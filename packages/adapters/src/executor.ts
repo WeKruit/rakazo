@@ -1666,7 +1666,7 @@ export function requestTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Do what you can yourself: a quick people search (up to ten), and a role's campaign with its role_id. Hand work to a role's conversation (delegate_to_role) only when it needs that role's long search or saved people, or a tool says that conversation is working on it now; an interview booking for a person named with an email goes to Scheduling here. To open a new role use start_role when offered.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Do what you can yourself, such as a role's campaign with its role_id. Finding or changing a role's people runs in that role's conversation (delegate_to_role), as does work a tool says that conversation is doing now; an interview booking for a person named with an email goes to Scheduling here. To open a new role use start_role when offered.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",

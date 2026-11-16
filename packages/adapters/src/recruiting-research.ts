@@ -466,17 +466,18 @@ async function runRole(
     : null;
 }
 
-/** Model-facing: a long people search in the main chat, whose people would have nowhere to go. */
+/** Model-facing: a people search in the main chat, whose people would have nowhere to go. */
 export const PEOPLE_SEARCH_NEEDS_ROLE =
-  "Not started: a long search saves its people to a role, and this conversation has none. For a quick look, use web_search_advanced_exa with category people (up to ten). To fill a role, open it with start_role; its conversation runs the long search.";
+  "Not searched: people found here would have no role to be saved, checked and kept in, so the search for a role runs in that role's conversation. For a saved role, pass the recruiter's request to it with delegate_to_role in their own words; for a new one, open it with start_role.";
 /** Model-facing: a people search in a role chat whose role is not saved yet. */
 export const PEOPLE_SEARCH_NEEDS_SAVED_ROLE =
   "Not searched: this role is not saved yet, so the people found would have nowhere to go. Save it first with recruiting_role create (title and the JD's requirements), then search again.";
 
 /**
- * Long people searches run only inside a saved role, whose cap and autosave both need it; quick
- * ones are capped at ten in limitPeopleSearch. Staging 14d33ed1: a role chat searched before its
- * role was saved and save_search was refused.
+ * People searches run only inside a saved role: its cap, autosave, Reviewer check and feedback
+ * all read the conversation's role. Staging a986fe51, feedback-round: the main chat searched
+ * itself, nothing was saved or checked, and a snippet's employer was stated as fact; 14d33ed1: a
+ * role chat searched before its role was saved and save_search was refused.
  */
 export async function requireRoleForPeopleSearch(
   prisma: PrismaClient,
@@ -502,12 +503,8 @@ export async function requireRoleForPeopleSearch(
     select: { thread: { select: { activeRecruitingRoleId: true, groupId: true } } },
   });
   if (!run || run.thread.activeRecruitingRoleId) return;
-  // The main chat runs quick people searches itself (staging 11-16: forcing every search through a
-  // role team made the recruiter wait minutes for a first answer); only the long search needs a role.
-  if (run.thread.groupId?.startsWith("recruiting-global-")) {
-    if (toolName === "agent_run") throw new IsolationError(PEOPLE_SEARCH_NEEDS_ROLE);
-    return;
-  }
+  if (run.thread.groupId?.startsWith("recruiting-global-"))
+    throw new IsolationError(PEOPLE_SEARCH_NEEDS_ROLE);
   if (run.thread.groupId?.startsWith("role-"))
     throw new IsolationError(PEOPLE_SEARCH_NEEDS_SAVED_ROLE);
 }
