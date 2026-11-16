@@ -42,6 +42,8 @@ import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.j
 
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
+import type * as BotMessagesModule from "./bot-messages.js";
+import { messageBot } from "./bot-messages.js";
 import type * as BotSecretsModule from "./bot-secrets.js";
 import { shellCommandEnvironment } from "./bot-secrets.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
@@ -106,6 +108,10 @@ vi.mock("./group-handoff.js", async (importOriginal) => {
   const original = await importOriginal<typeof GroupHandoffModule>();
   return { ...original, handoffToGroupBot: vi.fn(original.handoffToGroupBot) };
 });
+vi.mock("./bot-messages.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof BotMessagesModule>()),
+  messageBot: vi.fn(async () => ({ ok: true, name: "Role team" })),
+}));
 vi.mock("./recruiting-context.js", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   loadRecruitingRunContext: vi.fn(),
@@ -1335,6 +1341,42 @@ describe("stage report while the person's newest message is being answered", () 
     ]);
     await f.run();
     expect(f.results[0]).not.toEqual({ error: newerRequestElsewhere("") });
+  });
+});
+
+describe("one request handed to a role", () => {
+  // Staging 426d09b9, stop-after-approve: "add Ada to the card" went to the role twice a second
+  // apart, and two role runs raced on the same send card.
+  it("goes to that role's conversation once per turn", async () => {
+    const f = fixture("delegate-once");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    Object.assign(f.thread, { groupId: "recruiting-global-1" });
+    Object.assign(f.prisma, {
+      chatGroup: {
+        findUnique: vi.fn(async () => ({ id: "recruiting-global-1", name: "Kruit", members: [] })),
+      },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+      recruitingRole: {
+        findFirst: vi.fn(async () => ({
+          title: "Staff Engineer",
+          sourceThread: { id: "role-thread", groupId: "role-group" },
+        })),
+        findMany: vi.fn(async () => []),
+      },
+    });
+    vi.mocked(messageBot).mockClear();
+    const ask = { name: "delegate_to_role", args: { role_id: "role-1", message: "Add Ada" } };
+    f.setCalls([
+      { ...ask, executionId: "d1" },
+      { ...ask, executionId: "d2" },
+    ]);
+    await f.run();
+    expect(messageBot).toHaveBeenCalledTimes(1);
+    expect(f.results[1]).toMatchObject({ ok: true, note: expect.stringContaining("Already") });
   });
 });
 
