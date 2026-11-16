@@ -209,7 +209,7 @@ export function creditEstimateNote(remaining: number): string {
 
 /** Added to a recruiting turn when the recruiter's latest message is Chinese. */
 export const REPLY_IN_CHINESE_NOTE =
-  "The recruiter wrote in Chinese: write every reply, summary, question and card of this turn in Chinese. Emails and drafts to candidates stay in English unless they ask otherwise.";
+  "The recruiter wrote in Chinese: write every reply, summary, question and card of this turn in Chinese. Emails and drafts to candidates stay in English unless they ask otherwise, and a reply that shows one opens with a line in Chinese saying what it is.";
 
 /** Added when the recruiter's latest message is English: earlier Chinese turns pulled replies into Chinese. */
 export const REPLY_IN_ENGLISH_NOTE =
@@ -390,8 +390,8 @@ export function inOtherLanguage(line: string, language: ReplyLanguage): boolean 
 const REPLY_IN: Record<ReplyLanguage, string> = {
   zh: REPLY_IN_CHINESE_NOTE,
   en: REPLY_IN_ENGLISH_NOTE,
-  ko: "The recruiter wrote in Korean: write every reply, summary, question and card of this turn in Korean. Emails and drafts to candidates stay in English unless they ask otherwise.",
-  ja: "The recruiter wrote in Japanese: write every reply, summary, question and card of this turn in Japanese. Emails and drafts to candidates stay in English unless they ask otherwise.",
+  ko: "The recruiter wrote in Korean: write every reply, summary, question and card of this turn in Korean. Emails and drafts to candidates stay in English unless they ask otherwise, and a reply that shows one opens with a line in Korean saying what it is.",
+  ja: "The recruiter wrote in Japanese: write every reply, summary, question and card of this turn in Japanese. Emails and drafts to candidates stay in English unless they ask otherwise, and a reply that shows one opens with a line in Japanese saying what it is.",
 };
 
 /**
