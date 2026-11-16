@@ -6987,6 +6987,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let roleStartedInTurn = false;
         // Role conversations start_role opened this run: handing work to one is not another role.
         const groupsStartedInTurn = new Set<string>();
+        // Role conversations this run already handed the recruiter's request to: one owner each.
+        const rolesDelegatedInTurn = new Set<string>();
         const globalAskNeedsRoleCheck = () =>
           Boolean(thread.groupId?.startsWith("recruiting-global-")) &&
           Boolean(recruitingBotKey(bot)) &&
@@ -14847,6 +14849,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 team: `${target.title} team`,
                 note: "Already with that team: the role was opened from this same message, so its team is working on it now; nothing more was sent. Do not hand it over again or repeat that the role is open; the team's result comes back here.",
               });
+            // Staging 426d09b9, stop-after-approve: two hand-offs of one request a second apart
+            // gave the role two runs racing on the same send card.
+            if (rolesDelegatedInTurn.has(target.threadId))
+              return finish({
+                ok: true,
+                team: `${target.title} team`,
+                note: "Already handed to that team in this turn, with the recruiter's own words; nothing more was sent. Its answer comes back here.",
+              });
+            rolesDelegatedInTurn.add(target.threadId);
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },
@@ -14871,7 +14882,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 deliveryKey: effectKey,
               },
             );
-            if (!sent.ok) return finish({ error: sent.error });
+            if (!sent.ok) {
+              rolesDelegatedInTurn.delete(target.threadId);
+              return finish({ error: sent.error });
+            }
             delegatedToRole = true;
             await publishMessage(deps, run, "bot", [
               {
