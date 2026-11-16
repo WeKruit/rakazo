@@ -47,6 +47,7 @@ type StatePrisma = Pick<
   | "externalEffect"
   | "user"
   | "mcpServer"
+  | "recruitingCalibrationRound"
 >;
 
 /**
@@ -342,6 +343,7 @@ export async function loadWorkingState(
   ];
 
   if (global) {
+    let focusId: string | undefined;
     const roleById = new Map(roles.map((role) => [role.id, role]));
     const reference = referredRole(recruiterTexts, roles);
     const lastHanded = handoffs
@@ -375,7 +377,25 @@ export async function loadWorkingState(
           ? `- Role in focus: "${earlier.role.title}" (roleId ${earlier.role.id}), the role the recruiter last named in this conversation (${earlier.by}); the same person can be in several roles, so a person's name never picks the role.`
           : "- Role in focus: none named yet.",
       );
+      if (earlier?.kind === "saved") focusId = earlier.role.id;
     }
+    if (reference?.kind === "saved") focusId = reference.role.id;
+    else if (reference?.kind !== "new" && lastHanded) focusId = lastHanded;
+    // Feedback-round 11-16: Kruit spent 30 s resolving the people the recruiter turned down
+    // before handing off, though the team gets only the recruiter's words while a round waits.
+    const waiting = focusId
+      ? await prisma.recruitingCalibrationRound
+          .findFirst({
+            where: { roleId: focusId },
+            orderBy: { round: "desc" },
+            select: { round: true, approvedAt: true },
+          })
+          .catch(() => null)
+      : null;
+    if (waiting && !waiting.approvedAt)
+      lines.push(
+        `  Its round ${waiting.round} waits on the recruiter's answer, so work they ask for on it (turning people down, more like the rest, the next ten) reaches its team as their own words only and the team resolves the people itself: hand it with delegate_to_role as your first call, before reading or resolving anyone.`,
+      );
   }
 
   const cardRoleIds = global
