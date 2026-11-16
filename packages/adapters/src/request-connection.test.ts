@@ -11,6 +11,8 @@ function fixture({
   assigned = true,
   name = "Instantly",
   pendingRun = undefined as string | undefined,
+  /** A waiting run in another of the user's conversations, holding a card for this server. */
+  elsewhere = false,
   rows = [] as Array<{ id: string; slug: string; name: string; endpoint: string | null }>,
 } = {}) {
   const prisma: Record<string, any> = {
@@ -31,26 +33,53 @@ function fixture({
       create: vi.fn(async () => ({ id: "assignment" })),
     },
     message: {
-      findMany: vi.fn(async () =>
-        pendingRun
-          ? [
-              {
-                id: "ask-1",
-                runId: pendingRun,
-                blocks: [
-                  {
-                    kind: "ask",
-                    text: "Connect Instantly",
-                    status: "pending",
-                    connection: { serverId: "server-1", name: "Instantly", reason: "x" },
-                  },
-                ],
-              },
-            ]
-          : [],
+      findMany: vi.fn(async ({ where }: { where: { threadId: unknown } }) =>
+        typeof where.threadId === "object"
+          ? elsewhere
+            ? [
+                {
+                  id: "ask-main",
+                  threadId: "thread-main",
+                  blocks: [
+                    {
+                      kind: "ask",
+                      text: "Connect Instantly",
+                      status: "pending",
+                      connection: { serverId: "server-1", name: "Instantly", reason: "x" },
+                    },
+                  ],
+                },
+              ]
+            : []
+          : pendingRun
+            ? [
+                {
+                  id: "ask-1",
+                  runId: pendingRun,
+                  blocks: [
+                    {
+                      kind: "ask",
+                      text: "Connect Instantly",
+                      status: "pending",
+                      connection: { serverId: "server-1", name: "Instantly", reason: "x" },
+                    },
+                  ],
+                },
+              ]
+            : [],
       ),
     },
-    run: { findMany: vi.fn(async () => (pendingRun ? [{ id: pendingRun }] : [])) },
+    run: {
+      findMany: vi.fn(async ({ where }: { where: { status: string; threadId?: string } }) =>
+        where.threadId
+          ? pendingRun
+            ? [{ id: pendingRun }]
+            : []
+          : elsewhere
+            ? [{ id: "run-main", threadId: "thread-main" }]
+            : [],
+      ),
+    },
   };
   prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
   return { prisma, db: prisma as unknown as PrismaClient, pause: vi.fn(async () => {}) };
@@ -123,6 +152,17 @@ describe("request_connection", () => {
       status: "pending",
       askId: "ask-1",
       message: expect.stringContaining("Do not show another"),
+    });
+    expect(f.pause).not.toHaveBeenCalled();
+  });
+
+  // Team-stuck 11-16: Kruit's calendar card, then the role team's own card for the same calendar.
+  it("shows no second card when another conversation already holds one for the server", async () => {
+    const f = fixture({ elsewhere: true });
+    expect(await requestConnection(f.db, scope, args, f.pause)).toMatchObject({
+      status: "pending",
+      askId: "ask-main",
+      message: expect.stringContaining("open in another conversation"),
     });
     expect(f.pause).not.toHaveBeenCalled();
   });
