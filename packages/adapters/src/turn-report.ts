@@ -454,6 +454,26 @@ function asksWithoutPrecondition(request: string): boolean {
   return WITHOUT_PRECONDITION.test(request);
 }
 
+// A question about how things stand ("现在发送了多少人呢", "为什么一个邮件都发不出去？"), with no
+// instruction in it ("现在就发", "帮我…", "can you…").
+const STATE_QUESTION =
+  /多少|几(?:个|封|位|人|次)|为什么|为啥|怎么回事|哪(?:里|儿|些)|什么时候|从哪|干嘛|有没有|是不是|\b(?:how many|how much|why|where|what|which|when|who)\b/i;
+const INSTRUCTION =
+  /现在就发|现在发(?:吧|掉|出去)?(?=[，。！!？?\s]|$)|直接发|马上|立刻|帮我|请你?|给我|\b(?:can|could|would|will) you\b|\bplease\b|\b(?:send|book|email|draft|find) (?:it|this|them|him|her|the)\b/i;
+function asksAboutState(request: string): boolean {
+  return (
+    /[?？]|[吗呢么][\s。.!！]*$/.test(request) &&
+    STATE_QUESTION.test(request) &&
+    !INSTRUCTION.test(request)
+  );
+}
+/** A bare greeting or a lone question mark: nothing asked of the agent. */
+function asksNothing(request: string): boolean {
+  return /^[\s?？!！.。,，]*(?:hi|hello|hey|你好|您好|嗨|哈喽|在吗|안녕하세요)?[\s?？!！.。,，~～]*$/i.test(
+    request,
+  );
+}
+
 function requests(kind: Capability, request: string): boolean {
   return REQUEST_KINDS[kind].test(request.replace(NEGATED, " "));
 }
@@ -804,7 +824,7 @@ export function questionCard(reply: string, declined: Declined): DeclineRetry | 
 
 /** Model-facing: the substance of every decline retry; tools or a teammate are named after it. */
 export const DECLINE_RETRY_NOTE =
-  "Do not decline or defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can; for a send, the email is the one written in this conversation, else the role's saved email. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what.";
+  "Do not decline or defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can; for a send, the email is the one written in this conversation, else the role's saved email. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what. When none of your tools does what was asked at all (a send tool sends email only, so not a LinkedIn message, a text or a call), the honest answer stands: say in your first line that it cannot be done from here and nothing was done, then offer the closest thing you can do.";
 
 /** Model-facing: a clarifying question asked in plain text goes on a question card instead. */
 export const TEXT_QUESTION_NOTE =
@@ -847,6 +867,17 @@ export function declineRetry(input: {
   const question = /[?？]|[吗呢][\s。.!！]*$/.test(input.personRequest ?? input.request);
   if (input.read && question && !cardOwed && asked.every((kind) => kind === "schedule"))
     return undefined;
+  // An honest "no" to a question about the state of things answers it, and a greeting asks for
+  // nothing a card could hold (staging retry audit 11-16: 80 and 243 such retries in 48 h).
+  const person = input.personRequest ?? input.request;
+  // A count or status answer stands once a read backs it; whether something works without a
+  // connection is about the product and needs none.
+  if (
+    declined.kind === "decline" &&
+    (asksWithoutPrecondition(person) || (input.read && asksAboutState(person)))
+  )
+    return undefined;
+  if (declined.kind === "text_question" && asksNothing(person)) return undefined;
   const quoted = sentence.slice(0, 200);
   if (declined.kind === "text_question")
     return {
