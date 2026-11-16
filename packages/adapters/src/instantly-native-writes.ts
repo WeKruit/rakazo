@@ -950,6 +950,9 @@ const FEW_RECIPIENTS = 10;
  */
 const PICKUP_MINUTES = 60;
 
+const IN_MINUTES =
+  "Tell the recruiter that time in minutes from now, never as a clock time in any zone.";
+
 export function queuePace(
   campaign: Record<string, unknown> | undefined,
   count: number,
@@ -1000,16 +1003,17 @@ export function queuePace(
     // UTC and the time left beside it: agents read the conversation's clock in UTC, so a bare
     // local time still ahead was taken as one already passed.
     const left = Math.max(1, Math.round((end.getTime() - now.getTime()) / 60_000));
-    // Minutes from now first: the schedule's zone is the role's, not the recruiter's, so a clock
-    // time there alone (05:23 in Seattle) read as "not tonight" and the send was paused.
-    time = `about ${left} minutes from now (${end.toISOString().slice(11, 16)} UTC; ${at(end)} ${shown} on ${on(end)}, the sending schedule's zone, not necessarily the recruiter's)`;
+    // Minutes from now only: the schedule's zone is the role's, not the recruiter's, so a clock
+    // time there alone (05:23 in Seattle) read as "not tonight" and the send was paused, and
+    // agents converted it wrongly (gate b2005684: 01:10 UTC told as 17:10 Seattle the next day).
+    time = `about ${left} minutes from now (by ${end.toISOString().slice(11, 16)} UTC)`;
     queuedAt = at(start);
   } catch {
     return `sending now, not held for a later time: queued with the mail service, the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
   }
   if (overdue)
-    return `queued with the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}`;
-  return `sending now, not held for a later time: queued with the mail service, the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest`;
+    return `queued with the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}. ${IN_MINUTES}`;
+  return `sending now, not held for a later time: queued with the mail service, the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
 }
 /** One role's campaign record is changed by one call at a time: saves, adds and sends. */
 const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
