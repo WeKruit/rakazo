@@ -726,10 +726,10 @@ const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the cust
 A new role searches first (the product's order): its first people come straight from the JD as written, and at most one short question about something the recruiter left open comes beside them, never before them. Opening the role and saying its team is searching counts as answered when the role chat then shows that search; no question is expected, a question about something already said is "asked again", and a second question is "wordy". When the customer asks for something else (a template, an email), doing it is the right move and no role question is expected.
 What goes out is what was on the card the customer approved and what the records show, never a card the customer denied: a denied card's email was not queued or sent, so a reply that describes the approved email truthfully is "yes" even when a denied card said otherwise. Two send cards with different emails shown at once is its own problem ("other"), not a false claim.
 The simulated customer cannot complete an account sign-in (connecting Gmail or a calendar), so "I can't click that here" about a connection card is the test's limit, not Kruit's dead end. Judge whether Kruit showed the card, said in one step what connecting does, and kept the work for afterwards.
-When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
+When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; compare a number only with records of the same scope, so a total labelled for the account or all time is not wrong because one role shows less; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
 Judge an email or template only against what the customer actually told Kruit in the conversation: a draft without details the customer never gave (a role they only named, a salary they never said) is the honest result, not a fault and not a lower score.
-Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Answer with one JSON object and nothing else:
-{"turns": [{"turn": n, "answered": true|false, "truthful": "yes"|"no"|"unknown", "issues": ["..."], "note": "<one line>"}], "goals": [{"goal": "...", "met": true|false, "why": "..."}], "score": 0-10, "verdict": "...", "problems": ["..."]}`;
+Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Write each move's note first, then its verdicts: answered, truthful and issues must agree with the note, so a label the note says does not apply is left out. Answer with one JSON object and nothing else:
+{"turns": [{"turn": n, "note": "<one line>", "answered": true|false, "truthful": "yes"|"no"|"unknown", "issues": ["..."]}], "goals": [{"goal": "...", "met": true|false, "why": "..."}], "score": 0-10, "verdict": "...", "problems": ["..."]}`;
 
 async function judge(journey, result) {
   const moves = result.turns
@@ -738,8 +738,51 @@ async function judge(journey, result) {
         `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
     )
     .join("\n");
-  const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? "" : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
-  return parse(await model(JUDGE_RULES, prompt, JUDGE));
+  const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? "This account is a test fixture that earlier plays used too: on a page, roles, campaigns, totals and messages from those plays (older or same-named entries) are the test's leftovers, not Kruit's fault.\n\n" : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
+  // One reading flips on borderline moves, so three judges read the play and a finding stands
+  // only when most of them give it (majority voting, as in self-consistency).
+  const readings = (
+    await Promise.all(
+      [0, 1, 2].map(() =>
+        model(JUDGE_RULES, prompt, JUDGE)
+          .then(parse)
+          .catch(() => null),
+      ),
+    )
+  ).filter(Boolean);
+  if (!readings.length) throw new Error("the judge gave no reading");
+  return majority(readings);
+}
+/** One verdict from several readings of a play: the median reading, with each finding by vote. */
+function majority(readings) {
+  const most = (count) => count * 2 > readings.length;
+  const median = [...readings].sort((a, b) => a.score - b.score)[(readings.length - 1) >> 1];
+  return {
+    ...median,
+    turns: (median.turns ?? []).map((turn) => {
+      const all = readings.map((reading) => reading.turns?.find((item) => item.turn === turn.turn));
+      const votes = (test) => most(all.filter((item) => item && test(item)).length);
+      const issues = [...new Set(all.flatMap((item) => item?.issues ?? []))].filter((issue) =>
+        votes((item) => item.issues?.includes(issue)),
+      );
+      const flagged = all.find((item) => issues.some((issue) => item?.issues?.includes(issue)));
+      return {
+        ...turn,
+        note: (flagged ?? turn).note,
+        answered: !votes((item) => item.answered === false),
+        truthful: votes((item) => item.truthful === "no")
+          ? "no"
+          : turn.truthful === "no"
+            ? "unknown"
+            : turn.truthful,
+        issues,
+      };
+    }),
+    goals: (median.goals ?? []).map((goal, index) => ({
+      ...goal,
+      met: !most(readings.filter((reading) => reading.goals?.[index]?.met === false).length),
+    })),
+  };
 }
 
 // --- Run, judge, report -------------------------------------------------------------------------
