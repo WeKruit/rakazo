@@ -6,7 +6,6 @@ import {
   isAgentBrief,
   NEXT_STEP_LEAD,
   personWrote,
-  waitsOnCard,
   withoutAgentBrief,
   withoutNudge,
 } from "./silent-reply.js";
@@ -75,16 +74,6 @@ describe("isAgentBrief on one line", () => {
 });
 
 describe("one question at a time beside a teammate's card", () => {
-  it("drops a reply that only points at the card already shown", () => {
-    expect(
-      waitsOnCard(
-        "面试暂时还不能确认：目前缺少“下午两点”对应的时区。请先回答日程协调卡上的时区问题；日期按 2026年11月17日处理。",
-      ),
-    ).toBe(true);
-    expect(waitsOnCard("安排仍卡在上一条所问的日历选择上；收到后才能继续。")).toBe(true);
-    expect(waitsOnCard("已找到 10 位候选人，见上方列表。")).toBe(false);
-  });
-
   it("keeps only what comes before a second question", () => {
     expect(
       beforeCardQuestion(

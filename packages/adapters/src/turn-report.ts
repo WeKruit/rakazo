@@ -115,10 +115,6 @@ export function readsOnly(name: string, args: Record<string, unknown>): boolean 
   return READ_ACTION.test((name.split("__").at(-1) ?? name).toLowerCase());
 }
 
-/** A reply saying an approval card still waits or the email is not sent ("审批卡仍待你确认"). */
-export const CLAIMS_CARD_PENDING =
-  /(?:仍|还)?(?:在)?(?:等待|待)(?:你的?)?确认|(?:目前|状态)(?:为|是)?\**未发送|尚未发送|还没有?发送|\bstill (?:waiting|pending)\b|\bnot (?:yet )?(?:been )?sent\b/i;
-
 /**
  * What a tool call did, from its name, arguments and (once it returned) its result; undefined
  * when it changed nothing a person needs to hear about. A failed call did nothing.
@@ -430,7 +426,7 @@ export type DeclineKind = "decline" | "defer" | "pick" | "text_question";
 export type Declined = { sentence: string; kind: DeclineKind; keep?: string };
 
 /** Where a drafted email starts in a reply: an "Email N" heading or a Subject: line. */
-const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:|主题[:：]|第\s*\d+\s*封)/i;
+const _DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:|主题[:：]|第\s*\d+\s*封)/i;
 
 export type Teammate = { id: string; name: string; about: string };
 
@@ -476,50 +472,6 @@ export function quotesMessage(brief: string, message: string): boolean {
   if (wanted.length < 4) return false;
   const shown = new Set(pairs(flat(brief)));
   return wanted.filter((pair) => shown.has(pair)).length / wanted.length >= 0.8;
-}
-
-/** Model-facing: an email already in the conversation is pointed to, not pasted again. */
-const REPASTED_DRAFT_NOTE =
-  "That email is already shown above, word for word. If the recruiter asked for a change, make it and show the changed email; otherwise answer what they asked in one or two lines and point to the email above instead of pasting it again.";
-
-/** A reply that pastes, unchanged, an email the conversation already shows. */
-export function repastedDraft(
-  reply: string,
-  shown: readonly string[],
-  asked: string,
-): DeclineRetry | undefined {
-  const start = DRAFT_START.exec(reply);
-  if (!start) return undefined;
-  // 「把完整版再发一遍」: the recruiter asked to see it again.
-  if (
-    /贴|完整|全文|全部|原文|再(?:发|给|看)|给我看|\b(?:full|whole|paste|again|show|copy)\b/i.test(
-      asked,
-    )
-  )
-    return undefined;
-  const flat = (text: string) => text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
-  const email = flat(reply.slice(start.index));
-  if (email.length < 40 || !shown.some((earlier) => flat(earlier).includes(email)))
-    return undefined;
-  return { sentence: reply.slice(start.index).trim().slice(0, 120), note: REPASTED_DRAFT_NOTE };
-}
-
-/**
- * The reply up to an email it pastes again unchanged, without the line introducing it
- * (「以下是最终模板：」): the email is already shown above. A reply that is only the email stays.
- */
-export function withoutRepastedDraft(
-  reply: string,
-  shown: readonly string[],
-  asked: string,
-): string {
-  if (!repastedDraft(reply, shown, asked)) return reply;
-  const lead = reply
-    .slice(0, DRAFT_START.exec(reply)?.index ?? 0)
-    .trimEnd()
-    .replace(/(?:^|(?<=[。！!.\n]))[^。！!.\n]*[:：]$/, "")
-    .trim();
-  return lead.length >= 6 ? lead : reply;
 }
 
 // Chinese and Japanese have no spaces: a run of their characters counts by its character pairs.
@@ -571,46 +523,10 @@ export function lastOwnUpdate(rows: readonly HistoryRow[], botId: string): strin
 }
 
 /** The reply's sentences with their end marks, in order. */
-const sentencesOf = (text: string) =>
+const _sentencesOf = (text: string) =>
   text.match(/[^。！？!?；;\n]+(?:[。！？!?；;]+|\n+|$)/g) ?? [];
 
-/**
- * The reply without a closing line this bot already ended an earlier reply on (gate 19bf5552:
- * every answer ended 「发来职位描述…我就可以开始。」). A question, or a reply that is only that line,
- * stays as it is.
- */
-export function withoutRepeatedClosing(reply: string, earlier: readonly string[]): string {
-  const sentences = sentencesOf(reply.trimEnd());
-  const closing = sentences.at(-1)?.trim();
-  if (sentences.length < 2 || !closing || /[?？]/.test(closing)) return reply;
-  const said = earlier.flatMap((text) => sentencesOf(text).map((sentence) => sentence.trim()));
-  if (!said.some((sentence) => sameSentence(closing, sentence))) return reply;
-  // A clause after 「；」 leaves the sentence before it to end the reply.
-  const rest = sentences
-    .slice(0, -1)
-    .join("")
-    .trimEnd()
-    .replace(/[；;]$/, "。");
-  return rest.length >= 20 ? rest : reply;
-}
-
-/**
- * The reply without an opening line the conversation already shows, from this bot or a teammate
- * (sim cannot-do-that-honestly, 982a0ac9: the writer's retry opened with Kruit's line again). A
- * reply that is only that line stays as it is.
- */
-export function withoutRepeatedOpening(reply: string, shown: readonly string[]): string {
-  const opening = /^[^。！？!?\n]+(?:[。！？!?]+|\n)/.exec(reply.trimStart())?.[0];
-  // A reply that opens with its email (a Subject: line) opens with the deliverable, never a
-  // repeated line (gate 4a731582: the revised template lost its subject).
-  if (!opening || DRAFT_START.test(opening)) return reply;
-  const said = shown.flatMap((text) => text.match(/[^。！？!?\n]+[。！？!?]*/g) ?? []);
-  if (!said.some((sentence) => sameSentence(opening, sentence))) return reply;
-  const rest = reply.trimStart().slice(opening.length).trimStart();
-  return rest.length >= 20 ? rest : reply;
-}
-
-function sameSentence(a: string, b: string): boolean {
+function _sameSentence(a: string, b: string): boolean {
   const x = words(a);
   const y = words(b);
   if (x.size < 4 || y.size < 4) return false;

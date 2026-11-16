@@ -785,7 +785,6 @@ import {
   NO_RESPONSE,
   personWrote,
   stripNoResponseReply,
-  waitsOnCard,
   withoutAgentBrief,
   withoutNudge,
 } from "./silent-reply.js";
@@ -830,7 +829,6 @@ import {
   recruitingRoundListText,
   recruitingRoundPeople,
   sendDeclineRetry,
-  turnRequestText,
 } from "./turn-end-guard.js";
 import { unbackedClaim } from "./claim-receipts.js";
 import {
@@ -848,14 +846,10 @@ import {
   DRAFT_BEFORE_ASKING,
   draftAskedBeforeShown,
   questionStatesWork,
-  CLAIMS_CARD_PENDING,
   readsOnly,
   lastOwnUpdate,
   quotesMessage,
   restatesUpdate,
-  withoutRepeatedClosing,
-  withoutRepastedDraft,
-  withoutRepeatedOpening,
   sameWords,
   TurnReportLedger,
   turnReportText,
@@ -1497,12 +1491,6 @@ const SAYS_NOTHING = new Set([
   "bot_message_sent",
   "bot_message_received",
 ]);
-/** A reply that says a teammate's work is not done yet ("还没有发送", "the flow is paused"). */
-export const waitsOnTeammate = (text: string) =>
-  /还没有?(?:准备好|发送|发出)|尚未(?:发送|发出|给出)|(?:流程|处理).{0,6}暂停|\bnot (?:yet )?(?:been )?(?:sent|ready)\b|\bis paused\b/i.test(
-    text,
-  );
-
 /**
  * The recruiter sees one assistant: a question for them is an ask_user card. A poll closed on its
  * own and the agent answered it itself (staging 11-11 and 11-12), so recruiting runs have none.
@@ -7840,33 +7828,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (open && open.kind === "ask") return open.text;
           }
           return undefined;
-        };
-        // An approval card answered since the person's latest message: its outcome is on the card.
-        const approvalAnsweredSinceRequest = async () => {
-          const recent = await deps.prisma.message
-            .findMany({
-              where: { threadId: thread.id },
-              orderBy: { seq: "desc" },
-              take: 30,
-              select: { role: true, botId: true, blocks: true },
-            })
-            .catch(() => []);
-          for (const message of recent) {
-            if (message.role === "user" && !message.botId && personWrote(message.blocks))
-              return false;
-            const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
-            if (
-              blocks.some(
-                (block) =>
-                  block.kind === "ask" &&
-                  Boolean(block.approvalEffectId) &&
-                  block.status !== undefined &&
-                  block.status !== "pending",
-              )
-            )
-              return true;
-          }
-          return false;
         };
         const newerMessageAnsweredElsewhere = async () => {
           if (!run.createdAt) return undefined;
@@ -18521,18 +18482,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runSecrets,
                 ),
               );
-          // The person's newest message steered into the turn is what the reply answers; a
-          // teammate's handoff carries the request in its brief. Gate 493e9f2e: 「连上之后草稿还在吗」
-          // after 「发出去吧」 was judged against the send request and got a second Connect card.
-          const askedNow =
-            steeredText ??
-            turnRequestText(
-              currentTurnMessage,
-              handedIn
-                ? historyMessages.find((message) => message.id === run.sourceMessageId)
-                : undefined,
-              bot.id,
-            );
           // Only what the records say is unfinished goes round again; the reply's wording is
           // never judged (11-16: wording checks rewrote correct answers).
           const declineRetried =
@@ -18619,101 +18568,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               chars: text.length,
               trigger: run.trigger,
             });
-            text = "";
-            blocks = [];
-          }
-          // A closing line this bot already ended an earlier reply on is not said again.
-          if (
-            hideVendors &&
-            textOnly &&
-            text.trim() &&
-            blocks.filter((block) => block.kind === "text").length === 1
-          ) {
-            const closed = withoutRepeatedClosing(
-              text,
-              await deps.prisma.message
-                .findMany({
-                  where: { threadId: thread.id, role: "bot", botId: bot.id, NOT: { runId } },
-                  orderBy: { seq: "desc" },
-                  take: 3,
-                  select: { blocks: true },
-                })
-                .then((rows) =>
-                  rows.map((row) =>
-                    (Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : [])
-                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                      .join("\n"),
-                  ),
-                )
-                .catch(() => []),
-            );
-            // Gate e7805c70, change-mind: asked what changed, the reply pasted the email above again.
-            const shown = await deps.prisma.message
-              .findMany({
-                where: { threadId: thread.id, role: "bot", NOT: { runId } },
-                orderBy: { seq: "desc" },
-                take: 6,
-                select: { blocks: true },
-              })
-              .then((rows) =>
-                rows.map((row) =>
-                  (Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : [])
-                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                    .join("\n"),
-                ),
-              )
-              .catch(() => []);
-            // A line the chat already shows, from this bot or a teammate, does not open it again.
-            const pointed = withoutRepeatedOpening(
-              withoutRepastedDraft(closed, shown, steeredText ?? askedNow),
-              shown,
-            );
-            if (pointed !== text) {
-              text = pointed;
-              blocks = blocks.map((block) => (block.kind === "text" ? { ...block, text } : block));
-            }
-          }
-          // One question at a time: while another card waits in this conversation (a teammate's
-          // question), the reply keeps only what comes before its own question, and a reply that
-          // only says the work waits on that card is not sent.
-          if (
-            hideVendors &&
-            blocks.some((block) => block.kind === "text") &&
-            !blocks.some((block) => block.kind === "ask") &&
-            (/[?？]/.test(text) || waitsOnCard(text)) &&
-            (await openQuestionElsewhere()) !== undefined
-          ) {
-            text = waitsOnCard(text) ? "" : beforeCardQuestion(text);
-            blocks = [
-              ...blocks.filter((block) => block.kind !== "text"),
-              ...(text ? [{ kind: "text" as const, text }] : []),
-            ];
-          }
-          // A card answered while this turn ran: "the card still waits / not sent" read an earlier
-          // record and contradicts the card and its receipt, which the recruiter already sees.
-          if (
-            hideVendors &&
-            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
-            CLAIMS_CARD_PENDING.test(text) &&
-            (
-              await waitingCardBlocks(deps.prisma, thread.id)
-                .then(waitingApprovalCards)
-                .catch(() => ["unknown"])
-            ).length === 0 &&
-            (await approvalAnsweredSinceRequest())
-          ) {
-            getLogger().info("run.stale_card_claim.dropped", { runId });
-            text = "";
-            blocks = [];
-          }
-          // A teammate's Send card is the answer for now: a line saying the email is not sent yet
-          // would contradict the card the recruiter is looking at.
-          if (
-            hideVendors &&
-            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
-            waitsOnTeammate(text) &&
-            (await openQuestionElsewhere(true)) !== undefined
-          ) {
             text = "";
             blocks = [];
           }
