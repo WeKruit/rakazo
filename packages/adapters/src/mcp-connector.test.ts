@@ -5503,8 +5503,8 @@ describe("local native Instantly campaign and lead tools", () => {
           queued: true,
           recipients: ["nick@x.test"],
           next: expect.stringContaining(
-            // The date too: sim 11-14 turned a bare 22:05 into the next day's evening.
-            "it should be out within about 60 minutes from now (07:30 UTC; 01:30 Central time (Chicago) on Fri, Nov 13, the sending schedule's zone, not necessarily the recruiter's) at the latest",
+            // Minutes, never a local clock: gate b2005684 converted one to the wrong day.
+            "it should be out within about 60 minutes from now (by 07:30 UTC) at the latest",
           ),
         });
         expect(out).not.toHaveProperty("firstEmailAt");
@@ -5601,7 +5601,7 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(read).toMatchObject({
           queuedFirstEmail: "now",
           next: expect.stringMatching(
-            /all 2 should be out within about \d+ minutes from now \(\d\d:\d\d UTC; 01:40.*send_now/,
+            /all 2 should be out within about \d+ minutes from now \(by 07:40 UTC\).*send_now/,
           ),
         });
         f.state.requests.length = 0;
@@ -5620,7 +5620,7 @@ describe("local native Instantly campaign and lead tools", () => {
           sendingNow: true,
           recipients: ["abe@x.test", "p0@x.test"],
           next: expect.stringMatching(
-            /all 2 should be out within about \d+ minutes from now \(\d\d:\d\d UTC; 01:31/,
+            /all 2 should be out within about \d+ minutes from now \(by 07:31 UTC\)/,
           ),
         });
         f.state.requests.length = 0;
@@ -5682,10 +5682,10 @@ describe("local native Instantly campaign and lead tools", () => {
           lead.timestamp_created = "2026-11-13T06:10:00Z";
         // 11-13 staging: each check counted the hour from the check, so the time kept slipping.
         const first = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
-        expect(first).toMatchObject({ next: expect.stringContaining("UTC; 01:20") });
+        expect(first).toMatchObject({ next: expect.stringContaining("by 07:20 UTC") });
         vi.setSystemTime(new Date(NIGHT.getTime() + 15 * 60_000));
         const later = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
-        expect(later).toMatchObject({ next: expect.stringContaining("UTC; 01:20") });
+        expect(later).toMatchObject({ next: expect.stringContaining("by 07:20 UTC") });
         vi.setSystemTime(new Date(NIGHT.getTime() + 90 * 60_000));
         const late = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(late).toMatchObject({
