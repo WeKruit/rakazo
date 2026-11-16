@@ -1686,6 +1686,31 @@ describe("native Instantly activation card", () => {
     },
   );
 
+  it("sends a card confirmed through the tool catalog when the next turn lists tools directly", async () => {
+    // Gate 06e70043: the card was approved through the catalog wrapper, the resumed turn offered
+    // the tools directly, and the send was refused "must be replayed before connectors_execute_tool".
+    const options = {
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    };
+    const shown = fixture({ ...options, catalog: true });
+    shown.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await shown.run();
+    const f = fixture(options);
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    Object.assign(f.effects[0]!, { status: "approved", request: shown.effects[0]!.request });
+    f.setCalls([]);
+    await f.run();
+    const sent = f.execute.mock.calls.filter(
+      (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0]![0].args).toMatchObject({ campaign_id: "c-1" });
+  });
+
   it("closes a confirmed send that cannot start instead of failing the run", async () => {
     // Gate 245ab70b: the confirmed send was left for the model, which never repeated it; every
     // other call was refused and the run failed with nothing said or sent.

@@ -312,10 +312,43 @@ export function campaignSendCardHash(card: unknown): string {
 export async function findWaitingCampaignSend(
   tx: Prisma.TransactionClient,
   input: { spaceId: string; effectId: string; campaignId: string; card: unknown },
-): Promise<{ effectId: string; threadId: string; place: string | null } | undefined> {
+): Promise<
+  { effectId: string; threadId: string; place: string | null } | { declined: true } | undefined
+> {
   const card = campaignSendCardHash(input.card);
   const lock = `campaign-send:${input.spaceId}:${input.campaignId}`;
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))::text AS "lock"`;
+  // deny-then-change-and-send 11-16: the recruiter declined a card, then another agent's run
+  // asked again with the same email before the recruiter wrote anything. The same card the
+  // recruiter declined is not asked again until they write, in any conversation of the space.
+  const declined = await tx.externalEffect.findFirst({
+    where: {
+      spaceId: input.spaceId,
+      id: { not: input.effectId },
+      kind: { endsWith: "activate_campaign" },
+      status: "denied",
+      AND: [
+        { result: { path: ["instantlyActivationCampaign"], equals: input.campaignId } },
+        { result: { path: ["instantlyActivationCard"], equals: card } },
+      ],
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+  if (
+    declined &&
+    !(await tx.message.findFirst({
+      where: {
+        thread: { spaceId: input.spaceId },
+        role: "user",
+        botId: null,
+        createdAt: { gt: declined.updatedAt },
+        OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
+      },
+      select: { id: true },
+    }))
+  )
+    return { declined: true };
   const waiting = await tx.externalEffect.findFirst({
     where: {
       spaceId: input.spaceId,

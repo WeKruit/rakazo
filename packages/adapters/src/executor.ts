@@ -11636,6 +11636,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       }),
                     )
                   : undefined;
+              if (waitingSend && "declined" in waitingSend) {
+                const result = {
+                  error:
+                    "Nothing was sent and no card was made: the recruiter already declined this exact send (the same people and the same email) and has not written since. Do not ask again with it; tell the recruiter in one line that it was not sent, and wait for what they want changed.",
+                  dispatched: false,
+                };
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
               if (waitingSend) {
                 const result = {
                   status: "already_waiting",
@@ -16836,9 +16846,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // first and never replay it (gate ce4a9c24: the run failed and nothing was sent).
           if (operation === "native_instantly_activate_campaign") {
             const effect = approvedEffects.find((entry) => entry.request === request)!;
+            // Through the catalog wrapper only while this turn offers it; otherwise as the
+            // connector tool itself (gate 06e70043: the resumed turn listed the tools directly
+            // and the wrapper call was refused "must be replayed before connectors_execute_tool").
+            const inner = catalog?.args.arguments;
+            const viaWrapper = !catalog || connectorTools.has(catalog.toolName);
             const outcome = await applyTool(
-              catalog?.toolName ?? approvedEffectReplays.nextToolName()!,
-              catalog?.args ?? direct?.args ?? {},
+              catalog && viaWrapper ? catalog.toolName : approvedEffectReplays.nextToolName()!,
+              catalog
+                ? viaWrapper
+                  ? catalog.args
+                  : inner && typeof inner === "object" && !Array.isArray(inner)
+                    ? (inner as Record<string, unknown>)
+                    : {}
+                : (direct?.args ?? {}),
               `send-approval:${effect.id}`,
             );
             if (approvedEffectReplays.nextRequest() === request) {

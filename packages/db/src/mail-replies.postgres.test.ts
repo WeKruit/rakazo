@@ -455,4 +455,44 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
     });
     expect(await waiting(third.effect.id)).toBeUndefined();
   });
+
+  it("does not ask again for a send the recruiter declined until they write", async () => {
+    const declined = await fixture();
+    const retry = await fixture(true);
+    await prisma.externalEffect.updateMany({
+      where: { id: { in: [declined.effect.id, retry.effect.id] } },
+      data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
+    });
+    const card = { sendNow: false, recipients: [{ email: "ada@example.test" }], firstEmail: "a" };
+    const waiting = (effectId: string, shown: unknown = card) =>
+      prisma.$transaction((tx) =>
+        findWaitingCampaignSend(tx, {
+          spaceId: identity.spaceId,
+          effectId,
+          campaignId: "campaign-declined",
+          card: shown,
+        }),
+      );
+    expect(await waiting(declined.effect.id)).toBeUndefined();
+    await prisma.externalEffect.update({
+      where: { id: declined.effect.id },
+      data: { status: "denied" },
+    });
+    // Another agent's run asking with the same email before the recruiter writes is refused.
+    expect(await waiting(retry.effect.id)).toEqual({ declined: true });
+    // A changed email is a new send with its own card.
+    expect(await waiting(retry.effect.id, { ...card, firstEmail: "b" })).toBeUndefined();
+    // Once the recruiter writes, even the same email may be asked again.
+    await createThreadMessage(prisma, {
+      threadId: identity.threadId,
+      role: "user",
+      blocks: [{ kind: "text", text: "send it after all" }],
+    });
+    const later = await fixture(true);
+    await prisma.externalEffect.update({
+      where: { id: later.effect.id },
+      data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
+    });
+    expect(await waiting(later.effect.id)).toBeUndefined();
+  });
 });
