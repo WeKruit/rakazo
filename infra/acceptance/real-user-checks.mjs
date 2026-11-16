@@ -66,7 +66,8 @@ const quote = (text, match) =>
   `"…${text.slice(Math.max(0, match.index - 50), match.index + match[0].length + 50).replace(/\s+/g, " ")}…"`;
 // People lists carry English names and titles whatever the reply language.
 // An email draft is written for the candidate, in their language; only the words around it count.
-const DRAFT = /^\s*(?:\*\*)?(?:To|Subject|收件人|主题)(?:\*\*)?\s*[:：]/im;
+// A draft starts at its header or, for a bare template, at its greeting line ("Hi {{firstName}},").
+const DRAFT = /^\s*(?:(?:\*\*)?(?:To|Subject|收件人|主题)(?:\*\*)?\s*[:：]|(?:Hi|Hello|Hey|Dear)\b[^\n]{0,40},\s*$)/im;
 const prose = (text) =>
   text
     .slice(0, DRAFT.test(text) ? text.search(DRAFT) : undefined)
