@@ -340,11 +340,36 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     });
     expect(checked.createdAt.getTime()).toBeGreaterThan(held.createdAt.getTime());
     expect(checked.version).toBe(held.version + 2);
-    // A shown round is never corrected again: the recruiter saw it.
+    // A shown round is never corrected on the team's own initiative: the recruiter saw it.
     await expect(recordRound([...swapped.slice(0, 9), "swap-2"], true)).rejects.toThrow(
       /record it without corrects/,
     );
+    // Simulated 11-16: "swap Gaya for someone new" saved a replacement but no round could hold
+    // the shown ten minus Gaya plus him. Once the recruiter turns someone down, the swap is the
+    // next round: the others kept, the turned-down one replaced.
+    await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId,
+        kind: "recruiting_feedback",
+        idempotencyKey: `swap-verdict:${suffix}`,
+        status: "completed",
+        request: {
+          target: "candidate",
+          operation: "review",
+          roleId,
+          candidateKeys: [swapped[9]],
+          fit: "not_fit",
+        },
+        result: { status: "recorded" },
+      },
+    });
+    await expect(recordRound([...swapped.slice(0, 9), "swap-2"], true)).resolves.toMatchObject({
+      round: 3,
+      candidateKeys: [...swapped.slice(0, 9), "swap-2"],
+    });
     await prisma.recruitingCalibrationRound.deleteMany({ where: { roleId, round: 3 } });
+    await prisma.externalEffect.deleteMany({ where: { idempotencyKey: `swap-verdict:${suffix}` } });
     const checkedView = await recruiting.readRecruitingCalibrationRound(prisma, actor, {
       threadId,
     });
