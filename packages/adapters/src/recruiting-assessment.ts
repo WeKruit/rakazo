@@ -38,12 +38,12 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
 import { readRecruitingAccountView } from "./recruiting-account.js";
+import { linkedinPersonKey } from "./recruiting-profiles.js";
 import {
   bestLookedUpEmail,
   createRecruitingCandidateReportReader,
   lookedUpContacts,
 } from "./recruiting-research.js";
-import { linkedinPersonKey } from "./recruiting-profiles.js";
 import {
   feedbackBeforeRound,
   listedBeforeRound,
@@ -238,7 +238,11 @@ export async function executeRecruitingCandidatesTool(
           );
       itemCount = result.matches.length;
       succeeded = true;
-      return result;
+      // Branch x5 61eaccec (one-off-email): no saved match for "给 Wei Zhang 写封邮件" became a
+      // request for the role's JD instead of the email.
+      return result.status === "not_found"
+        ? { ...result, next: NOTHING_SAVED_IS_NO_BLOCKER }
+        : result;
     }
     if (input.operation === "activity") {
       // Simulated 11-16 (what-happened-since-yesterday, 1/10): "what's new on each role since
