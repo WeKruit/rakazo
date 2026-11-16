@@ -13,7 +13,7 @@ import {
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { roundCriteria } from "./recruiting-round-check.js";
+import { recruiterWordsSinceFirstRound, roundCriteria } from "./recruiting-round-check.js";
 
 export { RECRUITING_GRADE_NONCE_PREFIX };
 /** Newly saved searches settle this long before grading starts, so one request covers them. */
@@ -546,9 +546,14 @@ export async function startRecruitingGrading(
     return skipped("next round coming");
   }
   const asked = review
-    ? (await roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId })).map(
-        (criterion) => criterion.statement,
-      )
+    ? [
+        ...(await roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId })).map(
+          (criterion) => criterion.statement,
+        ),
+        ...(
+          await recruiterWordsSinceFirstRound(deps.prisma, { threadId: thread.id, roleId: role.id })
+        ).map((words) => `In their words: "${words}"`),
+      ]
     : [];
   const prompt = recruitingGradePrompt([...people.values()], grader, asked);
   // A retry of the same people after a request that never started research is a new request.

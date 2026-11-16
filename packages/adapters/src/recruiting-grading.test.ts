@@ -91,6 +91,8 @@ function fixture(options: {
     matchFields: unknown;
     pageId?: string;
   }>;
+  /** The recruiter's messages in the role's conversation, oldest first. */
+  said?: Array<{ blocks: unknown[] }>;
 }) {
   const runCreate = vi.fn(async () => ({ id: "grade-run" }));
   const taskCreate = vi.fn(async () => ({ id: "grade-task" }));
@@ -160,7 +162,9 @@ function fixture(options: {
     },
     message: {
       findFirst: vi.fn(async () => ({ id: "said-last" })),
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async ({ where }: { where?: { role?: string } } = {}) =>
+        where?.role === "user" ? (options.said ?? []) : [],
+      ),
     },
     chatGroupMember: {
       findMany: vi.fn(async () => [{ botId: "main" }, { botId: "sourcer" }]),
@@ -230,6 +234,34 @@ describe("startRecruitingGrading", () => {
     const prompt = promptOf(f);
     expect(prompt.indexOf("in/picked")).toBeLessThan(prompt.indexOf("in/newer"));
     expect(prompt).toContain("* Title: Data Engineer");
+  });
+
+  it("grades against the recruiter's own feedback words, also when a teammate handed them in", async () => {
+    // Staging 11-16: "senior only, 6+ years" was never saved as feedback, so the next round's
+    // check graded without it and juniors came back.
+    const f = fixture({
+      found: [person("picked")],
+      rounds: round(["linkedin:/in/picked"]),
+      researchBots: [],
+      agentRunBots: ["sourcer"],
+      said: [
+        { blocks: [{ kind: "text", text: "senior only, 6+ years" }] },
+        {
+          blocks: [
+            {
+              kind: "bot_message_received",
+              text: 'The recruiter wrote, word for word:\n"no agency people"',
+            },
+          ],
+        },
+        { blocks: [{ kind: "bot_message_received", text: "Reviewer: 3 of 10 checked" }] },
+      ],
+    });
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    const prompt = promptOf(f);
+    expect(prompt).toContain('* In their words: "senior only, 6+ years"');
+    expect(prompt).toContain('* In their words: "no agency people"');
+    expect(prompt).not.toContain("3 of 10 checked");
   });
 
   it("has the lead replace a held round's people the Reviewer found not to fit", async () => {
