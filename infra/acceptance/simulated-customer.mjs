@@ -1200,12 +1200,21 @@ const takeMailbox = () =>
   freeMailboxes.length ? Promise.resolve(freeMailboxes.pop()) : new Promise((r) => waiting.push(r));
 const giveBack = (mailbox) =>
   waiting.length ? waiting.shift()(mailbox) : freeMailboxes.push(mailbox);
+// The batch copy is one account with one main chat, so its journeys play one after another:
+// side by side, each judge would read the other plays' replies.
+let batchTurn = Promise.resolve();
 const rows = [];
 let next = 0;
 await Promise.all(
   Array.from({ length: Math.min(CONCURRENCY, plays.length) }, async () => {
     while (next < plays.length) {
       const { journey, sample } = plays[next++];
+      if (journey.account === "batch") {
+        const play = batchTurn.then(() => runOne(journey, sample, owner));
+        batchTurn = play.catch(() => undefined);
+        rows.push(await play);
+        continue;
+      }
       if (journey.account !== "mailbox") {
         rows.push(await runOne(journey, sample, owner));
         continue;
