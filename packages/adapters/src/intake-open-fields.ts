@@ -88,11 +88,27 @@ export function openFactAsked(question: string, recruiterText: string): IntakeFi
 }
 
 const JOB_TITLE =
-  /\b(engineer|developer|architect|scientist|analyst|manager|director|lead|head of|designer|sales|account executive|recruiter|marketer|marketing|operations|consultant|specialist|vp|cto|cfo|ceo)\b|工程师|开发|架构师|科学家|分析师|经理|总监|主管|设计师|销售|运营|产品|顾问|专员|招聘/i;
+  /\b(engineer|developer|architect|scientist|analyst|manager|director|lead|head of|designer|sales|account executive|recruiter|marketer|marketing|operations|consultant|specialist|vp|cto|cfo|ceo)\b|工程师|开发|架构师|科学家|分析师|经理|总监|主管|设计师|销售|运营|产品|顾问|专员|招聘|后端|前端|全栈|算法|运维|测试|\b(?:back-?end|front-?end|full-?stack|devops|sre)\b/i;
 
 /** A recruiter who names no title, place or years has not said what role it is. */
 export const describesRole = (recruiterText: string) =>
   JOB_TITLE.test(recruiterText) || intakeFields(recruiterText).openKeys.length < 2;
+
+/**
+ * Kruit's own chat answered a role the recruiter described by asking for the JD or requirements
+ * instead of opening it (gate b2005684 progress-and-where: 「那我第一步该干嘛，想找个后端的」 got
+ * three steps and "send the JD, location and must-haves").
+ */
+export function askedForRoleInsteadOfOpening(recruiterText: string, reply: string): boolean {
+  return (
+    describesRole(recruiterText) &&
+    /职位描述|岗位描述|\bJD\b|职位名称|岗位名称|必备条件|必须具备|工作地点|\bjob description\b|\b(?:requirements|must-haves)\b/i.test(
+      reply,
+    )
+  );
+}
+export const OPEN_DESCRIBED_ROLE_RETRY =
+  "Not shown: the recruiter described a role they want filled and your reply asked them for the JD or requirements instead. Call start_role now with a short title in their words; its team searches from what they wrote and asks any open fact beside the first ten. Then say in one line that the search has started.";
 
 /**
  * The recruiter chose to see the first ten before any question (staging 11-15, card tap
