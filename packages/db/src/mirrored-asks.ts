@@ -14,7 +14,8 @@ export function mirroredAskClientNonce(sourceMessageId: string): string {
  * Copy the card a role team's run is waiting on into the conversation that delegated the work,
  * so the person sees and answers it where they are (as Workloop posts a child agent's approval in
  * the user's thread and routes the decision back to that child). Answering the copy answers the
- * source card. Secret and sign-in cards stay where they are: they belong to the team's bot.
+ * source card. A sign-in card is copied too: the person's own sign-in connects the server the
+ * team's bot was given. A secret card stays where it is, because a secret is never copied.
  * Returns the copy's event, or null when there is nothing to copy or it was copied already.
  */
 export async function mirrorAskInTransaction(
@@ -45,7 +46,6 @@ export async function mirrorAskInTransaction(
         block.kind === "ask" &&
         isOpenAskBlock(block) &&
         !isSecretAskBlock(block) &&
-        !block.connection &&
         !block.answerTarget,
     )
     .map((block) => ({ ...block, answerTarget }) as MessageBlock);
