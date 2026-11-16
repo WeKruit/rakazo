@@ -442,20 +442,13 @@ export async function guardRecruitingTurnEnd(
     _sum: { rowCount: true },
   });
   const playbook = await readRecruitingPlaybookStep(deps.prisma, input.roleId);
-  let roundOwed = false;
   // The Results panel is a real feedback surface. Only the latest unapproved round,
   // recorded by this run's completed native effect, can satisfy this turn.
   if (playbook?.stage === "feedback" || playbook?.stage === "calibration_10") {
     const round = await deps.prisma.recruitingCalibrationRound.findFirst({
       where: { roleId: input.roleId },
       orderBy: { round: "desc" },
-      select: {
-        effectId: true,
-        candidateKeys: true,
-        approvedAt: true,
-        createdAt: true,
-        ownerBotId: true,
-      },
+      select: { effectId: true, candidateKeys: true, approvedAt: true, createdAt: true },
     });
     if (
       round &&
@@ -487,9 +480,6 @@ export async function guardRecruitingTurnEnd(
       });
       if (latest?.clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX))
         return { action: "ended", classification: "question" };
-      // Only the bot that records the rounds owes the next one. Staging 01e78cbe: the Reviewer's
-      // grading turn was pushed to record it, and the swap the recruiter asked for never came.
-      roundOwed = !round.ownerBotId || round.ownerBotId === run.botId;
     }
   }
   const classification = classifyTurnEnd(
@@ -508,19 +498,6 @@ export async function guardRecruitingTurnEnd(
     },
   );
   if (classification !== "none") return { action: "ended", classification };
-  // Staging 11-16: after the recruiter's feedback the turn searched, saved 39 new people, then
-  // ended on "I can't give you a reliable shortlist yet" with no round, and nothing pushed it on.
-  if (
-    roundOwed &&
-    (savedRows._sum.rowCount ?? 0) > 0 &&
-    !(await recruitingResearchInFlight(deps.prisma, input.roleId))
-  )
-    return pushContinuation(deps, input, {
-      reason: "round_owed",
-      stage: playbook?.stage ?? "feedback",
-      label: "Show the next round",
-      text: `Continue: the recruiter's feedback on the last round still has no next round. This turn saved new people but recorded none. Choose the next round now from the people saved for this role whom no round has shown and who fit every requirement, and record it with calibration_round; fewer than ten is fine: then say in one line how many short of ten it is and which requirement rules out the most. Don't report status instead.${AUTO_NOTE}`,
-    });
   const endText = turnEndText(input.blocks);
   // "已开始扩展搜索" with nothing running is a promise too; a running search is checked below.
   const promise = turnEndPromise(endText) ?? turnEndStarted(endText);
