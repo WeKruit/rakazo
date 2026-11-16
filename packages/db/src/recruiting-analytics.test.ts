@@ -2,7 +2,11 @@ import type { Actor } from "@rakazo/contracts";
 import { Client } from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { PrismaClient } from "./client.js";
-import { readRecruitingAnalytics, readRecruitingAnalyticsPeople } from "./recruiting-analytics.js";
+import {
+  readRecruitingActivity,
+  readRecruitingAnalytics,
+  readRecruitingAnalyticsPeople,
+} from "./recruiting-analytics.js";
 
 const url = process.env.ANALYTICS_TEST_DATABASE_URL;
 const actor: Actor = {
@@ -26,6 +30,7 @@ beforeAll(async () => {
     CREATE TEMP TABLE recruiting_crm_workspace_attachments ("roleId" text, "userId" text, "spaceId" text, "mcpServerId" text, "organizationId" text, "crmRoleId" text);
     CREATE TEMP TABLE recruiting_crm_contacts (id text, "userId" text, "spaceId" text, "mcpServerId" text, "organizationId" text, "crmCandidateId" text, "identityKey" text, "archivedAt" timestamp, name text, email text, "linkedinUrl" text);
     CREATE TEMP TABLE recruiting_candidate_occurrences ("candidateKey" text, "roleId" text, name text, "pageId" text, "rowIndex" int);
+    CREATE TEMP TABLE recruiting_candidate_pages ("effectId" text, "roleId" text, "observedAt" timestamp);
     CREATE TEMP TABLE recruiting_crm_messages ("userId" text, "spaceId" text, "mcpServerId" text, "organizationId" text, "crmCandidateId" text, "crmRoleId" text, direction text, "sentAt" timestamp);
     INSERT INTO threads VALUES ('t1','g1'),('t2','g2');
     INSERT INTO recruiting_roles VALUES ('r1','One','t1','u','s',NULL),('r2','Two','t2','u','s',NULL),('foreign','Other','t1','other','s',NULL);
@@ -33,6 +38,8 @@ beforeAll(async () => {
     INSERT INTO recruiting_crm_workspace_attachments VALUES ('r1','u','s','m','o','cr1'),('r2','u','s','m','o','cr2');
     INSERT INTO recruiting_crm_contacts (id,"userId","spaceId","mcpServerId","organizationId","crmCandidateId","identityKey","archivedAt") VALUES ('a','u','s','m','o','ca','li:linkedin.com/in/a',NULL),('b','u','s','m','o','cb','li:linkedin.com/in/b',NULL);
     UPDATE recruiting_crm_contacts SET name='Avery Example',email='avery@example.test',"linkedinUrl"='https://www.linkedin.com/in/a' WHERE id='a';
+    INSERT INTO recruiting_candidate_pages VALUES ('p1','r1','2026-09-20'),('p2','r1','2026-10-10'),('pf','foreign','2026-10-10');
+    INSERT INTO recruiting_candidate_occurrences VALUES ('linkedin:/in/a','r1',NULL,'p1',0),('linkedin:/in/a','r1',NULL,'p2',0),('linkedin:/in/c','r1',NULL,'p2',1),('private','foreign',NULL,'pf',0);
     INSERT INTO recruiting_crm_messages VALUES
       ('u','s','m','o','ca','cr1','sent','2026-10-02'),
       ('u','s','m','o','ca','cr2','sent','2026-10-03'),
@@ -137,5 +144,53 @@ it.skipIf(!url)(
     });
     expect(foreign.total).toBe(0);
     expect(foreign.items).toEqual([]);
+  },
+);
+
+it.skipIf(!url)(
+  "counts each role's new people, shortlist, emails sent and replies inside the window",
+  async () => {
+    const result = await readRecruitingActivity(prisma, actor, window);
+    const stored = { mail: "stored" };
+    expect(result.roles).toEqual([
+      {
+        roleId: "r1",
+        title: "One",
+        newPeople: 1,
+        shortlisted: 1,
+        emailedPeople: 1,
+        repliedPeople: 1,
+        ...stored,
+      },
+      {
+        roleId: "r2",
+        title: "Two",
+        newPeople: 0,
+        shortlisted: 1,
+        emailedPeople: 1,
+        repliedPeople: 0,
+        ...stored,
+      },
+    ]);
+    expect(result.quietRoles).toBe(0);
+    const later = await readRecruitingActivity(prisma, actor, {
+      since: "2026-11-02T00:00:00Z",
+      until: "2026-11-05T00:00:00Z",
+    });
+    // A reply counts in the window it arrived in, whenever the first email went out.
+    expect(later.roles).toEqual([
+      {
+        roleId: "r1",
+        title: "One",
+        newPeople: 0,
+        shortlisted: 0,
+        emailedPeople: 0,
+        repliedPeople: 1,
+        ...stored,
+      },
+    ]);
+    expect(later.quietRoles).toBe(1);
+    const foreign = await readRecruitingActivity(prisma, actor, { ...window, roleId: "foreign" });
+    expect(foreign).toEqual({ roles: [], quietRoles: 0 });
   },
 );

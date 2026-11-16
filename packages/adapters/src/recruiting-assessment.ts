@@ -29,6 +29,7 @@ import {
   listRecruitingCandidates,
   listRecruitingContacts,
   readRecruiterSeen,
+  readRecruitingActivity,
   readRecruitingCalibrationRound,
   recordRecruitingWebMaterial,
   saveRecruitingAssessment,
@@ -206,6 +207,26 @@ export async function executeRecruitingCandidatesTool(
       itemCount = result.matches.length;
       succeeded = true;
       return result;
+    }
+    if (input.operation === "activity") {
+      // Simulated 11-16 (what-happened-since-yesterday, 1/10): "what's new on each role since
+      // yesterday" had no read that answers it, so Kruit talked about an open card instead.
+      const until = input.until ?? new Date().toISOString();
+      const activityRoleId = input.roleId ?? roleId;
+      const result = await readRecruitingActivity(deps.prisma, trusted.actor, {
+        since: input.since,
+        until,
+        ...(activityRoleId ? { roleId: activityRoleId } : {}),
+      });
+      itemCount = result.roles.length;
+      succeeded = true;
+      return {
+        operation: input.operation,
+        since: input.since,
+        until,
+        ...result,
+        note: `Roles not listed had nothing new (quietRoles counts them): say so plainly. emailedPeople and repliedPeople come from the role's stored email; mail "none_stored" means those two are unknown for that role, not zero. ${ONE_OFF_REPLIES_NOTE}`,
+      };
     }
     if (input.operation === "contacts") {
       // Simulated 11-14: "which roles have people not emailed yet" got "cannot verify" on an
