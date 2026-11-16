@@ -205,12 +205,12 @@ export async function startRoleFromRecruiterMessage(
       ? `${text}\n\nWhat the recruiter said about this role earlier, in the main conversation:\n${earlier}`
       : text;
   // Staging 11-16: 「没有就直接帮我建这三个」 opened three roles with the same words, so the
-  // Java team asked what the other two are called and Data Engineer asked what 「三个」 means.
+  // Java team asked what the other two are called and Data Engineer asked what 「三个」 means;
+  // 「Java、Android、data engineer 三个」 names them all, and Java still set up all three.
   const title = role.title?.trim();
-  const prompt =
-    title && !titleCore(text).includes(titleCore(title))
-      ? `This conversation is for one role: ${title}. The recruiter wrote the message below in the main conversation; any other roles it mentions have their own conversations.\n\n${asked}`
-      : asked;
+  const prompt = title
+    ? `This conversation is for one role: ${title}. The recruiter wrote the message below in the main conversation; any other roles it mentions have their own conversations.\n\n${asked}`
+    : asked;
   const clientNonce = `${ROLE_START_NONCE}${role.deliveryKey}`;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {

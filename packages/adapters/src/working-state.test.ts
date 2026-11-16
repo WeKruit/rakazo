@@ -26,15 +26,25 @@ function fakePrisma(input: {
   sends?: Row[];
   /** The focus role's latest calibration round. */
   round?: Row | null;
+  /** Each card role's latest calibration round. */
+  rounds?: Row[];
+  /** The account's active roles, and its archived ones. */
+  roleCount?: number;
+  archivedCount?: number;
 }) {
   return {
-    recruitingCalibrationRound: { findFirst: vi.fn(async () => input.round ?? null) },
+    recruitingCalibrationRound: {
+      findFirst: vi.fn(async () => input.round ?? null),
+      findMany: vi.fn(async () => input.rounds ?? []),
+    },
     chatGroup: { findMany: vi.fn(async () => input.groups ?? []) },
     recruitingRole: {
       findMany: vi.fn(async ({ where }: { where: { id?: unknown } }) =>
         where.id ? (input.revisions ?? []) : (input.roles ?? []),
       ),
-      count: vi.fn(async () => 1175),
+      count: vi.fn(async ({ where }: { where: { archivedAt?: unknown } }) =>
+        where.archivedAt === null ? (input.roleCount ?? 1175) : (input.archivedCount ?? 0),
+      ),
     },
     message: {
       findMany: vi.fn(async ({ where }: { where: { threadId?: unknown; role?: string } }) =>
@@ -178,7 +188,9 @@ describe("loadWorkingState", () => {
     expect(card).toContain(
       "sent the email (1 min ago), saved people to the role ×2 (latest 2 min ago)",
     );
-    expect(card).toContain('Team\'s last report (Sourcer): "[redacted] draft ready"');
+    expect(card).toContain(
+      'Team\'s last report (Sourcer; its counts may be older than the ones above, which are read now): "[redacted] draft ready"',
+    );
   });
 
   it("tells Kruit to hand work on a round waiting for the recruiter to its team first", async () => {
@@ -575,6 +587,50 @@ describe("loadWorkingState", () => {
     expect(await card({ id: "gmail-1" }, 10_000)).not.toContain("Gmail: not connected");
     expect(await card(null, null)).not.toContain("Gmail");
   });
+  // team-stuck 11-16: Kruit said "checking" and handed an interview to the team, which found the
+  // missing calendar two minutes later; feedback-round 11-16: "34 found" came from an old report.
+  it("says when no calendar is connected and reads each team's round from records", async () => {
+    const card = (server: Row | null, linked: Row | null) =>
+      loadWorkingState(
+        {
+          ...fakePrisma({
+            groups,
+            roles,
+            rounds: [
+              {
+                roleId: "role-1",
+                round: 2,
+                status: "shown",
+                statusAt: new Date(now - 5 * 60_000),
+                approvedAt: null,
+              },
+            ],
+            messagesByThread: {
+              t1: [
+                {
+                  role: "bot",
+                  botId: "bot-sourcer",
+                  createdAt: new Date(now - 30 * 60_000),
+                  ...text("Found 34 people"),
+                },
+              ],
+            },
+          }),
+          mcpServer: { findFirst: vi.fn(async () => server) },
+          connection: { findFirst: vi.fn(async () => linked) },
+        } as never,
+        scope,
+        globalThread,
+        (t) => t,
+        now,
+      ).then((state) => state.text ?? "");
+    const none = await card(null, null);
+    expect(none).toContain("calendar: none connected");
+    expect(none).toContain("12 people saved · round 2 shown in the role team's chat 5 min ago");
+    expect(none).toContain("(Sourcer, 30 min ago; its counts may be older");
+    expect(await card({ id: "gcal" }, null)).not.toContain("calendar: none connected");
+    expect(await card(null, { id: "composio-gcal" })).not.toContain("calendar: none connected");
+  });
   // Gate 9e15e896, stop-after-approve: a campaign Kruit started outside any role was confirmed,
   // then "stop until Monday" and "who got it" had no campaign to read or pause.
   it("names a campaign this conversation started outside any role, with its id", async () => {
@@ -596,5 +652,65 @@ describe("loadWorkingState", () => {
     );
     expect(state.text).toContain('"Data Engineer ref 09071" (campaign_id campaign-7)');
     expect(state.text).toContain("pause_campaign with that campaign_id");
+  });
+
+  // honest-limits 3f85ef1f (did-you-really-send 3/10, 2/10): with nothing on record that says
+  // "none", Kruit answered "can't verify" and then took the recruiter's word that it had sent.
+  it("says how many emails the account sent through the product, and none as a plain none", async () => {
+    const none = await loadWorkingState(
+      fakePrisma({ groups }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(none.text).toContain(
+      "Emails sent from this account through the product in the last 7 days: none.",
+    );
+    const sent = await loadWorkingState(
+      fakePrisma({
+        groups,
+        completed: [
+          {
+            threadId: "t-other",
+            payload: { outcome: "succeeded", work: "sent" },
+            createdAt: new Date(now - 3 * 86_400_000),
+          },
+          {
+            threadId: "t-other",
+            payload: { outcome: "succeeded", work: "saved" },
+            createdAt: new Date(now - 60_000),
+          },
+        ],
+      }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(sent.text).toContain(
+      "Emails sent from this account through the product in the last 7 days: 1 send (latest 3 d ago)",
+    );
+  });
+
+  // honest-limits 8a002815 (push-back-on-correct-answer#2): with no roles the card said nothing
+  // about roles, so after 「不对啊，我昨天建了三个」 Kruit apologised and called the read unverifiable.
+  it("says an account with no roles has none, as a plain none", async () => {
+    const none = await loadWorkingState(
+      fakePrisma({ roleCount: 0 }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(none.text).toContain("Role teams: none.");
+    const archived = await loadWorkingState(
+      fakePrisma({ roleCount: 0, archivedCount: 2 }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(archived.text).toContain("Role teams: none active; 2 archived");
   });
 });

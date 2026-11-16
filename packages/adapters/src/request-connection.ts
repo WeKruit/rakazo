@@ -1,6 +1,7 @@
 import { INSTANTLY_MCP_ENDPOINT, sendRecipients, textLanguage } from "@rakazo/core";
 import {
   connectAskBlock,
+  findAccountConnectAsk,
   findPendingConnectAsk,
   loadConnectServer,
   type PrismaClient,
@@ -159,6 +160,17 @@ export async function requestConnection(
       status: "pending" as const,
       askId: pending.askId,
       message: `The ${server.name} card is still showing above, waiting for the recruiter. Do not show another: answer what they asked in your reply, and if it needs ${server.name}, say in one line to press Connect on that card.`,
+    };
+  const elsewhere = await findAccountConnectAsk(prisma, {
+    spaceId: scope.spaceId,
+    userId: scope.userId,
+    serverId,
+  });
+  if (elsewhere && elsewhere.threadId !== scope.threadId)
+    return {
+      status: "pending" as const,
+      askId: elsewhere.askId,
+      message: `The recruiter already has a ${server.name} Connect card open in another conversation, waiting for them. Do not show another: finish without it, and report that this step waits on ${server.name} being connected and what can be done meanwhile.`,
     };
   const mail = key(server.slug ?? "") === "gmail" || key(server.name) === "gmail";
   await pause(

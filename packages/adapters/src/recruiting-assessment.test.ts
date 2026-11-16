@@ -1400,6 +1400,38 @@ describe("native cross-role recruiting reads", () => {
     expect(overview.read.mock.calls.at(-1)![2].roleId).toBe("selected");
   });
 
+  it("says whether an empty role list is the account's whole record (simulated 2026-11-16, push-back)", async () => {
+    const f = fixture();
+    overview.read.mockResolvedValue({ roles: [], items: [], nextCursor: null });
+    const findMany = vi.fn(async (_query: unknown) => [] as { title: string; archivedAt: Date }[]);
+    const deps = {
+      ...f.deps,
+      prisma: { ...f.deps.prisma, recruitingRole: { findMany } } as unknown as PrismaClient,
+      connector: { execute: vi.fn() },
+    };
+    const none = (await executeRecruitingCandidatesTool(
+      deps,
+      trusted,
+      { operation: "roles" },
+      context,
+    )) as { closedRoles?: unknown[]; note?: string };
+    expect(none.closedRoles).toEqual([]);
+    expect(findMany.mock.calls[0]![0]).toMatchObject({
+      where: { userId: actor.userId, spaceId: actor.spaceId },
+    });
+    findMany.mockResolvedValueOnce([
+      { title: "Java", archivedAt: new Date("2026-11-15T09:00:00Z") },
+    ]);
+    const closed = (await executeRecruitingCandidatesTool(
+      deps,
+      trusted,
+      { operation: "roles" },
+      context,
+    )) as { closedRoles?: unknown[]; note?: string };
+    expect(closed.closedRoles).toEqual([{ title: "Java", closedAt: "2026-11-15T09:00:00.000Z" }]);
+    expect(closed.note).not.toBe(none.note);
+  });
+
   it.each([
     { status: "not_checked" },
     { status: "failed" },

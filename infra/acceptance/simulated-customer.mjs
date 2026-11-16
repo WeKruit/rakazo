@@ -212,6 +212,20 @@ function model(system, prompt, name) {
     });
   });
 }
+/** A model's JSON answer. A malformed or empty reply (a stray quote, an empty error from the CLI)
+ * is the test's own hiccup, not Kruit's, so it is asked again, up to three times. */
+async function askJson(system, prompt, name) {
+  let last;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, attempt * 5_000));
+    try {
+      return parse(await model(system, prompt, name));
+    } catch (error) {
+      last = error;
+    }
+  }
+  throw last;
+}
 /** The first JSON object in a model's reply. */
 function parse(text) {
   const start = text.indexOf("{");
@@ -444,7 +458,7 @@ async function simulate(journey, turns, view, cards, screen, tag, since) {
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}`
       : ""
   }${earlier}${looked(turns)}\n\nYour moves so far: ${turns.length}. Your next move:`;
-  return parse(await model(screen ? UI_RULES : SIMULATOR_RULES, prompt, SIMULATOR));
+  return askJson(screen ? UI_RULES : SIMULATOR_RULES, prompt, SIMULATOR);
 }
 
 /** The send answer the harness allows: only the internal test inboxes are ever emailed. */
@@ -582,6 +596,12 @@ async function play(journey, label, owner, mailbox, out) {
         break;
       }
       const card = cards[move.card];
+      // A sign-in card takes no typed answer; the recruiter's words go to that chat as a message,
+      // as a real recruiter would type them under the card.
+      if (card?.connect && move.action === "answer_card" && move.text) {
+        move.action = "say";
+        move.chat = card.chat;
+      }
       let waitForKruit = true;
       if (move.action === "say") {
         const chat = await chatNamed(move.chat);
@@ -833,9 +853,7 @@ async function judge(journey, result) {
   const readings = (
     await Promise.all(
       [0, 1, 2].map(() =>
-        model(JUDGE_RULES, prompt, JUDGE)
-          .then(parse)
-          .catch(() => null),
+        askJson(JUDGE_RULES, prompt, JUDGE).catch(() => null),
       ),
     )
   ).filter(Boolean);

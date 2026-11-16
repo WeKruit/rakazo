@@ -31,6 +31,8 @@ const RECRUITER_MESSAGES = 8;
 const REPORT_CHARS = 300;
 const QUESTION_CHARS = 180;
 const RECEIPT_WINDOW_MS = 24 * 3_600_000;
+/** How far back the account's own sends are counted: long enough for "did you send it yesterday". */
+const SEND_WINDOW_DAYS = 7;
 const RECEIPTS_SHOWN = 8;
 const ROLES_FOR_REFERENCE = 500;
 /** Calls in this conversation read for the role it last handed work to. */
@@ -47,6 +49,7 @@ type StatePrisma = Pick<
   | "externalEffect"
   | "user"
   | "mcpServer"
+  | "connection"
   | "recruitingCalibrationRound"
 >;
 
@@ -70,6 +73,54 @@ async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userI
   return gmail
     ? undefined
     : "- Recruiter's own Gmail: not connected, so no email can go out yet. Each email goes out from it once they press Connect Gmail and then Send on its card.";
+}
+
+/** Calendar connectors the product books interviews through (request_connection's catalog). */
+const CALENDAR_SLUGS = ["google-calendar", "cal-com"];
+const CALENDAR_ENDPOINTS = ["https://calendarmcp.googleapis.com/mcp/v1", "https://mcp.cal.com/mcp"];
+
+/**
+ * No calendar connected: no interview can be booked (team-stuck 11-16: Kruit said "checking" and
+ * handed the booking to the team, which found the missing calendar two minutes later).
+ */
+async function calendarLine(prisma: StatePrisma, scope: { spaceId: string; userId: string }) {
+  const [server, linked] = await Promise.all([
+    prisma.mcpServer.findFirst({
+      where: {
+        spaceId: scope.spaceId,
+        userId: scope.userId,
+        enabled: true,
+        secretId: { not: null },
+        OR: [{ slug: { in: CALENDAR_SLUGS } }, { endpoint: { in: CALENDAR_ENDPOINTS } }],
+      },
+      select: { id: true },
+    }),
+    // A calendar linked through a connector platform counts too, whatever its sync state.
+    prisma.connection.findFirst({
+      where: {
+        spaceId: scope.spaceId,
+        userId: scope.userId,
+        provider: { contains: "calendar", mode: "insensitive" },
+        status: { not: "revoked" },
+      },
+      select: { id: true },
+    }),
+  ]);
+  return server || linked
+    ? undefined
+    : "- Recruiter's calendar: none connected, so no interview can be booked or invited yet. When they ask for one, show the calendar Connect card (request_connection) in that same reply rather than handing the booking to a team.";
+}
+
+/** A role's latest calibration round, as the recruiter sees it. */
+function roundLine(
+  round: { round: number; status: string; statusAt: Date; approvedAt: Date | null } | undefined,
+  now: number,
+) {
+  if (!round) return undefined;
+  if (round.approvedAt) return `round ${round.round} approved`;
+  if (round.status === "checking") return `round ${round.round} being checked, not shown yet`;
+  if (round.status === "checked") return `round ${round.round} checked, not shown yet`;
+  return `round ${round.round} shown in the role team's chat ${ago(round.statusAt, now)}`;
 }
 
 export type WorkingStateThread = {
@@ -233,6 +284,7 @@ export async function loadWorkingState(
 ): Promise<WorkingState> {
   const global = thread.groupId?.startsWith("recruiting-global-") ?? false;
   const gmailLine = ownGmailLine(prisma, scope).catch(() => undefined);
+  const calendarRead = calendarLine(prisma, scope).catch(() => undefined);
   // The recruiter's most recently active conversations, Kruit's included: where their newest
   // words are, and (for Kruit) the role teams on the card. Bounded, so a large account reads few.
   const listed = await prisma.chatGroup.findMany({
@@ -264,6 +316,35 @@ export async function loadWorkingState(
   const roleThreadIds = groups.flatMap((group) => (group.thread ? [group.thread.id] : []));
   const threadIds = [thread.id, ...roleThreadIds];
   const since = new Date(now - RECEIPT_WINDOW_MS);
+  // Every send in the product runs only after its card is confirmed and leaves this receipt,
+  // so the account's own sends are a definite count, not an unknown.
+  const sendsRead = prisma.event
+    .findMany({
+      where: {
+        spaceId: scope.spaceId,
+        type: "agent.tool.completed",
+        createdAt: { gte: new Date(now - SEND_WINDOW_DAYS * 86_400_000) },
+        thread: { userId: scope.userId },
+        payload: { path: ["work"], equals: "sent" },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { threadId: true, payload: true, createdAt: true },
+    })
+    .catch(() => undefined);
+  const teamRoleIds = groups.flatMap((group) =>
+    group.thread?.activeRecruitingRoleId ? [group.thread.activeRecruitingRoleId] : [],
+  );
+  const roundsRead = teamRoleIds.length
+    ? prisma.recruitingCalibrationRound
+        .findMany({
+          where: { roleId: { in: teamRoleIds } },
+          orderBy: [{ roleId: "asc" }, { round: "desc" }],
+          distinct: ["roleId"],
+          select: { roleId: true, round: true, status: true, statusAt: true, approvedAt: true },
+        })
+        .catch(() => [])
+    : Promise.resolve([]);
   const [recruiterRows, roles, recent, runs, completed, handoffs, roleTotal] = await Promise.all([
     recruiterLanguageRows(prisma, thread.id, accountThreadIds),
     global
@@ -285,7 +366,7 @@ export async function loadWorkingState(
           where: { threadId },
           orderBy: { seq: "desc" },
           take: ROLE_MESSAGES,
-          select: { role: true, botId: true, blocks: true },
+          select: { role: true, botId: true, blocks: true, createdAt: true },
         }),
       ),
     ),
@@ -476,6 +557,20 @@ export async function loadWorkingState(
 
   const gmail = await gmailLine;
   if (gmail) lines.push(gmail);
+  const calendar = await calendarRead;
+  if (calendar) lines.push(calendar);
+
+  const sendRows = await sendsRead;
+  const sent = (sendRows ?? []).filter((event) => {
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    return payload.outcome === "succeeded" && payload.work === "sent";
+  });
+  if (sendRows)
+    lines.push(
+      sent.length
+        ? `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: ${sent.length >= 50 ? "50 or more sends" : `${sent.length} send${sent.length === 1 ? "" : "s"}`} (latest ${ago(sent[0]!.createdAt, now)}), each confirmed on its card. A campaign send queues its emails: who has received one is known from get_campaign.`
+        : `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: none. Every send needs its card and leaves a record, so this is a definite none: nothing was sent from here and nothing is waiting to go out, whatever earlier chat or the recruiter remembers. A mailbox or CRM that is not connected does not make it unknown; only a campaign imported from another tool sends outside this record, and get_campaign reads it.`,
+    );
 
   const own = receiptLine(receiptsOf(thread.id), now);
   lines.push(
@@ -496,6 +591,7 @@ export async function loadWorkingState(
         })
       : [];
     const botName = new Map(bots.map((bot) => [bot.id, bot.name]));
+    const roundOf = new Map((await roundsRead).map((round) => [round.roleId, round]));
     // A large account (hundreds of roles, thousands of people) never fits a card: what is not
     // on it is read, never recalled from chat or made up.
     lines.push(
@@ -511,6 +607,7 @@ export async function loadWorkingState(
           role ? `roleId ${role.id}` : `groupId ${group.id}, no saved role yet`,
           role ? `stage ${role.playbookStage}` : undefined,
           role ? `${role._count.candidates} people saved` : undefined,
+          roundLine(roleId ? roundOf.get(roleId) : undefined, now),
           teamState(latestRun.get(threadId), now),
         ]
           .filter(Boolean)
@@ -541,9 +638,20 @@ export async function loadWorkingState(
         : "";
       if (said.trim())
         lines.push(
-          `  Team's last report (${botName.get(report?.botId ?? "") ?? "Team"}): "${flat(said, REPORT_CHARS)}"`,
+          `  Team's last report (${botName.get(report?.botId ?? "") ?? "Team"}${report?.createdAt ? `, ${ago(report.createdAt, now)}` : ""}; its counts may be older than the ones above, which are read now): "${flat(said, REPORT_CHARS)}"`,
         );
     });
+  } else if (global && roleTotal === 0) {
+    // Every role opened here is saved to this account, so no roles is a definite none, not an
+    // unknown (honest-limits 8a002815: with nothing said, 「不对啊，我昨天建了三个」 got an apology).
+    const archived = await prisma.recruitingRole
+      .count({
+        where: { spaceId: scope.spaceId, userId: scope.userId, archivedAt: { not: null } },
+      })
+      .catch(() => 0);
+    lines.push(
+      `- Role teams: ${archived ? `none active; ${archived} archived` : "none"}. Every role opened in this product is saved to this account, so this is read now and definite, whatever earlier chat or the recruiter remembers.`,
+    );
   }
 
   return { text: redact(lines.join("\n")), language };

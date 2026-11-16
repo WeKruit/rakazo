@@ -288,15 +288,19 @@ describe("ensurePlatformServices", () => {
     });
   });
 
-  it("gives Scheduling a connected Google Calendar it was never granted", async () => {
+  it("gives Scheduling the Google Calendar it was never granted, connected or not yet", async () => {
+    // Simulated 11-16, team-stuck-tell-me: the calendar was added but not connected, so only
+    // Main had it; Scheduling found no calendar, handed the booking back twice, and the connect
+    // card came two minutes late. Scheduling asks for the connection on its own calendar.
     const f = fixture({ calendars: [{ id: "calendar" }], scheduling: [{ id: "scheduling-bot" }] });
     await ensurePlatformServices(f.prisma, actor);
     expect(f.tx.mcpServer.findMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
         endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
         enabled: true,
-        secretId: { not: null },
-      }),
+      },
       select: { id: true },
     });
     expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
@@ -312,7 +316,7 @@ describe("ensurePlatformServices", () => {
     });
   });
 
-  it("adds no calendar grant when no Google Calendar is connected", async () => {
+  it("adds no calendar grant when no Google Calendar was added", async () => {
     const f = fixture({ scheduling: [{ id: "scheduling-bot" }] });
     await ensurePlatformServices(f.prisma, actor);
     expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalledWith(

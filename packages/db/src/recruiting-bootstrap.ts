@@ -1091,15 +1091,18 @@ export async function ensurePlatformServices(
 }
 
 /**
- * A Google Calendar the recruiter connected reaches Scheduling, which books interviews on it,
- * even when it was first granted only to the coordinator. Adds only a missing grant.
+ * A Google Calendar the recruiter added reaches Scheduling, which books interviews on it, even
+ * when it was first granted only to the coordinator. Before it is connected Scheduling still
+ * holds it, so its own calls ask for the connection (simulated 11-16: without it Scheduling
+ * handed the booking back twice and the connect card came two minutes late). Adds only a
+ * missing grant.
  */
 async function ensureSchedulingCalendar(prisma: PrismaClient, actor: Actor): Promise<void> {
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
   const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "scheduling");
   if (!role) return;
   const servers = await prisma.mcpServer.findMany({
-    where: { ...scope, endpoint: GOOGLE_CALENDAR_ENDPOINT, enabled: true, secretId: { not: null } },
+    where: { ...scope, endpoint: GOOGLE_CALENDAR_ENDPOINT, enabled: true },
     select: { id: true },
   });
   if (!servers.length) return;
