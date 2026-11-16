@@ -22,6 +22,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
+import { requestedPeopleTarget } from "./people-target.js";
 import { roundAwaitingReview } from "./recruiting-grading.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
@@ -750,6 +751,17 @@ export async function returnDelegatedTeamOutcome(
       spaceId: run.spaceId,
       roleId: thread.activeRecruitingRoleId,
       since: delegated.createdAt,
+      // feedback-round 11-16: "can you pull some people?" came back with the round and 17
+      // unchecked people, Kruit listed all 27, and the next round's Gaya read as a repeat. Only
+      // a number the recruiter asked for lists people beyond the round.
+      listRest:
+        requestedPeopleTarget(
+          (Array.isArray(delegated.blocks) ? (delegated.blocks as MessageBlock[]) : [])
+            .flatMap((block) =>
+              block.kind === "text" || block.kind === "bot_message_received" ? [block.text] : [],
+            )
+            .join("\n"),
+        ) !== undefined,
     }));
   // Gate 71a2cac2: beside the record, the team's "profiles show 6+ years" left Kruit squaring a
   // retelling with the record, and it contradicted itself. The record is the whole answer.
@@ -785,7 +797,7 @@ export async function returnDelegatedTeamOutcome(
  */
 async function savedForRequest(
   prisma: PrismaClient,
-  input: { threadId: string; spaceId: string; roleId: string; since: Date },
+  input: { threadId: string; spaceId: string; roleId: string; since: Date; listRest: boolean },
 ) {
   const [keys, rounds] = await Promise.all([
     listRecruitingPeopleFoundSince(prisma, input),
@@ -803,6 +815,8 @@ async function savedForRequest(
   const rest = keys.filter((key) => !inRound.has(key));
   if (!rest.length) return "";
   const listed = keys.length - rest.length;
+  if (listed && !input.listRest)
+    return `Also saved for this request, not checked yet and not shown to the recruiter: ${rest.length} more ${rest.length === 1 ? "person" : "people"}, in the role's Results. Show the round above; mention only that count for the rest, without naming them.`;
   const all = `${keys.length} ${keys.length === 1 ? "person" : "people"} in all`;
   return recruitingRoundListText(prisma, {
     ...input,

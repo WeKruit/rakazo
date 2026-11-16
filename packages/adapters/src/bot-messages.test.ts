@@ -860,6 +860,41 @@ describe("delegating to a role team in another conversation", () => {
     expect(returned?.text).not.toContain("Saved 20; 4 more");
   });
 
+  it("names no unchecked people beyond the round when no number was asked for (simulated 2026-11-16)", async () => {
+    // feedback-round edb7834f: "can you pull some people?" came back with the round and 17
+    // unchecked people, Kruit listed all 27, and the next round's Gaya read as a repeat.
+    const round = "10 people this round:\n\n1. **[Amy A](https://www.linkedin.com/in/amy)** · SRE";
+    const harness = team({
+      roleId: "role-1",
+      root: { ...delegation, text: "Senior SRE in Austin, can you pull some people?" },
+      later: [said(round)],
+    });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const person = (slug: string, name: string) => ({
+      candidateKey: `linkedin:/in/${slug}`,
+      name,
+      title: "SRE",
+      company: "Visa",
+      location: "Austin",
+    });
+    prisma.recruitingCandidateOccurrence!.findMany = vi.fn(async () => [
+      person("amy", "Amy A"),
+      person("bo", "Bo B"),
+      person("cy", "Cy C"),
+    ]);
+    prisma.recruitingCalibrationRound = {
+      findMany: vi.fn(async () => [{ round: 1, candidateKeys: ["linkedin:/in/amy"] }]),
+    };
+    prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
+    prisma.externalEffect = { findMany: vi.fn(async () => []) };
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    const [returned] = returnedTo(harness) as Array<{ text: string }>;
+    expect(returned?.text).toContain(round);
+    expect(returned?.text).toContain("2 more");
+    expect(returned?.text).not.toContain("Bo B");
+    expect(returned?.text).not.toContain("Cy C");
+  });
+
   it("holds the result while the round it made waits for the Reviewer (staging 2026-11-15)", async () => {
     // A team turn ended right after recording round 2; its unchecked ten went back to Kruit, which
     // listed them, and the checked round with three people swapped never came back.
