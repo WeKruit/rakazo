@@ -7127,6 +7127,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const approvalAsked = new Set<string>();
         // Messages already told that a round shown after them answers them.
         const shownRoundAsked = new Set<string>();
+        const namedVerdictAsked = new Set<string>();
+        // Whether this run saved a recruiter's review of any of these people.
+        const reviewedThisRun = async (keys: readonly string[]) =>
+          (
+            await deps.prisma.externalEffect.findMany({
+              where: { runId: run.id, kind: "recruiting_feedback" },
+              select: { request: true, result: true },
+            })
+          ).some((effect) => {
+            const request = (effect.request ?? {}) as { candidateKeys?: unknown };
+            const result = (effect.result ?? {}) as { error?: unknown };
+            return (
+              result.error === undefined &&
+              Array.isArray(request.candidateKeys) &&
+              request.candidateKeys.some((key) => keys.includes(String(key)))
+            );
+          });
         /**
          * Picked people whose saved location names only a country or a state, and those whose
          * location shares no place with where the rest of the picks are.
@@ -8591,6 +8608,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
                 return {
                   error: `Not recorded yet: round ${state.round} was shown after this message was written, so it is the round the message asks for. Unless the message asks for something round ${state.round} does not do, record nothing and end the turn with one short line pointing to round ${state.round} above. If it does ask for more, call calibration_round again.`,
+                };
+            }
+            // Staging edb7834f: "kwang is LA based and half of these are amazon again, i said not
+            // those" got a round of four additions, and Kwang and the Amazon people stayed
+            // unreviewed in the round the recruiter was told was final. Asked once per message.
+            if (
+              state?.status === "shown" &&
+              recruitingSourceMessageId &&
+              !namedVerdictAsked.has(recruitingSourceMessageId)
+            ) {
+              namedVerdictAsked.add(recruitingSourceMessageId);
+              const named = await roundPeopleNamed(deps.prisma, {
+                threadId: run.threadId,
+                messageId: recruitingSourceMessageId,
+              }).catch(() => null);
+              if (named && !(await reviewedThisRun(named.keys)))
+                return {
+                  error: `Not recorded yet: the recruiter's message names people of round ${named.round} (${named.named.join(", ")}). Record a review with recruiting_feedback for each one it turns down, quoting their words, then call calibration_round again. If it names them only as examples to find more like, call calibration_round again now.`,
                 };
             }
           }

@@ -301,7 +301,37 @@ describe("roundPeopleNamed", () => {
         prismaFor("#3 is off. parthasarathi is a technical architect. find me more like the rest"),
         input,
       ),
-    ).resolves.toEqual({ round: 1, named: ["Parthasarathi Samantaray", "Mohamed Hassan"] });
+    ).resolves.toEqual({
+      round: 1,
+      named: ["Parthasarathi Samantaray", "Mohamed Hassan"],
+      keys: ["b", "c"],
+    });
+  });
+
+  // Staging edb7834f: the recruiter's words reach the role's lead quoted in a handoff, and "the
+  // amazon ones" names people by their company; the next round left all of them unreviewed.
+  it("reads a handed-in message and finds people by their company", async () => {
+    const prisma = prismaFor("");
+    (prisma.message.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      blocks: [
+        {
+          kind: "bot_message_received",
+          text: 'The recruiter wrote, word for word:\n"kwang is LA based and half of these are amazon again"',
+        },
+      ],
+    });
+    (
+      prisma.recruitingCandidateOccurrence.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce([
+      { candidateKey: "a", name: "Kwang Hyun Jang", company: "Apple" },
+      { candidateKey: "b", name: "Vinay Thanikonda", company: "Amazon" },
+      { candidateKey: "c", name: "Sashank Y.", company: "TikTok" },
+    ]);
+    await expect(roundPeopleNamed(prisma, input)).resolves.toEqual({
+      round: 1,
+      named: ["Kwang Hyun Jang", "Vinay Thanikonda"],
+      keys: ["a", "b"],
+    });
   });
 
   it("finds nobody in a plain request for more, or once the round is approved", async () => {
