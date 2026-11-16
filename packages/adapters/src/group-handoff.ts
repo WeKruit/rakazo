@@ -462,6 +462,41 @@ export async function reportGroupHandoffOutcome(
         runId: run.id,
         clientNonce: deliveryKey,
       });
+      const event = () =>
+        appendEventInTransaction(tx, {
+          spaceId: run.spaceId,
+          threadId: run.threadId,
+          botId: run.botId,
+          type: "group.handoff",
+          runId: run.id,
+          payload: { messageId: message.id, fromBotId: run.botId, toBotId: asked.fromBotId, text },
+        });
+      // Staging 11-16 (change-mind-mid-run): the teammate's result came back while the sender's
+      // turn was still running; a new turn started for it and the running one ended saying it had
+      // no draft. As Workloop steers a child's result into the parent's current turn, the report
+      // joins the sender's running turn; a turn that ends before reading it is requeued with it.
+      const working = await tx.run.findFirst({
+        where: {
+          threadId: run.threadId,
+          botId: asked.fromBotId,
+          status: { in: ["leased", "running"] },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, status: true },
+      });
+      if (working?.status) {
+        await tx.steeringMessage.create({
+          data: {
+            messageId: message.id,
+            botId: asked.fromBotId,
+            userId: run.userId,
+            runId: working.id,
+          },
+        });
+        const steered = await event();
+        await touchGroupUpdatedAt(tx, groupId);
+        return { runId: working.id, eventSeq: steered.seq, steered: true };
+      }
       const task = await tx.task.create({
         data: {
           spaceId: run.spaceId,
@@ -484,22 +519,16 @@ export async function reportGroupHandoffOutcome(
           sourceMessageId: message.id,
         },
       });
-      const event = await appendEventInTransaction(tx, {
-        spaceId: run.spaceId,
-        threadId: run.threadId,
-        botId: run.botId,
-        type: "group.handoff",
-        runId: run.id,
-        payload: { messageId: message.id, fromBotId: run.botId, toBotId: asked.fromBotId, text },
-      });
+      const created = await event();
       await touchGroupUpdatedAt(tx, groupId);
-      return { runId: nextRun.id, eventSeq: event.seq };
+      return { runId: nextRun.id, eventSeq: created.seq, steered: false };
     }),
   );
   if (!committed) return undefined;
   await deps.events.notify(run.threadId, committed.eventSeq).catch((error) => {
     getLogger().error("group report realtime notification", error);
   });
+  if (committed.steered) return { runId: committed.runId };
   await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
     getLogger().error("group report enqueue", error);
   });

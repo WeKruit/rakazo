@@ -565,6 +565,31 @@ describe("group handoff report back", () => {
     );
   });
 
+  // Staging change-mind-mid-run 11-16: the teammate's email arrived while Kruit's turn was still
+  // running; the report started another turn, and the running one ended saying it had no draft.
+  // As Workloop steers a child's result into the parent's current turn, the report joins it.
+  it("steers the report into the sender's running turn instead of starting another", async () => {
+    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
+      { blocks: [{ kind: "text", text: "Here is the email." }] },
+    ]);
+    const steeringCreate = vi.fn(async () => ({ id: "steer-1" }));
+    Object.assign(tx, { steeringMessage: { create: steeringCreate } });
+    const lookup = tx.run.findFirst;
+    tx.run.findFirst = vi.fn(async (query?: { where?: { botId?: string; status?: unknown } }) =>
+      query?.where?.botId === "bot-a" && query.where.status
+        ? { id: "run-a-live", status: "running" }
+        : lookup(),
+    ) as never;
+    await expect(
+      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" }),
+    ).resolves.toEqual({ runId: "run-a-live" });
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(steeringCreate).toHaveBeenCalledWith({
+      data: { messageId: "message-1", botId: "bot-a", userId: worker.userId, runId: "run-a-live" },
+    });
+    expect(deps.jobs.enqueue).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["没有发出去的原因是什么？", false],
     ["Find ten more people like these.", true],
