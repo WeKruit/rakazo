@@ -6953,6 +6953,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             },
             [lastRecruiterText, steeredText ?? ""].join("\n"),
+            hideVendors,
           );
           if (result) return result;
           approvalPausePending = true;
