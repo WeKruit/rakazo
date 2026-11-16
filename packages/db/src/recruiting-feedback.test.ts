@@ -319,6 +319,17 @@ describe("role work delegated by the global agent", () => {
       );
     },
   );
+  it("acts for it after the global turn waited on a slow tool and resumed", async () => {
+    // Staging 11-16: the global turn's candidate lookup ran past 10 s, so the turn resumed as a
+    // background run; its handoff's feedback save was then refused and never recorded.
+    const f = delegationFixture();
+    f.sender.trigger = "tool_background";
+    Object.assign(f.tx.event, {
+      findFirst: vi.fn(async () => ({ payload: { trigger: "user" } })),
+    });
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, f.input);
+    expect(result.source).toMatchObject({ anchor: { messageId: f.source.id } });
+  });
 });
 
 describe("native recruiting memory admission", () => {
