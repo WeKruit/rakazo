@@ -241,14 +241,24 @@ async function cardsOpen(rpc) {
 // The send records Kruit's claims are checked against: the campaign of every chat this journey
 // wrote in or got replies in, and of every role whose campaign changed since the journey began
 // (a send confirmed in the Kruit chat goes into a role's campaign, new or existing). A reused
-// fixture account's other roles are left out.
+// fixture account's other roles are left out. A role can send from more than its bound campaign
+// (a copy made for a new wave), so its other campaigns are read too, as its Sequence page lists them.
 async function campaignOf(rpc, chat) {
   const campaign = await rpc("recruiting/roleCampaign", { groupId: chat.id }).catch((error) => ({
     error: error.message,
   }));
+  const record = { chat: chat.name, status: campaign.status ?? campaign.error, ...campaignState(campaign) };
+  if (!campaign.campaign) return record;
+  const view = await rpc("recruiting/accountView", { view: "sequence", groupId: chat.id, limit: 1 }).catch(
+    () => null,
+  );
+  const others = (view?.items?.[0]?.campaigns ?? []).filter(
+    (other) => other.campaign && other.campaign.id !== campaign.campaign.id,
+  );
+  return others.length ? { ...record, otherCampaigns: others.map(campaignState) } : record;
+}
+function campaignState(campaign) {
   return {
-    chat: chat.name,
-    status: campaign.status ?? campaign.error,
     campaign: campaign.campaign
       ? {
           name: campaign.campaign.name,
@@ -301,7 +311,7 @@ async function savedPeople(rpc, group) {
   return page ? page.total : null;
 }
 const CAMPAIGN_CODES =
-  "saved: people the role chat has stored (its Results count); campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
+  "saved: people the role chat has stored (its Results count); otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
 
 // What the recruiter can read: messages with text, in chats they wrote in or were answered in.
 const visible = (chats) =>
