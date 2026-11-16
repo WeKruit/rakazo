@@ -17232,6 +17232,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // staging 11-16, the save step spent 3.1k reasoning tokens (28 s) on ten grades.
         if (run.trigger === "recruiting_grade" && runModel.thinkingLevel !== "off")
           runModel = { ...runModel, thinkingLevel: "low" };
+        // The same holds for the lead's turn on a round the Reviewer will check before it is
+        // shown: its pick is checked and corrected anyway. Staging 11-16, the round-writing step
+        // spent 6.5k reasoning tokens (56 s) while the recruiter waited for round 2.
+        else if (
+          effortMode !== "deep" &&
+          runModel.thinkingLevel !== "off" &&
+          runModel.thinkingLevel !== "minimal" &&
+          thread.activeRecruitingRoleId &&
+          (await nextRoundHeld(deps.prisma, {
+            threadId: run.threadId,
+            roleId: thread.activeRecruitingRoleId,
+          }).catch(() => false))
+        )
+          runModel = { ...runModel, thinkingLevel: "low" };
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
         // step only says what it is doing and starts its reads, so it runs at low thinking too.
