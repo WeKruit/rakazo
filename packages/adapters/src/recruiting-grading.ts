@@ -49,7 +49,9 @@ export async function scheduleRecruitingGrading(
   now = Date.now(),
   settleMs = RECRUITING_GRADE_SETTLE_MS,
 ): Promise<void> {
-  await jobs.enqueue(recruitingGradeStartJob({ threadId }, new Date(now + settleMs)));
+  const job = recruitingGradeStartJob({ threadId }, new Date(now + settleMs));
+  // A start with no settle wait (a held round's check) replaces a later one already waiting.
+  await jobs.enqueue(settleMs > 0 ? job : { ...job, keepExisting: false });
 }
 
 /**
