@@ -12,6 +12,7 @@ import {
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { roundCriteria } from "./recruiting-round-check.js";
 
 export { RECRUITING_GRADE_NONCE_PREFIX };
@@ -481,8 +482,14 @@ export async function startRecruitingGrading(
       });
       // Once per recruiter message, so the corrected round is never corrected again on its own.
       const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
+      const open = misfits.length + Math.max(0, 10 - review.round.candidateKeys.length);
       const runId = await startLeadRun(deps, thread, clientNonce, async () =>
-        roundReviewPrompt(review.round.round, misfits, review.round.candidateKeys.length),
+        roundReviewPrompt(
+          review.round.round,
+          misfits,
+          review.round.candidateKeys.length,
+          await roundReplacements(deps.prisma, role.id, open),
+        ),
       );
       if (runId) {
         getLogger().info("recruiting.round.review", {
@@ -751,7 +758,37 @@ type RoundGrade = {
   title: string | null;
   company: string | null;
   tier: unknown;
+  /** Requirements the check did not find met, with their verdict, and its concerns. */
+  gaps?: string[];
+  concerns?: string[];
 };
+
+/** The Reviewer's own words for one person in a save_grades request, by candidateKey. */
+function savedGradeNotes(request: unknown) {
+  const notes = new Map<string, Pick<RoundGrade, "gaps" | "concerns">>();
+  const rows = (request as { rows?: unknown } | null)?.rows;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const grade = row as {
+      linkedin_url?: unknown;
+      concerns?: unknown;
+      requirements_assessment?: unknown;
+    };
+    const key = linkedinPersonKey(grade.linkedin_url);
+    if (!key) continue;
+    const gaps = (
+      Array.isArray(grade.requirements_assessment) ? grade.requirements_assessment : []
+    ).flatMap((item: { requirement?: unknown; status?: unknown }) =>
+      typeof item?.requirement === "string" && item.status !== "met"
+        ? [`${item.requirement} (${String(item.status)})`]
+        : [],
+    );
+    const concerns = (Array.isArray(grade.concerns) ? grade.concerns : []).filter(
+      (concern): concern is string => typeof concern === "string",
+    );
+    notes.set(key, { gaps, concerns });
+  }
+  return notes;
+}
 
 /**
  * The latest calibration round while the recruiter has not approved it, with each of its people's
@@ -802,8 +839,22 @@ async function roundUnderReview(
       },
     },
     orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
-    select: { candidateKey: true, name: true, title: true, company: true, matchFields: true },
+    select: {
+      candidateKey: true,
+      name: true,
+      title: true,
+      company: true,
+      matchFields: true,
+      pageId: true,
+    },
   });
+  // The lead replacing a misfit reads why from here instead of reading each person again
+  // (staging 11-16: the swap re-read all ten people's sources five times, about 7 minutes).
+  const pages = await prisma.externalEffect.findMany({
+    where: { id: { in: [...new Set(rows.map((row) => row.pageId))] } },
+    select: { id: true, request: true },
+  });
+  const notes = new Map(pages.map((page) => [page.id, savedGradeNotes(page.request)]));
   const grades = new Map<string, RoundGrade>();
   for (const row of rows)
     if (!grades.has(row.candidateKey))
@@ -812,6 +863,7 @@ async function roundUnderReview(
         title: row.title,
         company: row.company,
         tier: (row.matchFields as { match_tier?: unknown } | null)?.match_tier,
+        ...notes.get(row.pageId)?.get(row.candidateKey),
       });
   return { round, grades, held, checked: held && status === "checked" };
 }
@@ -913,10 +965,74 @@ export async function hasRoundReviewer(prisma: PrismaClient, threadId: string): 
 }
 
 /** The lead's turn that shows a held round once the Reviewer has checked it, swapping misfits first. */
+type Replacement = {
+  key: string;
+  name: string | null;
+  title: string | null;
+  company: string | null;
+  location: string | null;
+  strong: boolean;
+};
+
+/**
+ * Saved people no round has shown, for the lead to fill a checked round's open places: the ones
+ * the Reviewer graded Strong first, then ones not graded yet; anyone graded below Strong is left
+ * out. Listing them in the request spares the lead paging through Results for them.
+ */
+async function roundReplacements(
+  prisma: PrismaClient,
+  roleId: string,
+  open: number,
+): Promise<Replacement[]> {
+  if (!open) return [];
+  const [rounds, graded, rows] = await Promise.all([
+    prisma.recruitingCalibrationRound.findMany({
+      where: { roleId },
+      select: { candidateKeys: true },
+    }),
+    prisma.recruitingCandidateOccurrence.findMany({
+      where: {
+        roleId,
+        page: {
+          effect: {
+            OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
+              request: { path: ["operation"], equals: operation },
+            })),
+          },
+        },
+      },
+      orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+      select: { candidateKey: true, matchFields: true },
+    }),
+    prisma.recruitingCandidateOccurrence.findMany({
+      where: { roleId, linkedinUrl: { not: null } },
+      orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+      take: 300,
+      select: { candidateKey: true, name: true, title: true, company: true, location: true },
+    }),
+  ]);
+  const shown = new Set(rounds.flatMap((round) => round.candidateKeys));
+  const tiers = new Map<string, unknown>();
+  for (const row of graded)
+    if (!tiers.has(row.candidateKey))
+      tiers.set(row.candidateKey, (row.matchFields as { match_tier?: unknown } | null)?.match_tier);
+  const people = new Map<string, Replacement>();
+  for (const row of rows) {
+    if (shown.has(row.candidateKey) || people.has(row.candidateKey)) continue;
+    const strong = tiers.get(row.candidateKey) === FIT_TIER;
+    if (tiers.has(row.candidateKey) && !strong) continue;
+    people.set(row.candidateKey, { key: row.candidateKey, ...row, strong });
+  }
+  return [...people.values()]
+    .sort((a, b) => Number(b.strong) - Number(a.strong))
+    .slice(0, open + 5);
+}
+
 export function roundReviewPrompt(
   round: number,
   misfits: readonly (RoundGrade & { key: string })[],
   size = 10,
+  replacements: readonly Replacement[] = [],
 ) {
   // Staging 11-15: two misfits swapped out with no replacement found left a round of 8, and the
   // recruiter's "only 8?" brought a second list. The checked round is filled to ten first.
@@ -925,11 +1041,28 @@ export function roundReviewPrompt(
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet.${misfits.length ? ` ${misfits.length === 1 ? "This person's profile doesn't" : `These ${misfits.length} people's profiles don't`} show everything the recruiter asked for:` : " Everyone in it fits."}`,
     ...misfits.map((person) => {
       const role = [person.title, person.company].filter(Boolean).join(" at ");
-      return `- ${person.name ?? person.key}${role ? `, ${role}` : ""}: ${String(person.tier)} (candidateKey ${person.key})`;
+      const notes = [
+        person.gaps?.length ? `not shown: ${person.gaps.join("; ")}` : "",
+        person.concerns?.length ? `concerns: ${person.concerns.join("; ")}` : "",
+      ].filter(Boolean);
+      return `- ${person.name ?? person.key}${role ? `, ${role}` : ""}: ${String(person.tier)} (candidateKey ${person.key})${notes.length ? `; ${notes.join("; ")}` : ""}`;
     }),
+    ...(open && replacements.length
+      ? [
+          "",
+          "Saved people no round has shown:",
+          ...replacements.map((person) => {
+            const about = [
+              [person.title, person.company].filter(Boolean).join(" at "),
+              person.location,
+            ].filter(Boolean);
+            return `- ${person.name ?? person.key}${about.length ? `, ${about.join(", ")}` : ""} (candidateKey ${person.key}): ${person.strong ? "checked, Strong" : "not checked yet"}`;
+          }),
+        ]
+      : []),
     "",
     open
-      ? `${misfits.length ? "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). " : ""}Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}: first saved people no round has shown who fit every requirement (recruiting_candidates list), then one quick search for the rest, and one more differently worded search only if places are still open. Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones. When both searches leave places open, keep the closest of these people (Promising before Uncertain, never Partial) in them; fewer than ten only when none is left. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
+      ? `Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}. Everything you need is above: don't read this round's people or Results again. ${replacements.length ? "Take the saved people listed above first, the checked ones before the rest, skipping anyone whose title, company or location shows they don't fit; only for places still open, run one quick search (four searches in one step)." : "Run one quick search (four searches in one step) for them."} Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones. When places are still open after that, keep the closest of these people (Promising before Uncertain, never Partial) in them; fewer than ten only when none is left. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
       : "Show it now: record calibration_round with corrects: true and the same people in the same order (no checks: the Reviewer's grades stand for them). Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
   ].join("\n");
 }

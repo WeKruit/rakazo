@@ -77,7 +77,12 @@ function fixture(options: {
   /** Whether the latest round was recorded as a correction. */
   corrects?: boolean;
   /** Grades of the latest round's people saved since the previous round. */
-  roundGrades?: Array<{ candidateKey: string; name: string; matchFields: unknown }>;
+  roundGrades?: Array<{
+    candidateKey: string;
+    name: string;
+    matchFields: unknown;
+    pageId?: string;
+  }>;
 }) {
   const runCreate = vi.fn(async () => ({ id: "grade-run" }));
   const taskCreate = vi.fn(async () => ({ id: "grade-task" }));
@@ -218,7 +223,7 @@ describe("startRecruitingGrading", () => {
       { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
     ];
     const options = {
-      found: [person("fits"), person("misfit"), person("unshown")],
+      found: [person("fits"), person("misfit"), person("unshown"), person("spare")],
       graded: ["linkedin:/in/fits", "linkedin:/in/misfit", "linkedin:/in/unshown"],
       rounds: round(["linkedin:/in/fits", "linkedin:/in/misfit", "linkedin:/in/unshown"]),
       roundGrades: [
@@ -227,6 +232,7 @@ describe("startRecruitingGrading", () => {
           candidateKey: "linkedin:/in/misfit",
           name: "Misfit",
           matchFields: { match_tier: "Partial" },
+          pageId: "grades",
         },
         // Staging 11-16: people whose profile doesn't show Kafka stayed in the checked round, and
         // the recruiter asked why they were there.
@@ -239,6 +245,25 @@ describe("startRecruitingGrading", () => {
     };
     const f = fixture(options);
     f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    // Staging 11-16: the swap re-read all ten people's profiles five times (about 7 minutes), so
+    // the request carries each misfit's gaps and the saved people it can take.
+    f.prisma.externalEffect.findMany.mockResolvedValue([
+      {
+        id: "grades",
+        request: {
+          rows: [
+            {
+              linkedin_url: "https://www.linkedin.com/in/misfit/",
+              concerns: ["Architect role"],
+              requirements_assessment: [
+                { requirement: "Spark in production", status: "met" },
+                { requirement: "Kafka in production", status: "unknown" },
+              ],
+            },
+          ],
+        },
+      },
+    ] as never);
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
@@ -246,7 +271,11 @@ describe("startRecruitingGrading", () => {
         clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
       }),
     });
-    expect(promptOf(f)).toContain("Misfit: Partial (candidateKey linkedin:/in/misfit)");
+    expect(promptOf(f)).toContain(
+      "Misfit: Partial (candidateKey linkedin:/in/misfit); not shown: Kafka in production (unknown); concerns: Architect role",
+    );
+    expect(promptOf(f)).toContain("spare (candidateKey linkedin:/in/spare): not checked yet");
+    expect(promptOf(f)).not.toContain("(candidateKey linkedin:/in/fits)");
     expect(promptOf(f)).toContain("Unshown: Promising (candidateKey linkedin:/in/unshown)");
     expect(promptOf(f)).not.toContain("Fits:");
     // Nothing is shown while a round person still waits for a grade made with the feedback.
