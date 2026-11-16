@@ -58,6 +58,7 @@ import { getLogger } from "@rakazo/logging";
 
 import { completeExternalEffect } from "./approval-effect.js";
 import { readActorArtifact } from "./artifact-read.js";
+import { productEmailSends, productSendsNote } from "./product-sends.js";
 import {
   isPeopleSearchEndpoint,
   peopleFromSearch,
@@ -1819,15 +1820,21 @@ export async function resolveRecruitingContactAcrossRoles(
       })),
     );
   }
+  const status = !matches.length
+    ? ("not_found" as const)
+    : matches.length === 1
+      ? ("resolved" as const)
+      : ("ambiguous" as const);
+  if (status !== "not_found")
+    return { scope: "all_user_roles" as const, status, matches, crm };
+  const sends = await productEmailSends(deps.prisma, actor);
   return {
     scope: "all_user_roles" as const,
-    status: !matches.length
-      ? ("not_found" as const)
-      : matches.length === 1
-        ? ("resolved" as const)
-        : ("ambiguous" as const),
+    status,
     matches,
     crm,
+    sends,
+    note: productSendsNote(sends),
   };
 }
 
