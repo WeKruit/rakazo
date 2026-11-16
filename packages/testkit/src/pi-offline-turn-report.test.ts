@@ -164,7 +164,7 @@ describe("turn report invariant on real Pi with an offline model", () => {
     expect(ledger.owed()).toEqual(["people_search"]);
   }, 30_000);
 
-  it("retries a declined final reply once, then accepts the next reply", async () => {
+  it("retries a deferred final reply once, then accepts the next reply", async () => {
     const findEmails: ConnectorTool = {
       name: "mcp__wekruit__find_emails",
       description: "Look up emails",
@@ -182,7 +182,7 @@ describe("turn report invariant on real Pi with an offline model", () => {
           expect() {},
           response: {
             type: "text",
-            text: "I can't verify whether other contact details are saved from the records available here.",
+            text: "Would you like me to look up their emails?",
           },
         },
         {
@@ -229,7 +229,7 @@ describe("turn report invariant on real Pi with an offline model", () => {
     const first = new TurnReportLedger(true);
     const declined = await runWithLedger(model.model, [findEmails], first, request);
     const retry = await guard(declined.reply, first);
-    expect(retry?.sentence).toContain("I can't verify");
+    expect(retry?.sentence).toContain("Would you like me to");
 
     thread.unshift({ clientNonce: "autocontinue:run-1:decline" });
     const second = new TurnReportLedger(true);
