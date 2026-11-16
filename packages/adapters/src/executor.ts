@@ -7110,6 +7110,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const gapAsked = new Set<string>();
         // Recruiter messages whose round acceptance was questioned once because they name people of the round.
         const approvalAsked = new Set<string>();
+        // Messages already told that a round shown after them answers them.
+        const shownRoundAsked = new Set<string>();
         /**
          * Picked people whose saved location names only a country or a state, and those whose
          * location shares no place with where the rest of the picks are.
@@ -8533,6 +8535,51 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // they turned people down): the agent's verdict on each decides who is in.
           // Keeping earlier people is for the round the Reviewer checked; after feedback the next
           // round is new people.
+          // Staging 11-15: with round 2 held for the Reviewer, a later turn recorded round 3 on top
+          // of it, so round 2 was never shown. Only the turn after the check records over it.
+          if (
+            name === "recruiting_research" &&
+            args.operation === "calibration_round" &&
+            thread.activeRecruitingRoleId &&
+            !run.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX) &&
+            !roundHeldRecorded
+          ) {
+            const awaiting = await roundAwaitingReview(deps.prisma, {
+              threadId: thread.id,
+              roleId: thread.activeRecruitingRoleId,
+            }).catch(() => null);
+            if (awaiting !== null)
+              return {
+                error: `Not recorded: round ${awaiting} is waiting for the Reviewer's check and is shown here once checked, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
+              };
+            // Staging 11-15: "just get me the next ten" waited behind the turn that showed round 2,
+            // then ran as a new request and built round 3. Asked once per message.
+            if (recruitingSourceMessageId && !shownRoundAsked.has(recruitingSourceMessageId)) {
+              shownRoundAsked.add(recruitingSourceMessageId);
+              const [source, latest] = await Promise.all([
+                deps.prisma.message.findUnique({
+                  where: { id: recruitingSourceMessageId },
+                  select: { createdAt: true },
+                }),
+                deps.prisma.recruitingCalibrationRound.findFirst({
+                  where: { roleId: thread.activeRecruitingRoleId },
+                  orderBy: { round: "desc" },
+                  select: { round: true, createdAt: true, approvedAt: true },
+                }),
+              ]);
+              if (
+                source &&
+                latest &&
+                !latest.approvedAt &&
+                latest.round >= 2 &&
+                latest.createdAt > source.createdAt &&
+                !(await roundRecordedThisRun())
+              )
+                return {
+                  error: `Not recorded yet: round ${latest.round} was shown after this message was written, so it is the round the message asks for. Unless the message asks for something round ${latest.round} does not do, record nothing and end the turn with one short line pointing to round ${latest.round} above. If it does ask for more, call calibration_round again.`,
+                };
+            }
+          }
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -15188,6 +15235,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
+            // Staging 11-15: the lead handed a held round to the Reviewer as a chat turn, which held
+            // the conversation while the check could not run, and the round was never shown.
+            if (typeof args.bot_id === "string" && thread.activeRecruitingRoleId) {
+              const target = await deps.prisma.bot
+                .findUnique({ where: { id: args.bot_id }, select: { name: true, spawnKey: true } })
+                .catch(() => null);
+              if (
+                target &&
+                recruitingBotKey(target) === "reviewer" &&
+                (await roundAwaitingReview(deps.prisma, {
+                  threadId: thread.id,
+                  roleId: thread.activeRecruitingRoleId,
+                }).catch(() => null)) !== null
+              )
+                return finish({
+                  error:
+                    "Not handed off: the Reviewer is already checking the held round from each person's full profile, and the checked round is shown here when that check ends. End the turn with one short line, in the recruiter's language, that it comes in a minute or two.",
+                });
+            }
             // A new role's first question is the coordinator's own: a handoff first costs the
             // recruiter a second agent's start-up before anything appears.
             if (
