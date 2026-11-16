@@ -542,6 +542,13 @@ describe("withoutRepeatedOpening", () => {
     const only = "无法发送 LinkedIn InMail；没有发送任何内容。";
     expect(withoutRepeatedOpening(only, shown)).toBe(only);
   });
+  // Gate 4a731582, change-mind-mid-run 3/10 and 4/10: the revised template's Subject line matched
+  // the first draft's and was dropped, so every later paste showed the email without it.
+  it("keeps a draft's own lines, whatever the chat already shows", () => {
+    const subject = "**Subject:** Staff Frontend Engineer | React | Beijing";
+    const revised = `${subject}\n\nHi {{firstName}},\n\nThe base is RMB 700,000–900,000.\n\nBest,\nAlex`;
+    expect(withoutRepeatedOpening(revised, [`${subject}\n\nHi {{firstName}},`])).toBe(revised);
+  });
 });
 
 describe("restatesUpdate", () => {
