@@ -243,11 +243,17 @@ async function claimUnverifiedFirstAccount(prisma: PrismaClient, userId: string)
 
 const CREDENTIAL_PATHS = ["/sign-in/email", "/sign-up/email", "/request-password-reset"] as const;
 
-/** Shared across API processes. Off outside production so tests can sign in freely. */
-export function authRateLimitOptions(nodeEnv = process.env.NODE_ENV) {
+/**
+ * Shared across API processes. Off outside production so tests can sign in freely, and off when
+ * the deployment sets AUTH_RATE_LIMIT=off (the test environment, where parallel plays sign in).
+ */
+export function authRateLimitOptions(
+  nodeEnv = process.env.NODE_ENV,
+  setting = process.env.AUTH_RATE_LIMIT,
+) {
   const rule = { window: 15 * 60, max: 10 };
   return {
-    enabled: nodeEnv === "production",
+    enabled: nodeEnv === "production" && setting !== "off",
     storage: "database" as const,
     customRules: {
       ...Object.fromEntries(CREDENTIAL_PATHS.map((path) => [path, rule])),
