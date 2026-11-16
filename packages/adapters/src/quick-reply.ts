@@ -7,7 +7,6 @@ import {
   textLanguage,
 } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
-import { sendOnOtherChannel } from "./instantly-senders.js";
 import { withoutNudge } from "./silent-reply.js";
 
 // A busy model can take several seconds to start; a late first line still beats silence.
@@ -32,7 +31,7 @@ const INSTRUCTIONS = [
 
 // For a recruiter: a pasted job description is a role they hire for, not a job to apply to or an
 // email to write because an earlier message mentioned emails.
-const RECRUITING_INSTRUCTIONS = `${INSTRUCTIONS} The person is a recruiter. A job description they send is a role they are hiring for: say you are reading its requirements, never that you are applying to it or writing an email or anything else an earlier message asked for.`;
+const RECRUITING_INSTRUCTIONS = `${INSTRUCTIONS} The person is a recruiter. A job description they send is a role they are hiring for: say you are reading its requirements, never that you are applying to it or writing an email or anything else an earlier message asked for. Outside this chat the assistant reaches people only by email, each on its Send card, and calendar invites: when the latest message asks for anything else outside the chat (a LinkedIn message, a text, a call, a post elsewhere), the sentence says plainly that it cannot be done from here and nothing was sent, naming no connection.`;
 
 /** Earlier turns in another language must not pull the sentence away from the latest message's. */
 export function replyLanguage(language: ReplyLanguage): string {
@@ -112,14 +111,6 @@ export function oneLineNote(line: string): boolean {
   return !text.includes("\n") && text.length <= 2 * MAX_REPLY_CHARS;
 }
 
-// No tool sends on LinkedIn, WhatsApp, SMS or WeChat: the first line says so, true by construction.
-const CANNOT_SEND_THERE: Record<ReplyLanguage, string> = {
-  zh: "这个渠道我这边发不了，什么都没发出。",
-  ko: "이 채널로는 여기서 보낼 수 없어서, 아무것도 보내지 않았어요.",
-  ja: "このチャネルではここから送れないので、何も送っていません。",
-  en: "I can't send on that channel from here, so nothing went out.",
-};
-
 const GOING_AHEAD: Record<ReplyLanguage, string> = {
   zh: "好，这就处理。",
   ko: "네, 진행할게요.",
@@ -186,8 +177,6 @@ export function quickReply(input: {
       .map((turn) => turn.text)
       .reverse(),
   ]);
-  if (input.recruiting && sendOnOtherChannel(input.userText))
-    return Promise.resolve(CANNOT_SEND_THERE[language]);
   const prompt = [
     ...(input.records?.trim()
       ? ["Saved records now:", clip(input.records, MAX_RECORDS_CHARS), ""]

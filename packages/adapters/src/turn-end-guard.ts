@@ -30,6 +30,7 @@ import {
   narratesRecords,
   draftVariables,
   droppedDay,
+  falseOmission,
   questionCard,
   refusedTemplateVariables,
   repastedDraft,
@@ -875,29 +876,32 @@ export async function planDeclineRetry(
             .join("\n"),
         ),
       ));
-  // An email the conversation already shows is pointed to, not pasted again.
+  // Earlier bot replies, newest first: this turn's own reply may already sit in its line.
+  let earlierBotTexts: Promise<string[]> | undefined;
+  const earlier = () =>
+    (earlierBotTexts ??= deps.prisma.message
+      .findMany({
+        where: {
+          threadId: input.run.threadId,
+          role: "bot",
+          ...(input.since ? { NOT: { runId: input.since.runId } } : {}),
+        },
+        orderBy: { seq: "desc" },
+        take: 6,
+        select: { blocks: true },
+      })
+      .then((rows) =>
+        rows.map((message) =>
+          (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+            .join("\n"),
+        ),
+      ));
+  // An email the conversation already shows is pointed to, not pasted again; a reply never
+  // agrees that its earlier draft lacked what that draft shows.
   const repasted = async () =>
-    repastedDraft(
-      input.reply,
-      (
-        await deps.prisma.message.findMany({
-          // This turn's own reply may already sit in its line; only earlier turns count.
-          where: {
-            threadId: input.run.threadId,
-            role: "bot",
-            ...(input.since ? { NOT: { runId: input.since.runId } } : {}),
-          },
-          orderBy: { seq: "desc" },
-          take: 6,
-          select: { blocks: true },
-        })
-      ).map((message) =>
-        (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
-          .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-          .join("\n"),
-      ),
-      asked,
-    );
+    repastedDraft(input.reply, await earlier(), asked) ??
+    falseOmission(input.reply, await earlier());
   const variables = template
     ? (candidateVoiceDraft(input.reply) ??
       sequenceForOneEmail(input.reply, asked) ??

@@ -81,19 +81,6 @@ describe("quick reply", () => {
     expect(seen[1]?.instructions).not.toContain("recruiter");
   });
 
-  // Sim cannot-do-that-honestly on 9e15e896: a LinkedIn InMail ask got 「Gmail 尚未连接…」 first.
-  it("says at once, without a model call, that a send on another channel cannot go out", async () => {
-    const seen: AgentRunRequest[] = [];
-    const ask = { ...base, recruiting: true, runtime: runtimeReplying("Gmail 尚未连接。", seen) };
-    expect(await quickReply({ ...ask, userText: "给 Li Wei 发个 LinkedIn InMail，现在发" })).toBe(
-      "这个渠道我这边发不了，什么都没发出。",
-    );
-    expect(await quickReply({ ...ask, userText: "send him a LinkedIn message now" })).toBe(
-      "I can't send on that channel from here, so nothing went out.",
-    );
-    expect(seen).toHaveLength(0);
-  });
-
   it("skips empty turns without a model call", async () => {
     const seen: AgentRunRequest[] = [];
     expect(await quickReply({ ...base, userText: "  ", runtime: runtimeReplying("x", seen) })).toBe(

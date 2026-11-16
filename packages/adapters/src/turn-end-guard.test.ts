@@ -1536,6 +1536,31 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  // Sim no-made-up-details on 9e15e896: 「薪资那句也没写 competitive 吧」 got 「你说得对，上一版漏了
+  // competitive」 though the previous version said "with competitive compensation".
+  it("never agrees that its earlier draft lacked what that draft shows", async () => {
+    const earlier =
+      "**Subject:** Senior Android Engineer\n\nHi,\n\nA role in Shenzhen, with competitive compensation.\n\nBest,\nAlex Morgan";
+    const shown = {
+      prisma: prisma([
+        { clientNonce: "send:human", blocks: [{ kind: "text", text: earlier }] },
+      ] as never),
+    } as const;
+    const request = "薪资那句也没写 competitive 吧";
+    const draft =
+      "\n\n**Subject:** Senior Android Engineer\n\nHi,\n\nA confidential role in Shenzhen that offers competitive compensation.\n\nBest,\nAlex Morgan";
+    const agrees = `你说得对，上一版漏了 **competitive**。下面这版：${draft}`;
+    expect((await planDeclineRetry(shown, { ...input, request, reply: agrees }))?.note).toContain(
+      "already",
+    );
+    const english = `You're right, the last version missed "competitive". Here it is:${draft}`;
+    expect((await planDeclineRetry(shown, { ...input, request, reply: english }))?.note).toContain(
+      "already",
+    );
+    const missing = `你说得对，上一版漏了保密这一句。下面这版：${draft}`;
+    expect(await planDeclineRetry(shown, { ...input, request, reply: missing })).toBeUndefined();
+  });
+
   it("keeps {{firstName}} when the recruiter edits a template they asked for (2026-11-13 staging)", async () => {
     // "sign it David Chen" names no template, and the variables check turned the template's
     // "Hi {{firstName}}," into "Hello,".
