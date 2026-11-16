@@ -599,6 +599,18 @@ describe("startRecruitingGrading", () => {
     expect(gaveUp.enqueue).not.toHaveBeenCalled();
   });
 
+  // Reliability plan S3 (11-16): the check is the Reviewer's own work. It waits only on the
+  // Reviewer's turns, not on teammates working in the same role conversation.
+  it("waits only on the grader's own turns, not on teammates' turns", async () => {
+    const f = fixture({ found: [person("a")] });
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.prisma.run.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ threadId: "thread", botId: "sourcer" }),
+      }),
+    );
+  });
+
   it("keeps a few batches in flight and waits when all of them are", async () => {
     const requests = Array.from({ length: GRADE_IN_FLIGHT }, (_, index) => ({
       id: `request-${index}`,

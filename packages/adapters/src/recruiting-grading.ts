@@ -280,8 +280,15 @@ export async function startRecruitingGrading(
     getLogger().info("recruiting.grade.skipped", { threadId: payload.threadId, reason });
   if (!thread || !role || role.archivedAt || role.userId !== thread.userId)
     return skipped("no role");
+  // The check is the grader's own work: it waits only on the grader's turns, while teammates keep
+  // working in the same conversation (reliability plan S3, one lane per agent).
+  const grader = await researchTeammate(deps.prisma, thread);
   const busy = await deps.prisma.run.findFirst({
-    where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
+    where: {
+      threadId: thread.id,
+      ...(grader ? { botId: grader.botId } : {}),
+      status: { in: BUSY_STATUSES },
+    },
     select: { id: true, trigger: true },
   });
   if (busy) {
@@ -338,7 +345,6 @@ export async function startRecruitingGrading(
       : [],
   );
   const started = (id: string) => researchByRun.has(id) || savedRuns.has(id);
-  const grader = await researchTeammate(deps.prisma, thread);
   // Up to GRADE_IN_FLIGHT batches at once, since one batch takes the research service about half
   // an hour; the wake that saves a batch's grades schedules the next one. A request that never
   // started research holds the next batch for half an hour, so a failing grading turn can't

@@ -469,6 +469,9 @@ export function teamWorkingFor(
         // Staging 11-15: a role opened from Kruit's chat ran its first round on the copy of the
         // recruiter's words, and meanwhile Kruit listed seven unchecked people from Results.
         { sourceMessage: { is: { clientNonce: { startsWith: ROLE_START_NONCE } } } },
+        // The teammate the work was handed to: with one lane per agent, a request that missed it
+        // would start a second turn beside it instead of steering the one doing the work.
+        { trigger: "follow_up" },
       ],
     },
     orderBy: { createdAt: "asc" },
