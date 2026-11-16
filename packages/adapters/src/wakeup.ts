@@ -173,6 +173,14 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
     });
     runner.events.on("job:failed", ({ job, error }) => {
       recordHistoryCompactAttemptsExhausted(job, error);
+      // The queue will not try this job again: one error line the deployment owner can alert on.
+      // Runs are not lost with it; the reconciler re-queues any run still waiting.
+      // history.compact already logs its own permanent failure above.
+      if (job.attempts >= job.max_attempts && job.task_identifier !== "history.compact")
+        getLogger().error("job.exhausted", error, {
+          "job.type": job.task_identifier,
+          "job.attempts": job.attempts,
+        });
     });
     if (this.stopping) {
       await runner.stop().catch(() => undefined);
@@ -482,7 +490,8 @@ export function startJobQueueReporter(pool: Pool, slots: number, signal: AbortSi
          coalesce(extract(epoch from now() - min(j.run_at)
            filter (where j.is_available and j.run_at <= now())), 0)::int as "oldestReadySeconds",
          count(*) filter (where j.locked_at is not null) as running,
-         count(*) filter (where j.attempts >= j.max_attempts) as exhausted
+         count(*) filter (where j.attempts >= j.max_attempts and j.last_error is not null)
+           as exhausted
        from graphile_worker._private_jobs j
        join graphile_worker._private_tasks t on t.id = j.task_id`,
       [BACKGROUND_PRIORITY],

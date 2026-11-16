@@ -169,6 +169,8 @@ export function createJobReconciler(
   let idleSweptAt = 0;
   let stagesWatchedAt = 0;
   let searchWaitsArmedAt = 0;
+  // Set on stop: an in-flight pass ends at its next step instead of querying a closing pool.
+  let stopped = false;
 
   const reconcileOnce = async () => {
     if (reconciling) return reconciling;
@@ -185,6 +187,7 @@ export function createJobReconciler(
           getLogger().error("auxiliary reconciliation", result.reason);
       }
 
+      if (stopped) return;
       const now = new Date();
       try {
         // Newly marked save receipts are the durable intent. Never load raw profile facts here.
@@ -211,6 +214,7 @@ export function createJobReconciler(
       } catch (error) {
         getLogger().error("recruiting profile reconciliation", error);
       }
+      if (stopped) return;
       try {
         questionCursor = await reconcileRecruitingQuestions({
           ...deps,
@@ -221,6 +225,7 @@ export function createJobReconciler(
       } catch (error) {
         getLogger().error("recruiting question reconciliation", error);
       }
+      if (stopped) return;
       if (deps.events && now.getTime() - idleSweptAt >= IDLE_SWEEP_INTERVAL_MS) {
         idleSweptAt = now.getTime();
         try {
@@ -235,6 +240,7 @@ export function createJobReconciler(
           getLogger().error("recruiting idle sweep", error);
         }
       }
+      if (stopped) return;
       if (now.getTime() - searchWaitsArmedAt >= SEARCH_WAIT_REARM_MS) {
         searchWaitsArmedAt = now.getTime();
         try {
@@ -243,6 +249,7 @@ export function createJobReconciler(
           getLogger().error("search follow-up re-arm", error);
         }
       }
+      if (stopped) return;
       if (deps.events && now.getTime() - stagesWatchedAt >= STAGE_WATCH_SCAN_MS) {
         stagesWatchedAt = now.getTime();
         try {
@@ -260,6 +267,7 @@ export function createJobReconciler(
           getLogger().error("stage watch", error);
         }
       }
+      if (stopped) return;
       try {
         stuckCursor = await reconcileStuckWork({
           prisma: deps.prisma,
@@ -273,6 +281,7 @@ export function createJobReconciler(
       } catch (error) {
         getLogger().error("stuck work reconciliation", error);
       }
+      if (stopped) return;
       controlScanDeadline ??= new Date(now.getTime() + CONTROL_LOOKAHEAD_MS);
       const runCursorFilter = runCursor
         ? {
@@ -510,11 +519,13 @@ export function createJobReconciler(
     reconcileOnce,
     start() {
       if (timer) return;
+      stopped = false;
       reconcileSafely();
       timer = setInterval(reconcileSafely, intervalMs);
       timer.unref?.();
     },
     async stop() {
+      stopped = true;
       if (timer) clearInterval(timer);
       timer = undefined;
       await reconciling?.catch(() => undefined);
