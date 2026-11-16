@@ -187,6 +187,8 @@ async function runWithModel(
     endedRunLine?: string;
     /** The server's hidden continuation prompt came after that line. */
     hiddenContinuation?: boolean;
+    /** That run's steps row, which shows the recruiter no words, came after the line. */
+    stepsAfterEndedLine?: boolean;
     /** This bot handed the teammate a newer brief after the report this run answers. */
     newerBrief?: boolean;
     /** The last message of the teammate that reported back, as its own latest posts return it. */
@@ -283,6 +285,15 @@ async function runWithModel(
         },
       ]
     : [];
+  const stepsRow = {
+    id: "steps-0",
+    botId: "bot-1",
+    runId: "run-0",
+    role: "bot",
+    blocks: [{ kind: "steps", steps: [] }],
+    createdAt: new Date(),
+  };
+  const silentRows = options.stepsAfterEndedLine ? [stepsRow] : [];
   const hiddenRow = {
     id: "continue-0",
     runId: "run-0",
@@ -398,13 +409,14 @@ async function runWithModel(
                     .map((message) => ({ runId: "run-1", role: "bot", ...message }))
                     .reverse(),
                   ...(options.hiddenContinuation ? [hiddenRow] : []),
+                  ...silentRows,
                   ...(options.ackFromEndedRun ? [endedRunAck] : []),
                   ...coordinatorRows,
                 ]
-              : options.briefAfterLine && args.take === 4
+              : options.briefAfterLine && args.take === 8
                 ? coordinatorRows
-                : options.ackFromEndedRun && args.take === 4
-                  ? [...(options.hiddenContinuation ? [hiddenRow] : []), endedRunAck]
+                : options.ackFromEndedRun && args.take === 8
+                  ? [...(options.hiddenContinuation ? [hiddenRow] : []), ...silentRows, endedRunAck]
                   : options.replyAfterTurn && args.take === 8 && !args.select?.runId
                     ? [
                         {
@@ -1309,6 +1321,22 @@ describe("handed-in stage", () => {
       endedRunLine: "我会说明不连接邮箱时能否直接发邮件。",
       hiddenContinuation: true,
       finalText: "需要连接 Gmail 才能给候选人发邮件。",
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "ack-0" } }),
+    );
+  });
+
+  // Honest-limits 8a002815, cannot-do-that-honestly: the first line, the run's steps rows, then
+  // the continuation's 「我无法发送 LinkedIn InMail…」 as a second message 40 s later.
+  it("puts a continuation's answer in place of the line under rows that say nothing", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      ackFromEndedRun: true,
+      endedRunLine: "可以改为通过邮件联系 Li Wei。",
+      hiddenContinuation: true,
+      stepsAfterEndedLine: true,
+      finalText: "我无法发送 LinkedIn InMail，这次没有联系任何人。",
     });
     expect(prisma.message.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "ack-0" } }),
