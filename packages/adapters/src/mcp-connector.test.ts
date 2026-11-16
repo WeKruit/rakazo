@@ -615,6 +615,27 @@ describe("local native Instantly thread history", () => {
       await f.connector.close();
     }
   });
+  // Simulated 11-16 on deb21fb1, did-you-really-send: list_mailbox_emails without a mailbox was
+  // refused as invalid arguments on an account that had none, and Kruit said the inbox was down.
+  it("lists mailbox mail without a mailbox named: none yet is no history, not a failure", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
+      "instantlyCampaignScope",
+    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const result = await f.collect(
+        {},
+        { ...route, toolName: "native_instantly_list_mailbox_emails" },
+      );
+      expect(result).toMatchObject([
+        { type: "result", data: { structuredContent: { note: NO_EMAIL_HISTORY_YET } } },
+      ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
   // Gate 9e15e896, stop-after-approve: on an account with several campaigns every contact read
   // said "failed during native anchor, check the connection", so nobody's status could be read.
   it("names the campaign choice when a contact lookup spans several of the account's campaigns", async () => {
@@ -869,7 +890,8 @@ describe("local native Instantly thread history", () => {
     }
   });
   it.each([
-    [{}, false],
+    // No mailbox named and none to default to: one accounts read, then a named fix.
+    [{}, true],
     [{ eaccount: "not-an-address" }, false],
     [{ eaccount: anchor.eaccount, lead: anchor.from_address_email }, false],
     [{ eaccount: anchor.eaccount, min_timestamp_created: "yesterday" }, false],
