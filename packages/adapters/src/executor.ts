@@ -651,6 +651,7 @@ import {
   gradingToolRefusal,
   gradingTools,
   heldRoundPeople,
+  heldRoundSearchRefusal,
   listsPeople,
   mentionsPeople,
   nextRoundHeld,
@@ -10094,11 +10095,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Feedback-round 11-15: after recording the held round 2, the lead kept searching for
           // "the next 10" for another minute, and the Reviewer's check waited for its turn to end.
           if (
-            roundHeldRecorded &&
             connectorCall.route?.connectorId === "mcp" &&
-            PEOPLE_SEARCH_TOOLS.has(connectorCall.route.toolName)
-          )
-            return { error: ROUND_HELD_SEARCH_REFUSAL };
+            PEOPLE_SEARCH_TOOLS.has(connectorCall.route.toolName) &&
+            run.trigger !== "recruiting_grade" &&
+            !thread.groupId?.startsWith("recruiting-global-")
+          ) {
+            const held = await heldRoundSearchRefusal(deps.prisma, {
+              roleId: thread.activeRecruitingRoleId,
+              botId: run.botId,
+              recordedThisTurn: roundHeldRecorded,
+            }).catch(() => (roundHeldRecorded ? ROUND_HELD_SEARCH_REFUSAL : null));
+            if (held) return { error: held };
+          }
           if (
             connectorCall.route?.connectorId === "mcp" &&
             thread.groupId?.startsWith("recruiting-global-")
@@ -17232,6 +17240,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Grading follows the request's rubric while the recruiter waits for the checked round:
         // staging 11-16, the save step spent 3.1k reasoning tokens (28 s) on ten grades.
         if (run.trigger === "recruiting_grade" && runModel.thinkingLevel !== "off")
+          runModel = { ...runModel, thinkingLevel: "low" };
+        // The same holds for the lead's turn on a round the Reviewer will check before it is
+        // shown: its pick is checked and corrected anyway. Staging 11-16, the round-writing step
+        // spent 6.5k reasoning tokens (56 s) while the recruiter waited for round 2.
+        else if (
+          effortMode !== "deep" &&
+          runModel.thinkingLevel !== "off" &&
+          runModel.thinkingLevel !== "minimal" &&
+          thread.activeRecruitingRoleId &&
+          (await nextRoundHeld(deps.prisma, {
+            threadId: run.threadId,
+            roleId: thread.activeRecruitingRoleId,
+          }).catch(() => false))
+        )
           runModel = { ...runModel, thinkingLevel: "low" };
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
