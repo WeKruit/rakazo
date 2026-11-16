@@ -162,8 +162,3 @@ export function unbackedClaim(
     );
   });
 }
-
-/** Model-facing: the one retry of a reply that states something no tool did this turn. */
-export function unbackedClaimNote(claim: Claim): string {
-  return `Your reply says "${claim.sentence.slice(0, 200)}", but no tool result this turn shows that${claim.count === undefined ? "" : ` (no result has ${claim.count})`}. Read the current record first and say exactly what it shows (names and counts from that result); an earlier step may already have done it, and what the record shows done is never done again. Only when the record shows it not done, do it now with the tool for it. Never describe anything as handed over, saved, sent, queued, connected, booked or created without the result that did it.`;
-}

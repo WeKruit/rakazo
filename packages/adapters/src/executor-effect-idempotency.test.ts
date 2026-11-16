@@ -6116,11 +6116,6 @@ describe("native recruiting assessment effect delivery", () => {
     });
     // Staging eval 11-11 (email-no-mailbox-zh): 「那你就直接发啊」 after an email opened a role.
     expect(JSON.stringify(bounced)).toContain("An email, a send, a person");
-    // Gate aceb80c9, jd-upload-pdf: a described role opens the role; its team searches first.
-    expect(
-      JSON.stringify(await request.beforeAsk?.("Seattle only, or the metro?", undefined)),
-    ).toContain("Call start_role now");
-    await request.beforeAsk?.("Seattle only, or the metro?", undefined);
     expect(await request.beforeAsk?.("Seattle only, or the metro?", undefined)).toBeUndefined();
   });
 

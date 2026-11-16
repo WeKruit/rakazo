@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  askedForRoleInsteadOfOpening,
   describesRole,
   intakeFields,
   intakeFieldsNote,
@@ -101,17 +100,5 @@ describe("search first, then ask", () => {
     expect(describesRole("find me some people")).toBe(false);
     expect(describesRole("Senior SRE, Austin TX onsite, 6+ years")).toBe(true);
     expect(describesRole("那我第一步该干嘛，想找个后端的")).toBe(true);
-  });
-
-  it("catches a reply that asks for a described role's JD instead of opening it", () => {
-    // Gate b2005684, progress-and-where.
-    const ask = "那我第一步该干嘛，想找个后端的";
-    expect(askedForRoleInsteadOfOpening(ask, "把职位描述贴给我，或发一行地点和必备条件。")).toBe(
-      true,
-    );
-    expect(askedForRoleInsteadOfOpening(ask, "已开始找后端工程师，十个人很快就到。")).toBe(false);
-    expect(askedForRoleInsteadOfOpening("最近进展怎么样了", "把职位描述发来，我就可以开始。")).toBe(
-      false,
-    );
   });
 });

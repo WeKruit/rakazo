@@ -12,9 +12,7 @@ import {
   recruitingRoundListText,
   roundPassage,
   turnRequestText,
-  unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
-import { askedTemplate } from "./turn-report.js";
 
 const run = {
   id: "run-1",
@@ -1187,104 +1185,24 @@ describe("turnRequestText", () => {
 });
 
 describe("planDeclineRetry", () => {
-  const prisma = (recent: { clientNonce: string | null; runId?: string; blocks?: object[] }[]) =>
+  const prisma = (recent: { clientNonce: string | null }[]) =>
     ({
       message: { findMany: vi.fn(async () => recent) },
-      chatGroupMember: {
-        findMany: vi.fn(async () => [
-          {
-            bot: {
-              id: "bot-o",
-              name: "Outreach",
-              title: "Outreach",
-              description: "Finds contacts, writes drafts and sends email",
-              mcpServers: [],
-            },
-          },
-        ]),
-      },
     }) as unknown as Parameters<typeof planDeclineRetry>[0]["prisma"];
   const input = {
-    run: { threadId: "thread-1", botId: "bot-m" },
-    groupId: "group-1",
-    reply: "Do you want me to send this to them?",
+    run: { threadId: "thread-1" },
     blocks: [{ kind: "text", text: "Do you want me to send this to them?" }] as MessageBlock[],
-    request: "send this email to them",
-    tools: [{ name: "recruiting_role" }],
   };
 
-  it("retries a deferred request once per human message, handing it to the teammate who can", async () => {
-    const retry = await planDeclineRetry(
-      { prisma: prisma([{ clientNonce: "send:human" }]) },
-      input,
-    );
-    expect(retry?.note).toContain("bot_id bot-o");
-    // Retried once already: the offer still typed into the reply goes on a card instead.
-    const again = await planDeclineRetry(
-      { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) },
-      input,
-    );
-    expect(again?.card).toBeDefined();
-    expect(again?.note).toBe("");
-  });
-
-  // Gate 66a2dd3e, change-mind-mid-run: the recruiter changed the ask while the teammate wrote,
-  // and the retry of its old stage posted a template for the old salary.
-  it("does not retry a turn the recruiter has written past", async () => {
-    const newer = [
-      { clientNonce: null, runId: "run-other", blocks: [{ kind: "text", text: "改成70-90万" }] },
-    ];
-    const since = { at: new Date(0), runId: "run-1" };
+  // 11-16: the person had every wording-based rewrite deleted; only the records decide a retry.
+  it("never sends a reply back for its wording alone", async () => {
     expect(
-      await planDeclineRetry(
-        { prisma: prisma([{ clientNonce: "send:human" }]) },
-        { ...input, since },
-      ),
-    ).toBeDefined();
-    expect(await planDeclineRetry({ prisma: prisma(newer) }, { ...input, since })).toBeUndefined();
-  });
-
-  // Gate 386f6a46, change-mind-mid-run: four messages after 「给我一封首次联系邮件模板」, the pasted
-  // template was retried for its {{firstName}} and came back opening "Hello,".
-  it("keeps a template's variables several messages after the template was asked for", async () => {
-    const said = (text: string) => ({ clientNonce: null, blocks: [{ kind: "text", text }] });
-    const users = [
-      said("把那一封完整贴出来"),
-      said("直接贴那一封"),
-      said("最终是哪版？"),
-      said("base改成70-90万"),
-      said("给我一封首次联系邮件模板"),
-    ];
-    const db = {
-      message: {
-        findMany: vi.fn(async ({ take }: { take?: number }) => users.slice(0, take)),
-      },
-      chatGroupMember: { findMany: vi.fn(async () => []) },
-    } as unknown as Parameters<typeof planDeclineRetry>[0]["prisma"];
-    const reply =
-      "**Subject:** Staff Frontend Engineer\n\nHi {{firstName}},\n\nThe base is RMB 700,000–900,000.\n\nBest,\nAlex";
-    expect(
-      await planDeclineRetry(
-        { prisma: db },
-        { ...input, reply, blocks: [{ kind: "text", text: reply }], request: "把那一封完整贴出来" },
-      ),
+      await planDeclineRetry({ prisma: prisma([{ clientNonce: "send:human" }]) }, input),
     ).toBeUndefined();
   });
 
-  // Staging 11-12: "已发送给 Noah" was retried as a refusal. Retry audit 11-16: a reply that says it
-  // can't was retried on its wording and pushed false capability claims; it stands too.
-  it("keeps a reply that reports a send or says it can't", async () => {
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    for (const reply of [
-      "初次联系邮件已发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
-      "我无法发送这封邮件。",
-      "I can't send a LinkedIn message from here; nothing was sent.",
-    ])
-      expect(await planDeclineRetry(human, { ...input, reply })).toBeUndefined();
-  });
-
   it("retries once when every memory save failed, so a failed save is not told as saved", async () => {
-    const saved = { ...input, reply: "Got it, I'll reply in Chinese.", memorySaveFailed: true };
+    const saved = { ...input, memorySaveFailed: true };
     expect(
       (await planDeclineRetry({ prisma: prisma([{ clientNonce: "send:human" }]) }, saved))?.note,
     ).toContain("nothing was saved");
@@ -1306,12 +1224,7 @@ describe("planDeclineRetry", () => {
     });
     const owedWork =
       "Continue the contact lookup: 448 of the first 500 people are still to look up.";
-    const done = {
-      ...input,
-      reply: "Looked up 52 people; 49 have an email.",
-      worked: true,
-      owedWork,
-    };
+    const done = { ...input, owedWork };
     expect((await planDeclineRetry(retried(5), done))?.note).toBe(owedWork);
     expect(await planDeclineRetry(retried(200), done)).toBeUndefined();
     expect(
@@ -1319,313 +1232,6 @@ describe("planDeclineRetry", () => {
         ...done,
         blocks: [{ kind: "ask", text: "Which list?", status: "pending" }],
       }),
-    ).toBeUndefined();
-  });
-
-  it("leaves a question in the reply as text when there is nothing to ask on a card", async () => {
-    const greeting = {
-      ...input,
-      reply: "你好！我可以帮你找人、写邮件和安排面试。你想先处理哪件事？",
-      request: "你好，你能帮我做什么？",
-    };
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    expect(await planDeclineRetry(human, greeting)).toBeDefined();
-    expect(await planDeclineRetry(human, { ...greeting, noQuestionCard: true })).toBeUndefined();
-  });
-
-  it("redrafts a draft shown with template variables once", async () => {
-    const reply =
-      "Here is the sequence.\n\n### Email 1\n**Subject:** Role\n\nHi {{firstName}},\n\nA role.";
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    const retry = await planDeclineRetry(human, {
-      ...input,
-      reply,
-      request: "draft",
-      worked: true,
-    });
-    expect(retry?.note).toContain("written for a real person");
-    const signed = reply.replace("{{firstName}}", "Abe") + "\n\nBest,\n[Your Name]";
-    expect(
-      (await planDeclineRetry(human, { ...input, reply: signed, request: "draft" }))?.sentence,
-    ).toBe("[Your Name]");
-    const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
-    expect(await planDeclineRetry(retried, { ...input, reply, request: "draft" })).toBeUndefined();
-    expect(
-      await planDeclineRetry(human, {
-        ...input,
-        reply: reply.replace("{{firstName}}", "Gin"),
-        request: "draft",
-        worked: true,
-      }),
-    ).toBeUndefined();
-  });
-
-  it("keeps the blanks in a template the recruiter asked for (2026-11-08 staging)", async () => {
-    const reply =
-      "Here is the template.\n\n### Email 1\n**Subject:** Thanks\n\nHi {{firstName}},\n\nThanks.";
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    expect(
-      await planDeclineRetry(human, { ...input, reply, request: "帮我写一封面试后跟进邮件的模板" }),
-    ).toBeUndefined();
-    expect(
-      await planDeclineRetry(human, {
-        ...input,
-        reply,
-        request: "Draft a follow-up for the team",
-        handedIn: true,
-        personRequest: "write me a follow-up email template",
-      }),
-    ).toBeUndefined();
-  });
-
-  it("rewrites a template written as the candidate thanking an interviewer (2026-11-11 staging)", async () => {
-    const reply =
-      "下面是一封通用的面试后跟进邮件模板：\n\n**Subject:** Thank you for the conversation\n\nHi [Interviewer’s Name],\n\nThank you for taking the time to speak with me about the [Role Title] position.";
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    const request = "帮我写一封面试后跟进邮件的模板";
-    const retry = await planDeclineRetry(human, { ...input, reply, request });
-    expect(retry?.note).toContain("The recruiter is the one writing");
-    const recruiter = reply
-      .replace("[Interviewer’s Name]", "{{firstName}}")
-      .replace("the [Role Title] position", "the Senior Data Engineer position");
-    expect(await planDeclineRetry(human, { ...input, reply: recruiter, request })).toBeUndefined();
-  });
-
-  it("sends a sequence back when one email was asked for (2026-11-11 staging)", async () => {
-    const email = (n: number) =>
-      `**Email ${n}**\n**Subject:** Senior Data Engineer\n\nHi {{firstName}},\n\nA role.`;
-    const reply = [1, 2, 3].map(email).join("\n\n");
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    const ask = "Write me a short cold outreach email for a senior data engineer role in Seattle";
-    const handed = { ...input, request: "Draft it", handedIn: true, personRequest: ask };
-    expect((await planDeclineRetry(human, { ...handed, reply }))?.note).toContain("not a sequence");
-    expect(await planDeclineRetry(human, { ...handed, reply: email(1) })).toBeUndefined();
-    const sequence = "Write a cold email sequence for the data engineer role";
-    expect(
-      await planDeclineRetry(human, { ...handed, reply, personRequest: sequence }),
-    ).toBeUndefined();
-  });
-
-  it("writes a template with {{firstName}}, never bracketed blanks (2026-11-13 staging)", async () => {
-    const reply =
-      "**Subject:** Senior Data Engineer opportunity in Seattle\n\nHi [Candidate Name],\n\nA role.";
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    const ask = "Write me a short cold outreach email for a senior data engineer role in Seattle";
-    const handed = { ...input, request: "Draft it", handedIn: true, personRequest: ask };
-    expect((await planDeclineRetry(human, { ...handed, reply }))?.note).toContain(
-      "bracketed blanks",
-    );
-    const zh = "**Subject:** 数据工程师\n\n您好 [候选人姓名]，\n\n我们在招 [职位名称]。";
-    // Staging 11-13: a draft headed 「主题：」 kept "[Your Name]" because only "Subject:" counted.
-    const zhSubject =
-      "**主题：感谢今天的面试**\n\nHi {{firstName}},\n\nThank you for your time.\n\nBest,\n[Your Name]";
-    expect((await planDeclineRetry(human, { ...handed, reply: zhSubject }))?.note).toContain(
-      "bracketed blanks",
-    );
-    expect((await planDeclineRetry(human, { ...handed, reply: zh }))?.note).toContain(
-      "bracketed blanks",
-    );
-    expect(
-      await planDeclineRetry(human, {
-        ...handed,
-        reply: reply.replace("[Candidate Name]", "{{firstName}}"),
-      }),
-    ).toBeUndefined();
-    expect(askedTemplate(ask)).toBe(true);
-    expect(askedTemplate("Write an email to these people about the data engineer role")).toBe(
-      false,
-    );
-    expect(askedTemplate("Email alex@example.com about the role")).toBe(false);
-    // Korean template asks (simulated korean-recruiter-template, 2026-11-14): no Korean word
-    // matched, so the guard demanded a real candidate's name instead of keeping {{firstName}}.
-    expect(
-      askedTemplate("시니어 백엔드 엔지니어 포지션용 첫 아웃리치 이메일 템플릿 부탁드립니다."),
-    ).toBe(true);
-    expect(askedTemplate("후보자는 아직 없으니 {{firstName}} 자리표시자로 쓰세요")).toBe(true);
-    expect(askedTemplate("採用メールのテンプレートをお願いします")).toBe(true);
-    // Gate 7b5230e4 change-mind: a first-touch email for a role title names no person, and the
-    // variables check sent the writer off to ask for candidate details.
-    expect(
-      askedTemplate("帮我写封 Staff Frontend Engineer 的首次触达邮件，React，北京，base 60-80万"),
-    ).toBe(true);
-    expect(askedTemplate("Write a first-touch email for a Senior Data Engineer, NYC")).toBe(true);
-    expect(askedTemplate("帮我给 Wei Zhang 写封邮件")).toBe(false);
-  });
-
-  // Sim no-made-up-details on 9e15e896: 「这有 {{firstName}} 占位符，能直接发吗？」 got the
-  // placeholder explained and the same {{firstName}} again, then a third ask.
-  it("drops {{firstName}} once the recruiter objects to the placeholder", async () => {
-    const reply =
-      "`{{firstName}}` 是占位符，群发时会替换。\n\n**Subject:** Senior Android Engineer\n\nHi {{firstName}},\n\nA role in Shenzhen.\n\nBest,\nAlex Morgan";
-    const asks = (text: string) =>
-      ({
-        prisma: prisma([{ clientNonce: "send:human", blocks: [{ kind: "text", text }] }] as never),
-      }) as const;
-    const template = asks("写个首轮触达邮件模板，Senior Android 工程师，深圳");
-    const objection = "这有 {{firstName}} 占位符，能直接发吗？另外客户保密，薪资写 competitive";
-    const retry = await planDeclineRetry(template, { ...input, request: objection, reply });
-    expect(retry?.note).toContain("no {{variables}}");
-    const plain = reply.replace("Hi {{firstName}},", "Hi,").replace(/^`.*\n\n/, "");
-    expect(
-      await planDeclineRetry(template, { ...input, request: objection, reply: plain }),
-    ).toBeUndefined();
-    expect(
-      await planDeclineRetry(template, { ...input, request: "署名改成 Alex Morgan", reply }),
-    ).toBeUndefined();
-  });
-
-  // Sim no-made-up-details on 9e15e896: 「薪资那句也没写 competitive 吧」 got 「你说得对，上一版漏了
-  // competitive」 though the previous version said "with competitive compensation".
-  it("never agrees that its earlier draft lacked what that draft shows", async () => {
-    const earlier =
-      "**Subject:** Senior Android Engineer\n\nHi,\n\nA role in Shenzhen, with competitive compensation.\n\nBest,\nAlex Morgan";
-    const shown = {
-      prisma: prisma([
-        { clientNonce: "send:human", blocks: [{ kind: "text", text: earlier }] },
-      ] as never),
-    } as const;
-    const request = "薪资那句也没写 competitive 吧";
-    const draft =
-      "\n\n**Subject:** Senior Android Engineer\n\nHi,\n\nA confidential role in Shenzhen that offers competitive compensation.\n\nBest,\nAlex Morgan";
-    const agrees = `你说得对，上一版漏了 **competitive**。下面这版：${draft}`;
-    expect((await planDeclineRetry(shown, { ...input, request, reply: agrees }))?.note).toContain(
-      "already",
-    );
-    const english = `You're right, the last version missed "competitive". Here it is:${draft}`;
-    expect((await planDeclineRetry(shown, { ...input, request, reply: english }))?.note).toContain(
-      "already",
-    );
-    const missing = `你说得对，上一版漏了保密这一句。下面这版：${draft}`;
-    expect(await planDeclineRetry(shown, { ...input, request, reply: missing })).toBeUndefined();
-  });
-
-  it("keeps {{firstName}} when the recruiter edits a template they asked for (2026-11-13 staging)", async () => {
-    // "sign it David Chen" names no template, and the variables check turned the template's
-    // "Hi {{firstName}}," into "Hello,".
-    const reply =
-      "**Subject:** Staff Backend Engineer\n\nHi {{firstName}},\n\nA role in New York.\n\nBest,\nDavid Chen";
-    const asks = (text: string) =>
-      ({
-        prisma: prisma([{ clientNonce: "send:human", blocks: [{ kind: "text", text }] }] as never),
-      }) as const;
-    const edit = { ...input, request: "my name is David Chen, sign it that" };
-    expect(
-      await planDeclineRetry(asks("i need a first outreach email template, no candidates yet"), {
-        ...edit,
-        reply,
-      }),
-    ).toBeUndefined();
-    expect(
-      (
-        await planDeclineRetry(asks("i need a first outreach email template"), {
-          ...edit,
-          reply: reply.replace("David Chen", "{{yourName}}"),
-        })
-      )?.note,
-    ).toContain("bracketed blanks");
-    expect(
-      (await planDeclineRetry(asks("write to Wei at wei@example.com"), { ...edit, reply }))?.note,
-    ).toContain("template variables");
-  });
-
-  it("re-signs a draft signed as a team (2026-11-13 staging)", async () => {
-    const reply =
-      "**Subject:** Backend Go Engineer\n\nHi Wei,\n\nA role in New York.\n\nBest,  \nRecruiting Team";
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    const handed = {
-      ...input,
-      request: "Draft it",
-      handedIn: true,
-      personRequest: "给 Wei 写封邮件",
-    };
-    expect((await planDeclineRetry(human, { ...handed, reply }))?.note).toContain(
-      "signed as a team",
-    );
-    expect(
-      await planDeclineRetry(human, {
-        ...handed,
-        reply: reply.replace("Recruiting Team", "David"),
-      }),
-    ).toBeUndefined();
-  });
-
-  it("puts a question the retry still typed into its reply on a card", async () => {
-    const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
-    const reply =
-      "There's no booking to move. Which candidate should I arrange it for? I can use the first candidate, or you can name someone else.";
-    const card = await planDeclineRetry(retried, { ...input, reply, request: "发一下" });
-    expect(card).toMatchObject({
-      keep: "There's no booking to move.",
-      card: "Which candidate should I arrange it for? I can use the first candidate, or you can name someone else.",
-    });
-  });
-
-  it("never retries the first ten, intake offers or an offer after real work", async () => {
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    const offer = { ...input, reply: "Do you want me to include remote people?", request: "go" };
-    expect(await planDeclineRetry(human, { ...input, presentedRound: true })).toBeUndefined();
-    const stage = vi.fn(async () => "intake");
-    expect(await planDeclineRetry(human, { ...offer, stage })).toBeUndefined();
-    expect(stage).toHaveBeenCalledOnce();
-    // A teammate handed the request asks on a card even during calibration.
-    expect(
-      (
-        await planDeclineRetry(human, {
-          ...offer,
-          handedIn: true,
-          stage: async () => "calibration_10",
-        })
-      )?.note,
-    ).toBeDefined();
-    // After real work the offer stands, as a card instead of text.
-    expect(
-      await planDeclineRetry(human, { ...offer, worked: true, stage: async () => "scale" }),
-    ).toMatchObject({ card: "Do you want me to include remote people?", note: "" });
-    expect((await planDeclineRetry(human, { ...offer, stage: async () => "scale" }))?.note).toMatch(
-      /^Your reply deferred the request/,
-    );
-  });
-
-  it("leaves a turn that ended on a card alone", async () => {
-    expect(
-      await planDeclineRetry(
-        { prisma: prisma([{ clientNonce: "send:human" }]) },
-        {
-          ...input,
-          blocks: [{ kind: "ask", text: "Confirm sending", status: "pending" }] as MessageBlock[],
-        },
-      ),
-    ).toBeUndefined();
-  });
-});
-
-describe("unprovenReplyCardRetry", () => {
-  const brief =
-    "Goal: 在「测试固定 · Agent 工程师 5」里，回复 noah-test@example.test 那封邮件（同一个线程），正文只写：Regression check T1m.";
-  it("retries a reply-card outcome the turn took from history", () => {
-    // Staging: the role team answered a fresh reply request from an older discarded card.
-    expect(
-      unprovenReplyCardRetry("Ti7eygm 的回复卡已被丢弃，邮件未发送。我没有重建卡片或重试。", brief)
-        ?.note,
-    ).toMatch(/call reply_to_email/);
-    expect(unprovenReplyCardRetry("The reply card was already sent earlier.", brief)).toBeDefined();
-  });
-  it("reads the request from a teammate's handoff brief", () => {
-    // Staging: Main handed Outreach the reply in the role conversation; Outreach had no message.
-    const handoff = {
-      blocks: [{ kind: "handoff", toBotId: "outreach", text: brief }] as MessageBlock[],
-    };
-    expect(
-      unprovenReplyCardRetry(
-        "Txihxwm 的回复卡已被丢弃，邮件未发送。",
-        turnRequestText(undefined, handoff, "outreach"),
-      ),
-    ).toBeDefined();
-  });
-  it("keeps other replies and turns that were not asked for a reply", () => {
-    expect(unprovenReplyCardRetry("已准备好回复，等你在卡片上确认。", brief)).toBeUndefined();
-    expect(
-      unprovenReplyCardRetry("这张回复卡已被丢弃，邮件未发送。", "那封邮件发出去了吗？"),
     ).toBeUndefined();
   });
 });

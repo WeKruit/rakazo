@@ -824,7 +824,6 @@ import { textContentArg } from "./tool-text.js";
 import {
   answeredAsk,
   answerSearchFilters,
-  declinedRunId,
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
   intakeAnswers,
@@ -833,7 +832,6 @@ import {
   recruitingRoundPeople,
   sendDeclineRetry,
   turnRequestText,
-  unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
 import { unbackedClaim } from "./claim-receipts.js";
 import {
@@ -1456,10 +1454,6 @@ export const RESEARCH_SAVE_REFUSED =
 /** Model-facing: a one-email template naming no one is written in the coordinator's own reply. */
 const TEMPLATE_WRITE_YOURSELF =
   "Not handed off: an email template that names no one is yours to write. Write it in this reply now, from the recruiter to the candidate: Subject: and the full body, {{firstName}} for the name, the real role details from the conversation including any change the recruiter just made, and signed with the recruiter's name. Show only the latest version.";
-
-/** Model-facing: a role the recruiter brought to Kruit's own chat is opened, not asked about. */
-const GLOBAL_OPEN_ROLE_FIRST =
-  "Not asked: the recruiter brought a new role (a JD file or a role they described). Call start_role now with a short title; its team searches from the JD as written and asks any open fact beside the first ten, so nothing is asked here.";
 
 const ROLE_NOT_SAVED_NOTE =
   "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then issue the four calibration people searches from what they wrote (the recruiter sees the first ten before any question; ask first only when they named no title, place or requirement at all). Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
@@ -6640,8 +6634,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let steeredUnanswered = false;
         // The request went to a role team this turn: that team owns it now.
         let delegatedToRole = false;
-        // A reply-card tool ran this turn, so what the turn says about that card came from it.
-        let mailReplyAttempted = false;
         let intakeHandoffRefused = false;
         let templateHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
@@ -7005,7 +6997,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // gets a plain answer, never a card, until the recruiter's role is saved.
         // Kruit's first question in a turn is checked once against opening a role instead.
         let globalAskChecked = false;
-        let globalRoleBounces = 0;
         let roleStartedInTurn = false;
         // Role conversations start_role opened this run: handing work to one is not another role.
         const groupsStartedInTurn = new Set<string>();
@@ -10177,7 +10168,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             "native_instantly_reply_to_email",
             "GMAIL_REPLY_TO_THREAD",
           ].includes(sendOperation ?? "");
-          if (mailReplyOperation) mailReplyAttempted = true;
           const recruiterSaidSend =
             !mailReplyOperation &&
             !nextApprovedTool &&
@@ -17524,21 +17514,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       movedElsewhere = true;
                       return { instead: askAfterNewerMessage(moved) };
                     }
-                    // Gate aceb80c9, jd-upload-pdf: after the check, Kruit's own chat still asked about
-                    // an attached JD's language and no role opened. A JD file or a described role opens
-                    // the role; its team searches first.
-                    if (
-                      globalAskChecked &&
-                      !roleStartedInTurn &&
-                      globalRoleBounces < 2 &&
-                      Boolean(thread.groupId?.startsWith("recruiting-global-")) &&
-                      !asksForOutreach(recruiterTexts[0] ?? "") &&
-                      (currentTurnMessage?.blocks.some((block) => block.kind === "file") ||
-                        describesRole(recruiterTexts[0] ?? ""))
-                    ) {
-                      globalRoleBounces++;
-                      return { instead: GLOBAL_OPEN_ROLE_FIRST };
-                    }
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
                     // A number of people the recruiter asked for decides the next step: no card.
@@ -18564,85 +18539,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : undefined,
               bot.id,
             );
-          // A reply that declines, defers or hands back a pick is held back for one retry; the
-          // work this turn did is still reported.
+          // Only what the records say is unfinished goes round again; the reply's wording is
+          // never judged (11-16: wording checks rewrote correct answers).
           const declineRetried =
-            (!handedOff &&
-            !mailReplyAttempted &&
-            // Once per turn: never again from that turn's own retry.
-            !declinedRunId(run.clientNonce) &&
-            !blocks.some((block) => block.kind === "ask")
-              ? unprovenReplyCardRetry(text, askedNow)
-              : undefined) ??
-            (turnReport.enabled &&
+            turnReport.enabled &&
             !handedOff &&
             !delegatedToRole &&
             !messagingChannelRun &&
             (run.trigger === "user" || run.trigger === "follow_up")
               ? await planDeclineRetry(deps, {
-                  run: { threadId: thread.id, botId: bot.id },
-                  groupId: thread.groupId,
-                  reply: text,
+                  run: { threadId: thread.id },
                   blocks,
-                  request: askedNow,
-                  tools,
-                  worked: turnReport.worked(),
-                  read: turnReport.read(),
                   memorySaveFailed: turnReport.memorySaveFailed(),
-                  presentedRound: turnReport.presentedRound(),
-                  handedIn: Boolean(handedIn),
-                  noQuestionCard: noRoleYet(),
-                  receipts: turnReport.receipts(),
-                  since: { at: new Date(attemptStartedAt), runId },
-                  ...(handedIn
-                    ? {
-                        personRequest:
-                          steeredText ??
-                          turnRequestText(
-                            historyMessages.findLast((message) => message.role === "user"),
-                            undefined,
-                            bot.id,
-                          ),
-                      }
-                    : {}),
                   ...(contactLookupOwed
                     ? {
                         owedWork: `Continue the contact lookup: ${contactLookupOwed.remaining} of the first ${contactLookupOwed.target} people are still to look up. Call find_emails with next_from_role ${contactLookupOwed.target} again now and keep calling until none are left, then report how many have an email. Do not stop, decline or ask before that.`,
                       }
                     : {}),
-                  stage: async () => {
-                    const roleId = (
-                      await deps.prisma.thread.findUnique({
-                        where: { id: thread.id },
-                        select: { activeRecruitingRoleId: true },
-                      })
-                    )?.activeRecruitingRoleId;
-                    return roleId
-                      ? (await readRecruitingPlaybookStep(deps.prisma, roleId))?.stage
-                      : undefined;
-                  },
                 }).catch((error) => {
                   getLogger().error("run.decline guard", error);
                   return undefined;
                 })
-              : undefined);
-          if (declineRetried?.card !== undefined) {
-            // A retry still asked in text: its question goes on a card, answered like any card.
-            text = declineRetried.keep ?? "";
-            blocks = [
-              ...blocks.filter((block) => block.kind !== "text"),
-              ...(text ? [{ kind: "text" as const, text }] : []),
-              {
-                kind: "ask" as const,
-                text: declineRetried.card,
-                status: "pending" as const,
-              },
-            ];
-          } else if (declineRetried?.keep !== undefined) {
-            // The draft stays shown; only its closing question moves to the question card.
-            text = declineRetried.keep;
-            blocks = [...blocks.filter((block) => block.kind !== "text"), { kind: "text", text }];
-          } else if (declineRetried) {
+              : undefined;
+          if (declineRetried) {
             const work = turnReport.owedWithoutFinalReply();
             text = work.length ? await turnReportFor(work) : "";
             blocks = text ? [{ kind: "text", text }] : [];
@@ -18900,7 +18819,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .catch((error) => getLogger().error("steering continuation enqueue", error));
           } else if (
             declineRetried &&
-            declineRetried.card === undefined &&
             // A teammate's handoff run of this bot is already doing the ask; a second run of the
             // same bot would work the same request twice.
             !(await deps.prisma.run.findFirst({

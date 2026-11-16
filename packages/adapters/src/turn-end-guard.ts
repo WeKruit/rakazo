@@ -1,9 +1,6 @@
-import type { Receipts } from "./claim-receipts.js";
-import { claimsIn, unbackedClaim, unbackedClaimNote } from "./claim-receipts.js";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
-  asksForOutreach,
   classifyTurnEnd,
   type TurnEndClass,
   turnEndPromise,
@@ -13,27 +10,10 @@ import {
 } from "@rakazo/core";
 import { calibrationRoundStatus, type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { askedForRoleInsteadOfOpening, OPEN_DESCRIBED_ROLE_RETRY } from "./intake-open-fields.js";
 import type { ExecutorDeps } from "./executor.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { AUTOMATIC_CONTINUATION, UNDONE_PROMISE_LEAD } from "./silent-reply.js";
 import type { DeclineRetry } from "./turn-report.js";
-import {
-  askedTemplate,
-  candidateVoiceDraft,
-  declinedSentence,
-  declineRetry,
-  draftVariables,
-  droppedDay,
-  falseOmission,
-  questionCard,
-  refusedTemplateVariables,
-  repastedDraft,
-  sequenceForOneEmail,
-  showsDraft,
-  teamSignedDraft,
-  templateBlanks,
-} from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
 
@@ -701,258 +681,44 @@ export function turnRequestText(
 const MEMORY_SAVE_FAILED_NOTE =
   "Your memory save failed, so nothing was saved. Read the error it returned, fix the call (read_memory first for the current revision, or send the whole content) and save again now. If it still fails, tell the recruiter in one sentence that it was not saved.";
 
-/** Stages whose own questions and lists are the turn's deliverable: an offer there is not a deferral. */
-const QUESTION_STAGES = new Set(["intake", "calibration_10"]);
-
 /**
- * A final reply that declines, defers or hands back a pick, once per human message: the retry
- * note (naming the tool or teammate for the asked work when there is one), else undefined and
- * the reply stands. A card or question card already shown is the turn's real boundary, and a
- * turn that presented the ten is the first-ten deliverable, so neither is ever retried; nor is
- * an offer or pick question while the role is still in intake or its first calibration.
+ * What the server's own records say this turn left undone: unfinished work it counts, or a memory
+ * save that failed. The reply's wording is never judged here (11-16: wording checks sent correct
+ * answers back for rewrite 943 times in 48 h, and the person asked for them all to be deleted).
  */
 export async function planDeclineRetry(
-  deps: { prisma: Pick<PrismaClient, "message" | "chatGroupMember"> },
+  deps: { prisma: Pick<PrismaClient, "message"> },
   input: {
-    run: { threadId: string; botId: string };
-    groupId?: string | null;
-    reply: string;
+    run: { threadId: string };
     blocks: readonly MessageBlock[];
-    request: string;
-    tools: readonly { name: string }[];
-    /** The turn did consequential work. */
-    worked?: boolean;
-    /** A tool call returned this turn. */
-    read?: boolean;
-    /** The turn showed or recorded the round's ten. */
-    presentedRound?: boolean;
-    /** A teammate handed this turn the request. */
-    handedIn?: boolean;
-    /** The recruiter's own latest words, when a teammate's brief is the request. */
-    personRequest?: string;
-    /** The role's playbook stage, read only when an offer or pick question needs it. */
-    stage?: () => Promise<string | undefined>;
     /** Work the turn left unfinished by the server's own count (e.g. people still to look up). */
     owedWork?: string;
     /** Every memory save this attempt tried failed, so the reply must not say it was saved. */
     memorySaveFailed?: boolean;
-    /** A question in the reply stays in text: there is nothing to ask on a card (no role yet). */
-    noQuestionCard?: boolean;
-    /** What this turn's tools did and returned (see TurnReportLedger.receipts). */
-    receipts?: Receipts;
-    /** When this run began: a message the person sent since, that another run answers, wins. */
-    since?: { at: Date; runId: string };
   },
 ): Promise<DeclineRetry | undefined> {
-  const recentContinues = async () =>
-    countTrailingAutoContinues(
-      await deps.prisma.message.findMany({
-        where: {
-          threadId: input.run.threadId,
-          OR: [
-            { role: "user" },
-            { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
-          ],
-        },
-        orderBy: { seq: "desc" },
-        take: LONG_TASK_RETRIES + 1,
-        select: { clientNonce: true },
-      }),
-    );
-  // A long task the server knows is unfinished keeps going whatever the reply said, until it is
-  // done; only a question card (a real decision for the recruiter) stops it.
-  if (input.owedWork && !input.blocks.some((block) => CARD_KINDS.has(block.kind)))
-    return (await recentContinues()) < LONG_TASK_RETRIES
-      ? { sentence: "", note: input.owedWork }
-      : undefined;
-  // A failed save told as saved is lost silently: one more try, or say plainly it wasn't saved.
-  if (
-    input.memorySaveFailed &&
-    !input.blocks.some((block) => CARD_KINDS.has(block.kind)) &&
-    (await recentContinues()) < 1
-  )
-    return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
-  // Earlier bot replies, newest first: this turn's own reply may already sit in its line.
-  let earlierBotTexts: Promise<string[]> | undefined;
-  const earlier = () =>
-    (earlierBotTexts ??= deps.prisma.message
-      .findMany({
-        where: {
-          threadId: input.run.threadId,
-          role: "bot",
-          ...(input.since ? { NOT: { runId: input.since.runId } } : {}),
-        },
-        orderBy: { seq: "desc" },
-        take: 6,
-        select: { blocks: true },
-      })
-      .then((rows) =>
-        rows.map((message) =>
-          (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
-            .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-            .join("\n"),
-        ),
-      ));
-  // Anything the reply says was saved, sent, connected, booked or created needs this turn's result.
-  const claim =
-    input.receipts && !input.blocks.some((block) => CARD_KINDS.has(block.kind))
-      ? unbackedClaim(input.reply, input.receipts, {
-          question: /[?？]|[吗呢][\s。.!！]*$/.test(input.personRequest ?? input.request),
-          // Read only when the reply claims something: most turns claim nothing.
-          draftShown:
-            claimsIn(input.reply).length > 0 &&
-            (showsDraft(input.reply) || (await earlier()).some(showsDraft)),
-        })
-      : undefined;
-  if (claim && (await recentContinues()) < 1)
-    return { sentence: claim.sentence, note: unbackedClaimNote(claim) };
-  // Kruit's own chat opens a role the recruiter described; the role's team searches first.
-  if (
-    input.groupId?.startsWith("recruiting-global-") &&
-    !input.handedIn &&
-    !input.blocks.some((block) => CARD_KINDS.has(block.kind)) &&
-    !input.tools.some((tool) => tool.name === "start_role" || tool.name === "delegate_to_role") &&
-    !asksForOutreach(input.personRequest ?? input.request) &&
-    askedForRoleInsteadOfOpening(input.personRequest ?? input.request, input.reply) &&
-    (await recentContinues()) < 1
-  )
-    return { sentence: "", note: OPEN_DESCRIBED_ROLE_RETRY };
-  // A template the recruiter asked for keeps {{firstName}} but no [bracketed] blanks, and it is
-  // the recruiter's email to the candidate, never the candidate's note to an interviewer.
-  const asked = input.personRequest ?? input.request;
-  // A follow-up on a template ("sign it David Chen") is still about the template: staging 11-13,
-  // the variables check dropped "Hi {{firstName}}," for "Hello," on that edit.
-  const template =
-    askedTemplate(asked) ||
-    (draftVariables(input.reply) !== undefined &&
-      // Gate 386f6a46: 「直接贴」 four messages on from the template ask is still about it.
-      (
-        await deps.prisma.message.findMany({
-          where: { threadId: input.run.threadId, role: "user" },
-          orderBy: { seq: "desc" },
-          take: 12,
-          select: { blocks: true },
-        })
-      ).some((message) =>
-        askedTemplate(
-          (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
-            .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-            .join("\n"),
-        ),
-      ));
-  // An email the conversation already shows is pointed to, not pasted again; a reply never
-  // agrees that its earlier draft lacked what that draft shows.
-  const repasted = async () =>
-    repastedDraft(input.reply, await earlier(), asked) ??
-    falseOmission(input.reply, await earlier());
-  const variables = template
-    ? (candidateVoiceDraft(input.reply) ??
-      sequenceForOneEmail(input.reply, asked) ??
-      refusedTemplateVariables(input.reply, asked) ??
-      templateBlanks(input.reply) ??
-      teamSignedDraft(input.reply) ??
-      droppedDay(input.reply, asked) ??
-      (await repasted()))
-    : (draftVariables(input.reply) ??
-      teamSignedDraft(input.reply) ??
-      droppedDay(input.reply, asked) ??
-      (await repasted()));
-  // After a send went out or its card was answered, a reply that talks about that work ("已发送给
-  // Noah") owes no card; only an actual refusal is retried.
-  // A reply that says it can't is not retried on its wording: the rules say when "can't" is the
-  // honest answer, and the retry audit (11-16) found the wording check overruling true ones. Only
-  // a question typed into the reply, or an offer or pick handed back, still goes on a card.
-  const reason =
-    !input.request.trim() || input.noQuestionCard ? undefined : declinedSentence(input.reply);
-  const declined = reason?.kind === "decline" ? undefined : reason;
-  if (!(variables || declined) || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
-  // After the asked work, a closing question or offer stands, on a card rather than in text.
-  if (!variables && declined && input.worked)
-    return !input.handedIn && QUESTION_STAGES.has((await input.stage?.()) ?? "")
-      ? undefined
-      : questionCard(input.reply, declined);
-  // Retried once for this recruiter message: a question still typed into the reply goes on a
-  // card instead. Work the server counts as unfinished is owedWork above, which keeps going.
-  if ((await recentContinues()) >= 1)
-    return declined && !variables ? questionCard(input.reply, declined) : undefined;
-  // The person wrote again while this turn ran, and another run answers that: a retry of this
-  // turn would redo work they have moved past (gate 66a2dd3e: a template for the old salary).
-  if (input.since) {
-    const since = input.since;
-    const newer = await deps.prisma.message.findMany({
+  if (!input.owedWork && !input.memorySaveFailed) return undefined;
+  const recentContinues = countTrailingAutoContinues(
+    await deps.prisma.message.findMany({
       where: {
         threadId: input.run.threadId,
-        role: "user",
-        botId: null,
-        createdAt: { gt: since.at },
-        NOT: { runId: since.runId },
+        OR: [
+          { role: "user" },
+          { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
+        ],
       },
       orderBy: { seq: "desc" },
-      take: 4,
-      select: { clientNonce: true, runId: true, blocks: true },
-    });
-    if (
-      newer.some(
-        (row) =>
-          row.runId &&
-          row.runId !== since.runId &&
-          !row.clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX) &&
-          !(Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : []).some(
-            (block) => block.kind === "bot_message_received",
-          ),
-      )
-    )
-      return undefined;
-  }
-  if (variables) return variables;
-  if (!declined) return undefined;
-  const members = input.groupId
-    ? await deps.prisma.chatGroupMember.findMany({
-        where: {
-          groupId: input.groupId,
-          botId: { not: input.run.botId },
-          bot: { archivedAt: null },
-        },
-        select: {
-          bot: {
-            select: {
-              id: true,
-              name: true,
-              title: true,
-              description: true,
-              mcpServers: {
-                where: { server: { enabled: true } },
-                select: { server: { select: { name: true, description: true } } },
-              },
-            },
-          },
-        },
-        orderBy: { createdAt: "asc" },
-      })
-    : [];
-  // Intake and calibration questions are the coordinator's own playbook steps; a teammate
-  // handed one request asks its question on a card.
-  if (!input.handedIn && QUESTION_STAGES.has((await input.stage?.()) ?? "")) return undefined;
-  return declineRetry({
-    reply: input.reply,
-    request: input.request,
-    tools: input.tools,
-    worked: input.worked,
-    read: input.read,
-    personRequest: input.personRequest,
-    teammates: members.map(({ bot }) => ({
-      id: bot.id,
-      name: bot.name,
-      about: [
-        bot.title,
-        bot.description,
-        ...bot.mcpServers.map(({ server }) => `${server.name} ${server.description}`),
-      ]
-        .filter(Boolean)
-        .join(" "),
-    })),
-  });
+      take: LONG_TASK_RETRIES + 1,
+      select: { clientNonce: true },
+    }),
+  );
+  // A long task the server knows is unfinished keeps going until it is done; only a question
+  // card (a real decision for the recruiter) stops it.
+  if (input.owedWork)
+    return recentContinues < LONG_TASK_RETRIES ? { sentence: "", note: input.owedWork } : undefined;
+  // A failed save told as saved is lost silently: one more try, or say plainly it wasn't saved.
+  return recentContinues < 1 ? { sentence: "", note: MEMORY_SAVE_FAILED_NOTE } : undefined;
 }
 
 /** Starts the one retry of a declined turn as an internal continuation of the same bot. */
@@ -969,27 +735,6 @@ export function declinedRunId(clientNonce: string | null | undefined): string | 
 }
 
 /** A request to reply to someone's email, naming the address. */
-const REPLY_REQUEST =
-  /(回复|reply)[^\n]{0,80}[\w.+-]+@[\w-]+\.[\w.-]+|[\w.+-]+@[\w-]+\.[\w.-]+[^\n]{0,80}(回复|reply)/i;
-
-/** A reply naming a reply card's outcome ("已被丢弃", "already sent"). */
-const REPLY_CARD_OUTCOME =
-  /(回复卡|审批卡|卡片|reply card|approval card|\bcard\b)[^。.!?\n]{0,40}(已被?丢弃|已发送|已处理|discarded|already (?:sent|drafted)|was sent)/i;
-
-/**
- * A turn that reports what happened to a reply card without having called a reply tool took that
- * outcome from the conversation's history: an earlier card for other text, not this request. The
- * reply tool itself reports an earlier card for this exact email, so the turn tries once more.
- */
-export function unprovenReplyCardRetry(reply: string, request: string): DeclineRetry | undefined {
-  return REPLY_REQUEST.test(request) && REPLY_CARD_OUTCOME.test(reply)
-    ? {
-        sentence: "",
-        note: "No tool this turn showed a reply card for this request; an earlier card in this conversation was for other text. Read the original email in the role's mailbox and call reply_to_email (or native_instantly_reply_to_email) with its email id and the exact reply text now: it reports itself if this exact reply was already drafted or sent. Never say a card was drafted, discarded or sent without that call.",
-      }
-    : undefined;
-}
-
 export async function sendDeclineRetry(
   deps: Pick<TurnEndGuardDeps, "events" | "jobs">,
   run: TurnEndGuardInput["run"],

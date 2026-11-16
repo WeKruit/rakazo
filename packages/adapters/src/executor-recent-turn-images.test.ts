@@ -17,7 +17,6 @@ import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 import type * as RequestConnectionModule from "./request-connection.js";
 import type * as TurnEndGuardModule from "./turn-end-guard.js";
-import { planDeclineRetry } from "./turn-end-guard.js";
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
@@ -819,42 +818,6 @@ describe("quick reply", () => {
       expect.objectContaining({ where: { id: "published-final" } }),
     );
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
-  });
-
-  // Gate 2a73ed94 (progress-and-where): a first line, then a card that said it again.
-  it("puts an answer that ends in a question card in place of the first line", async () => {
-    vi.mocked(planDeclineRetry).mockResolvedValueOnce({
-      keep: "Nothing is saved yet.",
-      card: "Which role should I start with?",
-    } as Awaited<ReturnType<typeof planDeclineRetry>>);
-    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "Nothing is saved yet.",
-      finalText: "Nothing is saved yet. Which role should I start with?",
-      quickReplies: true,
-    });
-    expect(prisma.message.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "published-final" },
-        data: {
-          blocks: expect.arrayContaining([
-            expect.objectContaining({ kind: "ask", text: "Which role should I start with?" }),
-          ]),
-          clientNonce: null,
-        },
-      }),
-    );
-    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
-  });
-
-  // Gate 493e9f2e, one-off-email: 「连上之后草稿还在吗」 came in after 「发出去吧」, and its answer
-  // was judged against the send request, which sent a second Connect Gmail card.
-  it("judges the reply against the message the recruiter sent while the turn ran", async () => {
-    vi.mocked(planDeclineRetry).mockClear();
-    await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      claimed: { id: "steer-1", messageId: "message-2", text: "连上之后草稿还在吗" },
-      finalText: "草稿会保留。连接 Gmail 后会出现发送确认卡，按下“发送”才会发出。",
-    });
-    expect(vi.mocked(planDeclineRetry).mock.calls.at(-1)?.[1].request).toBe("连上之后草稿还在吗");
   });
 
   // Gate 4774895e, send-at-night: the recruiter answered 「02311」 and the first line was English.
