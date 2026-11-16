@@ -542,8 +542,10 @@ import {
   OUTREACH_MAILBOX_ONLY_NOTE,
   OWN_EMAIL_REQUEST,
   ownMailboxSendingAllowed,
+  OTHER_CHANNEL_SEND_NOTE,
   SEND_NOW_REQUEST,
   SEND_NOW_WITHOUT_GMAIL_NOTE,
+  sendOnOtherChannel,
   showsGmailCard,
   SENDER_READ_FIRST,
   senderApprovalDisplay,
@@ -16623,10 +16625,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? OUTREACH_MAILBOX_ONLY_NOTE
             : undefined;
         // Own-email accounts: "send now" before Gmail is connected gets one plain line and the card.
-        const sendNowNote =
-          hideVendors &&
-          (SEND_NOW_REQUEST.test(lastRecruiterText) || showsGmailCard(messages)) &&
-          (await ownMailboxSendingAllowed(deps.prisma, run).catch(() => false))
+        // A send on LinkedIn, WhatsApp or SMS is not an email (sim cannot-do-that-honestly, 9e15e896:
+        // the Gmail note made the first reply "Gmail 尚未连接" and then "可以发 InMail").
+        const otherChannel = hideVendors && sendOnOtherChannel(lastRecruiterText);
+        const sendNowNote = otherChannel
+          ? OTHER_CHANNEL_SEND_NOTE
+          : hideVendors &&
+              (SEND_NOW_REQUEST.test(lastRecruiterText) || showsGmailCard(messages)) &&
+              (await ownMailboxSendingAllowed(deps.prisma, run).catch(() => false))
             ? SEND_NOW_WITHOUT_GMAIL_NOTE
             : undefined;
         // Back after a day or more with news waiting: the reply opens with what changed.

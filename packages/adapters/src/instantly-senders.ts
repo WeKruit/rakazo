@@ -72,6 +72,20 @@ export const OWN_EMAIL_REQUEST =
 /** A recruiter telling us to send an email now, or asking what sending or the draft needs. */
 export const SEND_NOW_REQUEST =
   /直接发|现在发|马上发|立刻发|发出去|发吧|就发|send (?:it |them )?now|just send|go ahead and send|草稿还在|草稿在吗|draft (?:still|kept|saved)|still have the draft|连哪|连什么|点了|能发|发得出|can (?:you|it) send|(?:不连|没连|不用|不接)\s*gmail|without (?:connecting )?gmail/i;
+/** Channels with no send tool here: a send on one is answered as such, never as an email. */
+const OTHER_CHANNEL =
+  /linked\s?in|领英|in-?mail|whats\s?app|wechat|微信|telegram|\bsms\b|短信|text message|\bdm\b|私信/i;
+const LINK_ASK = /链接|主页|profile|\blink\b|\burl\b/i;
+const MESSAGE_WORD = /in-?mail|私信|消息|message|\bdm\b/i;
+const SEND_VERB = /发|send|message (?:him|her|them)|reach out|ping/i;
+/** A recruiter asking to send (or whether Kruit can send) on LinkedIn, WhatsApp, SMS or similar. */
+export function sendOnOtherChannel(text: string): boolean {
+  if (!OTHER_CHANNEL.test(text) || !SEND_VERB.test(text)) return false;
+  // "send me his LinkedIn link" asks for a profile, not a message on LinkedIn.
+  return !LINK_ASK.test(text) || MESSAGE_WORD.test(text);
+}
+export const OTHER_CHANNEL_SEND_NOTE =
+  "The recruiter asked to send on a channel you have no tool for (LinkedIn, InMail, WhatsApp, SMS, WeChat and the like): nothing can go out there from here and nothing was sent. Open the reply with exactly that in one line, in the recruiter's language, before any tool call or lookup, then offer the message ready to paste, or an email instead. This is not an email: never mention Gmail, a Send card or connecting anything unless they ask for email, and never say you can send it.";
 /** Once a Connect Gmail card is in the conversation, every follow-up gets the send-now answer. */
 export function showsGmailCard(messages: readonly { role: string; blocks: unknown }[]): boolean {
   return messages.some(

@@ -3,6 +3,7 @@ import {
   OUTREACH_MAILBOX_ONLY_NOTE,
   OWN_EMAIL_REQUEST,
   SEND_NOW_REQUEST,
+  sendOnOtherChannel,
   SEND_NOW_WITHOUT_GMAIL_NOTE,
   showsGmailCard,
 } from "./instantly-senders.js";
@@ -71,4 +72,30 @@ describe("a Connect Gmail card already in the conversation", () => {
     expect(showsGmailCard([{ role: "user", blocks: card("Gmail").blocks }])).toBe(false);
     expect(showsGmailCard([{ role: "bot", blocks: null }])).toBe(false);
   });
+});
+
+// Sim cannot-do-that-honestly on 9e15e896: 「给 Li Wei 发个 LinkedIn InMail，现在发」 got the
+// Gmail send-now note, so the first reply said "Gmail 尚未连接", and 「能发吗？」 got "可以发 InMail".
+describe("a send on a channel this product cannot send on", () => {
+  it.each([
+    "给 Li Wei 发个 LinkedIn InMail，Staff ML 那个职位，现在发",
+    "我问的是LinkedIn InMail，不是邮件。能发吗？",
+    "所以到底能不能直接发InMail？说能或不能，别绕",
+    "send him a LinkedIn message now",
+    "send her the details on WhatsApp",
+    "发个短信给他",
+    "用微信发给他",
+  ])("is recognized: %s", (text) => expect(sendOnOtherChannel(text)).toBe(true));
+
+  it.each([
+    "现在就发给两个人",
+    "给 Wei Zhang 写封邮件，发吧",
+    "find people on LinkedIn for this role",
+    "他的 LinkedIn 是 linkedin.com/in/x",
+    "那给我写一段能直接粘贴的 InMail 草稿",
+    "把他的 LinkedIn 链接发给我",
+    "send me their LinkedIn profiles",
+  ])("leaves email sends, searches and drafts alone: %s", (text) =>
+    expect(sendOnOtherChannel(text)).toBe(false),
+  );
 });

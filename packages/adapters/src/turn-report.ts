@@ -746,6 +746,19 @@ export function withoutRepastedDraft(
 export const TEMPLATE_BLANKS_NOTE =
   "Your template shows bracketed blanks. Write {{firstName}} where the candidate's first name goes (it is filled in for each person when sent) and the real role title, company, location and pay from the conversation; leave out a detail nobody gave instead of writing a blank, sign with the recruiter's name or the sign-off alone, and show the whole template again.";
 
+/** The recruiter questions or refuses a mail-merge variable ("这有 {{firstName}} 占位符，能直接发吗？"). */
+const OBJECTS_TO_VARIABLES = /\{\{|占位符|placeholder|变量|\bvariables?\b|merge (?:tag|field)/i;
+const TEMPLATE_VARIABLES_REFUSED_NOTE =
+  "The recruiter questioned the {{firstName}} placeholder, so they mean to paste and send it by hand. Open with one line that answers what they asked, then show the whole template again with no {{variables}}: greet with the plain greeting alone (Hi,), keep every change they just asked for and the recruiter's signature.";
+
+/** A template that keeps a {{variable}} after the recruiter questioned or refused it. */
+export function refusedTemplateVariables(reply: string, asked: string): DeclineRetry | undefined {
+  const start = reply.search(DRAFT_START);
+  if (start < 0 || !OBJECTS_TO_VARIABLES.test(asked)) return undefined;
+  const variable = reply.slice(start).match(/\{\{\s*[\w.]+\s*\}\}/)?.[0];
+  return variable ? { sentence: variable, note: TEMPLATE_VARIABLES_REFUSED_NOTE } : undefined;
+}
+
 /** A template the recruiter asked for that still has [bracketed] blanks ("Hi [Candidate Name],"). */
 export function templateBlanks(reply: string): DeclineRetry | undefined {
   if (!DRAFT_START.test(reply)) return undefined;

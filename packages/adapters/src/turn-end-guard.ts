@@ -31,6 +31,7 @@ import {
   draftVariables,
   droppedDay,
   questionCard,
+  refusedTemplateVariables,
   repastedDraft,
   retryReason,
   sequenceForOneEmail,
@@ -859,8 +860,8 @@ export async function planDeclineRetry(
   const template =
     askedTemplate(asked) ||
     (draftVariables(input.reply) !== undefined &&
+      // Gate 386f6a46: 「直接贴」 four messages on from the template ask is still about it.
       (
-        // Gate 386f6a46: 「直接贴」 four messages on from the template ask is still about it.
         await deps.prisma.message.findMany({
           where: { threadId: input.run.threadId, role: "user" },
           orderBy: { seq: "desc" },
@@ -900,6 +901,7 @@ export async function planDeclineRetry(
   const variables = template
     ? (candidateVoiceDraft(input.reply) ??
       sequenceForOneEmail(input.reply, asked) ??
+      refusedTemplateVariables(input.reply, asked) ??
       templateBlanks(input.reply) ??
       teamSignedDraft(input.reply) ??
       droppedDay(input.reply, asked) ??
