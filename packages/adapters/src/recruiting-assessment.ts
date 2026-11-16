@@ -64,6 +64,37 @@ export const NOTHING_SAVED_IS_NO_BLOCKER =
 export const ONE_OFF_REPLIES_NOTE =
   "Covers replies to role email sequences only. For a reply to an email sent outside a role (a one-off email), read the mailbox with search_contact_emails on that person's address before saying there is no reply.";
 
+/**
+ * An account with no open role: the roles it closed, so an empty list is known to be the whole
+ * record. Simulated 11-16 (push-back-on-correct-answer, 6/10 twice): "I made three yesterday"
+ * got "you're right, I was wrong" and "maybe another account" on an account that never had one.
+ */
+async function noOpenRoles(prisma: Pick<PrismaClient, "recruitingRole">, actor: Actor) {
+  const closed = await prisma.recruitingRole.findMany({
+    where: {
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      OR: [
+        { archivedAt: { not: null } },
+        { sourceThread: { group: { archivedAt: { not: null } } } },
+        { sourceThread: { bot: { archivedAt: { not: null } } } },
+      ],
+    },
+    orderBy: { id: "desc" },
+    take: 10,
+    select: { title: true, archivedAt: true },
+  });
+  return {
+    closedRoles: closed.map((role) => ({
+      title: role.title,
+      closedAt: role.archivedAt?.toISOString() ?? null,
+    })),
+    note: closed.length
+      ? "No open roles. closedRoles are the account's closed roles, newest first: name them when the recruiter says a role is missing, and offer to reopen it as a new role."
+      : "No open or closed roles: this account has never had a role, so this is its whole record. Say so plainly, keep that answer when the recruiter insists they made some, and offer to open the roles they name now.",
+  };
+}
+
 export type RecruitingAssessmentToolContext = RecruitingRunContext & {
   save?: Omit<RecruitingAssessmentSaveContext, "runId" | "threadId" | "botId">;
   attemptId?: string;
@@ -323,6 +354,8 @@ export async function executeRecruitingCandidatesTool(
       // agent re-reads every turn; total and nextCursor still page through the rest.
       const listed = new Set(result.items.map((item) => item.roleId));
       const paged = { ...result, roles: result.roles.filter((role) => listed.has(role.id)) };
+      if (operation === "roles" && !result.roles.length && !input.cursor)
+        return { ...paged, ...(await noOpenRoles(deps.prisma, trusted.actor)) };
       return operation === "replies"
         ? {
             ...paged,

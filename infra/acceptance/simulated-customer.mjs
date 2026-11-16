@@ -578,6 +578,12 @@ async function play(journey, label, owner, mailbox, out) {
         break;
       }
       const card = cards[move.card];
+      // A sign-in card takes no typed answer; the recruiter's words go to that chat as a message,
+      // as a real recruiter would type them under the card.
+      if (card?.connect && move.action === "answer_card" && move.text) {
+        move.action = "say";
+        move.chat = card.chat;
+      }
       let waitForKruit = true;
       if (move.action === "say") {
         const chat = await chatNamed(move.chat);
