@@ -89,6 +89,12 @@ const CLAIMS: ReadonlyArray<{
 const NOT_A_CLAIM =
   /[?？]|没|未|不|尚|还(?:没|未)|一旦|之后|以后|如果|等你|会|将|要|例如|比如|譬如|哪些|\b(?:not|no|never|once|after|when|if|until|unless|will|would|can|could|should|before|yet|which|e\.g|for example|such as)\b|n't\b/i;
 
+/**
+ * "已发出的邮件在…查看", "已保存候选人的页面": a done-word that only describes a kind of thing
+ * names where it is shown, not that anything was done (staging retry audit 11-16).
+ */
+const DESCRIBES = /已(?:经)?(?:发送|发出|保存|存入|记录|预约|创建)[^，。,\d]{0,6}的/;
+
 const clauses = (text: string) =>
   text
     .split(/[。！？!?；;，,\n]|(?<=\.)\s+/u)
@@ -114,10 +120,12 @@ function claimedCount(clause: string): number | undefined {
 export function claimsIn(text: string): Claim[] {
   const found: Claim[] = [];
   for (const sentence of clauses(text)) {
-    if (NOT_A_CLAIM.test(sentence)) continue;
+    if (NOT_A_CLAIM.test(sentence) || DESCRIBES.test(sentence)) continue;
     const claim = CLAIMS.find(({ pattern }) => pattern.test(sentence));
     if (!claim) continue;
     const count = claimedCount(sentence);
+    // "已发出 0 封" says nothing was done.
+    if (count === 0) continue;
     found.push({ kind: claim.kind, sentence, ...(count === undefined ? {} : { count }) });
   }
   return found;

@@ -31,6 +31,10 @@ describe("claims of what happened", () => {
     // Gate 808f4f31 first-timer: explaining what the Sequence page shows is not a status claim.
     "Sequence 页用来管理联系步骤，例如哪些邮件已发出、哪些还在排队。",
     "It shows each step, for example which emails were sent and which are queued.",
+    // Retry audit 11-16: a description of a page and a zero count were held as claims.
+    "已发出的邮件在左侧「邮件序列」查看",
+    "而是汇总已保存候选人的页面",
+    "Ref 10391：**目前已发出 0 封**",
   ])("leaves alone %s", (text) => expect(claimsIn(text)).toEqual([]));
 });
 

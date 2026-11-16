@@ -296,6 +296,45 @@ describe("declineRetry", () => {
     expect(DECLINE_RETRY_NOTE).toContain("shows its own card");
   });
 
+  // Staging retry audit 11-16: 80 honest answers to questions about state were retried as
+  // refusals ("现在发送了多少人呢" → 「目前没有已保存的岗位，因此没有发送人数的记录。」), and 243
+  // replies to a bare greeting were retried to put "what would you like to do?" on a card.
+  it("keeps an honest answer to a question about state and a reply to a greeting", () => {
+    const retry = (reply: string, request: string) =>
+      declineRetry({ reply, request, tools: [], teammates: [], read: true });
+    expect(
+      retry("目前没有已保存的岗位，因此没有发送人数的记录。", "现在发送了多少人呢"),
+    ).toBeUndefined();
+    expect(
+      retry("不行；要从你的邮箱发送，需要先连接 Gmail。", "不连邮箱能直接发邮件给候选人吗"),
+    ).toBeUndefined();
+    expect(
+      retry(
+        "我无法确认发送状态：目前没有已保存的岗位。",
+        "你找了这么多人为什么一个邮件都发不出去？",
+      ),
+    ).toBeUndefined();
+    expect(retry("What would you like to work on first?", "hi")).toBeUndefined();
+    expect(retry("你想先处理哪项招聘工作？", "你好")).toBeUndefined();
+    // A request phrased as a question is still a request.
+    expect(
+      declineRetry({
+        reply: "我无法发送。",
+        request: "Ada为什么还没发？现在就发",
+        tools: [],
+        teammates: [],
+      }),
+    ).toBeDefined();
+    expect(
+      declineRetry({
+        reply: "我无法发送。",
+        request: "现在发送了多少人呢",
+        tools: [],
+        teammates: [],
+      }),
+    ).toBeDefined();
+  });
+
   it("names calendar tools for a booking, not routine schedules", () => {
     const retry = declineRetry({
       reply: "I can't book this interview yet.",
