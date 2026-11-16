@@ -46,7 +46,7 @@ describe("chooseTurnModel", () => {
         userText: "x".repeat(3000),
         recruitingIntake: true,
       }),
-    ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "off" });
+    ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "low" });
   });
   it("keeps the bot's thinking level for an intake answer, which picks the people", () => {
     const choice = chooseTurnModel({ ...base, answersQuestion: true, recruitingIntake: true });
@@ -102,21 +102,21 @@ describe("chooseTurnModel", () => {
   it("does not re-route a bot already on the fast model", () => {
     expect(chooseTurnModel({ ...base, configured: fast }).reason).toBe("already_fast");
   });
-  it("opens a role without reasoning on a bot already on the fast model", () => {
+  it("opens a role at low thinking on a bot already on the fast model", () => {
     expect(chooseTurnModel({ ...base, configured: fast, recruitingIntake: true })).toMatchObject({
       routed: "configured",
       reason: "recruiting_intake",
-      thinkingLevel: "off",
+      thinkingLevel: "low",
     });
   });
 });
 
 describe("effort mode", () => {
-  it("caps fast turns at low thinking and keeps lower levels", () => {
+  it("runs fast turns at low thinking, never without it", () => {
     expect(effortThinkingLevel("fast", "medium")).toBe("low");
     expect(effortThinkingLevel("fast", null)).toBe("low");
-    expect(effortThinkingLevel("fast", "off")).toBe("off");
-    expect(effortThinkingLevel("fast", "minimal")).toBe("minimal");
+    expect(effortThinkingLevel("fast", "off")).toBe("low");
+    expect(effortThinkingLevel("fast", "minimal")).toBe("low");
   });
 
   it("keeps the routed level when balanced and thinks high when deep", () => {

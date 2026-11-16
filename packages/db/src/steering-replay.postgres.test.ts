@@ -216,7 +216,11 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
   });
   // Staging 11-16: the decline guard pushed a second turn after Kruit's answer was shown, so the
   // recruiter read two answers to one question. The retry's answer takes the first one's place.
-  async function retryOfAnsweredTurn(personWroteSince: boolean, suffix = "decline") {
+  async function retryOfAnsweredTurn(
+    personWroteSince: boolean,
+    suffix = "decline",
+    handedOff?: "global" | "role",
+  ) {
     const fixture = await runSteeredByMessage("running");
     // A finished turn's reply carries its tool steps beside the text.
     await createThreadMessage(prisma, {
@@ -264,15 +268,58 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
         leaseFence: 1,
       },
     });
+    // Honest-limits (c9a6991e): the pushed-on turn handed the question to a teammate, whose
+    // answer came half a minute after Kruit's and said the same thing.
+    let answering = retry;
+    if (handedOff) {
+      const group = await prisma.chatGroup.create({
+        data: {
+          id: `${handedOff === "global" ? "recruiting-global-" : ""}${randomUUID()}`,
+          spaceId,
+          userId,
+          name: handedOff === "global" ? "Kruit" : "Data Engineer",
+        },
+      });
+      await prisma.thread.update({
+        where: { id: threadId },
+        data: { groupId: group.id, botId: null },
+      });
+      const handoff = await createThreadMessage(prisma, {
+        threadId,
+        role: "bot",
+        botId,
+        runId: retry.id,
+        blocks: [{ kind: "handoff", fromBotId: botId, toBotId: botId, text: "Answer it." }],
+        clientNonce: `group-handoff:${retry.id}`,
+      });
+      const teammateTask = await prisma.task.create({
+        data: { spaceId, botId, threadId, userId, prompt: "answer", status: "running" },
+      });
+      answering = await prisma.run.create({
+        data: {
+          spaceId,
+          botId,
+          threadId,
+          taskId: teammateTask.id,
+          userId,
+          status: "running",
+          trigger: "follow_up",
+          sourceMessageId: handoff.id,
+          startedAt: new Date(),
+          leaseOwner: "worker-1",
+          leaseFence: 1,
+        },
+      });
+    }
     const attempt = await prisma.attempt.create({
-      data: { runId: retry.id, fence: 1, status: "running" },
+      data: { runId: answering.id, fence: 1, status: "running" },
     });
     await finalizeRun(prisma, {
       spaceId,
       threadId,
       botId,
-      runId: retry.id,
-      taskId: task.id,
+      runId: answering.id,
+      taskId: answering.taskId ?? task.id,
       attemptId: attempt.id,
       leaseOwner: "worker-1",
       leaseFence: 1,
@@ -282,8 +329,15 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
         { kind: "text", text: "Here are the documents." },
       ],
     });
+    if (handedOff)
+      await prisma.thread.update({ where: { id: threadId }, data: { groupId: null, botId } });
     const replies = await prisma.message.findMany({
-      where: { threadId, role: "bot", runId: { in: [fixture.run.id, retry.id] } },
+      where: {
+        threadId,
+        role: "bot",
+        runId: { in: [fixture.run.id, retry.id, answering.id] },
+        NOT: { blocks: { array_contains: [{ kind: "handoff" }] } },
+      },
       select: { id: true, blocks: true },
     });
     return { first, replies };
@@ -299,6 +353,14 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
         ]),
       },
     ]);
+  });
+
+  it("puts a teammate's answer to a handed-off retry in Kruit's chat in place of the first", async () => {
+    const { first, replies } = await retryOfAnsweredTurn(false, "decline", "global");
+    expect(replies.map((reply) => reply.id)).toEqual([first.id]);
+    // In a role chat a teammate's work (drafts after a round) stays beside the lead's reply.
+    const role = await retryOfAnsweredTurn(false, "decline", "role");
+    expect(role.replies).toHaveLength(2);
   });
 
   it("puts a promised turn's push in place of the reply it pushed on from", async () => {
