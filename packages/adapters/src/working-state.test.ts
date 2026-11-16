@@ -178,6 +178,33 @@ describe("loadWorkingState", () => {
     expect(card).toContain('Team\'s last report (Sourcer): "[redacted] draft ready"');
   });
 
+  // Feedback-round 11-16: the recruiter's feedback on round one reached the role, but its
+  // next-step card stayed open, so Kruit said the next ten "haven't started, waiting on your choice".
+  it("drops a card the recruiter has written past in the role's chat", async () => {
+    const state = await loadWorkingState(
+      fakePrisma({
+        groups,
+        roles,
+        recruiter: [text("more like the rest")],
+        messagesByThread: {
+          t1: [
+            { role: "user", blocks: [{ kind: "text", text: "#8 and #10 aren't it" }] },
+            {
+              role: "bot",
+              botId: "bot-sourcer",
+              blocks: [{ kind: "ask", text: "What should I do next?", status: "pending" }],
+            },
+          ],
+        },
+      }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(state.text ?? "").not.toContain("Waiting on the recruiter");
+  });
+
   it("puts each role's requirements and saved email on the card, and a role's own email in its conversation", async () => {
     const effects = [
       {
