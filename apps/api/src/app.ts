@@ -704,6 +704,7 @@ export async function createApp(
       imageTag: env.imageTag,
       integrationsCatalogUrl: env.integrationsCatalogUrl,
       mcpAllowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
+      faultInjection: env.faultInjection,
       firstPartyMcpUrl: env.firstPartyMcpUrl,
       firstPartySession: env.firstPartySession,
       oidc: env.oidc ? { issuer: env.oidc.issuer, clientId: env.oidc.clientId } : undefined,

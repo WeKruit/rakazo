@@ -107,6 +107,8 @@ export interface AppEnv {
   mcpStdioAllowedCommands: string[];
   /** Deployment-owner escape for remote MCP on RFC1918 / Docker-network hosts. */
   mcpAllowPrivateEndpoint: boolean;
+  /** Test environment only: lets the owner inject network faults. */
+  faultInjection: boolean;
   /** Exact trusted MCP endpoint that accepts this product's OIDC identity. */
   firstPartyMcpUrl?: string;
   /** Lets the backend open the first-party CRM session itself, with no second sign-in. */
@@ -240,6 +242,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
       .map((value) => value.trim())
       .filter(Boolean),
     mcpAllowPrivateEndpoint: source.MCP_ALLOW_PRIVATE_ENDPOINT === "true",
+    faultInjection: source.FAULT_INJECTION === "true",
     port: Number(source.API_PORT ?? 3100),
     // The deploy injects RAKAZO_GIT_SHA from the archive; a stale GIT_SHA in the Secret must not win.
     gitSha: optional(source.RAKAZO_GIT_SHA) ?? optional(source.GIT_SHA),

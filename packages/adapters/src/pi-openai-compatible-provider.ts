@@ -27,6 +27,7 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
 } from "./openai-compatible-url.js";
 import { guardToolCallNames } from "./pi-tool-call-guard.js";
+import { sharedAgent } from "./shared-dispatcher.js";
 import { dispatcherFetch, fetchPairedWithDispatcher } from "./undici-fetch.js";
 
 export { OPENAI_COMPATIBLE_PROVIDER_ID };
@@ -182,11 +183,18 @@ export function createOpenAiCompatibleFetch(
       assertHttpsForKeyedOpenAiCompatibleUrl(url, "present");
     }
     const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    // The process's resolver reuses one pool per model host, so a reply does not pay for a new
+    // connection; an injected resolver gets its own pool, closed with the response.
+    const shared = resolve === resolveHostname;
     const dispatcher =
       isIP(hostname) === 0
-        ? new Agent({
-            connect: { lookup: createOpenAiCompatibleLookup(url, resolve) },
-          })
+        ? shared
+          ? sharedAgent(`model:${hostname}`, {
+              lookup: createOpenAiCompatibleLookup(url, resolve),
+            })
+          : new Agent({
+              connect: { lookup: createOpenAiCompatibleLookup(url, resolve) },
+            })
         : undefined;
     // Node's fetch rejects this package Agent. Pair them only when the
     // dispatcher is attached; a caller-supplied fetch stays in charge.
@@ -197,9 +205,11 @@ export function createOpenAiCompatibleFetch(
         redirect: "error",
         ...(dispatcher ? { dispatcher } : {}),
       } as RequestInit & { dispatcher?: Agent });
-      return dispatcher ? await closeDispatcherWithResponse(response, dispatcher) : response;
+      return dispatcher && !shared
+        ? await closeDispatcherWithResponse(response, dispatcher)
+        : response;
     } catch (error) {
-      await dispatcher?.close().catch(() => undefined);
+      if (!shared) await dispatcher?.close().catch(() => undefined);
       throw error;
     }
   };
