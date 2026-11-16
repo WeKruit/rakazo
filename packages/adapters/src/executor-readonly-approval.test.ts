@@ -166,8 +166,11 @@ function fixture({
   replyServerEndpoint = "https://mcp.instantly.ai/mcp",
   providerToolName,
   extraTools = [],
+  listed = [],
   connectorResults = {},
 }: {
+  /** Tools every turn lists next to the connector's own, such as the people search. */
+  listed?: ConnectorTool[];
   providerToolName?: string;
   extraTools?: ConnectorTool[];
   connectorResults?: Record<string, unknown>;
@@ -439,8 +442,8 @@ function fixture({
     ...(artifacts ? { artifacts: { get: vi.fn() } } : {}),
     runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
     connector: {
-      discoverTools: async () =>
-        builtin
+      discoverTools: async () => [
+        ...(builtin
           ? providerToolName
             ? providerTools
             : []
@@ -453,7 +456,9 @@ function fixture({
                   route: { connectorId, toolName: "__catalog_execute" },
                 },
               ]
-            : [tool],
+            : [tool]),
+        ...listed,
+      ],
       resolveCall: async (call: ConnectorCall) =>
         catalog || call.route?.toolName === "__catalog_execute"
           ? resolveCatalogCall(call, catalogEntries(providerTools))
@@ -1709,6 +1714,62 @@ describe("native Instantly activation card", () => {
     );
     expect(sent).toHaveLength(1);
     expect(sent[0]![0].args).toMatchObject({ campaign_id: "c-1" });
+  });
+
+  it("sends a card confirmed through the tool catalog when the next turn hides the catalog", async () => {
+    // Gate 94b302cd: the card was made through the catalog before the role was linked; on
+    // resume the role had no round yet, so the turn hid the catalog wrapper and the send was
+    // refused "must be replayed via its catalog execute tool".
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+      catalog: true,
+      artifacts: true,
+      listed: [
+        {
+          name: "exa__web_search_advanced_exa",
+          description: "People search",
+          readOnly: true,
+          inputSchema: { type: "object" },
+        },
+      ],
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    expect(f.effects[0]?.kind).toBe("instantly__demo__activate_campaign");
+    Object.assign(f.prisma.thread, {
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: "thread-1",
+        groupId: null,
+        activeRecruitingRoleId: "role-1",
+      })),
+      findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role-1" })),
+      findFirst: vi.fn(async () => ({
+        id: "thread-1",
+        spaceId: "space-1",
+        userId: "user-1",
+        botId: "bot-1",
+        groupId: null,
+        externalConversationId: null,
+        activeRecruitingRoleId: null,
+      })),
+    });
+    Object.assign(f.prisma.bot, {
+      findFirst: vi.fn(async () => ({ spaceId: "space-1", userId: "user-1" })),
+    });
+    Object.assign(f.prisma, {
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+    });
+    f.effects[0]!.status = "approved";
+    f.setCalls([]);
+    await f.run();
+    const sent = f.execute.mock.calls.filter(
+      (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+    );
+    expect(sent).toHaveLength(1);
+    expect(f.effects[0]!.status).not.toBe("failed");
   });
 
   it("closes a confirmed send that cannot start instead of failing the run", async () => {
