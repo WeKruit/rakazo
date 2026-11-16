@@ -17228,6 +17228,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ...runModel,
             thinkingLevel: effortThinkingLevel(effortMode, runModel.thinkingLevel),
           };
+        // Grading follows the request's rubric while the recruiter waits for the checked round:
+        // staging 11-16, the save step spent 3.1k reasoning tokens (28 s) on ten grades.
+        if (run.trigger === "recruiting_grade" && runModel.thinkingLevel !== "off")
+          runModel = { ...runModel, thinkingLevel: "low" };
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
         // step only says what it is doing and starts its reads, so it runs at low thinking too.

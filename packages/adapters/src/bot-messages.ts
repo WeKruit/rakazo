@@ -506,7 +506,7 @@ export async function teamProgress(
         select: { activeRecruitingRoleId: true },
       })
     )?.activeRecruitingRoleId;
-  const [peopleFound, recorded] = roleId
+  const [peopleFound, recorded, saved] = roleId
     ? await Promise.all([
         countRecruitingPeopleFoundSince(prisma, { roleId, since }),
         // Staging 11-15: the team kept working after recording round 2, and Kruit said the new
@@ -520,8 +520,13 @@ export async function teamProgress(
             }),
           )
           .catch(() => null),
+        // Staging 11-16: "found 39 so far" read as false beside Results' 52 saved people, since
+        // the two count different things; the reply names both.
+        Promise.resolve()
+          .then(() => prisma.recruitingCandidate.count({ where: { roleId } }))
+          .catch(() => null),
       ])
-    : [0, null];
+    : [0, null, null];
   // Staging 11-15: listed in the role's chat 23 s before its record was written, the new round
   // read as "not ready" in between.
   const listed =
@@ -540,7 +545,7 @@ export async function teamProgress(
       : false;
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
-  const found = `${peopleFound} ${peopleFound === 1 ? "person" : "people"}`;
+  const found = `${peopleFound} ${peopleFound === 1 ? "person" : "people"} on this request${typeof saved === "number" && saved > peopleFound ? `, ${saved} saved in Results in all` : ""}`;
   return {
     name: working.bot.name,
     minutes,

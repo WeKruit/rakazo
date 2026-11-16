@@ -237,7 +237,7 @@ export const SELF_GRADE_RUBRIC = [
   "- The job's own terms (pay range, office days or hybrid schedule, benefits) are what the job offers, not something a profile shows: leave them out of requirements_assessment, and they never lower a tier. The person's side of them still counts: a hybrid job needs someone living within a commute.",
   "- Years of experience: add up the dated roles that match the requirement, counting overlapping roles once; a stated total in the person's own summary counts too.",
   "- Location: the current location; a nearby commuting area counts.",
-  "Score and tier: Strong needs every hard requirement met; any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
+  "Score and tier: Strong needs every hard requirement met, and a preference never keeps anyone from Strong (note a missed one in concerns); any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
 ].join("\n");
 
 /** The profile links one grading request sent. */
@@ -1048,13 +1048,12 @@ type Replacement = {
   title: string | null;
   company: string | null;
   location: string | null;
-  strong: boolean;
 };
 
 /**
- * Saved people no round has shown, for the lead to fill a checked round's open places: the ones
- * the Reviewer graded Strong first, then ones not graded yet; anyone graded below Strong is left
- * out. Listing them in the request spares the lead paging through Results for them.
+ * Saved people no round has shown whom the Reviewer graded Strong, for the lead to fill a checked
+ * round's open places. Only checked people: staging 11-16 swapped seven checked Promising people
+ * for unchecked ones in a 2–3 minute turn. Listing them spares the lead paging through Results.
  */
 async function roundReplacements(
   prisma: PrismaClient,
@@ -1096,13 +1095,10 @@ async function roundReplacements(
   const people = new Map<string, Replacement>();
   for (const row of rows) {
     if (shown.has(row.candidateKey) || people.has(row.candidateKey)) continue;
-    const strong = tiers.get(row.candidateKey) === FIT_TIER;
-    if (tiers.has(row.candidateKey) && !strong) continue;
-    people.set(row.candidateKey, { key: row.candidateKey, ...row, strong });
+    if (tiers.get(row.candidateKey) !== FIT_TIER) continue;
+    people.set(row.candidateKey, { key: row.candidateKey, ...row });
   }
-  return [...people.values()]
-    .sort((a, b) => Number(b.strong) - Number(a.strong))
-    .slice(0, open + 5);
+  return [...people.values()].slice(0, open + 5);
 }
 
 export function roundReviewPrompt(
@@ -1127,19 +1123,19 @@ export function roundReviewPrompt(
     ...(open && replacements.length
       ? [
           "",
-          "Saved people no round has shown:",
+          "Saved people no round has shown, checked by the Reviewer as Strong:",
           ...replacements.map((person) => {
             const about = [
               [person.title, person.company].filter(Boolean).join(" at "),
               person.location,
             ].filter(Boolean);
-            return `- ${person.name ?? person.key}${about.length ? `, ${about.join(", ")}` : ""} (candidateKey ${person.key}): ${person.strong ? "checked, Strong" : "not checked yet"}`;
+            return `- ${person.name ?? person.key}${about.length ? `, ${about.join(", ")}` : ""} (candidateKey ${person.key})`;
           }),
         ]
       : []),
     "",
     open
-      ? `Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}. Everything you need is above: don't read this round's people or Results again. ${replacements.length ? "Take the saved people listed above first, the checked ones before the rest, skipping anyone whose title, company or location shows they don't fit; only for places still open, run one quick search (four searches in one step)." : "Run one quick search (four searches in one step) for them."} Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones. When places are still open after that, keep the closest of these people (Promising before Uncertain, never Partial) in them; fewer than ten only when none is left. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
+      ? `Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}. Everything you need is above: don't read this round's people or Results again, and don't search, since someone nobody has checked can't take a checked person's place. ${replacements.length ? "Take the checked people listed above, skipping anyone whose title, company or location shows they don't fit. " : ""}Keep the closest of these people (Promising before Uncertain, never Partial) in any place still open; fewer than ten only when none is left. Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
       : "Show it now: record calibration_round with corrects: true and the same people in the same order (no checks: the Reviewer's grades stand for them). Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
   ].join("\n");
 }
