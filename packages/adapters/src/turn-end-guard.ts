@@ -658,26 +658,6 @@ export async function guardRecruitingRoleCreate(
 
 const CARD_KINDS = new Set(["ask", "approval", "mcp_approval", "connect", "app_connect", "choice"]);
 
-/**
- * The request a turn answers: the person's message, or for a stage a teammate handed in, the
- * handoff's brief (a returned stage report is not a request).
- */
-export function turnRequestText(
-  message: { blocks: readonly MessageBlock[] } | undefined,
-  handoff: { blocks: readonly MessageBlock[] } | undefined,
-  botId: string,
-) {
-  if (message)
-    return message.blocks
-      .map((block) => ("text" in block && typeof block.text === "string" ? block.text : ""))
-      .join("\n");
-  return (handoff?.blocks ?? [])
-    .flatMap((block) =>
-      block.kind === "handoff" && block.toBotId === botId && !block.report ? [block.text] : [],
-    )
-    .join("\n");
-}
-
 const MEMORY_SAVE_FAILED_NOTE =
   "Your memory save failed, so nothing was saved. Read the error it returned, fix the call (read_memory first for the current revision, or send the whole content) and save again now. If it still fails, tell the recruiter in one sentence that it was not saved.";
 

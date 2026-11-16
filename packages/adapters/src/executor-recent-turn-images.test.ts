@@ -9,7 +9,6 @@ import {
   STEERING_PEEK_MS,
   STEERING_QUICK_REPLY_SENDING,
   saysSomething,
-  waitsOnTeammate,
   withoutPolls,
 } from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
@@ -707,17 +706,6 @@ describe("withoutPolls", () => {
     const tools = [{ name: "ask_user" }, { name: "create_poll" }];
     expect(withoutPolls(tools, true).map((tool) => tool.name)).toEqual(["ask_user"]);
     expect(withoutPolls(tools, false)).toHaveLength(2);
-  });
-});
-
-describe("waitsOnTeammate", () => {
-  it("reads a line saying a teammate's email is not sent yet", () => {
-    expect(
-      waitsOnTeammate(
-        "这封邮件还没有准备好或发送。负责处理的流程目前暂停，尚未给出邮件草稿或需要你补充的信息。",
-      ),
-    ).toBe(true);
-    expect(waitsOnTeammate("初次联系邮件已发送给 Noah Test。")).toBe(false);
   });
 });
 
