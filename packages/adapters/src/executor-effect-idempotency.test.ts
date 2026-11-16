@@ -6352,6 +6352,55 @@ describe("native recruiting assessment effect delivery", () => {
     expect(JSON.stringify(update)).toContain("Not shown");
   });
 
+  // Gate b2005684, one-off-email: after handing the send on, the coordinator saved the address
+  // (taking the request back) and its note 「这封邮件尚未发送…」 restated the teammate's Connect card.
+  it.each([
+    ["the teammate's card is already shown", true, false],
+    ["(the teammate has said nothing yet)", false, true],
+  ] as const)(
+    "after taking a handed-off request back, posts an update unless %s",
+    async (_, cardShown, posted) => {
+      vi.mocked(handoffToGroupBot).mockClear();
+      vi.mocked(handoffToGroupBot).mockResolvedValueOnce({ ok: true } as never);
+      const f = fixture(`takeback-after-card-${cardShown}`);
+      const bot = await f.prisma.bot.findUniqueOrThrow();
+      f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+        ...bot,
+        spawnKey: "recruiting:user-1:main",
+      } as typeof bot);
+      Object.assign(f.thread, { groupId: "group-1" });
+      Object.assign(f.prisma, {
+        chatGroup: { findUnique: vi.fn(async () => null) },
+        chatGroupMember: { findMany: vi.fn(async () => []) },
+      });
+      const findMany = f.prisma.message.findMany.getMockImplementation();
+      f.prisma.message.findMany.mockImplementation((async (query?: {
+        where?: { botId?: { not?: string } };
+      }) =>
+        query?.where?.botId?.not
+          ? cardShown
+            ? [{ blocks: [{ kind: "ask", text: "Connect Gmail", status: "pending" }] }]
+            : []
+          : (findMany?.(query as never) ?? [])) as never);
+      f.runtimeRun.mockImplementation(async function* (request) {
+        await request.executeTool!(
+          "handoff_to_bot",
+          { confirm_name: "Outreach", message: "Send the email to wei.zhang.test@example.com" },
+          "h1",
+        );
+        await request.executeTool!("write_file", { path: "n.txt", content: "x" }, "w1");
+        await request.executeTool!(
+          "message_user",
+          { message: "这封邮件尚未发送；连接你的 Gmail 后会出现发送确认卡。" },
+          "m1",
+        );
+        yield { type: "done" as const, text: "" };
+      });
+      await f.run();
+      expect(JSON.stringify(f.prisma.message.create.mock.calls).includes("尚未发送")).toBe(posted);
+    },
+  );
+
   // Gate 398accae, one-off-email: 「草稿还在吗」 typed past the Connect card got only a new card.
   it("answers a message typed past the connect card before showing the card again", async () => {
     const f = fixture("connect-answer-first");
