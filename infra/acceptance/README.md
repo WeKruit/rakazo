@@ -13,6 +13,9 @@ script: a new test is almost always a new entry in an existing file, not a new f
 | Something every release must prove | a layer in `regression.mjs` | release script, after deploy |
 | Agent behaviour offline, with a real or emulated model | a case in `packages/testkit/src/evals/cases.ts` | `pnpm test:evals` |
 
+To play a branch before it merges, `pnpm sim:branch` starts that checkout's own backend in a Modal
+sandbox (fresh database, emulated email, the real model only) and runs the free plays against it.
+
 Every conversation tool talks to the product through `real-user-session.mjs`: sign-in, sending,
 answering cards and waiting for replies. Wait on the live updates the web app uses, never poll on a
 timer: polling burned the shared request quota once. Extend the session client when a journey needs a new action.
