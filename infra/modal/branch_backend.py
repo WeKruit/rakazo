@@ -32,7 +32,7 @@ PORT = 3110
 DATABASE_URL = "postgresql://rakazo:rakazo@127.0.0.1:5432/rakazo"
 ORIGIN = "http://127.0.0.1:5180"  # the harness's web origin, which sign-in checks
 PLAYS = ",".join([
-    "change-mind-mid-run", "first-timer-no-gmail", "progress-and-where", "one-off-email",
+    "change-mind-mid-run", "did-you-really-send", "progress-and-where", "one-off-email",
     "korean-recruiter-template", "template-sign-with-my-name", "two-asks-one-message",
     "no-made-up-details", "cannot-do-that-honestly", "switch-language-midway",
     "template-then-send", "verify-musthave-evidence-list",

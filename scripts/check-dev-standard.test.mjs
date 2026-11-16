@@ -28,10 +28,10 @@ describe("development standard", () => {
   });
 
   it("stops a very large file from growing", () => {
-    const file = modified("packages/adapters/src/executor.ts", 20314, 220, 10);
+    const file = modified("apps/api/src/app.ts", 20314, 220, 10);
     expect(rules({ files: [file] })).toEqual(["large-file"]);
     expect(
-      rules({ files: [modified("packages/adapters/src/executor.ts", 20314, 85, 20)] }),
+      rules({ files: [modified("apps/api/src/app.ts", 20314, 85, 20)] }),
     ).toEqual([]);
   });
 
@@ -50,6 +50,14 @@ describe("development standard", () => {
     expect(
       rules({ files: [modified("packages/core/src/recruiting-playbook.ts", 900, 4, 4)] }),
     ).toEqual(["eval"]);
+  });
+
+  it("asks a change to the code that decides Kruit's turns for the branch plays that prove it", () => {
+    const files = [modified("packages/adapters/src/turn-end-guard.ts", 400, 10, 3)];
+    expect(rules({ files })).toEqual(["eval"]);
+    const body = `${TESTED}\nEval: pnpm sim:branch, 9/12 on stage before, 10/12 after.`;
+    expect(rules({ files, body })).toEqual([]);
+    expect(rules({ files: [modified("packages/adapters/src/turn-end-guard.test.ts", 400, 10, 3)] })).toEqual([]);
   });
 
   it("refuses a new script that nothing calls", () => {
@@ -76,7 +84,7 @@ describe("development standard", () => {
 
   it("lets a PR skip one named rule with a reason, and only that rule", () => {
     const files = [
-      modified("packages/adapters/src/executor.ts", 20314, 400, 0),
+      modified("apps/api/src/app.ts", 20314, 400, 0),
       added("scripts/backfill.mjs"),
     ];
     const body = `${TESTED}\nStandard-Exception: large-file — moving the round guidance out next.`;
