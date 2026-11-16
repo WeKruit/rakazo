@@ -136,6 +136,17 @@ test("a bare English template (no To or Subject line) in reply to Chinese is not
   );
 });
 
+test("an English draft whose greeting runs on is the candidate's, not the reply's language", () => {
+  const draft = "Hi Li Wei, I'm hiring for a Staff ML role based in Beijing. Would you be open to a chat?\n\nBest,\nAlex";
+  const recruiter = user("我不能发 InMail 的话，你能做什么？");
+  assert.deepEqual(conversationChecks([recruiter, bot(`可直接粘贴：\n\n${draft}`)]), []);
+  assert(
+    conversationChecks([recruiter, bot(`Here is a draft you can paste:\n\n${draft}`)]).some((failure) =>
+      failure.startsWith("language"),
+    ),
+  );
+});
+
 test("an agent's brief shown to the recruiter fails", () => {
   assert(
     conversationChecks([
