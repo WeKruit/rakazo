@@ -550,6 +550,24 @@ describe("startRecruitingGrading", () => {
     expect(behind.enqueue).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ availableAt: new Date(now + 5_000) }),
     );
+    // Staging 11-15: a held round's check gave up after six minutes behind other turns, and the
+    // round was never shown. It keeps trying while the round is held.
+    const heldBusy = fixture({
+      busy: true,
+      found: [person("a")],
+      rounds: round(["linkedin:/in/a"]),
+    });
+    heldBusy.prisma.chatGroupMember.findMany.mockResolvedValue([
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ] as never);
+    await startRecruitingGrading(heldBusy.deps, { threadId: "thread", attempt: 500 }, now);
+    expect(heldBusy.enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ availableAt: new Date(now + 3_000) }),
+    );
+    const gaveUp = fixture({ busy: true, found: [person("a")] });
+    await startRecruitingGrading(gaveUp.deps, { threadId: "thread", attempt: 500 }, now);
+    expect(gaveUp.enqueue).not.toHaveBeenCalled();
   });
 
   it("keeps a few batches in flight and waits when all of them are", async () => {

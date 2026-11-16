@@ -292,7 +292,14 @@ export async function startRecruitingGrading(
       : busy.trigger === ("recruiting_grade" satisfies RunTrigger)
         ? NEXT_BATCH_RETRY_MS
         : BUSY_RETRY_MS;
-    if (attempt + 1 < MAX_ATTEMPTS)
+    // A held round's check keeps trying while the round waits for it (staging 11-15: it gave up
+    // after six minutes behind other turns and the round was never shown).
+    if (
+      attempt + 1 < MAX_ATTEMPTS ||
+      (held &&
+        (await roundAwaitingReview(deps.prisma, { threadId: thread.id, roleId: role.id }, now)) !==
+          null)
+    )
       await deps.jobs.enqueue(
         laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + retry),
       );
