@@ -746,6 +746,38 @@ export function withoutRepastedDraft(
 export const TEMPLATE_BLANKS_NOTE =
   "Your template shows bracketed blanks. Write {{firstName}} where the candidate's first name goes (it is filled in for each person when sent) and the real role title, company, location and pay from the conversation; leave out a detail nobody gave instead of writing a blank, sign with the recruiter's name or the sign-off alone, and show the whole template again.";
 
+/** The recruiter questions or refuses a mail-merge variable ("这有 {{firstName}} 占位符，能直接发吗？"). */
+const OBJECTS_TO_VARIABLES = /\{\{|占位符|placeholder|变量|\bvariables?\b|merge (?:tag|field)/i;
+const TEMPLATE_VARIABLES_REFUSED_NOTE =
+  "The recruiter questioned the {{firstName}} placeholder, so they mean to paste and send it by hand. Open with one line that answers what they asked, then show the whole template again with no {{variables}}: greet with the plain greeting alone (Hi,), keep every change they just asked for and the recruiter's signature.";
+
+/** A template that keeps a {{variable}} after the recruiter questioned or refused it. */
+export function refusedTemplateVariables(reply: string, asked: string): DeclineRetry | undefined {
+  const start = reply.search(DRAFT_START);
+  if (start < 0 || !OBJECTS_TO_VARIABLES.test(asked)) return undefined;
+  const variable = reply.slice(start).match(/\{\{\s*[\w.]+\s*\}\}/)?.[0];
+  return variable ? { sentence: variable, note: TEMPLATE_VARIABLES_REFUSED_NOTE } : undefined;
+}
+
+// "上一版漏了 competitive", "the last version missed "competitive"": what the reply says was missing.
+const ADMITS_OMISSION = [
+  /(?:上一版|上一封|之前|刚才|前一版|原来)[^。\n]{0,12}?(?:漏了|漏掉了?|没写|没有写|缺了?|忘了写?)\s*[*`「“"']*([^*`」”"'，,。.\n]{2,40}?)[*`」”"']*(?=[，,。.\n]|$)/,
+  /(?:previous|last|earlier|first) (?:version|draft|one)[^.\n]{0,20}?(?:missed|left out|didn't include|did not include|was missing|forgot)\s+(?:the\s+)?[*`"“']*([^*`"”',.\n]{2,40}?)[*`"”']*(?=[,.\n]|$)/i,
+];
+
+/** A reply agreeing its earlier draft lacked something that draft does show. */
+export function falseOmission(reply: string, earlier: readonly string[]): DeclineRetry | undefined {
+  const start = reply.search(DRAFT_START);
+  const lead = start < 0 ? reply : reply.slice(0, start);
+  const missed = ADMITS_OMISSION.map((pattern) => pattern.exec(lead)?.[1]?.trim()).find(Boolean);
+  const before = earlier.find((text) => DRAFT_START.test(text));
+  if (!missed || !before?.toLowerCase().includes(missed.toLowerCase())) return undefined;
+  return {
+    sentence: missed,
+    note: `Your earlier draft already says "${missed}". Never agree that it was missing: say in one line that it was already there, then keep the rest of your reply.`,
+  };
+}
+
 /** A template the recruiter asked for that still has [bracketed] blanks ("Hi [Candidate Name],"). */
 export function templateBlanks(reply: string): DeclineRetry | undefined {
   if (!DRAFT_START.test(reply)) return undefined;
