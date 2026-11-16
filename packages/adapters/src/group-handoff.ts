@@ -25,7 +25,7 @@ import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { blocksText } from "./reply-suggestion.js";
-import { newRoleOpening, roleRef } from "./role-reference.js";
+import { newRoleNote, newRoleOpening, roleRef } from "./role-reference.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
@@ -157,6 +157,13 @@ export async function handoffToGroupBot(
         if (named)
           return {
             error: `Not handed off: the recruiter named the role "${named.title}", whose email threads and campaign only its team holds. Hand this to that team with delegate_to_role, role_id "${named.id}".`,
+          } as const;
+        // Staging 11-16: a new role's request went to Outreach as a one-off campaign outside any
+        // role, so its later "stop it" and "who got it" had nothing to act on.
+        const opening = newRoleOpening(asked);
+        if (opening)
+          return {
+            error: newRoleNote(opening.ref ?? "none given"),
           } as const;
       }
       // A search stage saves people into the conversation's role; without one the sourcing
