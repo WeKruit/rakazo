@@ -401,3 +401,60 @@ export async function replaceCompletedExternalEffectResult(
   });
   return replaced.count === 1;
 }
+
+export const DENIED_THIS_TURN_RESULT = {
+  error:
+    "The user already denied this kind of action in this turn. Do not ask again with changed content; tell the user it was not done and ask what they want instead.",
+  dispatched: false,
+} as const;
+
+/**
+ * Whether the person denied an action of this kind earlier in this turn and has not written
+ * since. send-through-blip 11-16: denied, the turn rewrote the email and asked again on a new
+ * card, because a changed request is a new approval. A message from the person lifts it.
+ */
+export async function deniedEarlierThisTurn(
+  prisma: {
+    externalEffect: {
+      findFirst: (args: {
+        where: { runId: string; kind: string; status: "denied"; id: { not: string } };
+        orderBy: { updatedAt: "desc" };
+        select: { updatedAt: true };
+      }) => Promise<{ updatedAt: Date } | null>;
+    };
+    message: {
+      findFirst: (args: {
+        where: {
+          threadId: string;
+          role: "user";
+          createdAt: { gt: Date };
+          OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: string } } }];
+        };
+        select: { id: true };
+      }) => Promise<{ id: string } | null>;
+    };
+  },
+  input: { threadId: string; effect: { id: string; runId: string; kind: string } },
+): Promise<boolean> {
+  const denied = await prisma.externalEffect.findFirst({
+    where: {
+      runId: input.effect.runId,
+      kind: input.effect.kind,
+      status: "denied",
+      id: { not: input.effect.id },
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+  if (!denied) return false;
+  const spoke = await prisma.message.findFirst({
+    where: {
+      threadId: input.threadId,
+      role: "user",
+      createdAt: { gt: denied.updatedAt },
+      OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
+    },
+    select: { id: true },
+  });
+  return !spoke;
+}

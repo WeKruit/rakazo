@@ -19,6 +19,7 @@ import {
   claimIntendedEffect,
   completeExternalEffect,
   createApprovedEffectReplayQueue,
+  deniedEarlierThisTurn,
   inputPausedToolResult,
   isApprovalPausedResult,
   isToolPauseResult,
@@ -566,5 +567,37 @@ describe("catalog wrapper names", () => {
         { connectorId: "mcp", resourceId: "server-1", toolName: "send_message" },
       ),
     ).toBe(true);
+  });
+});
+
+// send-through-blip 11-16: denied, the same turn rewrote the email and asked again on a new card.
+describe("a denial holds for the rest of the turn", () => {
+  function store(denied: { updatedAt: Date } | null, spokeSince: boolean) {
+    return {
+      externalEffect: { findFirst: vi.fn(async () => denied) },
+      message: { findFirst: vi.fn(async () => (spokeSince ? { id: "m" } : null)) },
+    };
+  }
+  const effect = { id: "e2", runId: "run", kind: "instantly__activate_campaign" };
+
+  it("refuses another card of the same kind after a denial in this turn", async () => {
+    const prisma = store({ updatedAt: new Date() }, false);
+    await expect(deniedEarlierThisTurn(prisma, { threadId: "t", effect })).resolves.toBe(true);
+    expect(prisma.externalEffect.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ runId: "run", kind: effect.kind, status: "denied" }),
+      }),
+    );
+  });
+
+  it("asks again once the person has written since the denial", async () => {
+    const prisma = store({ updatedAt: new Date() }, true);
+    await expect(deniedEarlierThisTurn(prisma, { threadId: "t", effect })).resolves.toBe(false);
+  });
+
+  it("asks when nothing was denied", async () => {
+    await expect(
+      deniedEarlierThisTurn(store(null, false), { threadId: "t", effect }),
+    ).resolves.toBe(false);
   });
 });

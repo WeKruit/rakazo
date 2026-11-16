@@ -267,6 +267,20 @@ function fixture(
     remove: vi.fn(async () => undefined),
   };
   const externalEffect = {
+    findFirst: vi.fn(
+      async ({
+        where,
+      }: {
+        where: { runId: string; kind: string; status: string; id: { not: string } };
+      }) =>
+        effects.find(
+          (effect) =>
+            effect.runId === where.runId &&
+            effect.kind === where.kind &&
+            effect.status === where.status &&
+            effect.id !== where.id.not,
+        ) ?? null,
+    ),
     findMany: vi.fn(
       async ({
         where,

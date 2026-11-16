@@ -347,6 +347,8 @@ import {
   claimIntendedEffect,
   completeExternalEffect,
   createApprovedEffectReplayQueue,
+  DENIED_THIS_TURN_RESULT,
+  deniedEarlierThisTurn,
   inputPausedToolResult,
   isToolPauseResult,
   parseCatalogApprovalTarget,
@@ -11413,6 +11415,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!(await renewRunLease(deps, runId, workerId, fence))) {
               // Another worker owns the run now; exit without leaving a local pause card.
               return pauseForApproval();
+            }
+            if (
+              applied &&
+              (await deniedEarlierThisTurn(deps.prisma, {
+                threadId: thread.id,
+                effect: { id: applied.effect.id, runId, kind: applied.effect.kind },
+              }))
+            ) {
+              await deps.prisma.externalEffect.updateMany({
+                where: { id: applied.effect.id, status: "intended" },
+                data: { status: "denied", result: DENIED_THIS_TURN_RESULT },
+              });
+              return DENIED_THIS_TURN_RESULT;
             }
             let files: MessageBlock[] = [];
             let approvalArgs = args;
