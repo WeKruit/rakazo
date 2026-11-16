@@ -16,6 +16,7 @@ import {
   defaultSendingMailbox,
   ensureSendingIdentity,
   isSenderRead,
+  ownMailboxSendingAllowed,
   requireSendingMailboxReady,
   sendingMailboxState,
 } from "./instantly-senders.js";
@@ -723,6 +724,23 @@ it("tells a self-signup account without a mailbox to send from its own email", a
   expect(read).toMatchObject({
     next: expect.stringContaining("Never say you started, sent or made a connection request"),
   });
+});
+
+it("does not send a credit account with a hand-assigned mailbox to its own Gmail", async () => {
+  // gate 63c860bb, send-through-blip: a new account's first line said Gmail was needed while its
+  // assigned mailbox, adopted later that turn, sent the campaign.
+  const prisma = (assigned: number) => ({
+    user: {
+      findUnique: vi.fn(async () => ({
+        usageCreditLimit: 10_000,
+        _count: { sendingMailboxAssignments: assigned },
+      })),
+    },
+    externalEffect: { findMany: vi.fn(async () => []) },
+  });
+  const scope = { userId: "user", spaceId: "space" };
+  expect(await ownMailboxSendingAllowed(prisma(1) as never, scope)).toBe(false);
+  expect(await ownMailboxSendingAllowed(prisma(0) as never, scope)).toBe(true);
 });
 
 it("asks no company name until the turn read the sending email", () => {
