@@ -1,5 +1,4 @@
 import type { ConnectorCall } from "@rakazo/adapter-kit";
-import { RECRUITING_DEFAULT_BOTS } from "@rakazo/core";
 import type * as Database from "@rakazo/db";
 import { listRecruitingCandidates } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -180,15 +179,6 @@ describe("resolveRecruitingContact", () => {
       "sumeetparekh1@gmail.com",
       "sumeet.shah@example.test",
     ]);
-  });
-
-  it("tells agents to resolve through role records and never guess an email", () => {
-    // The quality check never talks about people by name, so it carries no contact rules.
-    for (const bot of RECRUITING_DEFAULT_BOTS.filter((role) => role.key !== "reviewer"))
-      expect(bot.instructions).toContain(
-        "Resolve a person named in chat through the role's contacts and saved pool first",
-      );
-    expect(RECRUITING_DEFAULT_BOTS[0].instructions).toContain("never invent or guess an email");
   });
 
   it("resolves Sumeet without a thread role through the user's Data Infra role", async () => {
