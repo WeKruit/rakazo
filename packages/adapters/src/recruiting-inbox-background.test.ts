@@ -676,6 +676,17 @@ it.each(["campaign", "mailbox", "owner", "role", "source"])(
   },
 );
 
+it("projects mail from a campaign cloned for the role", async () => {
+  // gate d06ea499, send-at-night: a follow-up wave sent from a cloned draft never reached the Inbox.
+  const f = liveFixture();
+  const bound = { ...f.binding, result: { ...f.binding.result, campaignId: uuid(1001) } };
+  f.prisma.externalEffect.findUnique.mockImplementation((async (query: {
+    where: { idempotencyKey: string };
+  }) =>
+    query.where.idempotencyKey.endsWith(`:campaign:${uuid(1000)}`) ? f.binding : bound) as never);
+  await f.projectLive();
+  expect(db.projectRecruitingInboxMessages).toHaveBeenCalled();
+});
 it("keeps source observation order when newer and then older live reads finish out of order", async () => {
   const f = liveFixture();
   f.observation.observedAt = "2026-10-24T00:00:00.000Z";

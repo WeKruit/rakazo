@@ -206,7 +206,7 @@ describe("live role correspondence", () => {
     });
     expect(await open()).toEqual(["calendar:third"]);
   });
-  it("looks up the role's mail campaigns by their exact keys", async () => {
+  it("looks up only this role's mail campaigns", async () => {
     const { prisma } = fixture();
     const execute = vi.fn(async function* () {
       yield { type: "result", data: { structuredContent: { events: [] } } } as const;
@@ -221,16 +221,11 @@ describe("live role correspondence", () => {
     expect(prisma.externalEffect.findMany).toHaveBeenCalledWith({
       where: {
         spaceId: actor.spaceId,
+        kind: "instantly_role_campaign",
         status: "completed",
-        idempotencyKey: {
-          in: [
-            "instantly-role-campaign:calendar:role",
-            "instantly-role-campaign:calendar:role:history",
-            "instantly-role-campaign:instantly:role",
-            "instantly-role-campaign:instantly:role:history",
-          ],
-        },
+        request: { path: ["roleId"], equals: "role" },
       },
+      orderBy: { createdAt: "asc" },
       select: { idempotencyKey: true, result: true },
     });
   });
@@ -390,6 +385,39 @@ describe("live role correspondence", () => {
     );
     const calls = execute.mock.calls as unknown as [{ args: Record<string, unknown> }][];
     expect(calls.map((call) => call[0].args.campaign_id)).toEqual([campaignId, imported]);
+  });
+  it("reads a campaign cloned for the role, once, and no other source's", async () => {
+    // gate d06ea499, send-at-night: a follow-up wave went out from a cloned draft and its mail
+    // never reached the Inbox.
+    const { prisma } = fixture();
+    const clone = "00000000-0000-4000-8000-000000000010";
+    vi.mocked(prisma.externalEffect.findMany).mockResolvedValueOnce([
+      { idempotencyKey: "instantly-role-campaign:instantly:role", result: { campaignId } },
+      {
+        idempotencyKey: `instantly-role-campaign:instantly:role:campaign:${campaignId}`,
+        result: { campaignId },
+      },
+      {
+        idempotencyKey: `instantly-role-campaign:instantly:role:campaign:${clone}`,
+        result: { campaignId: clone },
+      },
+      {
+        idempotencyKey: "instantly-role-campaign:elsewhere:role:campaign:x",
+        result: { campaignId: "00000000-0000-4000-8000-000000000011" },
+      },
+    ] as never);
+    const execute = vi.fn(async function* () {
+      yield { type: "result", data: { structuredContent: { items: [] } } } as const;
+    });
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      { ...actor, userId: "cloned-campaign" },
+      { roleId: "role", threadId: "thread", view: "inbox", pageEnd: 50 },
+      [source("instantly")],
+      empty(),
+    );
+    const calls = execute.mock.calls as unknown as [{ args: Record<string, unknown> }][];
+    expect(calls.map((call) => call[0].args.campaign_id)).toEqual([campaignId, clone]);
   });
   it.each(["calendar", "cal"] as const)(
     "rejects malformed %s provider identities before generating event keys",
