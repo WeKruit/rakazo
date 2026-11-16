@@ -16825,11 +16825,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A recruiter clicked Send on a saved reply: replay the native approved request now,
         // before any model call. The regular tool path still owns preflight, claim and receipt.
         let sentReplyDirectly = false;
+        const sendOutcomes: string[] = [];
         while (approvedEffectReplays.nextToolName()) {
           const request = approvedEffectReplays.nextRequest();
           const direct = boundDirectApprovalDetails(request, CATALOG_APPROVAL_TOOL);
           const catalog = catalogApprovalDetails(request, CATALOG_APPROVAL_TOOL);
           const operation = (direct?.route ?? catalog?.route)?.toolName;
+          // A confirmed send card goes out now too: on resume the model may call other tools
+          // first and never replay it (gate ce4a9c24: the run failed and nothing was sent).
+          if (operation === "native_instantly_activate_campaign") {
+            const effect = approvedEffects.find((entry) => entry.request === request)!;
+            const outcome = await applyTool(
+              catalog?.toolName ?? approvedEffectReplays.nextToolName()!,
+              catalog?.args ?? direct?.args ?? {},
+              `send-approval:${effect.id}`,
+            );
+            if (approvedEffectReplays.nextRequest() === request) break;
+            sendOutcomes.push(
+              `The recruiter confirmed the send card and that approved send already ran just now, before this turn, with the result below; never call activate_campaign for it again (an error in it means nothing was sent). Result: ${redactSecrets(JSON.stringify(outcome), runSecrets).slice(0, 4_000)}`,
+            );
+            continue;
+          }
           const result = approvedEffects.find((effect) => effect.request === request)?.result;
           if (
             !result ||
@@ -16931,8 +16947,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
         }
         if (sentReplyDirectly) probeFoundNothing = true;
         const prompt = [
-          ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
+          ...promptParts.filter(
+            (part) =>
+              part !== approvalContinuation ||
+              !(
+                sentReplyDirectly ||
+                (sendOutcomes.length && !approvedEffectReplays.nextToolName())
+              ),
+          ),
           replyOutcome,
+          ...sendOutcomes,
         ]
           .filter(Boolean)
           .join("\n\n");
