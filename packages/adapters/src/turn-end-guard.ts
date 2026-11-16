@@ -3,6 +3,7 @@ import { unbackedClaim, unbackedClaimNote } from "./claim-receipts.js";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
+  asksForOutreach,
   classifyTurnEnd,
   type TurnEndClass,
   turnEndPromise,
@@ -12,6 +13,7 @@ import {
 } from "@rakazo/core";
 import { type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { askedForRoleInsteadOfOpening, OPEN_DESCRIBED_ROLE_RETRY } from "./intake-open-fields.js";
 import type { ExecutorDeps } from "./executor.js";
 import type { TextJudge } from "./judge.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
@@ -800,6 +802,17 @@ export async function planDeclineRetry(
     (await recentContinues()) < 1
   )
     return { sentence: "", note: RECORDS_NARRATED_RETRY };
+  // Kruit's own chat opens a role the recruiter described; the role's team searches first.
+  if (
+    input.groupId?.startsWith("recruiting-global-") &&
+    !input.handedIn &&
+    !input.blocks.some((block) => CARD_KINDS.has(block.kind)) &&
+    !input.tools.some((tool) => tool.name === "start_role" || tool.name === "delegate_to_role") &&
+    !asksForOutreach(input.personRequest ?? input.request) &&
+    askedForRoleInsteadOfOpening(input.personRequest ?? input.request, input.reply) &&
+    (await recentContinues()) < 1
+  )
+    return { sentence: "", note: OPEN_DESCRIBED_ROLE_RETRY };
   // A template the recruiter asked for keeps {{firstName}} but no [bracketed] blanks, and it is
   // the recruiter's email to the candidate, never the candidate's note to an interviewer.
   const asked = input.personRequest ?? input.request;
