@@ -15237,10 +15237,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             // Staging 11-15: the lead handed a held round to the Reviewer as a chat turn, which held
             // the conversation while the check could not run, and the round was never shown.
-            if (typeof args.bot_id === "string" && thread.activeRecruitingRoleId) {
-              const target = await deps.prisma.bot
-                .findUnique({ where: { id: args.bot_id }, select: { name: true, spawnKey: true } })
-                .catch(() => null);
+            // Staging 11-16: two handoffs named the Reviewer by confirm_name alone and got through.
+            if (
+              (typeof args.bot_id === "string" || typeof args.confirm_name === "string") &&
+              thread.activeRecruitingRoleId
+            ) {
+              const target =
+                typeof args.bot_id === "string"
+                  ? await deps.prisma.bot
+                      .findUnique({
+                        where: { id: args.bot_id },
+                        select: { name: true, spawnKey: true },
+                      })
+                      .catch(() => null)
+                  : { name: String(args.confirm_name), spawnKey: null };
               if (
                 target &&
                 recruitingBotKey(target) === "reviewer" &&
