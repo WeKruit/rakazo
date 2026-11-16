@@ -175,7 +175,8 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
       recordHistoryCompactAttemptsExhausted(job, error);
       // The queue will not try this job again: one error line the deployment owner can alert on.
       // Runs are not lost with it; the reconciler re-queues any run still waiting.
-      if (job.attempts >= job.max_attempts)
+      // history.compact already logs its own permanent failure above.
+      if (job.attempts >= job.max_attempts && job.task_identifier !== "history.compact")
         getLogger().error("job.exhausted", error, {
           "job.type": job.task_identifier,
           "job.attempts": job.attempts,

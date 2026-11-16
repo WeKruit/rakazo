@@ -485,6 +485,14 @@ describe("GraphileJobWorkerHost runner lifecycle", () => {
         "job.max_attempts": HISTORY_COMPACT_MAX_ATTEMPTS,
         error: expect.objectContaining({ message: "The operation was aborted due to timeout" }),
       }),
+      // Any other job that used its last attempt leaves one line to alert on.
+      expect.objectContaining({
+        level: "error",
+        message: "job.exhausted",
+        "job.type": "run.continue",
+        "job.attempts": 25,
+        error: expect.objectContaining({ message: "handler failed" }),
+      }),
     ]);
   });
 
