@@ -2,9 +2,12 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 
 const listRecruitingCandidates = vi.fn();
+const createThreadMessageInTransaction = vi.fn(async () => ({ id: "steer-message" }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof import("@rakazo/db")>()),
   listRecruitingCandidates: (...args: unknown[]) => listRecruitingCandidates(...args),
+  createThreadMessageInTransaction: (...args: unknown[]) =>
+    createThreadMessageInTransaction(...(args as [])),
 }));
 
 const {
@@ -90,6 +93,8 @@ function fixture(options: {
     thread: { updateMany: vi.fn(async () => ({ count: 1 })) },
     run: { findFirst: vi.fn(async () => null), create: runCreate },
     task: { create: taskCreate },
+    message: { findFirst: vi.fn(async () => null) },
+    steeringMessage: { create: vi.fn(async () => ({ id: "steering" })) },
   };
   const prisma = {
     thread: { findUnique: vi.fn(async () => thread) },
@@ -336,6 +341,34 @@ describe("startRecruitingGrading", () => {
       }),
     });
     expect(promptOf(f)).toContain("Everyone in it fits.");
+    // Staging 11-16 (7838c505): the check ended while the lead was answering "where's round 2?",
+    // the start found the conversation busy, and the checked round waited 3.5 min for a free
+    // moment. As a teammate's report joins the lead's running turn (S4), so does the round.
+    const answering = fixture({
+      found: [person("fits")],
+      graded: ["linkedin:/in/fits"],
+      rounds: round(["linkedin:/in/fits"]),
+      roundGrades: [
+        { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
+      ],
+    });
+    answering.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    answering.tx.run.findFirst.mockImplementation((async ({ where }: { where: object }) =>
+      "botId" in where && (where as { botId: string }).botId === "lead"
+        ? { id: "lead-turn" }
+        : null) as never);
+    await startRecruitingGrading(answering.deps, { threadId: "thread" }, now);
+    expect(answering.runCreate).not.toHaveBeenCalled();
+    expect(answering.tx.steeringMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ runId: "lead-turn", botId: "lead" }),
+    });
+    expect(createThreadMessageInTransaction).toHaveBeenCalledWith(
+      answering.tx,
+      expect.objectContaining({
+        clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
+        blocks: [expect.objectContaining({ kind: "handoff", toBotId: "lead" })],
+      }),
+    );
     // The check's end is stored before the lead is asked to show the round.
     expect(f.prisma.recruitingCalibrationRound.updateMany).toHaveBeenCalledWith({
       where: { id: "round-2", version: 0, status: "checking" },

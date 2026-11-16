@@ -6,6 +6,7 @@ import { recruitingBotKey } from "@rakazo/core";
 import type { CalibrationRoundStatus, PrismaClient } from "@rakazo/db";
 import {
   calibrationRoundStatus,
+  createThreadMessageInTransaction,
   listRecruitingCandidates,
   markCalibrationRoundChecked,
   RECRUITING_GRADE_NONCE_PREFIX,
@@ -483,13 +484,18 @@ export async function startRecruitingGrading(
       // Once per recruiter message, so the corrected round is never corrected again on its own.
       const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
       const open = misfits.length + Math.max(0, 10 - review.round.candidateKeys.length);
-      const runId = await startLeadRun(deps, thread, clientNonce, async () =>
-        roundReviewPrompt(
-          review.round.round,
-          misfits,
-          review.round.candidateKeys.length,
-          await roundReplacements(deps.prisma, role.id, open),
-        ),
+      const runId = await startLeadRun(
+        deps,
+        thread,
+        clientNonce,
+        async () =>
+          roundReviewPrompt(
+            review.round.round,
+            misfits,
+            review.round.candidateKeys.length,
+            await roundReplacements(deps.prisma, role.id, open),
+          ),
+        grader?.botId,
       );
       if (runId) {
         getLogger().info("recruiting.round.review", {
@@ -682,6 +688,8 @@ async function startLeadRun(
   },
   clientNonce: string,
   prompt: () => Promise<string>,
+  /** The teammate whose result this is: it joins the lead's running turn instead of waiting. */
+  from?: string,
 ): Promise<string | null> {
   const lead = thread.groupId
     ? (
@@ -705,6 +713,37 @@ async function startLeadRun(
       data: { nextEventSeq: { increment: 0 } },
     });
     if (!locked.count) return null;
+    // Staging 11-16: the check ended while the lead answered "where's round 2?", and the checked
+    // round waited minutes for a free moment. As a teammate's report joins the lead's running
+    // turn (reliability plan S4, as Workloop steers a child's result), so does this one; a turn
+    // that ends before reading it is continued with it.
+    const working = from
+      ? await tx.run.findFirst({
+          where: { threadId: thread.id, botId: lead, status: { in: ["leased", "running"] } },
+          orderBy: { createdAt: "desc" },
+          select: { id: true },
+        })
+      : null;
+    if (from && working) {
+      if (
+        await tx.message.findFirst({
+          where: { threadId: thread.id, clientNonce },
+          select: { id: true },
+        })
+      )
+        return null;
+      const message = await createThreadMessageInTransaction(tx, {
+        threadId: thread.id,
+        role: "bot",
+        botId: from,
+        blocks: [{ kind: "handoff", fromBotId: from, toBotId: lead, text }],
+        clientNonce,
+      });
+      await tx.steeringMessage.create({
+        data: { messageId: message.id, botId: lead, userId: thread.userId, runId: working.id },
+      });
+      return { id: working.id, steered: true };
+    }
     const [existing, running] = await Promise.all([
       tx.run.findFirst({ where: { spaceId: thread.spaceId, clientNonce }, select: { id: true } }),
       tx.run.findFirst({
@@ -735,13 +774,14 @@ async function startLeadRun(
         clientNonce,
       },
     });
-    return run.id;
+    return { id: run.id, steered: false };
   });
   if (!runId) return null;
-  await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
+  if (runId.steered) return runId.id;
+  await deps.jobs.enqueue(runContinueJob(runId.id)).catch(() => {
     getLogger().warn("recruiting lead run deferred to reconciliation");
   });
-  return runId;
+  return runId.id;
 }
 
 export { RECRUITING_ROUND_REVIEW_NONCE_PREFIX };
