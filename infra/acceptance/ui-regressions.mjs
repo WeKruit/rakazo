@@ -13,7 +13,7 @@
 //   greeting   A greeting in a role team with no role saves no role, asks no role question,
 //              and the next unrelated message starts no people search.
 //   onemail    One request to Kruit for an email reply shows one Send card, not two. The card
-//              is discarded at the end; nothing is sent.
+//              and any left by an earlier run are discarded, pass or fail; nothing is sent.
 //   reminder   The corner reminder never covers the composer in a role chat.
 //   twochats   Kruit with no role open shows one chat; a role's chat shows Kruit beside it, and
 //              each pane says which conversation it is. Read-only.
@@ -378,6 +378,31 @@ try {
         }
       }
     };
+    // Discards, without sending, every waiting reply card whose body matches: a card left by an
+    // earlier run makes Kruit rightly refuse a second card for the same email.
+    const discard = async (match) => {
+      for (const message of await messages(role.id).catch(() => []))
+        for (const block of message.blocks ?? [])
+          if (
+            block.kind === "ask" &&
+            (!block.status || block.status === "pending") &&
+            message.runId &&
+            match.test(block.mailReply?.body ?? "")
+          )
+            await rpc("threads/answer", {
+              groupId: role.id,
+              runId: message.runId,
+              messageId: message.id,
+              answer: "deny",
+            }).catch(() => {});
+    };
+    await discard(/Regression check \S+m\. Test note/);
+    try {
+      await sendAndCount();
+    } finally {
+      await discard(new RegExp(`Regression check ${mailTag}\\.`));
+    }
+    async function sendAndCount() {
     await rpc("threads/send", {
       groupId: kruit.id,
       addressing: "coordinator",
@@ -414,28 +439,6 @@ try {
     }, mailTag);
     await sleep(1_000);
     await page.screenshot({ path: path.join(OUT, "onemail.png") }).catch(() => {});
-    // Clean up without sending: discard every card this check made.
-    for (let left = found.length; left > 0; left -= 1) {
-      const marked = await page.evaluate((mark) => {
-        for (const old of document.querySelectorAll("[data-onemail-discard]"))
-          old.removeAttribute("data-onemail-discard");
-        for (const area of document.querySelectorAll("textarea")) {
-          if (!area.value.includes(mark)) continue;
-          for (let box = area.parentElement; box; box = box.parentElement) {
-            const discard = [...box.querySelectorAll("button")].find(
-              (button) => button.textContent.trim() === "Discard" && !button.disabled,
-            );
-            if (discard) {
-              discard.setAttribute("data-onemail-discard", "1");
-              return true;
-            }
-          }
-        }
-        return false;
-      }, mailTag);
-      if (!marked) break;
-      await page.locator('[data-onemail-discard="1"]').first().click();
-      await sleep(3_000);
     }
   });
 
