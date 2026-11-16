@@ -123,6 +123,10 @@ export function claimsIn(text: string): Claim[] {
   return found;
 }
 
+/** An edit of an email or template ("最终版已更新", "the template was updated"), not a save. */
+const DRAFT_EDIT =
+  /(?:版|稿|模板|邮件|正文|主题)[^，。]{0,8}(?:已(?:经)?更新|更新(?:了|好))|已(?:经)?更新[^，。]{0,8}(?:版|稿|模板|邮件)|\b(?:template|draft|email|version|subject|body)\b[^.,]{0,20}\b(?:was|is|has been|been)\s+updated\b|\bupdated\s+(?:the\s+)?(?:template|draft|email|version)\b/i;
+
 /**
  * The first claim no result of this turn backs: its kind of work did not return, and no read or
  * teammate's report this turn carries it, or the number it states appears in no result. A status
@@ -131,9 +135,12 @@ export function claimsIn(text: string): Claim[] {
 export function unbackedClaim(
   text: string,
   receipts: Receipts,
-  options: { question?: boolean } = {},
+  options: { question?: boolean; draftShown?: boolean } = {},
 ): Claim | undefined {
   return claimsIn(text).find((claim) => {
+    // The email the chat shows is the receipt of an edit to it: no tool writes a chat draft.
+    if (options.draftShown && claim.kind === "saved" && DRAFT_EDIT.test(claim.sentence))
+      return false;
     const spec = CLAIMS.find((entry) => entry.kind === claim.kind)!;
     const backed =
       spec.backs.some((work) => receipts.work.has(work)) ||

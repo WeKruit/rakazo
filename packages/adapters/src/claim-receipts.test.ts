@@ -58,6 +58,19 @@ describe("unbackedClaim", () => {
     expect(unbackedClaim("2 sent, none waiting.", read, { question: true })).toBeUndefined();
   });
 
+  // Gate f86204d2 change-mind: 「最终版已更新：base 从 60–80 万改为 70–90 万」 about the email the chat
+  // shows was held as an unbacked save, and the retry answered with role and sequence counts.
+  it("takes an edit of the email the chat shows as backed by that email", () => {
+    const edit = "最终版已更新：base 从 60–80 万改为 70–90 万，并加上每周五 remote。";
+    expect(unbackedClaim(edit, none)?.kind).toBe("saved");
+    expect(unbackedClaim(edit, none, { draftShown: true })).toBeUndefined();
+    expect(
+      unbackedClaim("The template was updated with the new base.", none, { draftShown: true }),
+    ).toBeUndefined();
+    const saved = "The first-outreach template is saved and ready to use in Sequence.";
+    expect(unbackedClaim(saved, none, { draftShown: true })?.kind).toBe("saved");
+  });
+
   // Sim 11-14 send-at-night: a role's ref read as a count sent Kruit to open the role again.
   it("never takes a ref or id for a count", () => {
     expect(claimsIn("Ref 15351 的岗位对话已开好")[0]?.count).toBeUndefined();

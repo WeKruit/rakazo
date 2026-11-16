@@ -861,6 +861,7 @@ import {
   restatesUpdate,
   withoutRepeatedClosing,
   withoutRepastedDraft,
+  withoutRepeatedOpening,
   sameWords,
   TurnReportLedger,
   turnReportText,
@@ -18772,7 +18773,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ),
               )
               .catch(() => []);
-            const pointed = withoutRepastedDraft(closed, shown, steeredText ?? askedNow);
+            // A line the chat already shows, from this bot or a teammate, does not open it again.
+            const pointed = withoutRepeatedOpening(
+              withoutRepastedDraft(closed, shown, steeredText ?? askedNow),
+              shown,
+            );
             if (pointed !== text) {
               text = pointed;
               blocks = blocks.map((block) => (block.kind === "text" ? { ...block, text } : block));
