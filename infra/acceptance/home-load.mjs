@@ -93,9 +93,23 @@ try {
   }
   const page = await context.newPage();
   const errors = [];
+  const pending = [];
   page.on("response", (response) => {
-    if (response.url().includes("/rpc/") && response.status() >= 500)
-      errors.push(`${new URL(response.url()).pathname} ${response.status()}`);
+    if (!response.url().includes("/rpc/") || response.status() < 500) return;
+    const at = new Date().toISOString().slice(11, 19);
+    // The body tells a proxy's dropped connection from a cutover or a refusal, so keep its start.
+    const seen = Promise.race([
+      response.text(),
+      new Promise((resolve) => setTimeout(resolve, 3_000, "")),
+    ])
+      .catch(() => "")
+      .then((body) => {
+        const start = body.replace(/\s+/g, " ").trim().slice(0, 150);
+        errors.push(
+          `${new URL(response.url()).pathname} ${response.status()} at ${at}Z${start ? ` "${start}"` : ""}`,
+        );
+      });
+    pending.push(seen);
   });
   const start = Date.now();
   await page.goto(`${origin}/`, { waitUntil: "commit" });
@@ -194,6 +208,7 @@ try {
       `${ok ? "PASS" : "FAIL"} ${view} ${ms === null ? "never showed" : `shown ${ms} ms`}${ms !== null ? (done === null ? ", roles never finished loading" : `, all roles ${done} ms`) : ""}${broken ? ", shows a load error" : ""}${vendor ? `, shows supplier name "${vendor}"` : ""} (budget ${viewBudget} ms, all roles ${completeBudget} ms)`,
     );
   }
+  await Promise.all(pending);
   if (errors.length) console.log(`server errors: ${[...new Set(errors)].join(", ")}`);
   process.exitCode = homeFailed ? 1 : failed ? 4 : 0;
 } finally {
