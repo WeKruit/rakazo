@@ -585,7 +585,10 @@ describe("loadWorkingState", () => {
       ).then((state) => state.text ?? "");
     expect(await card(null, 10_000)).toContain("Gmail: not connected");
     expect(await card({ id: "gmail-1" }, 10_000)).not.toContain("Gmail: not connected");
-    expect(await card(null, null)).not.toContain("Gmail");
+    // deny-then-change-and-send 11-16: on an account that sends from its outreach mailbox, Kruit
+    // said 「Gmail 尚未连接，邮件无法发出」 and a role run said it had no email connection at all.
+    expect(await card(null, null)).not.toContain("Gmail: not connected");
+    expect(await card(null, null)).toContain("outreach mailbox");
   });
   // team-stuck 11-16: Kruit said "checking" and handed an interview to the team, which found the
   // missing calendar two minutes later; feedback-round 11-16: "34 found" came from an old report.

@@ -59,7 +59,10 @@ type StatePrisma = Pick<
  * then the Connect card 22 s later).
  */
 async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userId: string }) {
-  if (!(await ownMailboxSendingAllowed(prisma, scope))) return undefined;
+  // deny-then-change-and-send 11-16: with no line on how this account sends, Kruit blamed a
+  // missing Gmail and a role run with no mail tools loaded said it had no email connection.
+  if (!(await ownMailboxSendingAllowed(prisma, scope)))
+    return "- How this account's emails go out: from the outreach mailbox the product runs for it, not the recruiter's Gmail, so Gmail is never needed for a send nor the reason one cannot happen. A role's emails go out on their Send card; its sending tools are found with connectors_search_tools group \"instantly\".";
   const gmail = await prisma.mcpServer.findFirst({
     where: {
       spaceId: scope.spaceId,
