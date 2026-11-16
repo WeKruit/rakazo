@@ -459,7 +459,7 @@ export async function startRecruitingGrading(
   if (review && ![...roundUrls].some((url) => waiting.has(url) || !sent.has(url))) {
     const misfits = review.round.candidateKeys.flatMap((key) => {
       const grade = review.grades.get(key);
-      return grade && NOT_FIT_TIERS.has(String(grade.tier)) ? [{ key, ...grade }] : [];
+      return grade && grade.tier !== FIT_TIER ? [{ key, ...grade }] : [];
     });
     // A round held for the Reviewer is shown once it is checked, swapped or not.
     if (review.held) {
@@ -726,8 +726,12 @@ async function startLeadRun(
 
 export { RECRUITING_ROUND_REVIEW_NONCE_PREFIX };
 
-/** Tiers the Reviewer gives someone who misses a hard requirement or whose current work doesn't fit. */
-const NOT_FIT_TIERS = new Set(["Partial"]);
+/**
+ * The tier the Reviewer gives only someone whose profile shows every hard requirement. Staging
+ * 11-16: a checked round kept people whose profiles never showed Kafka, so only 4 of its 10 met
+ * every requirement on a blind full-profile judge.
+ */
+const FIT_TIER = "Strong";
 
 type RoundGrade = {
   name: string | null;
@@ -873,14 +877,14 @@ export function roundReviewPrompt(
   // recruiter's "only 8?" brought a second list. The checked round is filled to ten first.
   const open = misfits.length + Math.max(0, 10 - size);
   return [
-    `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet.${misfits.length ? ` ${misfits.length === 1 ? "This person doesn't" : `These ${misfits.length} people don't`} fit what the recruiter asked for:` : " Everyone in it fits."}`,
+    `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet.${misfits.length ? ` ${misfits.length === 1 ? "This person's profile doesn't" : `These ${misfits.length} people's profiles don't`} show everything the recruiter asked for:` : " Everyone in it fits."}`,
     ...misfits.map((person) => {
       const role = [person.title, person.company].filter(Boolean).join(" at ");
       return `- ${person.name ?? person.key}${role ? `, ${role}` : ""}: ${String(person.tier)} (candidateKey ${person.key})`;
     }),
     "",
     open
-      ? `${misfits.length ? "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). " : ""}Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}: first saved people no round has shown who fit every requirement (recruiting_candidates list), then one quick search for the rest, and one more differently worded search only if places are still open. Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones; fewer than ten only after both searches. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
+      ? `${misfits.length ? "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). " : ""}Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}: first saved people no round has shown who fit every requirement (recruiting_candidates list), then one quick search for the rest, and one more differently worded search only if places are still open. Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones. When both searches leave places open, keep the closest of these people (Promising before Uncertain, never Partial) in them; fewer than ten only when none is left. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
       : "Show it now: record calibration_round with corrects: true and the same people in the same order, with their checks. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
   ].join("\n");
 }
