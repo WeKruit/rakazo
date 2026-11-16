@@ -116,8 +116,12 @@ async function roleTarget(
   return { kind: "bot", botId: bot.id, threadId: role.threadId };
 }
 
-/** Roles whose mail was read live this recently are not read again when the Inbox opens. */
-const REFRESH_EVERY_MS = 2 * 60_000;
+/**
+ * Roles whose mail was read live this recently are not read again when the Inbox opens. Short, so
+ * looking again a minute after a send reads the mail service again (gate 63c860bb, send-at-night:
+ * a second look inside two minutes showed nothing new).
+ */
+const REFRESH_EVERY_MS = 30_000;
 const SENDING_ROLES = 5;
 const refreshedAt = new Map<string, number>();
 
