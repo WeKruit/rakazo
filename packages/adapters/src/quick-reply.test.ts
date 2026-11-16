@@ -120,6 +120,16 @@ describe("quick reply", () => {
     expect(cleanQuickReply("好，现在发出。", "直接发吧")).toBe("好，这就处理。");
   });
 
+  // Honest-limits plays on c9a6991e: pushed with "你昨天明明说发了", Kruit conceded a correct answer.
+  // The first line has read nothing new, so it never concedes an earlier answer was wrong.
+  it("never concedes an earlier answer before anything was read again", () => {
+    expect(cleanQuickReply("抱歉，我刚才说错了。", "不对吧，你昨天明明说发了")).toBeNull();
+    expect(cleanQuickReply("Sorry, I was wrong about that.", "you said it was sent")).toBeNull();
+    expect(cleanQuickReply("我再核对一下发送记录。", "不对吧，你昨天明明说发了")).toBe(
+      "我再核对一下发送记录。",
+    );
+  });
+
   it("drops questions, long text and runtime filler", () => {
     expect(cleanQuickReply("你想招哪个职位？")).toBeNull();
     expect(cleanQuickReply("x".repeat(200))).toBeNull();

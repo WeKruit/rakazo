@@ -111,6 +111,11 @@ export function oneLineNote(line: string): boolean {
   return !text.includes("\n") && text.length <= 2 * MAX_REPLY_CHARS;
 }
 
+// "抱歉，我刚才说错了": the first line has read nothing new, so it never concedes an earlier answer
+// (honest-limits plays, c9a6991e: a pushed recruiter got a correct answer retracted).
+const CONCEDES =
+  /抱歉|对不起|说错|弄错|搞错|不准确|不可靠|是错的|\b(?:sorry|apolog\w*|my mistake|i was wrong|i misspoke|incorrect)\b/i;
+
 const GOING_AHEAD: Record<ReplyLanguage, string> = {
   zh: "好，这就处理。",
   ko: "네, 진행할게요.",
@@ -127,7 +132,7 @@ export function cleanQuickReply(raw: string, asked = ""): string | null {
     .replace(/^["'“”「」]+|["'“”「」]+$/g, "")
     .trim();
   if (!line || line.length > MAX_REPLY_CHARS) return null;
-  if (/[?？]$/.test(line) || withoutNudge(line) !== line) return null;
+  if (/[?？]$/.test(line) || withoutNudge(line) !== line || CONCEDES.test(line)) return null;
   // Staging 11-13: "发吧" got 「好，现在发出。」 and then no mailbox was connected. A send can
   // still need a connection or a card, so the first line never says it is going out.
   // A question about the send ("发出去了吗？") is answered by the run: the going-ahead line

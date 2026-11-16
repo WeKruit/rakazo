@@ -658,7 +658,7 @@ describe("a missed requirement is searched for again", () => {
   it("the recruiter's latest words beat the saved brief", () => {
     // Prod 11-10: the card answer "你能听的懂话吗？中文是必须！" got "我按当前岗位记录执行：中文口语不是硬性条件".
     expect(RECRUITING_MISSED_REQUIREMENT).toContain(
-      "The recruiter's latest words always win over the saved brief",
+      "the recruiter's latest words always win over the saved brief",
     );
     expect(RECRUITING_MISSED_REQUIREMENT).toContain("in a card's custom answer");
     expect(RECRUITING_MISSED_REQUIREMENT).toContain(
