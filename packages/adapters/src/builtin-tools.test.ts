@@ -8,10 +8,16 @@ import {
   RecruitingReplyInputSchema,
   RecruitingShortlistToolInputSchema,
 } from "@rakazo/contracts";
-import { RECRUITING_BRIEF_CHECKLIST } from "@rakazo/core";
+import {
+  RECRUITING_BRIEF_CHECKLIST,
+  RECRUITING_DISABLED_BUILTIN_TOOLS,
+  RECRUITING_UNUSED_BUILTIN_TOOLS,
+} from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { builtinAgentTools } from "./builtin-tools.js";
+import { selectBuiltinToolsForRun } from "./executor.js";
+import { normalizeOpenAiToolParameters } from "./openai-tool-parameters.js";
 
 describe("native recruiting approval tool", () => {
   it("offers scoped saved candidate reads as a disableable read-only tool", () => {
@@ -137,5 +143,33 @@ describe("recruiting brief checklist", () => {
     expect(description("recruiting_request_approval")).toContain(
       "run the first calibration round as a quick people search in the same turn; never",
     );
+  });
+});
+
+describe("recruiting tool budget", () => {
+  // Every Kruit call carries these definitions: 40 tools, about 7.7 times its instructions on 11-16.
+  // Workloop pins its prompt the same way (TestPrompt_FitsTheBudget). Lower it, never raise it:
+  // move procedure into skills and rarely used tools behind tool search instead.
+  it("keeps the built-in tools a recruiter turn always carries within budget", () => {
+    const tools = selectBuiltinToolsForRun({
+      graphicalToolsAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: true,
+      messagingChannelRun: false,
+      historyRetrievalEnabled: true,
+      disabledBuiltinTools: [
+        ...RECRUITING_DISABLED_BUILTIN_TOOLS,
+        ...RECRUITING_UNUSED_BUILTIN_TOOLS,
+      ],
+    });
+    const chars = tools.reduce(
+      (total, tool) =>
+        total +
+        (tool.description?.length ?? 0) +
+        JSON.stringify(normalizeOpenAiToolParameters(tool.inputSchema)).length,
+      0,
+    );
+    expect(chars).toBeLessThanOrEqual(92_500);
   });
 });
