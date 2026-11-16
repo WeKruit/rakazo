@@ -277,17 +277,31 @@ async function records(rpc, since, before) {
   const roles = [];
   for (const group of await activeGroupsOf(rpc)) {
     const record = now.get(group.id);
-    if (!record?.campaign) continue;
     const touched = (await messagesOf(rpc, group.id)).some(
       (message) => Date.parse(message.createdAt) >= since,
     );
-    if (touched || JSON.stringify(before.get(group.id)) !== JSON.stringify(record))
-      roles.push(record);
+    // A role chat this play worked in also shows how many people it has saved, so a "found N"
+    // claim is checked against what was stored, not only against sends.
+    const saved =
+      touched && !group.id.startsWith("recruiting-global-") ? await savedPeople(rpc, group) : null;
+    if (record?.campaign && (touched || JSON.stringify(before.get(group.id)) !== JSON.stringify(record)))
+      roles.push(saved === null ? record : { ...record, saved });
+    else if (saved !== null) roles.push({ chat: group.name, saved });
   }
   return roles;
 }
+/** How many people a role chat has saved, as its Results page counts them; null when unreadable. */
+async function savedPeople(rpc, group) {
+  const head = await rpc("threads/head", { groupId: group.id }).catch(() => null);
+  const threadId = head?.threadId ?? group.threadId;
+  if (!threadId) return null;
+  const page = await rpc("recruiting/roleCandidates", { groupId: group.id, threadId, limit: 1 }).catch(
+    () => null,
+  );
+  return page ? page.total : null;
+}
 const CAMPAIGN_CODES =
-  "campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
+  "saved: people the role chat has stored (its Results count); campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
 
 // What the recruiter can read: messages with text, in chats they wrote in or were answered in.
 const visible = (chats) =>
@@ -507,6 +521,17 @@ async function play(journey, label, owner, mailbox, out) {
       const last = turns.at(-1);
       if (screen && last && !last.screen)
         last.screen = { ...screen, text: screen.text.slice(-2500) };
+      // A journey about outages cuts the test environment's outbound network first; without the
+      // switch the play cannot test anything, so it is "not run".
+      if (journey.blip?.beforeTurn === index + 1) {
+        log(`${label}: cutting outbound network for ${journey.blip.seconds} s`);
+        await owner
+          .rpc("deployment/networkBlip", { seconds: journey.blip.seconds })
+          .catch((error) => {
+            throw new InfraError(`no network switch on this environment (${error.message})`);
+          });
+        await new Promise((resolve) => setTimeout(resolve, journey.blip.seconds * 1000));
+      }
       const move = await simulate(journey, turns, render(chats), cards, screen, tag, startedAt);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
@@ -720,7 +745,7 @@ async function answered(rpc, card) {
 // --- The judge ----------------------------------------------------------------------------------
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
-- truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign, role or person missing from them, it is "unknown", never "no"; a candidate name you cannot find in the records is not "invented" (saved search results are not in the records). Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send takes 45–60 minutes to go out: within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
+- truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no", and so is saying people were found, added or saved for a role when its "saved" count after the reply is lower. The records hold only the campaigns the test could read: when a claim is about a campaign, role or person missing from them, it is "unknown", never "no"; a candidate name you cannot find in the records is not "invented" (saved search results are not in the records). Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send takes 45–60 minutes to go out: within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
 - issues: short labels for what went wrong, from: dead end, refused, lecture, repeat (Kruit says the same thing again unprompted or posts a message twice; answering a new or overlapping question with the same fact is not a repeat), wrong language (Kruit's own words not in the recruiter's language; an email or template written for candidates is meant to be English and is never wrong language), false claim, internal jargon, slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), broken email (an email or template Kruit offers as ready contains a question to the recruiter, a "[...]" fill-in, or a sign-off with no name), did not act, asked again (only when Kruit actually asks a question or shows a card that asks about, or asks to confirm, something the recruiter's JD or messages already stated: location, work mode or commute when a city and mode are given, a stated number of years, including asking for a cap on it, or a language requirement when nothing implies a second language; a reply that asks nothing is never asked again; quote where the recruiter said it, and if you cannot, it is not asked again), screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
 - Check every move against the records and against what the page showed after Kruit's reply ("screen"): a claim the screen contradicts (a count, a status, "saved", "sent", a place to click that is not there) is truthful "no". Do not give the benefit of the doubt: an answer that is only "I'll check" or "on it" with nothing after it is "did not act".
 A new role searches first (the product's order): its first people come straight from the JD as written, and at most one short question about something the recruiter left open comes beside them, never before them. Opening the role and saying its team is searching counts as answered when the role chat then shows that search; no question is expected, a question about something already said is "asked again", and a second question is "wordy". When the customer asks for something else (a template, an email), doing it is the right move and no role question is expected.
@@ -854,8 +879,13 @@ function strictBar(verdict, result) {
     !missed.length &&
     !checks.length &&
     !blocking.length;
-  return { checks, falseClaims, missed, blocking, notRun, pass };
+  // A first reply over 30 s is felt as a hang. Report-only until it has passed twice (gate rule).
+  const slowStart = (result?.turns ?? [])
+    .filter((turn) => turn.firstReplySeconds > SLOW_START_SECONDS)
+    .map((turn) => `step ${turn.turn}: first reply after ${turn.firstReplySeconds} s`);
+  return { checks, falseClaims, missed, blocking, notRun, pass, slowStart };
 }
+const SLOW_START_SECONDS = 30;
 
 async function runOne(journey, sample, owner, mailbox) {
   const label = `${journey.name}#${sample}`;
@@ -872,7 +902,10 @@ async function runOne(journey, sample, owner, mailbox) {
     error = caught;
     result ??= caught.partial;
   }
-  const { checks, falseClaims, missed, blocking, notRun, pass } = strictBar(verdict, result);
+  const { checks, falseClaims, missed, blocking, notRun, pass, slowStart } = strictBar(
+    verdict,
+    result,
+  );
   const row = {
     suite: "simulated",
     scenario: journey.name,
@@ -896,6 +929,7 @@ async function runOne(journey, sample, owner, mailbox) {
     paid: Boolean(journey.paid),
     ...(verdict ? { verdict: verdict.verdict } : {}),
     ...(notRun ? { infra: true, notRun: true } : {}),
+    ...(slowStart.length ? { slowStart } : {}),
   };
   fs.writeFileSync(
     path.join(out, "journey.json"),
@@ -913,6 +947,9 @@ async function runOne(journey, sample, owner, mailbox) {
       ? ["## 目标", ...verdict.goals.map((g) => `- ${g.met ? "✓" : "✗"} ${g.goal}：${g.why}`), ""]
       : []),
     ...(checks.length ? ["## 规则检查", ...checks.map((c) => `- ${c}`), ""] : []),
+    ...(slowStart.length
+      ? [`## 首次回复超过 ${SLOW_START_SECONDS} 秒（暂不挡发布）`, ...slowStart.map((s) => `- ${s}`), ""]
+      : []),
     "## 每一步",
     "| # | 客户 | 首次回复 | 回答了 | 属实 | 问题 | 截图 |",
     "|---|---|---|---|---|---|---|",
