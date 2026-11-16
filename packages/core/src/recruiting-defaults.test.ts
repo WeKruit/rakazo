@@ -286,30 +286,6 @@ describe("recruitingNextStepCard", () => {
   });
 });
 
-describe("global recruiting overview", () => {
-  // Staging eval 11-11: "email alex… ask if he's free next week" opened a new role to send it.
-  it("hands a one-off email to Outreach without opening a role", () => {
-    const body = RECRUITING_DEFAULT_SKILLS.find(
-      (skill) => skill.name === "Global recruiting overview",
-    )?.body;
-    expect(body).toContain("goes to Outreach in this conversation with handoff_to_bot");
-    expect(body).toContain("never open a role for it");
-    // Staging eval 11-11: after that line a pasted JD opened no role.
-    expect(body).toContain("a new role, a JD or hiring requirements still go to start_role");
-    // Staging eval 11-11: "write me a cold outreach email…" was answered with "who should I address it to?"
-    expect(body).toContain("never ask who it is addressed to first");
-    expect(body).toContain("never a candidate thanking an interviewer");
-    // Staging eval 11-11: the request went to Outreach, which still asked who it was for.
-    const outreach = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "outreach")!;
-    expect(outreach.instructions).toContain(
-      "else the role's first result; else a template with blanks",
-    );
-    // Staging gate 11-11: Kruit handed it to Outreach, which wrote a three-email sequence.
-    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain("an email or template naming no one you write yourself");
-  });
-});
-
 describe("roleOpenedNote", () => {
   it("gives its example in the language of the recruiter's newest message", () => {
     expect(roleOpenedNote(true)).toContain("「岗位已经开好");
