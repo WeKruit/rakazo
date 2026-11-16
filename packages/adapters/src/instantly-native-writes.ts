@@ -1013,7 +1013,7 @@ export function queuePace(
   }
   if (overdue)
     return `queued with the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}. ${IN_MINUTES}`;
-  return `sending now, not held for a later time: queued with the mail service, the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
+  return `sending now, not held for a later time: queued with the mail service, the first email can take up to an hour to leave because the mail service starts each new send on its own schedule and nothing here can hurry it, so asking again or sending now does not make it sooner (tell the recruiter so, with that reason, and that it is already queued, not just started), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
 }
 /** One role's campaign record is changed by one call at a time: saves, adds and sends. */
 const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
