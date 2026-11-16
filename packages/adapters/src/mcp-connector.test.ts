@@ -5870,6 +5870,21 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(write).toBeLessThan(activate);
       });
 
+      it("saves one email for each named person when written as one step each", async () => {
+        // Gate 426d09b9, stop-after-approve: two people's emails in one save were refused, Kruit
+        // saved only Noah's, and the card left Ada out though the recruiter named both.
+        const { f, binding } = await roleWithSixteen();
+        const P0 = { subject: "P0, a data role", body: "Hi P0,\n\nA role in Seattle." };
+        const out = f.result(
+          await f.run("ensure_role_campaign", {
+            steps: [OWN, P0],
+            recipients: ["Abe Stone", "p0@x.test"],
+          }),
+        );
+        expect(out).toMatchObject({ ownEmailSavedFor: ["abe@x.test", "p0@x.test"] });
+        expect(binding.result).toMatchObject({ drafts: { "abe@x.test": OWN, "p0@x.test": P0 } });
+      });
+
       it("fills {{firstName}} for each person when one email is saved for several", async () => {
         const { f, binding } = await roleWithSixteen();
         const out = f.result(
@@ -6030,7 +6045,7 @@ describe("local native Instantly campaign and lead tools", () => {
           }),
         ).toMatch(/No lastName is known for P0/);
         expect(await message({ steps: [OWN, OWN], recipients: ["Abe Stone"] })).toMatch(
-          /exactly one step/,
+          /pass one step: .*or one step per recipient/,
         );
         expect(await message({ steps: [OWN], recipients: ["nobody@x.test"] })).toMatch(
           /Ask the recruiter one question: which person they mean/,

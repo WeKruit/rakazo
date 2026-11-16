@@ -179,7 +179,7 @@ const EnsureRoleCampaignInput = z.strictObject({
     "Change when emails may go out; a sending campaign keeps sending in the new hours.",
   ),
   recipients: Recipients.describe(
-    "Save steps (one step: the first email written for them) as only these people's own email, each one's email, full name, or 'Full Name <email>' (which also gives {{firstName}} its name); a candidate of this role with a saved email, or an email the recruiter typed for someone not in Results, who is not in the campaign yet is added first. Everyone else keeps the role's email.",
+    "Save steps (one step: the first email written for them, or one step per person in the same order: each one's own email) as only these people's own email, each one's email, full name, or 'Full Name <email>' (which also gives {{firstName}} its name); a candidate of this role with a saved email, or an email the recruiter typed for someone not in Results, who is not in the campaign yet is added first. Everyone else keeps the role's email.",
   ),
 });
 const AddShortlistLeadsInput = z.strictObject({
@@ -1850,6 +1850,34 @@ async function ensureRoleCampaign(
             (entry) => entry.campaign.id !== mappedId && (!campaign || entry.leads),
           );
     if (campaign && !better) {
+      // One step per named person is each one's own email, saved in turn (gate 426d09b9: the
+      // pair was refused, only Noah's was saved and the card left Ada out).
+      const steps = input.steps ?? [];
+      if (
+        input.recipients &&
+        input.recipients.length > 1 &&
+        steps.length === input.recipients.length
+      ) {
+        const each = [];
+        for (const [index, recipient] of input.recipients.entries()) {
+          const current = (await readBinding(prisma, context, key)) ?? existing;
+          const live = index ? await rest("GET", `/campaigns/${mappedId}`) : campaign;
+          const saved = await saveOwnEmail(prisma, rest, current, live, {
+            ...input,
+            steps: [steps[index]!],
+            recipients: [recipient],
+          });
+          if (saved.unmatched) return addThenSave(saved.unmatched);
+          each.push(saved);
+        }
+        return {
+          campaignId: existing.binding.campaignId,
+          ownEmailSavedFor: each.flatMap((saved) => saved.ownEmailSavedFor ?? []),
+          ...(each.every((saved) => saved.unchanged) ? { unchanged: true } : {}),
+          next: each.at(-1)?.next,
+          ...(added?.length ? { addedToCampaign: added } : {}),
+        };
+      }
       if (input.recipients) {
         const saved = await saveOwnEmail(prisma, rest, existing, campaign, input);
         if (saved.unmatched) return addThenSave(saved.unmatched);
@@ -2188,7 +2216,7 @@ async function saveOwnEmail(
   const [own, ...more] = input.steps ?? [];
   if (!own || more.length)
     throw new Error(
-      "With recipients, pass exactly one step: the first email written for them, with its subject and full body.",
+      "With recipients, pass one step: the first email written for them, with its subject and full body; or one step per recipient, in the same order, for each one's own email.",
     );
   const { binding } = existing;
   const leads = await allLeads(rest, binding.campaignId);
