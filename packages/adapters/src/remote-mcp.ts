@@ -17,6 +17,7 @@ import {
   type ResolveHostname,
   withPinnedDnsLookup,
 } from "./network-address.js";
+import { sharedAgent } from "./shared-dispatcher.js";
 import { dispatcherFetch, fetchPairedWithDispatcher } from "./undici-fetch.js";
 
 const MAX_MCP_TOOLS = 250;
@@ -202,7 +203,13 @@ export function createSafeRemoteFetch(
   resolve: ResolveHostname = resolveHostname,
   policy: RemoteUrlPolicy = {},
 ): SafeRemoteFetch {
-  const dispatcher = new Agent({ connect: { lookup: createSafeLookup(resolve, policy) } });
+  // The process's own resolver shares one pool per policy; an injected resolver (tests,
+  // emulators) gets a pool of its own that close() releases.
+  const shared = resolve === resolveHostname;
+  const connect = { lookup: createSafeLookup(resolve, policy), timeout: CONNECT_TIMEOUT_MS };
+  const dispatcher = shared
+    ? sharedAgent(`public:${policy.allowPrivateEndpoint === true}`, connect)
+    : new Agent({ connect });
   // Injected fetches are not given this Agent; they keep the original hostname
   // for TLS/SNI and pin TCP to the already-validated address through dns.lookup.
   const usePackageFetch = fetchPairedWithDispatcher(baseFetch) === dispatcherFetch;
@@ -214,14 +221,16 @@ export function createSafeRemoteFetch(
     let response: Response;
     try {
       const requestInit = { ...init, redirect: "manual" as const };
-      response = usePackageFetch
-        ? await dispatcherFetch(url, {
-            ...requestInit,
-            dispatcher,
-          } as RequestInit & { dispatcher: Agent })
-        : await withPinnedDnsLookup(url.hostname, addresses, () =>
-            baseFetch!(url, requestInitWithHost(url, requestInit)),
-          );
+      const send = () =>
+        usePackageFetch
+          ? dispatcherFetch(url, {
+              ...requestInit,
+              dispatcher,
+            } as RequestInit & { dispatcher: Agent })
+          : withPinnedDnsLookup(url.hostname, addresses, () =>
+              baseFetch!(url, requestInitWithHost(url, requestInit)),
+            );
+      response = await retryUnsentRequest(send, init);
     } catch (error) {
       const detail = transportFailureDetail(error);
       throw new Error(`Could not reach ${url.host}${detail ? `: ${detail}` : ""}`, {
@@ -234,7 +243,7 @@ export function createSafeRemoteFetch(
     return response;
   };
   const result = safeFetch as SafeRemoteFetch;
-  result.close = () => dispatcher.close();
+  result.close = shared ? async () => undefined : () => dispatcher.close();
   return result;
 }
 
@@ -264,9 +273,12 @@ export function createPrivateNetworkFetch(
   baseFetch?: typeof globalThis.fetch,
   resolve: ResolveHostname = resolveHostname,
 ): SafeRemoteFetch {
-  const dispatcher = new Agent({
-    connect: { lookup: createAddressCheckedLookup(resolve, assertPrivateAddresses) },
-  });
+  const shared = resolve === resolveHostname;
+  const connect = {
+    lookup: createAddressCheckedLookup(resolve, assertPrivateAddresses),
+    timeout: CONNECT_TIMEOUT_MS,
+  };
+  const dispatcher = shared ? sharedAgent("private", connect) : new Agent({ connect });
   const usePackageFetch = fetchPairedWithDispatcher(baseFetch) === dispatcherFetch;
   const privateFetch = async (input: string | URL | Request, init?: RequestInit) => {
     if (typeof input !== "string" && !(input instanceof URL)) {
@@ -301,7 +313,7 @@ export function createPrivateNetworkFetch(
     return response;
   };
   const result = privateFetch as SafeRemoteFetch;
-  result.close = () => dispatcher.close();
+  result.close = shared ? async () => undefined : () => dispatcher.close();
   return result;
 }
 
@@ -310,6 +322,64 @@ const MAX_CAUSE_DEPTH = 5;
 /** undici reports refused ports, unreachable hosts, DNS misses and TLS errors
  * alike as `TypeError: fetch failed` and keeps the actionable reason in `cause`
  * (or in the per-address errors of a happy-eyeballs AggregateError). */
+/**
+ * A TCP connect normally takes well under a second; the container's network sometimes drops
+ * every new connection for a few seconds, and the default 10 s wait then holds a reply.
+ */
+const CONNECT_TIMEOUT_MS = 5_000;
+/** Waits before each retry of a request that never left the container. */
+const CONNECT_RETRY_DELAYS_MS = [300, 1_000] as const;
+const CONNECT_FAILURE_CODES = new Set([
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+const CONNECT_FAILURE_TEXT =
+  /\b(?:connect (?:ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH)|getaddrinfo EAI_AGAIN|UND_ERR_CONNECT_TIMEOUT|Connect Timeout Error)\b/;
+
+/**
+ * True when the request failed before any connection was made, so the server never saw it.
+ * Such a request is safe to send again (gRPC's "transparent retry"), and the failure says
+ * nothing about the server itself.
+ */
+export function isConnectFailure(error: unknown, depth = 0): boolean {
+  if (depth >= MAX_CAUSE_DEPTH || !(error instanceof Error)) return false;
+  if (
+    error instanceof AggregateError &&
+    error.errors.some((inner) => isConnectFailure(inner, depth + 1))
+  )
+    return true;
+  const { code, syscall } = error as { code?: unknown; syscall?: unknown };
+  if (typeof code === "string" && CONNECT_FAILURE_CODES.has(code)) return true;
+  if (code === "ETIMEDOUT" && syscall === "connect") return true;
+  // A client that rewraps the error keeps only its text, as in "Could not reach <host>: connect …".
+  if (CONNECT_FAILURE_TEXT.test(error.message)) return true;
+  return isConnectFailure(error.cause, depth + 1);
+}
+
+/**
+ * Sends again, after a short backoff, a request that failed before connecting. Only a body the
+ * runtime can send twice is retried; a caller's abort stops the retries.
+ */
+async function retryUnsentRequest(send: () => Promise<Response>, init?: RequestInit) {
+  // Every body type but a stream can be sent again as it was.
+  const resendable = !(init?.body instanceof ReadableStream);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await send();
+    } catch (error) {
+      const delay = CONNECT_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !resendable || init?.signal?.aborted || !isConnectFailure(error))
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay * (0.75 + Math.random() / 2)));
+      if (init?.signal?.aborted) throw error;
+    }
+  }
+}
+
 function transportFailureDetail(error: unknown, depth = 0): string | undefined {
   if (depth >= MAX_CAUSE_DEPTH || !(error instanceof Error)) return undefined;
   if (error instanceof AggregateError) {

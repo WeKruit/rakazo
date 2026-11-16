@@ -163,6 +163,7 @@ export * from "./secrets.js";
 export * from "./sendblue-emulator.js";
 export { SerenityMemoryProvider } from "./serenity-memory-provider.js";
 export * from "./session-admission-runtime.js";
+export { blockNewConnections } from "./shared-dispatcher.js";
 export * from "./skill-tools.js";
 export * from "./slot-replacement.js";
 export * from "./smtp-email.js";

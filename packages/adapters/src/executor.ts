@@ -271,6 +271,7 @@ import {
   getRecruitingCrmTarget,
   hasUnclaimedSteering,
   humanMessageInclude,
+  isRetryableTransactionConflict,
   InvalidSpaceNameError,
   IsolationError,
   isNativeHumanMessage,
@@ -12277,7 +12278,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   await completeEffect(deps, saving.effect.id, "executing", {
                     error: error instanceof Error ? error.message : String(error),
                   });
-                  if (!(error instanceof RecruitingConflictError)) throw error;
+                  // A deadlock rolled the save back; the second attempt saves it again.
+                  if (
+                    !(error instanceof RecruitingConflictError) &&
+                    !isRetryableTransactionConflict(error)
+                  )
+                    throw error;
                 }
               }
             } catch (error) {

@@ -9,6 +9,7 @@ import { InfisicalSecretStore } from "./infisical-secret-store.js";
 import { sequenceConfigurationRevision } from "./instantly-native-writes.js";
 import {
   allowlistDrift,
+  CONNECTION_REFUSED_TTL_MS,
   DISCOVERY_CACHE_TTL_MS,
   DISCOVERY_FAILURE_TTL_MS,
   DISCOVERY_REFRESH_OPERATION,
@@ -2702,7 +2703,7 @@ describe("MCP connector session cache", () => {
           expect(names).toEqual(["mcp__demo__ensure_role_campaign", "mcp__demo__get_weather"]);
         }
         // It is never permanent: after the window the connection is offered and called again.
-        vi.useFakeTimers({ now: Date.now() + DISCOVERY_FAILURE_TTL_MS + 1, toFake: ["Date"] });
+        vi.useFakeTimers({ now: Date.now() + CONNECTION_REFUSED_TTL_MS + 1, toFake: ["Date"] });
         expect((await connector.discoverTools(context as never)).map((t) => t.name)).toContain(
           "mcp__mail__create_draft",
         );
@@ -6149,9 +6150,19 @@ describe("local native Instantly campaign and lead tools", () => {
 
 describe("MCP discovery tool-list cache", () => {
   function fixture() {
-    const state = { failNext: false, initializations: 0, lists: 0 };
+    const state = { failNext: false, unreachable: 0, initializations: 0, lists: 0 };
     const fetch = mcpFetch(state);
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      if (state.unreachable > 0) {
+        state.unreachable -= 1;
+        // What the container's network gives during a burst: the connection never opens.
+        throw new TypeError("fetch failed", {
+          cause: Object.assign(new Error("connect ETIMEDOUT 192.0.2.1:443"), {
+            code: "ETIMEDOUT",
+            syscall: "connect",
+          }),
+        });
+      }
       const request = input instanceof Request ? input : new Request(input, init);
       if (request.method === "POST" && (await request.clone().text()).includes('"tools/list"'))
         state.lists += 1;
@@ -6243,6 +6254,46 @@ describe("MCP discovery tool-list cache", () => {
     } finally {
       await f.connector.close();
       vi.useRealTimers();
+    }
+  });
+
+  it("never hides a server from runs because the background refresh failed", async () => {
+    const f = fixture();
+    try {
+      f.state.failNext = true;
+      const refresh = {
+        ...(f.context as object),
+        operationId: DISCOVERY_REFRESH_OPERATION,
+      } as never;
+      expect(await f.connector.discoverTools(refresh)).toEqual([]);
+      f.state.failNext = false;
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+    } finally {
+      await f.connector.close();
+    }
+  });
+
+  it("connects again when a connection did not open, and forgets that failure within seconds", async () => {
+    const f = fixture();
+    try {
+      // One dropped connection is retried at once and the run still gets its tools.
+      f.state.unreachable = 1;
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      await f.connector.close();
+      const g = fixture();
+      try {
+        // A burst longer than the retries is remembered only briefly, not for the failure TTL.
+        g.state.unreachable = 3;
+        expect(await g.connector.discoverTools(g.context)).toEqual([]);
+        expect(await g.connector.discoverTools(g.context)).toEqual([]);
+        vi.useFakeTimers({ now: Date.now() + DISCOVERY_FAILURE_TTL_MS + 1, toFake: ["Date"] });
+        expect(await g.connector.discoverTools(g.context)).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+        await g.connector.close();
+      }
+    } finally {
+      await f.connector.close();
     }
   });
 

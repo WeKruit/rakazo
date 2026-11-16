@@ -105,7 +105,9 @@ image = (
     volumes={"/data": files},
     env={"MODAL_APP_NAME": APP_NAME, "MODAL_SECRET_NAME": SECRET_NAME, "MODAL_VOLUME_NAME": VOLUME_NAME,
          "MODAL_ENVIRONMENT": MODAL_ENVIRONMENT,
-         "RAKAZO_RELEASE_PROFILE": RELEASE_PROFILE, "RAKAZO_GIT_SHA": SOURCE_REVISION},
+         "RAKAZO_RELEASE_PROFILE": RELEASE_PROFILE, "RAKAZO_GIT_SHA": SOURCE_REVISION,
+         # Only the test environment lets the owner inject a network blip for reliability plays.
+         "FAULT_INJECTION": "true" if MODAL_ENVIRONMENT == "test" else "false"},
     port=8000,
     compute_region="us-west",
     unauthenticated=True,  # Native Better Auth protects application/API routes.

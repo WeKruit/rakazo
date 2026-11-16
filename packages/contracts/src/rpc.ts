@@ -503,6 +503,10 @@ export const appContract = {
         }),
       )
       .output(z.object({ userId: Id, mailbox: z.string() })),
+    /** Test environment only: new outside connections fail for this long, as in a network blip. */
+    networkBlip: oc
+      .input(z.object({ seconds: z.number().int().min(1).max(300) }))
+      .output(z.object({ until: z.string() })),
   },
   /**
    * Deployment-owner product updates. When the Compose updater sidecar is reachable, these proxy

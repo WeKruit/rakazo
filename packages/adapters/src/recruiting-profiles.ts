@@ -15,6 +15,7 @@ import {
   listRunToolResults,
   saveRecruitingSavedProfile,
   saveRecruitingSavedProfiles,
+  withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { inlineProfilePhotos, linkedinPhotoUrl } from "./profile-photo.js";
@@ -1066,36 +1067,45 @@ export async function projectRecruitingCandidateProfiles(
       : [];
   });
   const key = `recruiting-profile-project:${page.effectId}:${page.artifactHash}`;
-  const authorized = async (tx: Pick<PrismaClient, "$queryRaw">) => {
-    const rows = await tx.$queryRaw<
-      Array<{ id: string }>
-    >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,t,sm`;
+  // The transaction that appends the change event updates the conversation row, so it takes
+  // that row's write lock up front: a shared lock upgraded later deadlocks against live runs
+  // appending their own events to the same conversation.
+  const authorized = async (tx: Pick<PrismaClient, "$queryRaw">, appendsEvent = false) => {
+    const rows = appendsEvent
+      ? await tx.$queryRaw<
+          Array<{ id: string }>
+        >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,sm FOR NO KEY UPDATE OF t`
+      : await tx.$queryRaw<
+          Array<{ id: string }>
+        >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,t,sm`;
     return rows.length === 1;
   };
   // Membership and the current role stay locked only for writes, never while fetching pixels.
-  const marker = await prisma.$transaction(async (tx) => {
-    if (!(await authorized(tx))) return null;
-    const marker = await tx.externalEffect.upsert({
-      where: { idempotencyKey: key },
-      create: {
-        spaceId,
-        runId: run.id,
-        kind: "recruiting_profile_projection",
-        idempotencyKey: key,
-        status: "executing",
-        request: {
-          pageEffectId: page.effectId,
-          roleId: page.roleId,
-          roleRevisionId: page.roleRevisionId,
-          artifactHash: page.artifactHash,
+  const marker = await withTransactionRetry(() =>
+    prisma.$transaction(async (tx) => {
+      if (!(await authorized(tx))) return null;
+      const marker = await tx.externalEffect.upsert({
+        where: { idempotencyKey: key },
+        create: {
+          spaceId,
+          runId: run.id,
+          kind: "recruiting_profile_projection",
+          idempotencyKey: key,
+          status: "executing",
+          request: {
+            pageEffectId: page.effectId,
+            roleId: page.roleId,
+            roleRevisionId: page.roleRevisionId,
+            artifactHash: page.artifactHash,
+          },
         },
-      },
-      update: {},
-    });
-    if (marker.status === "completed") return null;
-    await saveRecruitingSavedProfiles(tx, actor, run.id, entries);
-    return marker;
-  });
+        update: {},
+      });
+      if (marker.status === "completed") return null;
+      await saveRecruitingSavedProfiles(tx, actor, run.id, entries);
+      return marker;
+    }),
+  );
   if (!marker) return;
   const profiles = entries.length
     ? await prisma.recruitingSavedProfile.findMany({
@@ -1133,29 +1143,31 @@ export async function projectRecruitingCandidateProfiles(
       ? [{ ...item, photo: item.profile_image_url }]
       : [],
   );
-  const event = await prisma.$transaction(async (tx) => {
-    if (!(await authorized(tx))) return null;
-    if (copied.length)
-      await tx.$executeRaw`UPDATE recruiting_saved_profiles p SET profile=jsonb_set(p.profile,'{profileImageUrl}',to_jsonb(copy.photo)),"updatedAt"=now() FROM jsonb_to_recordset(${JSON.stringify(copied)}::jsonb) AS copy("personKey" text,"sourceEffectId" text,"fetchedAt" text,source text,photo text) WHERE p."ownerUserId"=${userId} AND p."spaceId"=${spaceId} AND p."personKey"=copy."personKey" AND p."sourceEffectId"=copy."sourceEffectId" AND p."fetchedAt"=copy."fetchedAt"::timestamp AND p.profile->>'profileImageUrl'=copy.source`;
-    await tx.externalEffect.update({
-      where: { id: marker.id },
-      data: {
-        status: "completed",
-        result: {
-          projected: entries.length,
-          copied: copied.length,
-          sourcePreserved: copies.length - copied.length,
+  const event = await withTransactionRetry(() =>
+    prisma.$transaction(async (tx) => {
+      if (!(await authorized(tx, true))) return null;
+      if (copied.length)
+        await tx.$executeRaw`UPDATE recruiting_saved_profiles p SET profile=jsonb_set(p.profile,'{profileImageUrl}',to_jsonb(copy.photo)),"updatedAt"=now() FROM jsonb_to_recordset(${JSON.stringify(copied)}::jsonb) AS copy("personKey" text,"sourceEffectId" text,"fetchedAt" text,source text,photo text) WHERE p."ownerUserId"=${userId} AND p."spaceId"=${spaceId} AND p."personKey"=copy."personKey" AND p."sourceEffectId"=copy."sourceEffectId" AND p."fetchedAt"=copy."fetchedAt"::timestamp AND p.profile->>'profileImageUrl'=copy.source`;
+      await tx.externalEffect.update({
+        where: { id: marker.id },
+        data: {
+          status: "completed",
+          result: {
+            projected: entries.length,
+            copied: copied.length,
+            sourcePreserved: copies.length - copied.length,
+          },
         },
-      },
-    });
-    return appendEventInTransaction(tx, {
-      spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      type: "recruiting.changed",
-      payload: { roleId: page.roleId },
-    });
-  });
+      });
+      return appendEventInTransaction(tx, {
+        spaceId,
+        threadId: run.threadId,
+        botId: run.botId,
+        type: "recruiting.changed",
+        payload: { roleId: page.roleId },
+      });
+    }),
+  );
   if (event) await deps.events.notify(run.threadId, event.seq);
 }
 

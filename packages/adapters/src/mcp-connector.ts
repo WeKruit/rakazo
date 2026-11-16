@@ -894,10 +894,12 @@ export async function loadMcpCredentialRecord(
 /** How long a worker reuses a server's discovered tool list before listing it again. */
 export const DISCOVERY_CACHE_TTL_MS = 10 * 60_000;
 /**
- * How long a worker skips a server whose discovery just failed, instead of reconnecting every run.
- * Longer than the prewarm cadence, which retries it in the background.
+ * How long a worker skips a server whose listing just failed (a short breaker, then one trial):
+ * a passing network or server error must not hide a service from runs for minutes.
  */
-export const DISCOVERY_FAILURE_TTL_MS = DISCOVERY_CACHE_TTL_MS;
+export const DISCOVERY_FAILURE_TTL_MS = 30_000;
+/** A server that refused the credential stays skipped until the window ends or a reconnect. */
+export const CONNECTION_REFUSED_TTL_MS = DISCOVERY_CACHE_TTL_MS;
 /** Discovery with this operation id lists every server again, refreshing the cache for runs. */
 export const DISCOVERY_REFRESH_OPERATION = "discovery.prewarm";
 /**
@@ -1147,11 +1149,13 @@ export class McpConnector implements ConnectorProvider {
           // Capture material before eviction so the audited reason stays redacted, the
           // same reason execute() captures it before callTool.
           const key = failureKey;
-          this.discoveryFailures.set(key, {
-            version: this.discoveryVersion(assignment.server),
-            until: Date.now() + DISCOVERY_FAILURE_TTL_MS,
-            logged: false,
-          });
+          // The background refresh must never hide a server from runs: a run lists it itself.
+          if (context.operationId !== DISCOVERY_REFRESH_OPERATION)
+            this.discoveryFailures.set(key, {
+              version: this.discoveryVersion(assignment.server),
+              until: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+              logged: false,
+            });
           const material = this.sessions.get(key)?.material;
           await this.evict(key);
           await this.recordDiscoveryFailure(
@@ -2757,11 +2761,11 @@ export class McpConnector implements ConnectorProvider {
     getLogger().warn("mcp.connection_refused", {
       server: server.slug,
       tool: toolName,
-      untilMs: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+      untilMs: Date.now() + CONNECTION_REFUSED_TTL_MS,
     });
     this.discoveryFailures.set(this.sessionKey(server, context), {
       version: this.discoveryVersion(server),
-      until: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+      until: Date.now() + CONNECTION_REFUSED_TTL_MS,
       logged: false,
       refused: { serverId: server.id, slug: server.slug },
     });

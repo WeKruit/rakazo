@@ -1,4 +1,5 @@
 import dns from "node:dns";
+import { createServer } from "node:http";
 import { fetch as undiciFetch } from "undici";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -8,6 +9,7 @@ import {
   createSafeRemoteFetch,
   limitRemoteMcpPayload,
 } from "./remote-mcp.js";
+import { blockNewConnections } from "./shared-dispatcher.js";
 
 const publicResolver = async () => [{ address: "203.0.113.10", family: 4 as const }];
 
@@ -631,4 +633,36 @@ describe("createPrivateNetworkFetch", () => {
       "redirects are not allowed",
     );
   });
+});
+
+describe("shared connection pool", () => {
+  it("reuses an open connection through a network blip and opens new ones after it", async () => {
+    const sockets = new Set<unknown>();
+    const server = createServer((_request, response) => response.end("ok"));
+    server.on("connection", (socket) => sockets.add(socket));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    const url = `http://localhost:${port}/`;
+    try {
+      // Two fetches built separately share the process pool: the second opens no connection.
+      const first = createSafeRemoteFetch(undefined, undefined, { allowPrivateEndpoint: true });
+      expect(await (await first(url)).text()).toBe("ok");
+      await first.close();
+      const second = createSafeRemoteFetch(undefined, undefined, { allowPrivateEndpoint: true });
+      await blockNewConnections(5);
+      expect(await (await second(url)).text()).toBe("ok");
+      expect(sockets.size).toBe(1);
+      // A new connection during the blip fails the way the container's network did.
+      for (const socket of sockets) (socket as { destroy(): void }).destroy();
+      sockets.clear();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await expect(second(url)).rejects.toThrow(/connect ETIMEDOUT/);
+      await blockNewConnections(0);
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      expect(await (await second(url)).text()).toBe("ok");
+    } finally {
+      await blockNewConnections(0);
+      server.close();
+    }
+  }, 15_000);
 });

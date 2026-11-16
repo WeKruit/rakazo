@@ -47,6 +47,7 @@ import {
   archiveBot,
   assertSafeRemoteUrl,
   bindImportedCampaigns,
+  blockNewConnections,
   buildMcpCredentialBlob,
   buildModelConnectPlaintext,
   CHATGPT_OAUTH_PROVIDER,
@@ -755,6 +756,7 @@ export interface RouterDeps {
     imageTag?: string;
     integrationsCatalogUrl?: string;
     mcpAllowPrivateEndpoint?: boolean;
+    faultInjection?: boolean;
     firstPartyMcpUrl?: string;
     firstPartySession?: FirstPartySessionConfig;
     oidc?: Pick<OidcConfig, "issuer" | "clientId">;
@@ -1680,6 +1682,12 @@ export function createRouter(deps: RouterDeps) {
           return { userId: user.id, mailbox };
         },
       ),
+      networkBlip: authed.deployment.networkBlip.handler(async ({ context, input }) => {
+        if (!context.actor.isDeploymentOwner || deps.env.faultInjection !== true)
+          throw new ORPCError("FORBIDDEN");
+        const until = await blockNewConnections(input.seconds);
+        return { until: until.toISOString() };
+      }),
     },
     updater: {
       status: authed.updater.status.handler(async ({ context }) => {
