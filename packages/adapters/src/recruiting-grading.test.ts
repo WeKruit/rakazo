@@ -79,6 +79,8 @@ function fixture(options: {
   }>;
   /** Whether the latest round was recorded as a correction. */
   corrects?: boolean;
+  /** The tier of each graded person, by candidateKey. */
+  tiers?: Record<string, string>;
   /** Grades of the latest round's people saved since the previous round. */
   roundGrades?: Array<{
     candidateKey: string;
@@ -127,7 +129,12 @@ function fixture(options: {
         where.candidateKey
           ? (options.roundGrades ?? []).map((row) => ({ title: null, company: null, ...row }))
           : where.page
-            ? (options.graded ?? []).map((candidateKey) => ({ candidateKey }))
+            ? (options.graded ?? []).map((candidateKey) => ({
+                candidateKey,
+                matchFields: options.tiers?.[candidateKey]
+                  ? { match_tier: options.tiers[candidateKey] }
+                  : null,
+              }))
             : (options.found ?? []),
       ),
     },
@@ -228,8 +235,14 @@ describe("startRecruitingGrading", () => {
       { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
     ];
     const options = {
-      found: [person("fits"), person("misfit"), person("unshown"), person("spare")],
-      graded: ["linkedin:/in/fits", "linkedin:/in/misfit", "linkedin:/in/unshown"],
+      found: [person("fits"), person("misfit"), person("unshown"), person("spare"), person("new")],
+      graded: [
+        "linkedin:/in/fits",
+        "linkedin:/in/misfit",
+        "linkedin:/in/unshown",
+        "linkedin:/in/spare",
+      ],
+      tiers: { "linkedin:/in/spare": "Strong" },
       rounds: round(["linkedin:/in/fits", "linkedin:/in/misfit", "linkedin:/in/unshown"]),
       roundGrades: [
         { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
@@ -279,7 +292,10 @@ describe("startRecruitingGrading", () => {
     expect(promptOf(f)).toContain(
       "Misfit: Partial (candidateKey linkedin:/in/misfit); not shown: Kafka in production (unknown); concerns: Architect role",
     );
-    expect(promptOf(f)).toContain("spare (candidateKey linkedin:/in/spare): not checked yet");
+    // Only people the Reviewer checked as Strong take a checked person's place; no search.
+    expect(promptOf(f)).toContain("- spare (candidateKey linkedin:/in/spare)");
+    expect(promptOf(f)).not.toContain("linkedin:/in/new");
+    expect(promptOf(f)).toContain("don't search");
     expect(promptOf(f)).not.toContain("(candidateKey linkedin:/in/fits)");
     expect(promptOf(f)).toContain("Unshown: Promising (candidateKey linkedin:/in/unshown)");
     expect(promptOf(f)).not.toContain("Fits:");

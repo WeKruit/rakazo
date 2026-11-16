@@ -566,7 +566,7 @@ describe("delegating to a role team in another conversation", () => {
     expect(harness.tx.run.create).not.toHaveBeenCalled();
     expect(harness.enqueue).not.toHaveBeenCalled();
     expect(sent.note).toContain(
-      "Sourcer has been working on the recruiter's request for 3 min and has found 2 people so far",
+      "Sourcer has been working on the recruiter's request for 3 min and has found 2 people on this request so far",
     );
     expect(sent.note).toContain("never say it has not started");
     expect(harness.tx.run.findFirst).toHaveBeenCalledWith(
