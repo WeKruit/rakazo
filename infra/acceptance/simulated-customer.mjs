@@ -514,6 +514,7 @@ async function play(journey, label, owner, mailbox, out) {
         origin: ORIGIN,
         email: credentials[0],
         password: credentials[1],
+        cookie: user.cookie(),
         chinese: journey.chinese,
         out,
         mobile: Boolean(journey.mobile),

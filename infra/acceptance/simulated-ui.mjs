@@ -47,7 +47,9 @@ export const ROLE_PAGES = ["conversation", "results", "brief", "sequence", "inbo
 export const SEND_BUTTON = /^(Confirm and send|确认发送|确认并发送|发送|Send)$/i;
 export const STANDING_BUTTON = /(Send when I say send|always|一律|总是|以后都)/i;
 
-export async function openUi({ origin, email, password, chinese, out, mobile = false }) {
+// `cookie` is the API client's session for the same account: the browser reuses it instead of
+// signing in again (sign-ins are rate limited across every test on the environment).
+export async function openUi({ origin, email, password, cookie, chinese, out, mobile = false }) {
   browser ??= await chromium.launch();
   // A phone-width journey uses a phone's screen, so layout and touch problems show up too.
   const context = await browser.newContext({
@@ -56,7 +58,14 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
       : { viewport: { width: 1440, height: 900 } }),
     locale: chinese ? "zh-CN" : "en-US",
   });
-  for (let attempt = 0; ; attempt += 1) {
+  if (cookie)
+    await context.addCookies(
+      cookie.split("; ").map((pair) => {
+        const at = pair.indexOf("=");
+        return { name: pair.slice(0, at), value: pair.slice(at + 1), url: origin, secure: origin.startsWith("https:"), httpOnly: true, sameSite: "Lax" };
+      }),
+    );
+  for (let attempt = 0; !cookie; attempt += 1) {
     const response = await context.request.post(`${origin}/api/auth/sign-in/email`, {
       headers: { origin },
       data: { email, password },
