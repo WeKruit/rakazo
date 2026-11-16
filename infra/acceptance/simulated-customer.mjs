@@ -545,6 +545,9 @@ async function play(journey, label, owner, mailbox, out) {
         await new Promise((resolve) => setTimeout(resolve, journey.blip.seconds * 1000));
       }
       const move = await simulate(journey, turns, render(chats), cards, screen, tag, startedAt);
+      // The planner model sometimes nests its text ({"text": {"zh": "…"}}); the recruiter types a string.
+      if (move.text != null && typeof move.text !== "string")
+        move.text = Object.values(move.text).find((value) => typeof value === "string") ?? JSON.stringify(move.text);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
       const problems = [];

@@ -124,6 +124,18 @@ test("an English email draft inside a Chinese reply is not a language switch", (
   );
 });
 
+test("a bare English template (no To or Subject line) in reply to Chinese is not a language switch", () => {
+  assert.deepEqual(
+    conversationChecks([
+      user("等下，base改70-90万，邮件里加每周五remote"),
+      bot(
+        "Hi {{firstName}},\n\nI'm reaching out about a Staff Frontend Engineer opportunity in Beijing, with remote work every Friday.\n\nWould you be open to a brief conversation?\n\nBest,\nAlex Morgan",
+      ),
+    ]),
+    [],
+  );
+});
+
 test("an agent's brief shown to the recruiter fails", () => {
   assert(
     conversationChecks([
