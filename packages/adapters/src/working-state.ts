@@ -468,7 +468,11 @@ export async function loadWorkingState(
           .join(" · ")}`,
       );
       const messages = recent[index] ?? [];
-      for (const block of messages.flatMap((m) => m.blocks as MessageBlock[]))
+      // A card the recruiter wrote past (newest first) is not what the team waits on: feedback-
+      // round 11-16, an open next-step card read as "waiting on your choice" after their feedback.
+      const answered = messages.findIndex((m) => m.role === "user");
+      const open = answered === -1 ? messages : messages.slice(0, answered);
+      for (const block of open.flatMap((m) => m.blocks as MessageBlock[]))
         if (block.kind === "ask" && block.status === "pending")
           lines.push(`  Waiting on the recruiter: "${flat(block.text, QUESTION_CHARS)}"`);
       const record = roleId ? records.get(roleId) : undefined;
