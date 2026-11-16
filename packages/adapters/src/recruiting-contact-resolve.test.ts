@@ -236,6 +236,34 @@ describe("resolveRecruitingContact", () => {
       null,
     );
   });
+
+  it("says what this account sent when nobody by the name is saved (simulated 2026-11-16, did-you-really-send)", async () => {
+    const f = fixture([]);
+    const queryRaw = vi.fn(async (..._query: unknown[]) => [{ sent: 0, waiting: 0, unknown: 0 }]);
+    const deps = {
+      prisma: {
+        recruitingRole: { findMany: async () => [] },
+        externalEffect: { findMany: async () => [] },
+        $queryRaw: queryRaw,
+      } as never,
+      connector: f.connector,
+    };
+    const context = {
+      runId: "run-roleless",
+      operationId: "op",
+      signal: new AbortController().signal,
+    } as never;
+    const none = await resolveRecruitingContactAcrossRoles(deps, actor, "Wang Lei", context);
+    expect(none).toMatchObject({
+      status: "not_found",
+      sends: { sent: 0, waitingForCard: 0, unknown: 0 },
+    });
+    expect(queryRaw.mock.calls[0]!.slice(1, 4)).toEqual(["w1", "w1", "u1"]);
+    queryRaw.mockResolvedValueOnce([{ sent: 3, waiting: 0, unknown: 0 }]);
+    const some = await resolveRecruitingContactAcrossRoles(deps, actor, "Wang Lei", context);
+    expect(some).toMatchObject({ sends: { sent: 3 } });
+    expect((some as { note: string }).note).not.toBe((none as { note: string }).note);
+  });
 });
 
 describe("agent list_crm_candidates arguments", () => {
