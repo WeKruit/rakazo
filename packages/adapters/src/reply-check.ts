@@ -2,7 +2,7 @@ import type { BackgroundJobPayloads, JobPublisher } from "@rakazo/adapter-kit";
 import { runContinueJob, threadReplyCheckJob } from "@rakazo/adapter-kit";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
-import { isDeclineRetryNonce, STOPPED_TURN } from "@rakazo/db";
+import { isContinuationNonce, STOPPED_TURN } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { AUTOCONTINUE_NONCE_PREFIX } from "./turn-end-guard.js";
 
@@ -87,8 +87,8 @@ export async function checkThreadReplied(
     },
   });
   if (latest?.role !== "user") return skipped("replied");
-  // A retry's answer takes the place of the reply it retried, above its own note.
-  if (isDeclineRetryNonce(latest.clientNonce)) return skipped("replied");
+  // A pushed-on turn's answer takes the place of the reply above its own note.
+  if (isContinuationNonce(latest.clientNonce)) return skipped("replied");
   if (latest.createdAt.getTime() < now - MAX_AGE_MS) return skipped("old");
   // Only a message sent to an agent: transcripts and automation input carry their own rules.
   const source = latest.sourceRuns[0];

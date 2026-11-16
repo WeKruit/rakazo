@@ -25,7 +25,7 @@ export * from "./message-embeddings.js";
 export * from "./message-thinking.js";
 export * from "./messages.js";
 export * from "./mirrored-asks.js";
-export { isDeclineRetryNonce } from "./retried-reply.js";
+export { isContinuationNonce } from "./retried-reply.js";
 export * from "./messaging.js";
 export * from "./model-backups.js";
 export * from "./model-credentials.js";

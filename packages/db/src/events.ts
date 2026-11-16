@@ -2202,7 +2202,11 @@ async function finalizeRunOnce(
             })
           : null;
       if (retried) {
-        await tx.message.update({ where: { id: retried }, data: { blocks: completedBlocks } });
+        // The reply is now this turn's, so a further push of this turn finds it too.
+        await tx.message.update({
+          where: { id: retried },
+          data: { blocks: completedBlocks, runId: input.runId },
+        });
         events.push({
           spaceId: input.spaceId,
           threadId: input.threadId,
