@@ -597,4 +597,43 @@ describe("loadWorkingState", () => {
     expect(state.text).toContain('"Data Engineer ref 09071" (campaign_id campaign-7)');
     expect(state.text).toContain("pause_campaign with that campaign_id");
   });
+
+  // honest-limits 3f85ef1f (did-you-really-send 3/10, 2/10): with nothing on record that says
+  // "none", Kruit answered "can't verify" and then took the recruiter's word that it had sent.
+  it("says how many emails the account sent through the product, and none as a plain none", async () => {
+    const none = await loadWorkingState(
+      fakePrisma({ groups }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(none.text).toContain(
+      "Emails sent from this account through the product in the last 7 days: none.",
+    );
+    const sent = await loadWorkingState(
+      fakePrisma({
+        groups,
+        completed: [
+          {
+            threadId: "t-other",
+            payload: { outcome: "succeeded", work: "sent" },
+            createdAt: new Date(now - 3 * 86_400_000),
+          },
+          {
+            threadId: "t-other",
+            payload: { outcome: "succeeded", work: "saved" },
+            createdAt: new Date(now - 60_000),
+          },
+        ],
+      }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(sent.text).toContain(
+      "Emails sent from this account through the product in the last 7 days: 1 send (latest 3 d ago)",
+    );
+  });
 });
