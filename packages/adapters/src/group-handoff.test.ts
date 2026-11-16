@@ -1103,5 +1103,11 @@ describe("a role named in a handoff", () => {
     expect(namesRole(opened, "Senior Data Engineer (Seattle)")).toBeUndefined();
     expect(namesRole(opened, "Senior Data Engineer Seattle — Ref 0842")).toBeUndefined();
     expect(namesRole(opened, "Senior Data Engineer (Seattle) Ref 12181")).toBe("full");
+    // 11-16 staging: the same with the new ref written as a bare number.
+    const bare = "新岗位 senior data engineer — seattle 07151，首封你写了发给他们俩";
+    expect(namesRole(bare, "Senior Data Engineer — Seattle")).toBeUndefined();
+    expect(
+      namesRole("新岗位 senior data engineer — seattle", "Senior Data Engineer — Seattle"),
+    ).toBeUndefined();
   });
 });
