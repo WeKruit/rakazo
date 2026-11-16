@@ -214,4 +214,80 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
 
     expect(expired).toMatchObject({ continuationRunId: null });
   });
+  // Staging 11-16: the decline guard pushed a second turn after Kruit's answer was shown, so the
+  // recruiter read two answers to one question. The retry's answer takes the first one's place.
+  async function retryOfAnsweredTurn(personWroteSince: boolean) {
+    const fixture = await runSteeredByMessage("running");
+    await botReplies(fixture.run.id);
+    const first = await prisma.message.findFirstOrThrow({
+      where: { threadId, runId: fixture.run.id, role: "bot" },
+      select: { id: true },
+    });
+    await failRun(fixture);
+    if (personWroteSince)
+      await createThreadMessage(prisma, {
+        threadId,
+        role: "user",
+        blocks: [{ kind: "text", text: `and another thing ${randomUUID()}` }],
+      });
+    const nudge = await createThreadMessage(prisma, {
+      threadId,
+      role: "user",
+      blocks: [{ kind: "text", text: "Your reply declined the request." }],
+      clientNonce: `autocontinue:${fixture.run.id}:decline`,
+    });
+    const task = await prisma.task.create({
+      data: { spaceId, botId, threadId, userId, prompt: "retry", status: "running" },
+    });
+    const retry = await prisma.run.create({
+      data: {
+        spaceId,
+        botId,
+        threadId,
+        taskId: task.id,
+        userId,
+        status: "running",
+        trigger: "follow_up",
+        sourceMessageId: nudge.id,
+        startedAt: new Date(),
+        leaseOwner: "worker-1",
+        leaseFence: 1,
+      },
+    });
+    const attempt = await prisma.attempt.create({
+      data: { runId: retry.id, fence: 1, status: "running" },
+    });
+    await finalizeRun(prisma, {
+      spaceId,
+      threadId,
+      botId,
+      runId: retry.id,
+      taskId: task.id,
+      attemptId: attempt.id,
+      leaseOwner: "worker-1",
+      leaseFence: 1,
+      outcome: "completed",
+      blocks: [{ kind: "text", text: "Here are the documents." }],
+    });
+    const replies = await prisma.message.findMany({
+      where: { threadId, role: "bot", runId: { in: [fixture.run.id, retry.id] } },
+      select: { id: true, blocks: true },
+    });
+    return { first, replies };
+  }
+
+  it("puts a declined turn's retry answer in place of the answer it retried", async () => {
+    const { first, replies } = await retryOfAnsweredTurn(false);
+    expect(replies).toEqual([
+      {
+        id: first.id,
+        blocks: [expect.objectContaining({ kind: "text", text: "Here are the documents." })],
+      },
+    ]);
+  });
+
+  it("posts the retry answer on its own once the person has written again", async () => {
+    const { replies } = await retryOfAnsweredTurn(true);
+    expect(replies).toHaveLength(2);
+  });
 });
