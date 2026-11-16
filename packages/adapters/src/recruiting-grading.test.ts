@@ -27,6 +27,7 @@ const {
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_SEARCH_REFUSAL,
+  scheduleRecruitingGrading,
   startRecruitingGrading,
 } = await import("./recruiting-grading.js");
 
@@ -867,6 +868,20 @@ describe("startRecruitingGrading", () => {
     const readOnly = fixture({ found: [person("a")], readOnlyBots: ["main"], researchBots: [] });
     await startRecruitingGrading(readOnly.deps, { threadId: "thread" }, now);
     expect(readOnly.runCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("scheduleRecruitingGrading", () => {
+  it("starts a held round's check now, replacing a later start already waiting", async () => {
+    // Staging 11-16 (94b302cd run 4): a start pushed 30 s out by "next round coming" was kept,
+    // so the check of the held round waited 26 s for it.
+    const enqueue = vi.fn(async () => undefined);
+    await scheduleRecruitingGrading({ enqueue }, "thread", now, 0);
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ keepExisting: false, availableAt: new Date(now) }),
+    );
+    await scheduleRecruitingGrading({ enqueue }, "thread", now);
+    expect(enqueue).toHaveBeenLastCalledWith(expect.objectContaining({ keepExisting: true }));
   });
 });
 
