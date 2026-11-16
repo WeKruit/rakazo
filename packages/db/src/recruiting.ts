@@ -130,6 +130,7 @@ import {
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
 import { getLogger } from "@rakazo/logging";
+import { backgroundToolSourceTrigger } from "./background-tool.js";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import type { AnswerRunInput, PauseRunForInput } from "./events.js";
@@ -2061,6 +2062,14 @@ async function requireCurrentHumanSource(
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage }> {
   if (ancestors.has(run.id)) throw new IsolationError();
   ancestors.add(run.id);
+  // A turn that waited on a slow tool resumes as a background run; it still acts for the message
+  // that started it (staging 11-16: a resumed global turn's handoff could save no feedback).
+  run = {
+    ...run,
+    trigger: await backgroundToolSourceTrigger(tx, { ...run, spaceId: actor.spaceId }).catch(
+      () => run.trigger,
+    ),
+  };
   const {
     source: given,
     steering,
