@@ -36,6 +36,13 @@ describe("referredRole", () => {
     const numbered = "新岗位，西雅图Senior Data Engineer，编号0733。两个都发";
     expect(referredRole([numbered], roles)).toEqual({ kind: "new", ref: "0733" });
     expect(referredRole(["编号 0303 发了几封"], roles)).toMatchObject({ role: { id: "r303" } });
+    // Sim 11-16 d06ea499: 「新岗位 … 西雅图 07151」 gave the new ref as a bare number and went to
+    // the saved "Senior Data Engineer — Seattle", whose campaign had already sent for another ref.
+    const bare = "新岗位 Senior Data Engineer Seattle 07151，hybrid每周3天，6年+，base 180-220k";
+    expect(referredRole([bare], roles)).toEqual({ kind: "new", ref: "07151" });
+    expect(
+      referredRole(["新岗位 Senior Data Engineer Seattle，2026年开始"], roles),
+    ).toBeUndefined();
   });
 
   it("matches a title by its distinctive words, not generic ones", () => {

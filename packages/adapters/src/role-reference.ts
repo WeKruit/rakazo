@@ -30,6 +30,24 @@ export function titleWithRef(title: string, request: string): string {
   return !title || !ref || roleRef(title) === ref.toLowerCase() ? title : `${title} (Ref ${ref})`;
 }
 const NEW_ROLE = /新(?:的)?\s*(?:岗位|职位|role)|\bnew (?:role|position|job|req)\b/i;
+// A role number written bare beside the opening (「新岗位 … 西雅图 07151」): 4–6 digits on their own,
+// not a year, an amount ("180-220k") or part of an address.
+const BARE_REF = /(?<![\p{L}\p{N}.,+@-])(\d{4,6})(?![\p{L}\p{N}.,%@-])/gu;
+
+/**
+ * A message that opens a new role, with the ref it gives ("ref 0232", 「编号0733」 or a bare
+ * number), else undefined. Such a message names a saved role only by that ref, never by title
+ * words: the same title in a new role is still a new role (staging 11-16, 「新岗位 … 07151」).
+ */
+export function newRoleOpening(text: string): { ref?: string } | undefined {
+  if (!NEW_ROLE.test(text)) return undefined;
+  const ref =
+    roleRef(text) ??
+    [...text.matchAll(BARE_REF)]
+      .map((match) => match[1])
+      .find((n) => n && !/^(?:19|20)\d\d$/.test(n));
+  return { ref };
+}
 
 // Words in many role titles say nothing about which one is meant.
 const GENERIC = new Set(
@@ -69,13 +87,15 @@ export function referredRole(
   roles: readonly SavedRole[],
 ): RoleReference | undefined {
   for (const text of newestFirst.slice(0, 4)) {
-    const ref = REF.exec(text)?.[1]?.toLowerCase();
+    const opening = newRoleOpening(text);
+    const ref = REF.exec(text)?.[1]?.toLowerCase() ?? opening?.ref;
+    if (opening && !ref) return undefined;
     if (ref) {
       const role =
         roles.find((saved) => saved.title && REF.exec(saved.title)?.[1]?.toLowerCase() === ref) ??
         roles.find((saved) => saved.title?.toLowerCase().includes(ref));
       if (role) return { kind: "saved", role, by: `ref ${ref}` };
-      if (NEW_ROLE.test(text)) return { kind: "new", ref };
+      if (opening) return { kind: "new", ref };
       continue;
     }
     // A saved role's ref written as a bare number ("Senior Data Engineer 02311") names it too.

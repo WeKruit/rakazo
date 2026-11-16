@@ -25,7 +25,7 @@ import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { blocksText } from "./reply-suggestion.js";
-import { roleRef } from "./role-reference.js";
+import { newRoleOpening, roleRef } from "./role-reference.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
@@ -873,8 +873,10 @@ function roleTitleText(text: string): string {
 export function namesRole(asked: string, title: string): "full" | "core" | undefined {
   // A ref the recruiter gives picks the role: "Senior Data Engineer … ref 12181" is not an older
   // "Senior Data Engineer (Seattle)" with no ref or another one (staging 11-14).
-  const askedRef = roleRef(asked);
+  const opening = newRoleOpening(asked);
+  const askedRef = roleRef(asked) ?? opening?.ref;
   if (askedRef && askedRef !== roleRef(title)) return undefined;
+  if (opening && !askedRef) return undefined;
   const full = roleTitleText(title).trim();
   if (full.length > 1 && asked.includes(full)) return "full";
   const core = full.replace(/\s*\([^)]*\)$/, "").trim();
