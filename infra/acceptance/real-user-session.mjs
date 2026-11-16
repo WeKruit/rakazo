@@ -1,7 +1,10 @@
 // The calls a recruiter's browser makes, shared by the real-user conversations (real-user.mjs)
 // and the simulated customer (simulated-customer.mjs): sign in, send, answer cards, wait for
 // replies, read what the recruiter saw, and stop open work at the end.
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { AGENT_BRIEF, botText } from "./real-user-checks.mjs";
 
 const BASE = (process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
@@ -16,9 +19,32 @@ export const INFRA = [429, 500, 502, 503, 504];
 let requests = 0;
 export const requestCount = () => requests;
 
+// Sign-ins share one limit (100 per 15 minutes) with every test on the environment, so a session
+// is kept per account and reused by every play, sample and run on this machine, and by the
+// browser, until the server stops accepting it. It is a credential: kept outside the repository,
+// readable only by this user.
+const SESSIONS = path.join(os.tmpdir(), "rakazo-test-sessions");
+const sessionFile = (email) =>
+  path.join(SESSIONS, `${createHash("sha256").update(`${BASE}\n${email.toLowerCase()}`).digest("hex")}.cookie`);
+async function savedSession(email) {
+  let saved;
+  try {
+    saved = fs.readFileSync(sessionFile(email), "utf8").trim();
+  } catch {
+    return "";
+  }
+  const response = await fetch(`${BASE}/api/auth/get-session`, {
+    headers: { origin: ORIGIN, cookie: saved },
+  }).catch(() => null);
+  const session = response?.ok ? await response.json().catch(() => null) : null;
+  return session?.user?.email?.toLowerCase() === email.toLowerCase() ? saved : "";
+}
+
 export function client() {
   let cookie = "";
   const auth = async (email, password) => {
+    cookie = await savedSession(email);
+    if (cookie) return;
     // Sign-ins share one limit with every other test on the environment: wait as long as the
     // server asks, for up to about 15 minutes.
     for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -36,6 +62,8 @@ export function client() {
       cookie = (response.headers.getSetCookie?.() ?? [])
         .map((line) => line.split(";")[0])
         .join("; ");
+      fs.mkdirSync(SESSIONS, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(sessionFile(email), cookie, { mode: 0o600 });
       return;
     }
     throw new InfraError("sign-in still refused after about 15 minutes");
@@ -104,7 +132,7 @@ export function client() {
       }
     }
   };
-  return { auth, rpc };
+  return { auth, rpc, cookie: () => cookie };
 }
 
 // Waiting without polling: each watched chat keeps one live event stream open, like the web app,
