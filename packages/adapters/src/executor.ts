@@ -831,6 +831,7 @@ import {
   planDeclineRetry,
   recruitingRoundListText,
   recruitingRoundPeople,
+  replyReworkEnabled,
   sendDeclineRetry,
   turnRequestText,
   unprovenReplyCardRetry,
@@ -18595,14 +18596,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A reply that declines, defers or hands back a pick is held back for one retry; the
           // work this turn did is still reported.
           const declineRetried =
-            (!handedOff &&
+            (replyReworkEnabled() &&
+            !handedOff &&
             !mailReplyAttempted &&
             // Once per turn: never again from that turn's own retry.
             !declinedRunId(run.clientNonce) &&
             !blocks.some((block) => block.kind === "ask")
               ? unprovenReplyCardRetry(text, askedNow)
               : undefined) ??
-            (turnReport.enabled &&
+            (replyReworkEnabled() &&
+            turnReport.enabled &&
             !handedOff &&
             !delegatedToRole &&
             !messagingChannelRun &&
@@ -18952,6 +18955,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             recruitingContinued = true;
           } else if (
             !messagingChannelRun &&
+            replyReworkEnabled() &&
             (thread.activeRecruitingRoleId || isRecruitingSpawnKey(bot.spawnKey))
           ) {
             // Turn-end guard: a recruiting turn must end with a deliverable, a question, a card

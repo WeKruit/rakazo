@@ -56,6 +56,15 @@ export function autoContinueMax(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 3;
 }
 
+/**
+ * RAKAZO_REPLY_REWORK=off: a finished turn's reply is shown as written. Nothing reruns the turn
+ * because of what the reply says or left out (decline retries and the turn-end guards). It
+ * measures the plain agent loop against those reruns; default on.
+ */
+export function replyReworkEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.RAKAZO_REPLY_REWORK?.trim().toLowerCase() !== "off";
+}
+
 /** Continuations since the last human message: trailing user messages carrying the nonce prefix. */
 export function countTrailingAutoContinues(
   messages: readonly { clientNonce: string | null }[],

@@ -95,6 +95,23 @@ const missing = (journey) => [
     : []),
   ...(journey.sends && !RECIPIENTS.length ? ["RAKAZO_SIM_RECIPIENTS"] : []),
 ];
+// --arm <file>: an experiment arm, {"name", "bots": {"<agent name>": {"instructions"?, "disable"?: [built-in tool names]}}},
+// applied to each new account's agents before the play, so two arms play the same journeys on the
+// same backend and are judged the same way.
+const ARM = option("--arm") ? JSON.parse(fs.readFileSync(option("--arm"), "utf8")) : undefined;
+async function applyArm(rpc) {
+  for (const bot of await rpc("bots/list")) {
+    const settings = ARM.bots?.[bot.name];
+    if (!settings) continue;
+    await rpc("bots/update", {
+      botId: bot.id,
+      ...(settings.instructions !== undefined ? { instructions: settings.instructions } : {}),
+      ...(settings.disable
+        ? { disabledBuiltinTools: [...new Set([...(bot.disabledBuiltinTools ?? []), ...settings.disable])] }
+        : {}),
+    });
+  }
+}
 // Journeys learned from earlier failures (--learn writes them; --learned <file> plays them too).
 const LEARNED = option("--learned");
 const learned =
@@ -493,6 +510,7 @@ async function play(journey, label, owner, mailbox, out) {
     await owner.rpc("deployment/createAccount", { email, name: ACCOUNT_NAME, password });
     await user.auth(email, password);
     credentials = [email, password];
+    if (ARM) await applyArm(user.rpc);
   }
   const { rpc } = user;
   const startedAt = Date.now();
@@ -954,6 +972,7 @@ async function runOne(journey, sample, owner, mailbox) {
   );
   const row = {
     suite: "simulated",
+    ...(ARM ? { arm: ARM.name } : {}),
     scenario: journey.name,
     area: journey.area,
     source: journey.source,
