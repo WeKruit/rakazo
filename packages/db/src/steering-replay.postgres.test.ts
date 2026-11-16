@@ -216,9 +216,19 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
   });
   // Staging 11-16: the decline guard pushed a second turn after Kruit's answer was shown, so the
   // recruiter read two answers to one question. The retry's answer takes the first one's place.
-  async function retryOfAnsweredTurn(personWroteSince: boolean) {
+  async function retryOfAnsweredTurn(personWroteSince: boolean, suffix = "decline") {
     const fixture = await runSteeredByMessage("running");
-    await botReplies(fixture.run.id);
+    // A finished turn's reply carries its tool steps beside the text.
+    await createThreadMessage(prisma, {
+      threadId,
+      role: "bot",
+      botId,
+      runId: fixture.run.id,
+      blocks: [
+        { kind: "steps", steps: [{ label: "Recruiting candidates", count: 1 }] },
+        { kind: "text", text: "Queued; both send within 58 minutes." },
+      ],
+    });
     const first = await prisma.message.findFirstOrThrow({
       where: { threadId, runId: fixture.run.id, role: "bot" },
       select: { id: true },
@@ -234,7 +244,7 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
       threadId,
       role: "user",
       blocks: [{ kind: "text", text: "Your reply declined the request." }],
-      clientNonce: `autocontinue:${fixture.run.id}:decline`,
+      clientNonce: `autocontinue:${fixture.run.id}:${suffix}`,
     });
     const task = await prisma.task.create({
       data: { spaceId, botId, threadId, userId, prompt: "retry", status: "running" },
@@ -267,7 +277,10 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
       leaseOwner: "worker-1",
       leaseFence: 1,
       outcome: "completed",
-      blocks: [{ kind: "text", text: "Here are the documents." }],
+      blocks: [
+        { kind: "steps", steps: [{ label: "Recruiting candidates", count: 2 }] },
+        { kind: "text", text: "Here are the documents." },
+      ],
     });
     const replies = await prisma.message.findMany({
       where: { threadId, role: "bot", runId: { in: [fixture.run.id, retry.id] } },
@@ -281,9 +294,16 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
     expect(replies).toEqual([
       {
         id: first.id,
-        blocks: [expect.objectContaining({ kind: "text", text: "Here are the documents." })],
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ kind: "text", text: "Here are the documents." }),
+        ]),
       },
     ]);
+  });
+
+  it("puts a promised turn's push in place of the reply it pushed on from", async () => {
+    const { first, replies } = await retryOfAnsweredTurn(false, "1");
+    expect(replies.map((reply) => reply.id)).toEqual([first.id]);
   });
 
   it("posts the retry answer on its own once the person has written again", async () => {
