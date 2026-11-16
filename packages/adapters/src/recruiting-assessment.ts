@@ -41,8 +41,9 @@ import { readRecruitingAccountView } from "./recruiting-account.js";
 import {
   bestLookedUpEmail,
   createRecruitingCandidateReportReader,
-  lookedUpContactEmails,
+  lookedUpContacts,
 } from "./recruiting-research.js";
+import { linkedinPersonKey } from "./recruiting-profiles.js";
 import {
   feedbackBeforeRound,
   listedBeforeRound,
@@ -407,9 +408,10 @@ export async function executeRecruitingCandidatesTool(
       queryMs = Math.round(performance.now() - queryStarted);
       itemCount = result.items.length;
       // Every agent sees the emails earlier contact lookups saved, in any later turn.
-      const found = result.items.length
-        ? await lookedUpContactEmails(deps.prisma, trusted.actor)
-        : new Map();
+      const lookups = result.items.length
+        ? await lookedUpContacts(deps.prisma, trusted.actor)
+        : { emails: new Map(), searched: new Map() };
+      const found = lookups.emails;
       const enriched = found.size
         ? result.items.flatMap((item) => {
             const email = bestLookedUpEmail(found, item.linkedinUrl, item.candidateKey);
@@ -448,7 +450,18 @@ export async function executeRecruitingCandidatesTool(
       const anySeen = [...seen.people.values()].some(
         (person) => person.round !== undefined || person.seenBeforeLatestRound || person.verdict,
       );
-      if (!enriched.length && !anySeen && !seen.latestRound) return result;
+      // Team-has-no-email (245ab70b, 2/10): "who has no email" had only a missing field to go on.
+      const noEmail = (item: (typeof result.items)[number]) =>
+        [linkedinPersonKey(item.linkedinUrl), item.candidateKey].some(
+          (key) => key && lookups.searched.has(key),
+        )
+          ? ("none_found" as const)
+          : ("not_looked_up" as const);
+      if (!enriched.length && !anySeen && !seen.latestRound)
+        return {
+          ...result,
+          items: result.items.map((item) => ({ ...item, email: noEmail(item) })),
+        };
       return {
         ...result,
         ...(seen.latestRound
@@ -466,9 +479,9 @@ export async function executeRecruitingCandidatesTool(
           const person = seen.people.get(item.candidateKey);
           return {
             ...item,
-            ...(email
-              ? { email: { address: email.address, type: email.type, status: email.status } }
-              : {}),
+            email: email
+              ? { address: email.address, type: email.type, status: email.status }
+              : noEmail(item),
             ...(person?.round !== undefined ? { shownInRound: person.round } : {}),
             // A later round may not show people a round showed. Said in words, so a person only
             // found (who a later round may show) is never called a repeat of a round.

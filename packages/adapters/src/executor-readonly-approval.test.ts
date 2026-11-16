@@ -1659,9 +1659,36 @@ describe("native Instantly activation card", () => {
     expect(sent()).toHaveLength(1);
   });
 
-  it("sends an approved card as soon as the run resumes, without waiting for the model", async () => {
-    // Gate ce4a9c24, stop-after-approve: on resume the model called other tools first and the
-    // run failed "Approved tool requests were not fully replayed"; nothing was sent.
+  it.each([{ catalog: false }, { catalog: true }])(
+    "sends an approved card as soon as the run resumes, without waiting for the model (%j)",
+    async ({ catalog }) => {
+      // Gate ce4a9c24, stop-after-approve: on resume the model called other tools first and the
+      // run failed "Approved tool requests were not fully replayed"; nothing was sent. Gate
+      // 245ab70b: the same through the tool catalog, where the card was approved via its wrapper.
+      const f = fixture({
+        name: "instantly__demo__activate_campaign",
+        route,
+        catalog,
+        connectorResults,
+        inputSchema,
+      });
+      f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+      await f.run();
+      f.effects[0]!.status = "approved";
+      f.setCalls([]);
+      await f.run();
+      const sent = f.execute.mock.calls.filter(
+        (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+      );
+      expect(sent).toHaveLength(1);
+      const prompt = f.runtimeRun.mock.calls.at(-1)?.[0] as { prompt?: string } | undefined;
+      expect(prompt?.prompt).toContain("already ran");
+    },
+  );
+
+  it("closes a confirmed send that cannot start instead of failing the run", async () => {
+    // Gate 245ab70b: the confirmed send was left for the model, which never repeated it; every
+    // other call was refused and the run failed with nothing said or sent.
     const f = fixture({
       name: "instantly__demo__activate_campaign",
       route,
@@ -1670,15 +1697,12 @@ describe("native Instantly activation card", () => {
     });
     f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
     await f.run();
-    f.effects[0]!.status = "approved";
+    Object.assign(f.effects[0]!, { status: "approved", kind: "instantly__retired__activate" });
     f.setCalls([]);
     await f.run();
-    const sent = f.execute.mock.calls.filter(
-      (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
-    );
-    expect(sent).toHaveLength(1);
+    expect(f.effects[0]!.status).toBe("failed");
     const prompt = f.runtimeRun.mock.calls.at(-1)?.[0] as { prompt?: string } | undefined;
-    expect(prompt?.prompt).toContain("already ran");
+    expect(prompt?.prompt).toContain("could not start, so nothing was sent");
   });
 
   it("resolves the role's bound campaign when campaign_id is omitted", async () => {

@@ -16841,7 +16841,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
               catalog?.args ?? direct?.args ?? {},
               `send-approval:${effect.id}`,
             );
-            if (approvedEffectReplays.nextRequest() === request) break;
+            if (approvedEffectReplays.nextRequest() === request) {
+              // Not taken: never leave it for the model to repeat (gate 245ab70b: it called six
+              // other tools, each refused, and the run failed). Close it and say why.
+              const why = String(toolResultError(outcome) ?? "the send could not be started");
+              getLogger().warn("send.approval.not_replayed", {
+                runId,
+                effectId: effect.id,
+                error: why.replace(/[^\s@<>]+@[^\s@<>]+/g, "<email>").slice(0, 300),
+              });
+              await deps.prisma.externalEffect.updateMany({
+                where: { id: effect.id, spaceId: run.spaceId, runId, status: "approved" },
+                data: { status: "failed", result: { error: why, dispatched: false } as never },
+              });
+              approvedEffectReplays.take(approvedEffectReplays.nextToolName()!);
+              sendOutcomes.push(
+                `The recruiter confirmed the send card, but that send could not start, so nothing was sent: ${redactSecrets(why, runSecrets).slice(0, 1_000)} Tell the recruiter in one line, then call activate_campaign again; its new card is theirs to confirm.`,
+              );
+              continue;
+            }
             sendOutcomes.push(
               `The recruiter confirmed the send card and that approved send already ran just now, before this turn, with the result below; never call activate_campaign for it again (an error in it means nothing was sent). Result: ${redactSecrets(JSON.stringify(outcome), runSecrets).slice(0, 4_000)}`,
             );

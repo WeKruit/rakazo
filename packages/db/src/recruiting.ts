@@ -7997,7 +7997,10 @@ export async function saveRecruitingCandidateGrades(
     requireResearchLease(run, trusted);
     if (saving.status !== "executing" || !thread.activeRecruitingRoleId) throw new IsolationError();
     const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
-    if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
+    // A grade is about the person, so it is saved on the current revision even when the lead
+    // updated the role while the Reviewer graded. Staging 11-16: every round's first grade save
+    // was refused this way and saved again unchanged with the new number, half a minute later.
+    if (!role.currentRevisionId || input.expectedRoleRevision > role.revision)
       throw new RecruitingConflictError();
     const typed = input.rows.map((grade) => {
       const row: Record<string, string> = { name: grade.name, linkedin_url: grade.linkedin_url };
