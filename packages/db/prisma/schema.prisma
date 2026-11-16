@@ -1696,6 +1696,13 @@ model RecruitingCalibrationRound {
   approvedByUserId String?
   /// What carried the human decision: {kind:"control"} or {kind:"message",messageId} or {kind:"approval",effectId}.
   approvalSource Json?
+  /// checking: held for the Reviewer; checked: graded, waiting for its owner to show it; shown.
+  status String @default("shown")
+  /// The bot whose run recorded the round; only it shows the checked round.
+  ownerBotId String?
+  /// Bumped on every status change; a change applies only to the version it read.
+  version Int @default(0)
+  statusAt DateTime @default(now())
 
   @@unique([roleId, round])
   @@map("recruiting_calibration_rounds")

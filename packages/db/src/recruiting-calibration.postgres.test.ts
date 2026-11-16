@@ -307,40 +307,43 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
 
     // Staging 11-15: round 2 was held for the Reviewer, and its checked version was recorded as
     // round 3 although the recruiter had seen only round 1. The check's correction takes its place.
-    const heldBy = runId;
-    const { taskId } = await prisma.run.findUniqueOrThrow({ where: { id: heldBy } });
-    runId = (
-      await prisma.run.create({
-        data: {
-          spaceId,
-          userId,
-          botId,
-          threadId,
-          taskId,
-          status: "running",
-          trigger: "user",
-          clientNonce: `${recruiting.RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${threadId}:check`,
-        },
-      })
-    ).id;
-    try {
-      const held = await prisma.recruitingCalibrationRound.findFirstOrThrow({
-        where: { roleId, round: 2 },
-      });
-      await expect(recordRound(swapped, true)).resolves.toMatchObject({ round: 2 });
-      // Shown now: messages written while it was held come before it.
-      const checked = await prisma.recruitingCalibrationRound.findFirstOrThrow({
-        where: { roleId, round: 2 },
-      });
-      expect(checked.createdAt.getTime()).toBeGreaterThan(held.createdAt.getTime());
-      // A second correction from a check is a later round: the recruiter saw the checked one.
-      await savePage(["swap-2"]);
-      await expect(recordRound([...swapped.slice(0, 9), "swap-2"], true)).resolves.toMatchObject({
-        round: 3,
-      });
-    } finally {
-      runId = heldBy;
-    }
+    // Staging 11-16: a later turn recorded round 3 over the held round 2. The stored state decides.
+    const held = await prisma.recruitingCalibrationRound.update({
+      where: { roleId_round: { roleId, round: 2 } },
+      data: { status: "checking", statusAt: new Date(), ownerBotId: botId },
+    });
+    await savePage(["swap-2", ...keys("held-later")]);
+    await expect(recordRound(keys("held-later"))).rejects.toThrow(/being checked by the Reviewer/);
+    await expect(recordRound(swapped, true)).rejects.toThrow(/being checked by the Reviewer/);
+    await expect(recruiting.markCalibrationRoundChecked(prisma, held)).resolves.toBe(true);
+    // A stale version changes nothing.
+    await expect(recruiting.markCalibrationRoundChecked(prisma, held)).resolves.toBe(false);
+    await expect(recordRound(keys("held-later"))).rejects.toThrow(
+      /shown by the teammate who recorded/,
+    );
+    await prisma.recruitingCalibrationRound.update({
+      where: { id: held.id },
+      data: { ownerBotId: "another-bot" },
+    });
+    await expect(recordRound(swapped, true)).rejects.toThrow(/shown by the teammate who recorded/);
+    await prisma.recruitingCalibrationRound.update({
+      where: { id: held.id },
+      data: { ownerBotId: botId },
+    });
+    await expect(recordRound(swapped, true)).resolves.toMatchObject({
+      round: 2,
+      roundStatus: "shown",
+    });
+    // Shown now: messages written while it was held come before it.
+    const checked = await prisma.recruitingCalibrationRound.findFirstOrThrow({
+      where: { roleId, round: 2 },
+    });
+    expect(checked.createdAt.getTime()).toBeGreaterThan(held.createdAt.getTime());
+    expect(checked.version).toBe(held.version + 2);
+    // A shown round is never corrected again: the recruiter saw it.
+    await expect(recordRound([...swapped.slice(0, 9), "swap-2"], true)).rejects.toThrow(
+      /record it without corrects/,
+    );
     await prisma.recruitingCalibrationRound.deleteMany({ where: { roleId, round: 3 } });
     const checkedView = await recruiting.readRecruitingCalibrationRound(prisma, actor, {
       threadId,

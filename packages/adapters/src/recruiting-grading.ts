@@ -3,9 +3,11 @@ import type { JobPublisher } from "@rakazo/adapter-kit";
 import { recruitingGradeStartJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
 import { recruitingBotKey } from "@rakazo/core";
-import type { PrismaClient } from "@rakazo/db";
+import type { CalibrationRoundStatus, PrismaClient } from "@rakazo/db";
 import {
+  calibrationRoundStatus,
   listRecruitingCandidates,
+  markCalibrationRoundChecked,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
 } from "@rakazo/db";
@@ -286,7 +288,7 @@ export async function startRecruitingGrading(
     // The recruiter waits on a held round, so its check starts within seconds of the turn ending,
     // and the next batch starts within seconds of the batch before it (staging 11-15: half of a
     // search's 20 people were still unscored when the recruiter looked, with 30 s between batches).
-    const held = (await roundUnderReview(deps.prisma, role.id, true))?.held;
+    const held = (await roundUnderReview(deps.prisma, role.id, true, now))?.held;
     const retry = held
       ? HELD_RETRY_MS
       : busy.trigger === ("recruiting_grade" satisfies RunTrigger)
@@ -438,7 +440,7 @@ export async function startRecruitingGrading(
     }),
   ]);
   // The round the recruiter is reviewing is graded first, against what they said since the last one.
-  const review = await roundUnderReview(deps.prisma, role.id, grader?.tool === "self");
+  const review = await roundUnderReview(deps.prisma, role.id, grader?.tool === "self", now);
   const unreviewed = new Set(
     review?.round.candidateKeys.filter((key) => !review.grades.has(key)) ?? [],
   );
@@ -461,8 +463,11 @@ export async function startRecruitingGrading(
       const grade = review.grades.get(key);
       return grade && grade.tier !== FIT_TIER ? [{ key, ...grade }] : [];
     });
-    // A round held for the Reviewer is shown once it is checked, swapped or not.
+    // A round held for the Reviewer is shown once it is checked, swapped or not: the check's end is
+    // stored, so its owner's turn that shows it is the only one that may record it.
     if (review.held) {
+      if (!review.checked && !(await markCalibrationRoundChecked(deps.prisma, review.round)))
+        return skipped("round changed");
       const latest = await deps.prisma.message.findFirst({
         where: { threadId: thread.id, role: "user" },
         orderBy: { seq: "desc" },
@@ -748,11 +753,14 @@ async function roundUnderReview(
   prisma: PrismaClient,
   roleId: string,
   reviewer: boolean,
+  now = Date.now(),
 ): Promise<{
-  round: { id: string; round: number; candidateKeys: string[] };
+  round: { id: string; round: number; candidateKeys: string[]; version: number };
   grades: Map<string, RoundGrade>;
-  /** Not shown yet: it waits for the Reviewer's check. */
+  /** Not shown yet: it waits for the Reviewer's check, or for its owner to show it. */
   held: boolean;
+  /** The Reviewer's grades are all in and the owner has not shown it yet. */
+  checked: boolean;
 } | null> {
   const [round, previous] = await prisma.recruitingCalibrationRound.findMany({
     where: { roleId },
@@ -764,15 +772,14 @@ async function roundUnderReview(
       candidateKeys: true,
       createdAt: true,
       approvedAt: true,
-      effectId: true,
+      status: true,
+      statusAt: true,
+      version: true,
     },
   });
   if (!round || round.approvedAt) return null;
-  const recorded = await prisma.externalEffect.findUnique({
-    where: { id: round.effectId },
-    select: { run: { select: { clientNonce: true } } },
-  });
-  const held = reviewer && roundHeldForReview(round.round, recorded?.run?.clientNonce);
+  const status = calibrationRoundStatus(round, now);
+  const held = reviewer && status !== "shown";
   const rows = await prisma.recruitingCandidateOccurrence.findMany({
     where: {
       roleId,
@@ -798,38 +805,67 @@ async function roundUnderReview(
         company: row.company,
         tier: (row.matchFields as { match_tier?: unknown } | null)?.match_tier,
       });
-  return { round, grades, held };
+  return { round, grades, held, checked: held && status === "checked" };
 }
 
+export type RoundState = {
+  id: string;
+  round: number;
+  status: CalibrationRoundStatus;
+  ownerBotId: string | null;
+  version: number;
+  candidateKeys: string[];
+};
+
 /**
- * A round recorded after the recruiter's feedback waits for the Reviewer before it is shown, so
- * the recruiter never sees people who break what they just said. The first round shows at once,
- * and so does the round the lead records after the check (its run carries the review nonce).
+ * The role's latest calibration round and its stored state, while the recruiter has not approved
+ * the calibration. A round after feedback is held (checking) until the Reviewer has graded it
+ * (checked), and only its owner shows it.
  */
-export function roundHeldForReview(round: number, recordedByNonce: string | null | undefined) {
-  return round >= 2 && !recordedByNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX);
+export async function roundState(
+  prisma: PrismaClient,
+  roleId: string,
+  now = Date.now(),
+): Promise<RoundState | null> {
+  const latest = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId },
+    orderBy: { round: "desc" },
+    select: {
+      id: true,
+      round: true,
+      candidateKeys: true,
+      approvedAt: true,
+      status: true,
+      statusAt: true,
+      ownerBotId: true,
+      version: true,
+    },
+  });
+  if (!latest || latest.approvedAt) return null;
+  return {
+    id: latest.id,
+    round: latest.round,
+    status: calibrationRoundStatus(latest, now),
+    ownerBotId: latest.ownerBotId,
+    version: latest.version,
+    candidateKeys: latest.candidateKeys,
+  };
 }
 
 /**
- * Whether the round this run would record waits for the Reviewer: a round already exists, so the
- * next one follows feedback, and this run is not the lead's turn after the check. Nothing of such a
- * round is shown in chat before the check.
+ * Whether the round this run would record waits for the Reviewer: a shown round exists, so the
+ * next one follows feedback, and the team has the Reviewer. Nothing of such a round is shown in
+ * chat before the check.
  */
 export async function nextRoundHeld(
   prisma: PrismaClient,
-  input: { threadId: string; roleId: string; clientNonce: string | null | undefined },
+  input: { threadId: string; roleId: string },
 ): Promise<boolean> {
-  if (input.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX)) return false;
-  const latest = await prisma.recruitingCalibrationRound.findFirst({
-    where: { roleId: input.roleId },
-    orderBy: { round: "desc" },
-    select: { approvedAt: true },
-  });
-  return !!latest && !latest.approvedAt && (await hasRoundReviewer(prisma, input.threadId));
+  return (
+    (await roundState(prisma, input.roleId))?.status === "shown" &&
+    (await hasRoundReviewer(prisma, input.threadId))
+  );
 }
-
-/** How long a held round is waited on before people from Results may be listed again. */
-const HELD_ROUND_WAIT_MS = 15 * 60_000;
 
 /**
  * The round waiting for the Reviewer's check right now, if any. Staging 11-15: asked "where's the
@@ -841,21 +877,8 @@ export async function roundAwaitingReview(
   input: { threadId: string; roleId: string },
   now = Date.now(),
 ): Promise<number | null> {
-  const latest = await prisma.recruitingCalibrationRound.findFirst({
-    where: { roleId: input.roleId },
-    orderBy: { round: "desc" },
-    select: { round: true, createdAt: true, approvedAt: true, effectId: true },
-  });
-  if (!latest || latest.approvedAt || now - latest.createdAt.getTime() > HELD_ROUND_WAIT_MS)
-    return null;
-  const recorded = await prisma.externalEffect.findUnique({
-    where: { id: latest.effectId },
-    select: { run: { select: { clientNonce: true } } },
-  });
-  return roundHeldForReview(latest.round, recorded?.run?.clientNonce) &&
-    (await hasRoundReviewer(prisma, input.threadId))
-    ? latest.round
-    : null;
+  const state = await roundState(prisma, input.roleId, now);
+  return state && state.status !== "shown" ? state.round : null;
 }
 
 /** Whether this conversation's team has the Reviewer, who checks a held round. */
