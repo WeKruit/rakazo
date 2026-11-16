@@ -123,6 +123,57 @@ export async function readRecruitingAnalytics(
   };
 }
 
+export type RecruitingActivityRole = {
+  roleId: string;
+  title: string;
+  /** People first saved to the role in the window (by their earliest saved search page). */
+  newPeople: number;
+  shortlisted: number;
+  /** Distinct people emailed / heard from in the window, from the stored CRM mail. */
+  emailedPeople: number;
+  repliedPeople: number;
+  /** "none_stored": no CRM mail is stored for the role, so its email counts are unknown. */
+  mail: "stored" | "none_stored";
+};
+
+/**
+ * What changed on each role in a time window ("what's new since yesterday"), read live from the
+ * stored records the Dashboard and Contacts pages use. Roles with nothing new are only counted.
+ */
+export async function readRecruitingActivity(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: RecruitingAnalyticsInput,
+): Promise<{ roles: RecruitingActivityRole[]; quietRoles: number }> {
+  const input = RecruitingAnalyticsInputSchema.parse(raw);
+  const since = new Date(input.since);
+  const until = new Date(input.until);
+  const rows = await prisma.$queryRaw<(RecruitingActivityRole & { quiet: boolean })[]>(Prisma.sql`
+    ${analyticsScope(actor, input)}, activity AS (
+      SELECT r.id AS "roleId", r.title,
+        (SELECT count(*) FROM (
+          SELECT o."candidateKey" FROM recruiting_candidate_occurrences o
+          JOIN recruiting_candidate_pages p ON p."effectId" = o."pageId"
+          WHERE o."roleId" = r.id GROUP BY o."candidateKey"
+          HAVING min(p."observedAt") >= ${since} AND min(p."observedAt") < ${until}) n)::int AS "newPeople",
+        (SELECT count(*) FROM recruiting_candidates c WHERE c."roleId" = r.id AND c.shortlisted
+          AND c."shortlistedAt" >= ${since} AND c."shortlistedAt" < ${until})::int AS shortlisted,
+        (SELECT count(DISTINCT m.person) FROM mail m WHERE m.role = r.id AND m.direction = 'sent'
+          AND m.at >= ${since} AND m.at < ${until})::int AS "emailedPeople",
+        (SELECT count(DISTINCT m.person) FROM mail m WHERE m.role = r.id AND m.direction = 'received'
+          AND m.at >= ${since} AND m.at < ${until})::int AS "repliedPeople",
+        CASE WHEN EXISTS (SELECT 1 FROM mail m WHERE m.role = r.id) THEN 'stored' ELSE 'none_stored' END AS mail
+      FROM scoped_roles r
+    )
+    SELECT *, ("newPeople" + shortlisted + "emailedPeople" + "repliedPeople") = 0 AS quiet
+    FROM activity ORDER BY title, "roleId"
+  `);
+  return {
+    roles: rows.filter((row) => !row.quiet).map(({ quiet: _quiet, ...role }) => role),
+    quietRoles: rows.filter((row) => row.quiet).length,
+  };
+}
+
 /** Same scoped cohorts as the counters; paged identities make the denominator inspectable. */
 export async function readRecruitingAnalyticsPeople(
   prisma: PrismaClient,

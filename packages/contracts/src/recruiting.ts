@@ -1644,6 +1644,13 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("shortlist") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("sequences") }),
+  // What changed on each role in a window ("what's new since yesterday"), read live each time.
+  z.strictObject({
+    operation: z.literal("activity"),
+    since: z.iso.datetime({ offset: true }),
+    until: z.iso.datetime({ offset: true }).optional(),
+    roleId: RecruitingId.optional(),
+  }),
   // The Contacts page's people, across roles: who was never emailed, or never replied.
   z.strictObject({
     operation: z.literal("contacts"),
