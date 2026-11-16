@@ -643,6 +643,23 @@ describe("guardRecruitingTurnEnd", () => {
     const answered = await ended(0);
     expect(answered.result).toMatchObject({ action: "ended" });
     expect(answered.f.sendUserMessage).not.toHaveBeenCalled();
+    // Staging 01e78cbe: the Reviewer's grading turn saved its grades and was pushed to record a
+    // round it does not own, and the swap the recruiter asked for never came.
+    const f = fixture({
+      ...options,
+      savedRows: 10,
+      round: { ...options.round, ownerBotId: "bot-lead" },
+    });
+    const reviewer = await guardRecruitingTurnEnd(f.deps, {
+      run,
+      roleId: "role-1",
+      blocks: [{ kind: "text", text: "Graded the ten." }],
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    });
+    expect(reviewer.action).toBe("ended");
+    expect(f.sendUserMessage).not.toHaveBeenCalled();
   });
 
   it("lets a question end the turn", async () => {
