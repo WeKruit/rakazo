@@ -69,7 +69,6 @@ export async function globalRoleWriteRefusal(
   return `Not done: the conversation of "${role.title}" ${now}, so it owns this change. Pass the recruiter's request to it with delegate_to_role, role_id "${role.id}", in their own words, instead of a second change here. In the same reply, answer what they asked from what you have already read.`;
 }
 
-
 /**
  * What Kruit's handoff of the recruiter's turn tells a role's team. Staging 11-15: "3 and 10
  * aren't a fit, find more like the rest" reached the team as Kruit's brief "find the next 20

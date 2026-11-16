@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  globalRoleWriteRefusal,
-  roleRequestMessage,
-} from "./global-role-writes.js";
+import { globalRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
 
 function prisma(boundRoleId?: string, openRun?: { status: string }) {
   return {
