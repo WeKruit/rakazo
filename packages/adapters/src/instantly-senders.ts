@@ -100,9 +100,10 @@ export async function ownMailboxSendingAllowed(
 ): Promise<boolean> {
   const user = await prisma.user.findUnique({
     where: { id: context.userId },
-    select: { usageCreditLimit: true },
+    select: { usageCreditLimit: true, _count: { select: { sendingMailboxAssignments: true } } },
   });
-  if (user?.usageCreditLimit == null) return false;
+  // A mailbox we assigned by hand is this account's sender even before a run adopts it.
+  if (user?.usageCreditLimit == null || user._count?.sendingMailboxAssignments) return false;
   return (await confirmedSendingMailboxes(prisma, context)).length === 0;
 }
 const key = (email: string) => `instantly-sender-mailbox:${email.trim().toLowerCase()}`;
