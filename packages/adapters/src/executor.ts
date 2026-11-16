@@ -6595,6 +6595,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        let handedOffAt: Date | undefined;
+        // Gate b2005684, one-off-email: the coordinator saved the address after handing the send on,
+        // which took the request back, and its note restated the teammate's Connect card.
+        const teammateAnsweredHandoff = async () => {
+          if (!hideVendors || !handedOffAt) return false;
+          const since = handedOffAt;
+          const rows = await deps.prisma.message
+            .findMany({
+              where: {
+                threadId: thread.id,
+                role: "bot",
+                botId: { not: bot.id },
+                createdAt: { gt: since },
+              },
+              orderBy: { seq: "desc" },
+              take: 5,
+              select: { blocks: true },
+            })
+            .catch(() => []);
+          return rows.some((row) => saysSomething(row.blocks as MessageBlock[]));
+        };
         // The person's newest message steered into this run: a handoff for it is a new delivery,
         // not a replay of the handoff the run made before it arrived.
         let steeredMessageId: string | undefined;
@@ -6770,7 +6791,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : written;
           messageSegments = extracted.remaining;
           currentTextSegment = "";
-          if (!narration || (hideVendors && handedOff)) {
+          if (!narration || (hideVendors && handedOff) || (await teammateAnsweredHandoff())) {
             if (written) {
               assembled = "";
               hasStreamedText = false;
@@ -14642,7 +14663,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (movedElsewhere) return finish({ error: REPORT_IN_FINAL_REPLY });
             // Gate ab68f06d: the teammate answers what was handed to it; an update of this bot's
             // own beside that answer ("我会查看更新后的工具处理说明…") says nothing to the person.
-            if (hideVendors && handedOff) return finish({ ok: true, note: HANDED_OFF_NOT_SHOWN });
+            if ((hideVendors && handedOff) || (await teammateAnsweredHandoff()))
+              return finish({ ok: true, note: HANDED_OFF_NOT_SHOWN });
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
             const unnudged = clampUserProgressMessage(withoutNudge(rawMessage));
             const text = fixedAckSent ? withoutLeadingAck(unnudged) : unnudged;
@@ -15233,7 +15255,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // The coordinator checks every stage it hands out, like a supervisor's job report.
               report_back: args.report_back === true || recruitingBotKey(bot) === "main",
             });
-            if ("ok" in result && result.ok) handedOff = true;
+            if ("ok" in result && result.ok) {
+              handedOff = true;
+              handedOffAt = new Date();
+            }
             return finish(result);
           }
           if (name === "archive_bot" || name === "delete_bot") {
