@@ -298,6 +298,37 @@ describe("startRecruitingGrading", () => {
       ).not.toContainEqual(expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX));
   });
 
+  it("holds other people's grading while the lead picks the next round after feedback", async () => {
+    // Staging 11-16 (9e15e896): a batch of pool people started while the lead was still picking
+    // round 2, and round 2's check waited 2.5 minutes behind it.
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const shown = [
+      {
+        id: "round-1",
+        round: 1,
+        candidateKeys: ["linkedin:/in/shown"],
+        createdAt: new Date(now - 5 * 60_000),
+      },
+    ];
+    const picking = fixture({ found: [person("pool")], rounds: shown });
+    picking.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    picking.prisma.run.findFirst.mockImplementation((async ({ where }: { where: object }) =>
+      "botId" in where && typeof (where as { botId: unknown }).botId === "object"
+        ? { id: "lead-turn" }
+        : null) as never);
+    await startRecruitingGrading(picking.deps, { threadId: "thread" }, now);
+    expect(picking.runCreate).not.toHaveBeenCalled();
+    expect(picking.enqueue).toHaveBeenCalledOnce();
+    // With the lead idle the pool is graded as before.
+    const idle = fixture({ found: [person("pool")], rounds: shown });
+    idle.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    await startRecruitingGrading(idle.deps, { threadId: "thread" }, now);
+    expect(idle.runCreate).toHaveBeenCalledOnce();
+  });
+
   it("grades only the held round's people while the recruiter waits for it", async () => {
     // Staging 11-15: one round person left to grade was padded with nine from the pool, and the
     // recruiter waited a whole extra batch for the checked round.

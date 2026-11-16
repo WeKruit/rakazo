@@ -528,6 +528,22 @@ export async function startRecruitingGrading(
     return skipped("nobody to grade");
   }
   if (!grader) return skipped("no research teammate");
+  // Staging 11-16 (9e15e896): after feedback on a shown round, a batch of other saved people
+  // started while the lead was still picking the next round, and that round's check then waited
+  // 2.5 minutes behind it. While the lead works on the next round, the pool waits for it.
+  if (
+    grader.tool === "self" &&
+    review &&
+    !review.held &&
+    ![...people.keys()].some((key) => review.round.candidateKeys.includes(key)) &&
+    (await nextRoundComing(deps.prisma, thread.id, review.round.createdAt, grader.botId))
+  ) {
+    if (attempt + 1 < MAX_ATTEMPTS)
+      await deps.jobs.enqueue(
+        laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + BUSY_RETRY_MS),
+      );
+    return skipped("next round coming");
+  }
   const asked = review
     ? (await roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId })).map(
         (criterion) => criterion.statement,
@@ -841,7 +857,7 @@ async function roundUnderReview(
   reviewer: boolean,
   now = Date.now(),
 ): Promise<{
-  round: { id: string; round: number; candidateKeys: string[]; version: number };
+  round: { id: string; round: number; candidateKeys: string[]; version: number; createdAt: Date };
   grades: Map<string, RoundGrade>;
   /** Not shown yet: it waits for the Reviewer's check, or for its owner to show it. */
   held: boolean;
@@ -907,6 +923,26 @@ async function roundUnderReview(
         ...notes.get(row.pageId)?.get(row.candidateKey),
       });
   return { round, grades, held, checked: held && status === "checked" };
+}
+
+/** The recruiter wrote since the shown round and a teammate's turn is working on it. */
+async function nextRoundComing(
+  prisma: PrismaClient,
+  threadId: string,
+  shownAt: Date,
+  graderBotId: string,
+): Promise<boolean> {
+  const [said, working] = await Promise.all([
+    prisma.message.findFirst({
+      where: { threadId, role: "user", createdAt: { gt: shownAt } },
+      select: { id: true },
+    }),
+    prisma.run.findFirst({
+      where: { threadId, botId: { not: graderBotId }, status: { in: BUSY_STATUSES } },
+      select: { id: true },
+    }),
+  ]);
+  return Boolean(said && working);
 }
 
 export type RoundState = {
