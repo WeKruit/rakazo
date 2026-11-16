@@ -56,15 +56,6 @@ export function autoContinueMax(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 3;
 }
 
-/**
- * RAKAZO_REPLY_REWORK=off: a finished turn's reply is shown as written. Nothing reruns the turn
- * because of what the reply says or left out (decline retries and the turn-end guards). It
- * measures the plain agent loop against those reruns; default on.
- */
-export function replyReworkEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.RAKAZO_REPLY_REWORK?.trim().toLowerCase() !== "off";
-}
-
 /** Continuations since the last human message: trailing user messages carrying the nonce prefix. */
 export function countTrailingAutoContinues(
   messages: readonly { clientNonce: string | null }[],
@@ -458,7 +449,13 @@ export async function guardRecruitingTurnEnd(
     const round = await deps.prisma.recruitingCalibrationRound.findFirst({
       where: { roleId: input.roleId },
       orderBy: { round: "desc" },
-      select: { effectId: true, candidateKeys: true, approvedAt: true, createdAt: true },
+      select: {
+        effectId: true,
+        candidateKeys: true,
+        approvedAt: true,
+        createdAt: true,
+        ownerBotId: true,
+      },
     });
     if (
       round &&
@@ -490,7 +487,9 @@ export async function guardRecruitingTurnEnd(
       });
       if (latest?.clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX))
         return { action: "ended", classification: "question" };
-      roundOwed = true;
+      // Only the bot that records the rounds owes the next one. Staging 01e78cbe: the Reviewer's
+      // grading turn was pushed to record it, and the swap the recruiter asked for never came.
+      roundOwed = !round.ownerBotId || round.ownerBotId === run.botId;
     }
   }
   const classification = classifyTurnEnd(

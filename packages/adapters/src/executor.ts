@@ -831,7 +831,6 @@ import {
   planDeclineRetry,
   recruitingRoundListText,
   recruitingRoundPeople,
-  replyReworkEnabled,
   sendDeclineRetry,
   turnRequestText,
   unprovenReplyCardRetry,
@@ -5555,7 +5554,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const recent = await deps.prisma.message.findMany({
               where: { threadId: thread.id },
               orderBy: { seq: "desc" },
-              take: 4,
+              take: 8,
               select: {
                 id: true,
                 botId: true,
@@ -5576,9 +5575,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (block) => block.kind === "handoff" && block.toBotId === bot.id && !block.report,
                 ),
             );
+            // A row that shows the recruiter no words (a run's steps, a handoff marker) leaves the
+            // line the newest reply (honest-limits 8a002815: the line, two steps rows, then the
+            // continuation's answer as a second message).
             const newest = recent.find(
               (message) =>
-                !message.clientNonce?.startsWith("autocontinue:") && message.id !== brief?.id,
+                !message.clientNonce?.startsWith("autocontinue:") &&
+                message.id !== brief?.id &&
+                !(message.role === "bot" && !saysSomething(message.blocks as MessageBlock[])),
             );
             const blocks = (Array.isArray(newest?.blocks) ? newest.blocks : []) as MessageBlock[];
             const line = blocks.length === 1 && blocks[0]!.kind === "text" ? blocks[0]!.text : "";
@@ -6708,6 +6712,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 message.clientNonce?.startsWith("autocontinue:") ||
                 // So is the brief that handed this bot the request under a teammate's line.
                 (lineFromTeammate && message.id === run.sourceMessageId) ||
+                // Nor does a row that shows no words, whichever run wrote it.
+                (message.role === "bot" && !saysSomething(message.blocks as MessageBlock[])) ||
                 (message.runId === runId &&
                   message.role === "bot" &&
                   Array.isArray(message.blocks) &&
@@ -18596,16 +18602,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A reply that declines, defers or hands back a pick is held back for one retry; the
           // work this turn did is still reported.
           const declineRetried =
-            (replyReworkEnabled() &&
-            !handedOff &&
+            (!handedOff &&
             !mailReplyAttempted &&
             // Once per turn: never again from that turn's own retry.
             !declinedRunId(run.clientNonce) &&
             !blocks.some((block) => block.kind === "ask")
               ? unprovenReplyCardRetry(text, askedNow)
               : undefined) ??
-            (replyReworkEnabled() &&
-            turnReport.enabled &&
+            (turnReport.enabled &&
             !handedOff &&
             !delegatedToRole &&
             !messagingChannelRun &&
@@ -18955,7 +18959,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             recruitingContinued = true;
           } else if (
             !messagingChannelRun &&
-            replyReworkEnabled() &&
             (thread.activeRecruitingRoleId || isRecruitingSpawnKey(bot.spawnKey))
           ) {
             // Turn-end guard: a recruiting turn must end with a deliverable, a question, a card
