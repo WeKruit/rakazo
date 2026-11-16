@@ -388,6 +388,8 @@ export const JOURNEYS = [
   },
   {
     name: "feedback-on-some-people",
+    // Each play opens its own role, so one play's rejects and passes never seed the next.
+    leftover: /^测试固定 · 数据工程师 6 · \d{4,5}/,
     mechanisms: ["reference", "long-task"],
     paid: true,
     title: "对几个人给反馈，看下一轮真的改了",
@@ -398,11 +400,12 @@ export const JOURNEYS = [
     chinese: true,
     maxTurns: 8,
     waitMs: 12 * 60_000,
-    persona: `${AGENCY_RECRUITER} You have a role with people already found and want the next people to be better.`,
-    facts: () =>
-      "Pick one role that already shows people. Do not approve any send. Keep any new search small (20 people at most).",
+    persona: `${AGENCY_RECRUITER} You are opening a new role and want the second batch of people to be better than the first.`,
+    facts: (_recipients, tag) =>
+      `The role is named 「测试固定 · 数据工程师 6 · ${tag}」: Senior Data Engineer, Shanghai, hybrid 3 days in office, 5+ years building batch and streaming pipelines (Spark or Flink), data warehouse modelling, Mandarin and working English, base 500k–700k RMB. Do not approve any send. Keep any search small (10 people per round, 20 in all).`,
     goals: [
-      "Look at one role's people and tell Kruit which two or three are not a fit and why, in one short message.",
+      "Give Kruit the role under that exact name in one message and ask it to find people.",
+      "When the first people show, tell Kruit which two or three are not a fit and why, in one short message.",
       "Check Kruit says plainly what it changed for the next people, without asking you to rate everyone.",
       "Ask for a few more people and check none of the rejected ones come back and the new ones follow your feedback.",
       "Open the role's Results page and check the rejected people are marked and the new people show.",
