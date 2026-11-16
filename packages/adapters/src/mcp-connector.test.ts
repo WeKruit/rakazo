@@ -5851,6 +5851,25 @@ describe("local native Instantly campaign and lead tools", () => {
         ]);
       });
 
+      it("sends the saved email the card showed when the mail service still holds an older one", async () => {
+        // Gate deb21fb1, stop-after-approve: the card was read from the mail service seconds
+        // after a save and the check at approval read it again; three approved cards sent nothing.
+        const { f } = await roleWithSixteen();
+        await saveForAbe(f);
+        const abe = f.state.campaignLeads.find((lead) => lead.email === "abe@x.test")!;
+        abe.payload = { rk_subject: "Hi", rk_body: "Hi Abe" };
+        f.state.requests.length = 0;
+        const sent = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
+        expect(sent).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
+        const write = f.state.requests.findIndex(
+          (r) => r.method === "PATCH" && r.path === "/api/v2/leads/lead-abe",
+        );
+        expect(f.state.requests[write]?.body).toEqual({ custom_variables: OWN_VARIABLES });
+        const activate = f.state.requests.findIndex((r) => r.path.endsWith("/activate"));
+        expect(write).toBeGreaterThan(-1);
+        expect(write).toBeLessThan(activate);
+      });
+
       it("fills {{firstName}} for each person when one email is saved for several", async () => {
         const { f, binding } = await roleWithSixteen();
         const out = f.result(
