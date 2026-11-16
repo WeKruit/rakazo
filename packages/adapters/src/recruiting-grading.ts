@@ -535,8 +535,10 @@ export async function startRecruitingGrading(
     if (!locked.count) return null;
     const [existing, running] = await Promise.all([
       tx.run.findFirst({ where: { spaceId: thread.spaceId, clientNonce }, select: { id: true } }),
+      // Only the grader's own turn holds the check, as above: a lead turn that recorded the
+      // round is still running when its check starts (staging 11-16: no retry, 4 min unchecked).
       tx.run.findFirst({
-        where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
+        where: { threadId: thread.id, botId: grader.botId, status: { in: BUSY_STATUSES } },
         select: { id: true },
       }),
     ]);
