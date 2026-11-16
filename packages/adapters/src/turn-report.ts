@@ -927,7 +927,9 @@ export function withoutRepeatedClosing(reply: string, earlier: readonly string[]
  */
 export function withoutRepeatedOpening(reply: string, shown: readonly string[]): string {
   const opening = /^[^。！？!?\n]+(?:[。！？!?]+|\n)/.exec(reply.trimStart())?.[0];
-  if (!opening) return reply;
+  // A reply that opens with its email (a Subject: line) opens with the deliverable, never a
+  // repeated line (gate 4a731582: the revised template lost its subject).
+  if (!opening || DRAFT_START.test(opening)) return reply;
   const said = shown.flatMap((text) => text.match(/[^。！？!?\n]+[。！？!?]*/g) ?? []);
   if (!said.some((sentence) => sameSentence(opening, sentence))) return reply;
   const rest = reply.trimStart().slice(opening.length).trimStart();
