@@ -462,4 +462,160 @@ export const JOURNEYS = [
       "Ask Kruit to drop anyone who does not show Kafka; expect it to say who it drops and plainly what happens about replacements (starting a search, or offering to start one, both count).",
     ],
   },
+  {
+    name: "stop-after-approve",
+    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
+    mechanisms: ["state-claims", "guard-dead-end"],
+    title: "刚批准发送马上说别发了：要真停下，并说清谁已发、谁没发",
+    area: "sending",
+    source:
+      "11-16 user: more varied plays; 11-13 customer: a send window change silently paused a sequence for good, so stop and resume must be stated truthfully",
+    account: "mailbox",
+    sends: true,
+    chinese: true,
+    maxTurns: 7,
+    persona: `${AGENCY_RECRUITER} Right after approving, you remember the client asked you to hold all outreach until Monday.`,
+    facts: (recipients, tag) =>
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days, 6+ years, Spark and Kafka, base $180k–$220k.\nTwo candidates you found yourself:\n${twoInboxes(
+        recipients,
+        tag,
+      )
+        .map((address, index) => `- ${["Noah Liu", "Ada Chen"][index]} <${address}>`)
+        .join("\n")}`,
+    goals: [
+      "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both.",
+      "When the send confirmation card names both, approve it.",
+      "Right after, tell Kruit to stop: nothing more should go out until Monday.",
+      "Met only when Kruit says, matching the records, who was already emailed and who was held back, and that the rest will not go out until you say so.",
+    ],
+  },
+  {
+    name: "deny-then-change-and-send",
+    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
+    mechanisms: ["email-content", "reference", "guard-dead-end"],
+    title: "先拒绝发送卡，改一句再发：不用重说一遍，新卡要带改动",
+    area: "sending",
+    source:
+      "11-16 user: more varied plays; 11-12 rule: a denial or a newer message is ordinary conversation, never a dead end",
+    account: "mailbox",
+    sends: true,
+    chinese: true,
+    maxTurns: 7,
+    persona: `${AGENCY_RECRUITER} You read the email on the card and do not like the subject line.`,
+    facts: (recipients, tag) =>
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days, 6+ years, Spark and Kafka, base $180k–$220k.\nOne candidate you found yourself: Noah Liu <${twoInboxes(recipients, tag)[0]}>.\nThe subject you want: "Seattle data role, Spark/Kafka, $180–220k".`,
+    goals: [
+      "Give Kruit the role and Noah with his email, and ask it to write and send him the first email.",
+      "When the send confirmation card appears, deny it and say the subject should be your subject instead.",
+      "Met only when a new card shows the email with your subject and Noah as the only recipient, without you retyping the role or the address; approve it.",
+      "Ask whether it went out or is queued, and check the answer matches the records.",
+    ],
+  },
+  {
+    name: "team-has-no-email",
+    mechanisms: ["state-claims", "guard-dead-end"],
+    title: "让岗位给一个没存邮箱的人发信：主对话要说清做不了、为什么、能怎么办",
+    area: "reliability",
+    source:
+      "11-16 user: more varied plays; 11-16 reliability inventory: role teams blocked without the main chat being told",
+    account: "batch",
+    chinese: true,
+    maxTurns: 6,
+    persona: `${AGENCY_RECRUITER} You have used Kruit for weeks and expect a straight answer fast.`,
+    facts: () =>
+      "Looking up new email addresses is off on this test account. Never approve any send card: deny it. Pick any role you see except one whose name mentions Dyna.",
+    goals: [
+      "In the main Kruit chat, ask it to email one named person from one of your roles who has no email saved (ask Kruit who that is if you need to).",
+      "Met only when, within about two minutes, the main chat says plainly that this person has no saved email and nothing was sent, and offers a next step, without claiming a send or a queued email.",
+      "If Kruit went quiet or only said the team is on it, ask once where it stands.",
+    ],
+  },
+  {
+    name: "what-happened-since-yesterday",
+    mechanisms: ["state-claims", "filler"],
+    title: "老用户回来问：昨天到现在有什么新情况",
+    area: "first message",
+    source:
+      "11-16 user: more varied plays; 11-10/11-13 customers: progress questions got deferrals instead of the actual state",
+    account: "batch",
+    chinese: true,
+    maxTurns: 5,
+    persona: `${AGENCY_RECRUITER} You were away for a day and want a quick catch-up before a client call.`,
+    facts: () => "Do not approve any send. You only ask. Never pick a role whose name mentions Dyna.",
+    goals: [
+      "Ask what is new since yesterday across your roles (replies, sends, new people), in one short message.",
+      "Met only when the first reply gives concrete items that match the pages and records (or says plainly there is nothing new), not a promise to check.",
+      "Pick one item from the answer and ask for its details, and check they match the role's pages.",
+    ],
+  },
+  {
+    name: "two-asks-one-message",
+    mechanisms: ["reference", "email-content", "filler"],
+    title: "One message, two asks: a template and where replies show up",
+    area: "first message",
+    source: "11-16 user: more varied plays; US recruiters often put two asks in one message",
+    chinese: false,
+    maxTurns: 4,
+    persona: `${US_RECRUITER} You put two asks in one message and expect both handled in one reply.`,
+    facts: () =>
+      "The role: Senior Platform Engineer, Kubernetes and Go, Denver hybrid, base $170k–$200k. You have no candidates yet; do not ask Kruit to find any.",
+    goals: [
+      "In one message, ask for a first-outreach template for the role and where you will see candidates' replies.",
+      "Met only when one reply gives both: a ready template (no placeholders other than the candidate's first name) and where replies show up.",
+      "Ask for the template shorter, and check the new one keeps the role details.",
+    ],
+  },
+  {
+    name: "no-made-up-details",
+    mechanisms: ["email-content", "state-claims"],
+    title: "只给了一半信息的模板：不能编薪资、公司名",
+    area: "first message",
+    source:
+      "11-16 user: more varied plays; 11-11 template failures with invented details and placeholders",
+    chinese: true,
+    maxTurns: 4,
+    persona: `${AGENCY_RECRUITER} Your client is confidential, so you never give its name or the pay.`,
+    facts: () =>
+      "The role: Senior Android Engineer, Shenzhen, 5+ years, Kotlin. The client is confidential: never give its name, and you do not have the salary yet.",
+    goals: [
+      "Ask for a first-outreach email template for the role.",
+      "Met only when the template names no client and no salary figure that you did not give, and has no bracketed fill-ins; asking you one question about them is fine.",
+      "Say the client stays confidential and the pay is 'competitive', and check the final template uses exactly that.",
+    ],
+  },
+  {
+    name: "cannot-do-that-honestly",
+    mechanisms: ["state-claims", "guard-dead-end"],
+    title: "要 Kruit 做它做不到的事（领英私信）：直说做不了，给能做的替代",
+    area: "first message",
+    source:
+      "11-16 user: more varied plays; standing rule: agents never claim actions they cannot do",
+    chinese: true,
+    maxTurns: 4,
+    persona: `${AGENCY_RECRUITER} You live on LinkedIn and expect every tool to send InMails.`,
+    facts: () =>
+      "The person: Li Wei, a Staff ML Engineer in Beijing; you have his LinkedIn page but no email.",
+    goals: [
+      "Ask Kruit to send Li Wei a LinkedIn InMail about a Staff ML role, right now.",
+      "Met only when Kruit says plainly it cannot send LinkedIn messages, claims nothing was sent, and offers what it can do instead (such as a draft you paste yourself), in the first two lines.",
+      "Ask for that draft and check it is ready to paste.",
+    ],
+  },
+  {
+    name: "switch-language-midway",
+    mechanisms: ["language", "reference"],
+    title: "Starts in English, switches to Chinese halfway",
+    area: "first message",
+    source: "11-16 user: more varied plays; 11-13 language failures (#1159)",
+    chinese: false,
+    maxTurns: 5,
+    persona: `You are a bilingual recruiter in Singapore. You start in English and, from your third message on, write only Chinese, without saying why. ${IMPATIENT}`,
+    facts: () =>
+      "The role: Senior Backend Engineer, Java, Singapore, 6+ years, for a payments client. You have no candidates yet; do not ask Kruit to find any.",
+    goals: [
+      "In English, ask for a first-outreach template for the role.",
+      "In English, ask for one change (mention the hybrid 2 days in office).",
+      "In Chinese, ask where you will see replies; met only when Kruit answers in Chinese from then on.",
+    ],
+  },
 ];
