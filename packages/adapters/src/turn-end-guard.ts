@@ -370,20 +370,34 @@ async function unsavedFeedback(
     select: { clientNonce: true },
   });
   if (countTrailingAutoContinues(recent) > 0) return undefined;
+  return pushContinuation(deps, input, {
+    reason: "feedback_refused",
+    stage: "feedback",
+    label: "Save feedback",
+    text: `Continue: saving the recruiter's feedback just failed, so this feedback is not recorded yet. Reason: ${error.slice(0, 600)} Fix it from the reason and save it again with recruiting_feedback right away, then continue with the next step. Do not say it is recorded until the save succeeds.${AUTO_NOTE}`,
+  });
+}
+
+/** One internal follow-up that continues the turn, once per recruiter message. */
+async function pushContinuation(
+  deps: TurnEndGuardDeps,
+  input: TurnEndGuardInput,
+  push: { reason: string; stage: string; label: string; text: string },
+): Promise<TurnEndGuardResult> {
+  const { run } = input;
   getLogger().info("run.autocontinue", {
     runId: run.id,
     roleId: input.roleId,
-    stage: "feedback",
-    reason: "feedback_refused",
+    stage: push.stage,
+    reason: push.reason,
   });
-  const text = `Continue: saving the recruiter's feedback just failed, so this feedback is not recorded yet. Reason: ${error.slice(0, 600)} Fix it from the reason and save it again with recruiting_feedback right away, then continue with the next step. Do not say it is recorded until the save succeeds.${AUTO_NOTE}`;
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,
     botId: run.botId,
     userId: run.userId,
-    blocks: [{ kind: "text", text }],
-    prompt: text,
+    blocks: [{ kind: "text", text: push.text }],
+    prompt: push.text,
     trigger: "follow_up",
     internal: true,
     skipWaitingRuns: true,
@@ -396,8 +410,8 @@ async function unsavedFeedback(
   return {
     action: "continued",
     runId: sent.runId ?? null,
-    stage: "feedback",
-    label: "Save feedback",
+    stage: push.stage,
+    label: push.label,
     count: 1,
   };
 }
@@ -435,6 +449,7 @@ export async function guardRecruitingTurnEnd(
     _sum: { rowCount: true },
   });
   const playbook = await readRecruitingPlaybookStep(deps.prisma, input.roleId);
+  let roundOwed = false;
   // The Results panel is a real feedback surface. Only the latest unapproved round,
   // recorded by this run's completed native effect, can satisfy this turn.
   if (playbook?.stage === "feedback" || playbook?.stage === "calibration_10") {
@@ -473,6 +488,7 @@ export async function guardRecruitingTurnEnd(
       });
       if (latest?.clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX))
         return { action: "ended", classification: "question" };
+      roundOwed = true;
     }
   }
   const classification = classifyTurnEnd(
@@ -491,6 +507,19 @@ export async function guardRecruitingTurnEnd(
     },
   );
   if (classification !== "none") return { action: "ended", classification };
+  // Staging 11-16: after the recruiter's feedback the turn searched, saved 39 new people, then
+  // ended on "I can't give you a reliable shortlist yet" with no round, and nothing pushed it on.
+  if (
+    roundOwed &&
+    (savedRows._sum.rowCount ?? 0) > 0 &&
+    !(await recruitingResearchInFlight(deps.prisma, input.roleId))
+  )
+    return pushContinuation(deps, input, {
+      reason: "round_owed",
+      stage: playbook?.stage ?? "feedback",
+      label: "Show the next round",
+      text: `Continue: the recruiter's feedback on the last round still has no next round. This turn saved new people but recorded none. Choose the next round now from the people saved for this role whom no round has shown and who fit every requirement, and record it with calibration_round; fewer than ten is fine: then say in one line how many short of ten it is and which requirement rules out the most. Don't report status instead.${AUTO_NOTE}`,
+    });
   const endText = turnEndText(input.blocks);
   // "已开始扩展搜索" with nothing running is a promise too; a running search is checked below.
   const promise = turnEndPromise(endText) ?? turnEndStarted(endText);
