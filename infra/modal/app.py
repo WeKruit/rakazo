@@ -115,7 +115,9 @@ image = (
     unauthenticated=True,  # Native Better Auth protects application/API routes.
     min_containers=1,
     max_containers=1,  # ponytail: one native DATA_DIR writer; scale only with a shared store.
-    max_concurrency=128,
+    # Modal answers 429 "Server is at capacity" past this many open requests. Every open live
+    # stream and long poll holds one, so 128 refused reads with only 6-8 plays open (11-16).
+    max_concurrency=1000,
     # Test may be preempted and reserves less memory; it only serves development and test runs.
     nonpreemptible=not TEST_ENVIRONMENT,
     # Request is the idle reservation; the limit lets the cold start burst.
