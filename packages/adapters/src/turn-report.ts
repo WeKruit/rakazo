@@ -1,4 +1,3 @@
-import type { ConnectorTool } from "@rakazo/adapter-kit";
 import { asksForOutreach } from "@rakazo/core";
 import type { Receipts } from "./claim-receipts.js";
 
@@ -426,112 +425,12 @@ export class TurnReportLedger {
 /** What a person asked for, by kind of capability. */
 export type Capability = "send" | "contacts" | "schedule" | "draft" | "search";
 
-const REQUEST_KINDS: Record<Capability, RegExp> = {
-  send: /\bsend\b|\bemail (?:it|this|them|him|her)\b|发(?:送|给|出|邮件|信|\d)/i,
-  contacts: /\bcontacts?\b|\bemail address|邮箱|联系方式/i,
-  schedule: /\binterview|\bschedul|\bbook|\bavailab|\bcalendar|面试|约.{0,6}(?:时间|面)/i,
-  draft: /\bdraft|草稿|写.{0,8}(?:邮件|email)/i,
-  search: /\bfind\b|\bsearch|\bmore (?:people|candidates)|再找|找\d|找更多/i,
-};
-// "Do not send anything", "No emails will be sent", "before anything is sent" or 先不要发 rule a
-// send out; they are not a send request.
-const NEGATED =
-  /\b(?:do not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|book(?:ing)?|schedul\w*|email (?:it|this|them|him|her))\b|\b(?:no|nothing)\b(?:\s+\w+){0,4}?\s+(?:sent|send(?:ing)?)\b|\b(?:before|until)\s+(?:\w+\s+){0,3}?(?:send(?:ing)?|sent)\b|(?:不要|别|先不|不用|不)(?:发|约)/gi;
-
-/** A bare greeting or a lone question mark: nothing asked of the agent. */
-function asksNothing(request: string): boolean {
-  return /^[\s?？!！.。,，]*(?:hi|hello|hey|你好|您好|嗨|哈喽|在吗|안녕하세요)?[\s?？!！.。,，~～]*$/i.test(
-    request,
-  );
-}
-
-function requests(kind: Capability, request: string): boolean {
-  return REQUEST_KINDS[kind].test(request.replace(NEGATED, " "));
-}
-// A booking change, which needs the recruiter's card. Reading the calendar or the interviews
-// ("what interviews are coming up", "when is she free") changes nothing and owes no card.
-const BOOKING_CHANGE =
-  /\b(?:book|re-?schedul|cancel|arrange)\w*|\bschedul\w*\s+(?:an?|the|her|him|them|it|time|\w+\s+for)\b|\bset\s+up\s+(?:an?\s+)?(?:interview|call|meeting)|约.{0,6}(?:时间|面)|(?:安排|取消|改|重新约).{0,4}面试|改期/i;
-function asksBooking(request: string): boolean {
-  return BOOKING_CHANGE.test(request.replace(NEGATED, " "));
-}
-// Tool operations (the last "__" segment) that do each kind of request.
-const TOOL_KINDS: Record<Capability, RegExp> = {
-  send: /send|reply_to|activate_campaign|forward/,
-  contacts: /contact|enrich|lookup|find_emails/,
-  // Calendar tools; schedule_* are routines, not interviews.
-  schedule: /booking|calendar|availability|event_type|^recruiting_scheduling$/,
-  draft: /draft|recruiting_reply|role_campaign/,
-  search: /web_search_advanced_exa|recruiting_research/,
-};
-// A teammate's roster entry (name, title, description, assigned services) that names each kind.
-const TEAMMATE_KINDS: Record<Capability, RegExp> = {
-  send: /\bsend|outreach|\bemail/i,
-  contacts: /contact|enrich/i,
-  schedule: /schedul|calendar|booking|interview/i,
-  draft: /draft|outreach/i,
-  search: /sourc|research|people search/i,
-};
-
-/**
- * A final reply that refuses the request outright. Drawn from the release regression's decline
- * checks so the server and the harness agree.
- */
-const DECLINE =
-  /\bI (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|am not able to|['’]m not able to|don['’]t have (?:access|a tool|the ability|permission))\b|\b(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)\b|\bnot something I can\b|\bnot (?:send-)?ready to send\b|\bcan(?:no|['’])t (?:send|look up|book|schedule|draft|prepare)\b|我(?:无法|不能|没法|没有权限|做不了)|无法(?:发送|完成|执行|代|查|找|安排|准备)|权限(?:不支持|不足|不允许|不够)|没有(?:相应的?|足够的?)?权限|需要开通[^。！？\n]{0,20}权限|\bnot (?:permitted|authorized|allowed) to\b|\b(?:my|the current) permissions? (?:do(?:es)?n['’]t|do(?:es)? not) (?:allow|support)\b/i;
-/** A reply that offers the work back instead of doing it ("Do you want me to…?", 要不要我…). */
-const DEFER =
-  /\b(?:do you want|would you like|want) me to\b|\bshall I\b|\bshould I (?:go ahead|proceed|start|send|draft|look|find|search|book|schedule|reach|contact)\b|\bif you(?:['’]d| would)? like,? I can\b|要不要我|需要我.{0,24}[吗么]|是否需要我|要我.{0,24}[吗么]|需要你先|请先(?:确认|提供|告诉)/i;
-/** A reply that hands the recruiter a choice the agent could make ("Which people…?"). */
-const PICK =
-  /\bwhich (?:\d+ |of (?:them|these|the \w+) |ones?\b|people|candidates?|person|emails?|interviews?)[^.!?\n]{0,60}\b(?:should I|do you want|would you like|to (?:send|email|contact|reach|draft|look up|book|schedule|process|handle))\b|^which (?:\d+|ones?|people|candidates?|person)\b[^.!?\n]{0,30}[?？]$|(?:(?:哪些|哪几)(?:个|位)?(?:人|候选人)|哪位|哪个(?:人|候选人)).{0,20}(?:发|联系|约|处理|查|写)|(?:发给|联系|约)(?:谁|哪些|哪几|哪位)/i;
-
 export type DeclineKind = "decline" | "defer" | "pick" | "text_question";
 /** `keep` is the reply without the question, when the reply also delivered a draft. */
 export type Declined = { sentence: string; kind: DeclineKind; keep?: string };
 
 /** Where a drafted email starts in a reply: an "Email N" heading or a Subject: line. */
 const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:|主题[:：]|第\s*\d+\s*封)/i;
-/** Whether the text shows an email or template (a Subject: line, 主题：, Email 1). */
-export const showsDraft = (text: string) => DRAFT_START.test(text);
-const DRAFT_GREETING = /(?:^|\n)\s*(?:Hi|Hello|Hey|Dear)\s+[^\n,，]{1,40}[,，]\s*\n/i;
-/** A question to the user about the draft itself, after the draft (not the candidate's "open to a chat?"). */
-const ABOUT_DRAFT =
-  /\b(?:draft|emails?|change|edit|send|tweak|adjust|version|tone|shorter|longer)\b|改|发/i;
-/** A choice asked as an instruction instead of a question mark. */
-const ASKS_TO_CHOOSE =
-  /\b(?:please|just) (?:choose|pick|select|tell me|let me know)\b|请(?:选择|选|告诉我)/i;
-const asksUser = (sentence: string) => /[?？]$/.test(sentence) || ASKS_TO_CHOOSE.test(sentence);
-
-/** The first sentence of a reply that declines, defers or hands back a pick, else undefined. */
-export function declinedSentence(text: string): Declined | undefined {
-  // A drafted email is the deliverable, not the reply's own words: its "Would you be open…?"
-  // is no question to the user, so only the text before the first email is read, and after it
-  // only a closing question about the draft.
-  // An email without a subject line starts at its greeting ("Hi {{firstName}},").
-  const starts = [text.search(DRAFT_START), text.search(DRAFT_GREETING)].filter((at) => at >= 0);
-  const draft = starts.length ? Math.min(...starts) : -1;
-  const own = draft >= 0 ? text.slice(0, draft) : text;
-  const sentences = own
-    .split(/(?<=[.!?。！？\n])/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-  for (const sentence of sentences) {
-    if (DECLINE.test(sentence)) return { sentence, kind: "decline" };
-    if (PICK.test(sentence)) return { sentence, kind: "pick" };
-    if (DEFER.test(sentence)) return { sentence, kind: "defer" };
-  }
-  // A clarifying question typed into the reply instead of a question card.
-  const question = sentences.find(asksUser);
-  if (question) return { sentence: question, kind: "text_question" };
-  if (draft < 0) return undefined;
-  const paragraphs = text.trimEnd().split(/\n\s*\n/);
-  const last = paragraphs.at(-1)?.trim() ?? "";
-  const asks = last.split(/(?<=[.!?。！？])\s*/).some((sentence) => asksUser(sentence.trim()));
-  return paragraphs.length > 1 && asks && ABOUT_DRAFT.test(last)
-    ? { sentence: last, kind: "text_question", keep: paragraphs.slice(0, -1).join("\n\n") }
-    : undefined;
-}
 
 export type Teammate = { id: string; name: string; about: string };
 
@@ -540,10 +439,6 @@ export type Teammate = { id: string; name: string; about: string };
  * question the retry still typed into its reply: it goes on a question card instead.
  */
 export type DeclineRetry = { sentence: string; note: string; keep?: string; card?: string };
-
-/** Model-facing: a draft shown in chat with {{variables}} is written again for a real person. */
-export const DRAFT_VARIABLES_NOTE =
-  "Your draft shows template variables or placeholders. A draft in the chat is written for a real person: use the name and current title or company of the person it is for, else the role's first result from recruiting_candidates, and show the whole draft again. Never {{variables}}, placeholders or brackets in a draft; only a send uses them.";
 
 /**
  * The recruiter asked for a template: named it, or asked for an email about a role without naming
@@ -569,54 +464,6 @@ export function askedTemplate(request: string): boolean {
   );
 }
 
-/** Model-facing: a template written as the candidate thanking an interviewer is written again. */
-export const CANDIDATE_VOICE_NOTE =
-  'This template is written as a candidate thanking an interviewer. The recruiter is the one writing, to the candidate: write it again from the recruiter, opening "Hi {{firstName}},", and show the whole template.';
-
-/** A drafted template addressed to the interviewer, as if the candidate were writing. */
-export function candidateVoiceDraft(reply: string): DeclineRetry | undefined {
-  if (!DRAFT_START.test(reply)) return undefined;
-  const greeting = reply.match(
-    /\b(?:Hi|Dear|Hello)\s+\[(?:Interviewer|Hiring Manager)[^\]\n]{0,30}\]/i,
-  )?.[0];
-  return greeting ? { sentence: greeting, note: CANDIDATE_VOICE_NOTE } : undefined;
-}
-
-/** Model-facing: one email was asked for and a sequence came back. */
-export const ONE_EMAIL_NOTE =
-  "They asked for one email, not a sequence: show just that one email, with its subject and full body.";
-
-/** A sequence of drafts shown when the recruiter asked for one email ("a short cold email…", "一封…"). */
-export function sequenceForOneEmail(reply: string, request: string): DeclineRetry | undefined {
-  if (!/\b(?:an?|one|single)\s+(?:\w+\s+){0,3}e-?mail\b|[一写发]封/i.test(request))
-    return undefined;
-  if (/\b(?:sequence|campaign|follow-?ups)\b|序列|跟进序列/i.test(request)) return undefined;
-  const subjects = reply.match(/(?:^|\n)\s*(?:[#*_]+\s*)?Subject:/gi) ?? [];
-  return subjects.length > 1 ? { sentence: "", note: ONE_EMAIL_NOTE } : undefined;
-}
-
-/** A drafted email shown with {{variables}} instead of a real person's details. */
-export function draftVariables(reply: string): DeclineRetry | undefined {
-  if (!DRAFT_START.test(reply)) return undefined;
-  const variable = reply.match(
-    /\{\{\s*[\w.]+\s*\}\}|\[(?:your|candidate|recipient|first|last|full|company|name|title|role|recruiter|sender)\b[^\]\n]{0,30}\](?!\()/i,
-  )?.[0];
-  return variable ? { sentence: variable, note: DRAFT_VARIABLES_NOTE } : undefined;
-}
-
-/** Model-facing: a draft signed as a team is written again with the recruiter's name. */
-export const TEAM_SIGNED_DRAFT_NOTE =
-  "Your draft is signed as a team. Sign it with the recruiter's name or saved signature, else end with the sign-off alone (Best,), and show the whole draft again.";
-
-/** A drafted email signed by a team ("Best,\nRecruiting Team") or as Kruit instead of a person. */
-export function teamSignedDraft(reply: string): DeclineRetry | undefined {
-  if (!DRAFT_START.test(reply)) return undefined;
-  const signature = reply.match(
-    /^[ \t]*(?:the\s+)?(?:recruiting|recruitment|talent(?:\s+acquisition)?|hiring|hr|kruit)(?:\s+(?:team|department))?[ \t]*$/im,
-  )?.[0];
-  return signature ? { sentence: signature.trim(), note: TEAM_SIGNED_DRAFT_NOTE } : undefined;
-}
-
 /**
  * Whether a brief carries the recruiter's message: most of the message's character pairs, spaces
  * and punctuation aside, appear in the brief, as they do when it is quoted.
@@ -631,38 +478,8 @@ export function quotesMessage(brief: string, message: string): boolean {
   return wanted.filter((pair) => shown.has(pair)).length / wanted.length >= 0.8;
 }
 
-// A day the recruiter named, as they wrote it, and its English name. 「每周五天」 is a count.
-const NAMED_DAYS = (
-  [
-    ["一", "Monday"],
-    ["二", "Tuesday"],
-    ["三", "Wednesday"],
-    ["四", "Thursday"],
-    ["五", "Friday"],
-    ["六", "Saturday"],
-    ["[日天]", "Sunday"],
-  ] as const
-).map(
-  ([zh, en]) => [new RegExp(`(?:周|星期|礼拜)${zh}(?![天个])|\\b${en}s?\\b`, "i"), en] as const,
-);
-
-/** Model-facing: the draft says the day the recruiter named, in the email's own language. */
-export const droppedDayNote = (said: string, day: string) =>
-  `The recruiter said 「${said}」, and your draft does not name ${day}. Write that detail as they gave it (${day}, not a count of days), keep everything else, and show the whole draft again.`;
-
-/** A drafted email that lost a weekday the recruiter named ("每周五远程" → "one remote day"). */
-export function droppedDay(reply: string, asked: string): DeclineRetry | undefined {
-  if (!/Subject\s*[:：]|主题\s*[:：]|\{\{\s*firstName/i.test(reply)) return undefined;
-  for (const [named, day] of NAMED_DAYS) {
-    const said = named.exec(asked)?.[0];
-    if (said && !named.test(reply))
-      return { sentence: said, note: droppedDayNote(asked.trim().slice(0, 120), day) };
-  }
-  return undefined;
-}
-
 /** Model-facing: an email already in the conversation is pointed to, not pasted again. */
-export const REPASTED_DRAFT_NOTE =
+const REPASTED_DRAFT_NOTE =
   "That email is already shown above, word for word. If the recruiter asked for a change, make it and show the changed email; otherwise answer what they asked in one or two lines and point to the email above instead of pasting it again.";
 
 /** A reply that pastes, unchanged, an email the conversation already shows. */
@@ -703,149 +520,6 @@ export function withoutRepastedDraft(
     .replace(/(?:^|(?<=[。！!.\n]))[^。！!.\n]*[:：]$/, "")
     .trim();
   return lead.length >= 6 ? lead : reply;
-}
-
-/** Model-facing: a template with [bracketed] blanks is written again with real details. */
-export const TEMPLATE_BLANKS_NOTE =
-  "Your template shows bracketed blanks. Write {{firstName}} where the candidate's first name goes (it is filled in for each person when sent) and the real role title, company, location and pay from the conversation; leave out a detail nobody gave instead of writing a blank, sign with the recruiter's name or the sign-off alone, and show the whole template again.";
-
-/** The recruiter questions or refuses a mail-merge variable ("这有 {{firstName}} 占位符，能直接发吗？"). */
-const OBJECTS_TO_VARIABLES = /\{\{|占位符|placeholder|变量|\bvariables?\b|merge (?:tag|field)/i;
-const TEMPLATE_VARIABLES_REFUSED_NOTE =
-  "The recruiter questioned the {{firstName}} placeholder, so they mean to paste and send it by hand. Open with one line that answers what they asked, then show the whole template again with no {{variables}}: greet with the plain greeting alone (Hi,), keep every change they just asked for and the recruiter's signature.";
-
-/** A template that keeps a {{variable}} after the recruiter questioned or refused it. */
-export function refusedTemplateVariables(reply: string, asked: string): DeclineRetry | undefined {
-  const start = reply.search(DRAFT_START);
-  if (start < 0 || !OBJECTS_TO_VARIABLES.test(asked)) return undefined;
-  const variable = reply.slice(start).match(/\{\{\s*[\w.]+\s*\}\}/)?.[0];
-  return variable ? { sentence: variable, note: TEMPLATE_VARIABLES_REFUSED_NOTE } : undefined;
-}
-
-// "上一版漏了 competitive", "the last version missed "competitive"": what the reply says was missing.
-const ADMITS_OMISSION = [
-  /(?:上一版|上一封|之前|刚才|前一版|原来)[^。\n]{0,12}?(?:漏了|漏掉了?|没写|没有写|缺了?|忘了写?)\s*[*`「“"']*([^*`」”"'，,。.\n]{2,40}?)[*`」”"']*(?=[，,。.\n]|$)/,
-  /(?:previous|last|earlier|first) (?:version|draft|one)[^.\n]{0,20}?(?:missed|left out|didn't include|did not include|was missing|forgot)\s+(?:the\s+)?[*`"“']*([^*`"”',.\n]{2,40}?)[*`"”']*(?=[,.\n]|$)/i,
-];
-
-/** A reply agreeing its earlier draft lacked something that draft does show. */
-export function falseOmission(reply: string, earlier: readonly string[]): DeclineRetry | undefined {
-  const start = reply.search(DRAFT_START);
-  const lead = start < 0 ? reply : reply.slice(0, start);
-  const missed = ADMITS_OMISSION.map((pattern) => pattern.exec(lead)?.[1]?.trim()).find(Boolean);
-  const before = earlier.find((text) => DRAFT_START.test(text));
-  if (!missed || !before?.toLowerCase().includes(missed.toLowerCase())) return undefined;
-  return {
-    sentence: missed,
-    note: `Your earlier draft already says "${missed}". Never agree that it was missing: say in one line that it was already there, then keep the rest of your reply.`,
-  };
-}
-
-/** A template the recruiter asked for that still has [bracketed] blanks ("Hi [Candidate Name],"). */
-export function templateBlanks(reply: string): DeclineRetry | undefined {
-  if (!DRAFT_START.test(reply)) return undefined;
-  const blank = reply.match(
-    /\{\{\s*(?:your|my|sender|recruiter)[\w.]*\s*\}\}|\[(?:your|candidate|recipient|first|last|full|company|name|title|role|position|recruiter|sender|interviewer|hiring)\b[^\]\n]{0,30}\](?!\()|\[[^\]\n]{0,10}(?:候选人|姓名|名字|公司|职位|岗位|名称|你的|您的)[^\]\n]{0,10}\]/i,
-  )?.[0];
-  return blank ? { sentence: blank, note: TEMPLATE_BLANKS_NOTE } : undefined;
-}
-
-/**
- * A question still typed into a reply after its retry: the question and what follows it go on a
- * question card, the text before it stays. A refusal is not a question.
- */
-export function questionCard(reply: string, declined: Declined): DeclineRetry | undefined {
-  if (declined.kind === "decline") return undefined;
-  const at = reply.indexOf(declined.sentence);
-  if (at < 0) return undefined;
-  const card = reply.slice(at).trim();
-  if (!/[?？]/.test(card)) return undefined;
-  return { sentence: declined.sentence, note: "", keep: reply.slice(0, at).trim(), card };
-}
-
-/** Model-facing: the substance of every defer or pick retry; tools or a teammate are named after it. */
-export const DECLINE_RETRY_NOTE =
-  "Do not defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can; for a send, the email is the one written in this conversation, else the role's saved email. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what. When none of your tools does what was asked at all (a send tool sends email only, so not a LinkedIn message, a text or a call), the honest answer stands: say in your first line that it cannot be done from here and nothing was done, then offer the closest thing you can do.";
-
-/** Model-facing: a clarifying question asked in plain text goes on a question card instead. */
-export const TEXT_QUESTION_NOTE =
-  "You asked the user in plain text. Ask it with ask_user instead: the question in one sentence, concrete options (the people or choices you listed) and a custom answer, without saying what you could not do or find. Your question was";
-
-/**
- * One retry for a final reply that defers, hands back a pick or asks in text, when the turn did
- * nothing. After other work the reply stands: a handed stage reports back and is checked against
- * its brief, and "want me to keep going?" is a fair next step. The note names the tools or
- * teammate for the asked kind of work when there are any. Undefined keeps the reply.
- */
-export function declineRetry(input: {
-  reply: string;
-  request: string;
-  tools: readonly Pick<ConnectorTool, "name">[];
-  teammates: readonly Teammate[];
-  /** The turn did consequential work (see TurnReportLedger.worked). */
-  worked?: boolean;
-  /** A tool call returned this turn (see TurnReportLedger.read). */
-  read?: boolean;
-  /** The recruiter's own latest words, when a teammate's brief is the request. */
-  personRequest?: string;
-}): DeclineRetry | undefined {
-  const declined = declinedSentence(input.reply);
-  // A reply that says it can't stands: the rules say when that is the honest answer, and the retry
-  // audit (11-16) found its wording check overruling true ones. A reply that shows a drafted email
-  // delivered the work; holding it back would lose the draft.
-  if (
-    !declined ||
-    declined.kind === "decline" ||
-    (DRAFT_START.test(input.reply) && declined.keep === undefined)
-  )
-    return undefined;
-  const { sentence } = declined;
-  const asked = (Object.keys(REQUEST_KINDS) as Capability[]).filter((kind) =>
-    requests(kind, input.request),
-  );
-  // A turn that did work reports it, and the coordinator checks it against the brief.
-  if (input.worked) return undefined;
-  const cardOwed = asked.includes("send") || asksBooking(input.request);
-  // A question that asks for nothing to be done ("what interviews do I have") is answered by its
-  // reads; a coverage aside in that answer is no refusal.
-  // An instruction ("drop the ones without Kafka") is no question, whatever was read for it.
-  const question = /[?？]|[吗呢][\s。.!！]*$/.test(input.personRequest ?? input.request);
-  if (input.read && question && !cardOwed && asked.every((kind) => kind === "schedule"))
-    return undefined;
-  // A greeting asks for nothing a card could hold (staging retry audit 11-16: 243 such retries).
-  const person = input.personRequest ?? input.request;
-  if (declined.kind === "text_question" && asksNothing(person)) return undefined;
-  const quoted = sentence.slice(0, 200);
-  if (declined.kind === "text_question")
-    return {
-      sentence,
-      note: `${TEXT_QUESTION_NOTE} ("${quoted}")`,
-      ...(declined.keep === undefined ? {} : { keep: declined.keep }),
-    };
-  const lead =
-    declined.kind === "pick"
-      ? `Your reply asked the user to choose ("${quoted}"). When the request names the people or a number, use those; otherwise ask that choice as one ask_user question with concrete options (such as the person just discussed or the first results).`
-      : `Your reply deferred the request ("${quoted}").`;
-  const own = asked.flatMap((kind) =>
-    input.tools
-      .map((tool) => tool.name)
-      .filter((name) => TOOL_KINDS[kind].test((name.split("__").at(-1) ?? name).toLowerCase())),
-  );
-  const mate = own.length
-    ? undefined
-    : asked
-        .map((kind) =>
-          input.teammates.find((teammate) =>
-            TEAMMATE_KINDS[kind].test(`${teammate.name} ${teammate.about}`),
-          ),
-        )
-        .find(Boolean);
-  const named = own.length
-    ? ` You have ${[...new Set(own)].slice(0, 3).join(", ")} for it.`
-    : mate
-      ? ` ${mate.name} can do it: hand it to ${mate.name} now with handoff_to_bot (bot_id ${mate.id}), quoting the user's words.`
-      : "";
-  return { sentence, note: `${lead} ${DECLINE_RETRY_NOTE}${named}` };
 }
 
 // Chinese and Japanese have no spaces: a run of their characters counts by its character pairs.

@@ -95,22 +95,6 @@ export const describesRole = (recruiterText: string) =>
   JOB_TITLE.test(recruiterText) || intakeFields(recruiterText).openKeys.length < 2;
 
 /**
- * Kruit's own chat answered a role the recruiter described by asking for the JD or requirements
- * instead of opening it (gate b2005684 progress-and-where: 「那我第一步该干嘛，想找个后端的」 got
- * three steps and "send the JD, location and must-haves").
- */
-export function askedForRoleInsteadOfOpening(recruiterText: string, reply: string): boolean {
-  return (
-    describesRole(recruiterText) &&
-    /职位描述|岗位描述|\bJD\b|职位名称|岗位名称|必备条件|必须具备|工作地点|\bjob description\b|\b(?:requirements|must-haves)\b/i.test(
-      reply,
-    )
-  );
-}
-export const OPEN_DESCRIBED_ROLE_RETRY =
-  "Not shown: the recruiter described a role they want filled and your reply asked them for the JD or requirements instead. Call start_role now with a short title in their words; its team searches from what they wrote and asks any open fact beside the first ten. Then say in one line that the search has started.";
-
-/**
  * The recruiter chose to see the first ten before any question (staging 11-15, card tap
  * 「先出前十个，再问」): a described role is searched as written.
  */
