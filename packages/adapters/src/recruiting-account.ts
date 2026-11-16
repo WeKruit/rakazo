@@ -15,6 +15,7 @@ import {
   createGroupRepos,
   createRepos,
   getRecruitingWorkspace,
+  IsolationError,
   listRecruitingFeedback,
   listRecruitingReminders,
   listRecruitingSchedulingPlans,
@@ -528,8 +529,10 @@ export async function readRecruitingAccountView(
             items[index] = await readItem(row).catch((error: unknown) => {
               // One role whose conversation moved or was removed must not hide every other
               // role from an account-wide read; a named role still reports it.
-              if (input.roleId || !(error instanceof ORPCError) || error.code !== "NOT_FOUND")
-                throw error;
+              const gone =
+                error instanceof IsolationError ||
+                (error instanceof ORPCError && error.code === "NOT_FOUND");
+              if (input.roleId || !gone) throw error;
               getLogger().warn("recruiting.role_read.skipped", { "recruiting.role_id": row.id });
               return undefined;
             });
