@@ -27,7 +27,7 @@ export interface TurnModelChoice {
   routed: "fast" | "configured";
   reason: string;
   /** Overrides the bot's thinking level for this turn. */
-  thinkingLevel?: "low" | "off";
+  thinkingLevel?: "low";
 }
 
 /**
@@ -44,18 +44,18 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
   if (!fastId) return { ...configured, reason: "fast_model_disabled" };
   const fastProvider = env.RAKAZO_FAST_MODEL_PROVIDER?.trim() || input.configured.provider;
   if (fastProvider === input.configured.provider && fastId === input.configured.id)
-    // A bot already on the fast model still opens a role without reasoning.
+    // A bot already on the fast model still opens a role at low thinking.
     return input.recruitingIntake && !input.pendingToolLoop
-      ? { ...configured, reason: "recruiting_intake", thinkingLevel: "off" }
+      ? { ...configured, reason: "recruiting_intake", thinkingLevel: "low" }
       : { ...configured, reason: "already_fast" };
   const fast = { model: { provider: fastProvider, id: fastId }, routed: "fast" as const };
 
   if (input.pendingToolLoop) return { ...configured, reason: "pending_tool_loop" };
   // An answer turn picks the people, so it keeps the bot's thinking level.
   if (input.answersQuestion) return { ...fast, reason: "clarifying_answer" };
-  // The turn that opens a role only reads the JD and asks the first question, so it skips
-  // reasoning: the question is the first thing the recruiter waits for.
-  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake", thinkingLevel: "off" };
+  // The turn that opens a role reads the JD and starts the first search while the recruiter
+  // waits, so it thinks at low. With thinking off the model wrote its planning into the reply.
+  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake", thinkingLevel: "low" };
   if (input.peerIntent === "status" || input.peerIntent === "fyi")
     return { ...fast, reason: "status_turn" };
   if (input.trigger !== "user" && input.trigger !== "messaging")
@@ -73,8 +73,9 @@ export type EffortMode = "fast" | "balanced" | "deep";
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
- * A chat's effort mode applied to the turn's thinking level. Fast (the default) caps thinking at
- * low and keeps lower levels; balanced keeps the routed level; deep thinks at high.
+ * A chat's effort mode applied to the turn's thinking level. Fast (the default) thinks at low:
+ * with thinking off or minimal the model wrote its planning into the reply the recruiter sees.
+ * Balanced keeps the routed level; deep thinks at high.
  */
 export function effortThinkingLevel(
   mode: EffortMode,
@@ -82,7 +83,7 @@ export function effortThinkingLevel(
 ): ThinkingLevel | null | undefined {
   if (mode === "deep") return "high";
   if (mode === "balanced") return level;
-  return level === "off" || level === "minimal" || level === "low" ? level : "low";
+  return "low";
 }
 
 /**

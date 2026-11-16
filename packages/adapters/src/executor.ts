@@ -887,7 +887,6 @@ import {
   workEstimateForResearch,
   workStartNote,
 } from "./work-estimate.js";
-import { dropScratchReasoning } from "./scratch-reasoning.js";
 import type { WorkingState } from "./working-state.js";
 import {
   isRolelessHomeTeam,
@@ -18564,11 +18563,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : "The checked round comes in a minute or two.",
               },
             ];
-          // A recruiter never sees the model's own planning written after its answer.
-          if (hideVendors)
-            blocks = blocks.map((block) =>
-              block.kind === "text" ? { ...block, text: dropScratchReasoning(block.text) } : block,
-            );
           let text = handedOff
             ? ""
             : visible(
@@ -18577,7 +18571,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runSecrets,
                 ),
               );
-          if (hideVendors) text = dropScratchReasoning(text);
           // The person's newest message steered into the turn is what the reply answers; a
           // teammate's handoff carries the request in its brief. Gate 493e9f2e: 「连上之后草稿还在吗」
           // after 「发出去吧」 was judged against the send request and got a second Connect card.
