@@ -15,6 +15,7 @@ import {
   countRecruitingPeopleFoundSince,
   createThreadMessageInTransaction,
   listRecruitingPeopleFoundSince,
+  mirrorAskInTransaction,
   type PrismaClient,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -887,9 +888,8 @@ async function roleStartReturn(
 }
 
 /**
- * A role team working on delegated work stopped to wait on the recruiter (an approval or a
- * question card) or failed: tell the conversation that delegated it right away, once per
- * turn, so it never waits silently behind the card.
+ * A role team working on delegated work failed: tell the conversation that delegated it right
+ * away, once per turn, so it never waits silently.
  */
 export async function reportDelegatedTeamBlocked(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -901,7 +901,7 @@ export async function reportDelegatedTeamBlocked(
     userId: string;
     sourceMessageId?: string | null;
   },
-  blocked: { kind: "waiting" | "failed"; text: string },
+  blocked: { kind: "failed"; text: string },
 ): Promise<void> {
   const thread = await deps.prisma.thread.findFirst({
     where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
@@ -911,10 +911,6 @@ export async function reportDelegatedTeamBlocked(
   const found = await openDelegation(deps.prisma, run.threadId);
   if (!found) return;
   const detail = blocked.text.trim().slice(0, 600);
-  const message =
-    blocked.kind === "waiting"
-      ? `Waiting on the recruiter in the ${thread.group.name} conversation, on its card: "${detail}". The work continues there once they answer.`
-      : `The ${thread.group.name} team could not finish: ${detail}`;
   const sent = await messageBot(
     deps,
     run,
@@ -924,14 +920,59 @@ export async function reportDelegatedTeamBlocked(
       thread_id: found.root.returnThreadId,
       sender_label: `${thread.group.name} team`,
       target_label: found.root.fromBotName,
-      message: clampBotMessage(message),
+      message: clampBotMessage(`The ${thread.group.name} team could not finish: ${detail}`),
       intent: "status",
       deliveryKey: `delegation-${blocked.kind}:${run.id}`,
     },
     { allowTerminalSource: true },
   );
   if (!sent.ok)
-    getLogger().warn("delegated team block not reported", { runId: run.id, error: sent.error });
+    getLogger().warn("delegated team block not reported", { runId: run.id, reason: sent.error });
+}
+
+/**
+ * A role team working on delegated work stopped on a card (a question, form or approval): show
+ * that card in the conversation that delegated the work, where the recruiter is, and route the
+ * answer back to the waiting run. Workloop does the same for a child agent waiting on a person;
+ * the delegating agent is not woken. Staging 11-16: the old "waiting on its card" message was
+ * refused every time (the paused run is neither running nor finished), 194 times in 24 h.
+ */
+export async function showDelegatedTeamCard(
+  deps: Pick<ExecutorDeps, "prisma" | "events">,
+  run: { id: string; spaceId: string; threadId: string; userId: string },
+): Promise<void> {
+  const thread = await deps.prisma.thread.findFirst({
+    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
+    select: { id: true },
+  });
+  if (!thread) return;
+  const found = await openDelegation(deps.prisma, run.threadId);
+  if (!found) return;
+  const card = await deps.prisma.message.findFirst({
+    where: {
+      threadId: run.threadId,
+      runId: run.id,
+      role: "bot",
+      blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+    },
+    orderBy: { seq: "desc" },
+    select: { id: true },
+  });
+  if (!card) return;
+  const shown = await withTransactionRetry(() =>
+    deps.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM threads WHERE id = ${found.root.returnThreadId} FOR UPDATE`;
+      return mirrorAskInTransaction(tx, {
+        spaceId: run.spaceId,
+        sourceThreadId: run.threadId,
+        sourceMessageId: card.id,
+        runId: run.id,
+        targetThreadId: found.root.returnThreadId,
+        botId: found.root.fromBotId,
+      });
+    }),
+  );
+  if (shown) await deps.events.notify(shown.threadId, shown.seq);
 }
 
 /** Only a recent delegation is still waiting for its team's result. */

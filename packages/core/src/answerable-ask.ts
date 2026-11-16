@@ -37,14 +37,14 @@ export function connectCardOpen(block: {
  * closed, the way an expired card reads, so history never presents it as waiting. A connect card
  * stays pressable after its wait ends (`reopenedAskMessageIds`), so it reads as open until answered.
  */
-export function closeEndedAsks<T extends { kind: string; status?: string; connection?: unknown }>(
-  blocks: readonly T[],
-  runWaits: boolean,
-): T[] {
+export function closeEndedAsks<
+  T extends { kind: string; status?: string; connection?: unknown; answerTarget?: unknown },
+>(blocks: readonly T[], runWaits: boolean): T[] {
   return blocks.map((block) =>
     block.kind === "ask" && block.connection && block.status === "expired"
       ? { ...block, status: "pending" }
-      : !runWaits && isOpenAskBlock(block) && !block.connection
+      : // A copied card's status follows its source card, which the server keeps in step.
+        !runWaits && isOpenAskBlock(block) && !block.connection && !block.answerTarget
         ? { ...block, status: "expired" }
         : block,
   );
@@ -170,6 +170,7 @@ type AskSnapshot = {
       input?: unknown;
       credential?: unknown;
       connection?: unknown;
+      answerTarget?: unknown;
     }[];
   }[];
   run?: { id: string; status: string } | null;
@@ -191,7 +192,13 @@ export function answerableAskMessageIds(snapshot: AskSnapshot | null): string[] 
   const ids: string[] = [];
   for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
     const message = snapshot.messages[index];
-    if (!message?.runId || !waitingRunIds.has(message.runId)) continue;
+    if (!message?.runId) continue;
+    // A copy of a role team's card waits on a run in that team's conversation, not this one.
+    if (message.blocks.some((block) => block.answerTarget && isOpenAskBlock(block))) {
+      ids.unshift(message.id);
+      continue;
+    }
+    if (!waitingRunIds.has(message.runId)) continue;
     if (message.blocks.some(isOpenAskBlock)) {
       ids.unshift(message.id);
       waitingRunIds.delete(message.runId);

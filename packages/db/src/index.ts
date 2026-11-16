@@ -24,6 +24,7 @@ export * from "./memory-config.js";
 export * from "./message-embeddings.js";
 export * from "./message-thinking.js";
 export * from "./messages.js";
+export * from "./mirrored-asks.js";
 export * from "./messaging.js";
 export * from "./model-backups.js";
 export * from "./model-credentials.js";

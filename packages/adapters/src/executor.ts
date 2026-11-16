@@ -388,6 +388,7 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
+  showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
 import {
@@ -18054,12 +18055,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               if (!paused) return;
               logRunTiming("waiting_input");
-              // Delegated work waiting on the recruiter tells the delegating conversation now.
+              // Delegated work waiting on the recruiter shows its card where the recruiter is.
               if (thread.groupId)
-                void reportDelegatedTeamBlocked(deps, run, {
-                  kind: "waiting",
-                  text: safeText,
-                }).catch((error) => getLogger().error("delegated team wait report", error));
+                void showDelegatedTeamCard(deps, run).catch((error) =>
+                  getLogger().error("delegated team card", error),
+                );
               // A recruiter message that arrived while this turn was finishing answers the card.
               const answeredBySteering = await answerPausedAskWithSteering(deps.prisma, {
                 spaceId: run.spaceId,
@@ -18075,6 +18075,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runId,
                 });
                 await deps.events.notify(answeredBySteering.threadId, answeredBySteering.seq);
+                for (const copy of answeredBySteering.mirrors ?? [])
+                  await deps.events.notify(copy.threadId, copy.seq);
                 await deps.jobs
                   .enqueue(runContinueJob(runId))
                   .catch((error) => getLogger().error("steering answer enqueue", error));

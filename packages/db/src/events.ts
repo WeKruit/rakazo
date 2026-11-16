@@ -47,6 +47,7 @@ import {
   createThreadMessageInTransaction,
   RunHistoryWriteError,
 } from "./messages.js";
+import { syncMirroredAsksInTransaction } from "./mirrored-asks.js";
 import type { RecruitingQuestionPauseContext } from "./recruiting.js";
 import {
   authorizeRecruitingApprovalAnswerInTransaction,
@@ -1002,7 +1003,7 @@ async function commitAnswerRunInput(
   tx: Prisma.TransactionClient,
   input: AnswerRunInput,
   runSecretWriter?: RunSecretWriter,
-): Promise<{ threadId: string; seq: number } | null> {
+): Promise<AnsweredCard | null> {
   // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
   // concurrent clear cannot deadlock against this transaction.
   await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
@@ -1470,6 +1471,14 @@ async function commitAnswerRunInput(
     runId: input.runId,
     payload: { messageId: message.id, role: "bot", blocks },
   });
+  // Copies of this card in the conversation that delegated the work close with it.
+  const mirrors = await syncMirroredAsksInTransaction(tx, {
+    spaceId: input.spaceId,
+    sourceThreadId: input.threadId,
+    sourceMessageId: message.id,
+    runId: input.runId,
+    blocks,
+  });
   if (ordinaryAsk) {
     const proof = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
@@ -1484,7 +1493,7 @@ async function commitAnswerRunInput(
         answeredByUserId: input.answeredByUserId,
       },
     });
-    return { threadId: proof.threadId, seq: proof.seq };
+    return { threadId: proof.threadId, seq: proof.seq, mirrors };
   }
   if (approvalAsk) {
     const proof = await appendEventInTransaction(tx, {
@@ -1507,9 +1516,26 @@ async function commitAnswerRunInput(
           .digest("hex"),
       },
     });
-    return { threadId: proof.threadId, seq: proof.seq };
+    return { threadId: proof.threadId, seq: proof.seq, mirrors };
   }
-  return { threadId: updated.threadId, seq: updated.seq };
+  return { threadId: updated.threadId, seq: updated.seq, mirrors };
+}
+
+/** The answered card's event, plus the events of its copies in other conversations. */
+export type AnsweredCard = {
+  threadId: string;
+  seq: number;
+  mirrors?: { threadId: string; seq: number }[];
+};
+
+/** Tell open clients about an answered card and every copy of it. */
+export async function notifyAnsweredCard(
+  realtime: RealtimeFanout | undefined,
+  answered: AnsweredCard,
+): Promise<void> {
+  await notifyRealtime(realtime, answered.threadId, answered.seq);
+  for (const mirror of answered.mirrors ?? [])
+    await notifyRealtime(realtime, mirror.threadId, mirror.seq);
 }
 
 export async function answerRunInput(
@@ -1527,7 +1553,7 @@ export async function answerRunInput(
     : await commit();
 
   if (!committed) return false;
-  await notifyRealtime(realtime, committed.threadId, committed.seq);
+  await notifyAnsweredCard(realtime, committed);
   return true;
 }
 
@@ -1543,7 +1569,7 @@ export async function answerWaitingRunWithTextInTransaction(
     /** Server-only native composer message, reused across the waiting runs it answers. */
     answerMessageId?: string;
   },
-): Promise<{ threadId: string; seq: number } | null> {
+): Promise<AnsweredCard | null> {
   if (!input.answer.trim()) return null;
   const found = await findPendingAsk(tx, input);
   if (!found) return null;
@@ -1612,7 +1638,7 @@ export async function cancelFormAskInTransaction(
 export async function answerPausedAskWithSteering(
   prisma: PrismaClient,
   input: { spaceId: string; threadId: string; botId: string; runId: string },
-): Promise<{ threadId: string; seq: number } | null> {
+): Promise<AnsweredCard | null> {
   return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
     const rows = await tx.steeringMessage.findMany({

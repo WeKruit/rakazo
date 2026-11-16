@@ -492,6 +492,8 @@ export const AskBlockSchema = z
     requestedSchema: AskRequestedSchema.optional(),
     formResponse: AskFormResponseSchema.optional(),
     connection: AskConnectionSchema.optional(),
+    /** A copy of another conversation's card: answering it answers that card. */
+    answerTarget: z.object({ threadId: Id, runId: Id, messageId: Id }).optional(),
     actions: z
       .array(
         z.object({
@@ -933,7 +935,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 13;
+export const EVENT_FORMAT_VERSION = 14;
 
 export const ProductEventSchema = z
   .object({

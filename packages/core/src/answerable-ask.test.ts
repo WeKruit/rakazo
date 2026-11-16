@@ -125,6 +125,30 @@ it("keeps each waiting agent's latest question answerable in a group", () => {
   ).toEqual(["main-ask", "sourcer-ask"]);
 });
 
+it("keeps another conversation's card answerable where it is copied, until it closes", () => {
+  const target = { threadId: "role", runId: "team", messageId: "source" };
+  expect(
+    answerableAskMessageIds({
+      activeRuns: [],
+      messages: [
+        {
+          id: "copy",
+          runId: "team",
+          blocks: [{ kind: "ask", status: "pending", answerTarget: target }],
+        },
+        {
+          id: "closed",
+          runId: "team",
+          blocks: [{ kind: "ask", status: "answered", answerTarget: target }],
+        },
+      ],
+    }),
+  ).toEqual(["copy"]);
+  expect(
+    closeEndedAsks([{ kind: "ask", status: "pending", answerTarget: target }], false)[0]?.status,
+  ).toBe("pending");
+});
+
 describe("latestAnswerableAskMessageId", () => {
   it("finds a waiting prompt even when a newer group run is active", () => {
     expect(

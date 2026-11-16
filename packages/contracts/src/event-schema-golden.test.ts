@@ -37,6 +37,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   12: "66a18eb346137eef4e42ede4c285d884685f41eab8857b9aaa55807cdc2b70ba",
   // 13: optional interface language on user text blocks (menu names as the sender sees them).
   13: "e90ed4b7750f6a67737fc8ce1899e683947209f2f0e06c770eecc851f32a7e66",
+  // 14: optional answerTarget on ask blocks (a role team's card shown in the delegating chat).
+  14: "0080544f7957fff29512ddc4b5c0dd244ba91a53c0c6a5a3f2b738c4398375b7",
 };
 
 const OLD_ROWS: unknown[] = [

@@ -1,0 +1,145 @@
+import type { MessageBlock } from "@rakazo/contracts";
+import { MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
+import { isOpenAskBlock, isSecretAskBlock } from "@rakazo/core";
+import type { Prisma } from "./client.js";
+import { appendEventInTransaction } from "./events.js";
+import { createThreadMessageInTransaction } from "./messages.js";
+
+/** One copy per source card, however often the pause is replayed. */
+export function mirroredAskClientNonce(sourceMessageId: string): string {
+  return `delegated-ask:${sourceMessageId}`;
+}
+
+/**
+ * Copy the card a role team's run is waiting on into the conversation that delegated the work,
+ * so the person sees and answers it where they are (as Workloop posts a child agent's approval in
+ * the user's thread and routes the decision back to that child). Answering the copy answers the
+ * source card. Secret and sign-in cards stay where they are: they belong to the team's bot.
+ * Returns the copy's event, or null when there is nothing to copy or it was copied already.
+ */
+export async function mirrorAskInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    spaceId: string;
+    sourceThreadId: string;
+    sourceMessageId: string;
+    runId: string;
+    targetThreadId: string;
+    botId: string;
+  },
+): Promise<{ threadId: string; seq: number } | null> {
+  const source = await tx.message.findFirst({
+    where: { id: input.sourceMessageId, threadId: input.sourceThreadId, runId: input.runId },
+    select: { blocks: true },
+  });
+  const parsed = MessageBlockSchema.array().safeParse(source?.blocks);
+  if (!parsed.success) return null;
+  const answerTarget = {
+    threadId: input.sourceThreadId,
+    runId: input.runId,
+    messageId: input.sourceMessageId,
+  };
+  const blocks: MessageBlock[] = parsed.data
+    .filter(
+      (block) =>
+        block.kind === "ask" &&
+        isOpenAskBlock(block) &&
+        !isSecretAskBlock(block) &&
+        !block.connection &&
+        !block.answerTarget,
+    )
+    .map((block) => ({ ...block, answerTarget }) as MessageBlock);
+  if (!blocks.length) return null;
+  const clientNonce = mirroredAskClientNonce(input.sourceMessageId);
+  const already = await tx.message.findUnique({
+    where: { threadId_clientNonce: { threadId: input.targetThreadId, clientNonce } },
+    select: { id: true },
+  });
+  if (already) return null;
+  const copy = await createThreadMessageInTransaction(tx, {
+    threadId: input.targetThreadId,
+    role: "bot",
+    blocks,
+    botId: input.botId,
+    runId: input.runId,
+    clientNonce,
+    markUnread: true,
+  });
+  const event = await appendEventInTransaction(tx, {
+    spaceId: input.spaceId,
+    threadId: input.targetThreadId,
+    botId: input.botId,
+    type: "thread.message.created",
+    runId: input.runId,
+    payload: { messageId: copy.id, role: "bot", blocks },
+  });
+  return { threadId: event.threadId, seq: event.seq };
+}
+
+/**
+ * Bring the copy of a card in step with its source after the source was answered or closed.
+ */
+export async function syncMirroredAsksInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    spaceId: string;
+    sourceThreadId: string;
+    sourceMessageId: string;
+    runId: string;
+    blocks: readonly MessageBlock[];
+  },
+): Promise<{ threadId: string; seq: number }[]> {
+  const source = input.blocks.find((block) => block.kind === "ask");
+  if (source?.kind !== "ask") return [];
+  // One copy per card, in the conversation that delegated the work.
+  const copy = await tx.message.findFirst({
+    where: {
+      runId: input.runId,
+      role: "bot",
+      clientNonce: mirroredAskClientNonce(input.sourceMessageId),
+    },
+    select: { id: true, threadId: true, botId: true, blocks: true },
+  });
+  const parsed = MessageBlockSchema.array().safeParse(copy?.blocks);
+  if (!copy?.botId || copy.threadId === input.sourceThreadId || !parsed.success) return [];
+  const blocks = parsed.data.map((block) =>
+    block.kind === "ask" && block.answerTarget?.messageId === input.sourceMessageId
+      ? ({ ...source, answerTarget: block.answerTarget } as MessageBlock)
+      : block,
+  );
+  await tx.message.update({ where: { id: copy.id }, data: { blocks } });
+  const event = await appendEventInTransaction(tx, {
+    spaceId: input.spaceId,
+    threadId: copy.threadId,
+    botId: copy.botId,
+    type: "thread.message.updated",
+    runId: input.runId,
+    allowCancelledRun: true,
+    payload: { messageId: copy.id, role: "bot", blocks },
+  });
+  return [{ threadId: event.threadId, seq: event.seq }];
+}
+
+/**
+ * The source card a press on a copy answers, or null when the pressed card is not a copy. The
+ * source must be in the same person's own conversations.
+ */
+export async function mirroredAskSource(
+  tx: Pick<Prisma.TransactionClient, "message" | "thread">,
+  input: { spaceId: string; userId: string; threadId: string; messageId: string },
+): Promise<{ threadId: string; runId: string; messageId: string } | null> {
+  const copy = await tx.message.findFirst({
+    where: { id: input.messageId, threadId: input.threadId, role: "bot" },
+    select: { blocks: true },
+  });
+  const parsed = MessageBlockSchema.array().safeParse(copy?.blocks);
+  if (!parsed.success) return null;
+  const ask = parsed.data.find((block) => block.kind === "ask" && block.answerTarget);
+  const target = ask?.kind === "ask" ? ask.answerTarget : undefined;
+  if (!target) return null;
+  const source = await tx.thread.findFirst({
+    where: { id: target.threadId, spaceId: input.spaceId, userId: input.userId },
+    select: { id: true },
+  });
+  return source ? target : null;
+}

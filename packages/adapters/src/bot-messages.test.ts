@@ -7,6 +7,7 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
+  showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
@@ -926,30 +927,25 @@ describe("delegating to a role team in another conversation", () => {
     expect(returnedTo(harness)).toEqual([expect.objectContaining({ text: "Added 50 people." })]);
   });
 
-  it("tells the delegating conversation right away when the team waits on a card", async () => {
+  it("shows the team's waiting card in the delegating conversation, pointing back at it", async () => {
     const harness = team({ busy: true });
-    await reportDelegatedTeamBlocked(harness.deps, roleRun, {
-      kind: "waiting",
+    const card = {
+      kind: "ask",
       text: "Send these 3 emails?",
-    });
-    expect(returnedTo(harness)).toEqual([
-      expect.objectContaining({
-        kind: "bot_message_received",
-        fromBotName: "SUI Engineer team",
-        intent: "status",
-        text: expect.stringContaining('on its card: "Send these 3 emails?"'),
-      }),
-    ]);
-    expect(harness.tx.message.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          threadId_clientNonce: {
-            threadId: "thread-global",
-            clientNonce: "bot-message:delegation-waiting:run-1",
-          },
-        },
-      }),
+      status: "pending",
+      actions: [{ id: "allow", label: "Send" }],
+    };
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const delegated = prisma.message!.findFirst as (args: { where: { runId?: string } }) => unknown;
+    const cardRow = { id: "card-1", blocks: [card] };
+    prisma.message!.findFirst = vi.fn(async (args: { where: { runId?: string } }) =>
+      args.where.runId ? cardRow : delegated(args),
     );
+    (harness.tx.message as Record<string, unknown>).findFirst = vi.fn(async () => cardRow);
+    await showDelegatedTeamCard(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([
+      { ...card, answerTarget: { threadId: "thread-role", runId: "run-1", messageId: "card-1" } },
+    ]);
   });
 
   it("reports nothing when no other conversation delegated the work", async () => {
