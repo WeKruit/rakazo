@@ -4992,17 +4992,25 @@ export async function projectRecruitingInboxJob(
       )
         throw new IsolationError();
       if (observation) {
-        const binding = await prisma.externalEffect.findUnique({
-          where: { idempotencyKey: `instantly-role-campaign:${sourceId}:${roleId}` },
-          select: {
-            kind: true,
-            status: true,
-            spaceId: true,
-            request: true,
-            result: true,
-            run: { select: { userId: true, spaceId: true, threadId: true } },
-          },
-        });
+        // The role's bound campaign, else the draft cloned or created for the role that sent it.
+        const key = `instantly-role-campaign:${sourceId}:${roleId}`;
+        const read = (idempotencyKey: string) =>
+          prisma.externalEffect.findUnique({
+            where: { idempotencyKey },
+            select: {
+              kind: true,
+              status: true,
+              spaceId: true,
+              request: true,
+              result: true,
+              run: { select: { userId: true, spaceId: true, threadId: true } },
+            },
+          });
+        const bound = await read(key);
+        const binding =
+          correspondenceRecord(bound?.result)?.campaignId === observation.campaignId
+            ? bound
+            : ((await read(`${key}:campaign:${observation.campaignId}`)) ?? bound);
         const result = correspondenceRecord(binding?.result);
         const request = correspondenceRecord(binding?.request);
         const mailbox =

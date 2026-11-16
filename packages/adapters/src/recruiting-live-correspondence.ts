@@ -247,19 +247,22 @@ export async function refreshRecruitingCorrespondence(
       ),
     ].map((email) => email.toLowerCase()),
   );
-  // Exact keys use the unique index; a prefix or suffix match reads every effect in the table.
+  // A role's campaigns: its bound one, its history, and drafts cloned or created for it later
+  // (a clone sends a follow-up wave on its own campaign; gate d06ea499, send-at-night: its mail
+  // never reached the Inbox). Read by kind within the account, then matched by exact key.
+  const roleKeys = (source: { id: string }) => {
+    const key = bindingKey(source.id, scope.roleId);
+    return { key, exact: [key, `${key}:history`], associated: `${key}:campaign:` };
+  };
   const campaignBindings = sources.length
     ? await deps.prisma.externalEffect.findMany({
         where: {
           spaceId: actor.spaceId,
+          kind: "instantly_role_campaign",
           status: "completed",
-          idempotencyKey: {
-            in: sources.flatMap((source) => [
-              bindingKey(source.id, scope.roleId),
-              `${bindingKey(source.id, scope.roleId)}:history`,
-            ]),
-          },
+          request: { path: ["roleId"], equals: scope.roleId },
         },
+        orderBy: { createdAt: "asc" },
         select: { idempotencyKey: true, result: true },
       })
     : [];
@@ -349,16 +352,22 @@ export async function refreshRecruitingCorrespondence(
     }
     try {
       if (scope.view === "inbox") {
+        const readCampaigns = new Set<string>();
         for (const binding of campaignBindings) {
-          const key = bindingKey(source.id, scope.roleId);
-          if (binding.idempotencyKey !== key && binding.idempotencyKey !== `${key}:history`)
+          const keys = roleKeys(source);
+          if (
+            !keys.exact.includes(binding.idempotencyKey) &&
+            !binding.idempotencyKey.startsWith(keys.associated)
+          )
             continue;
           const campaignId = record(binding.result)?.campaignId;
           if (
             typeof campaignId !== "string" ||
+            readCampaigns.has(campaignId) ||
             (scope.message && campaignId !== scope.message.campaignId)
           )
             continue;
+          readCampaigns.add(campaignId);
           let cursor: string | undefined;
           let fetched = 0;
           const seenCursors = new Set<string>();
