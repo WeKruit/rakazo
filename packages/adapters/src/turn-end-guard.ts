@@ -11,7 +11,7 @@ import {
   turnEndStuck,
   turnEndText,
 } from "@rakazo/core";
-import { type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
+import { calibrationRoundStatus, type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { askedForRoleInsteadOfOpening, OPEN_DESCRIBED_ROLE_RETRY } from "./intake-open-fields.js";
 import type { ExecutorDeps } from "./executor.js";
@@ -418,6 +418,15 @@ export async function guardRecruitingTurnEnd(
     !GUARDED_TRIGGERS.has(run.trigger) ||
     (run.trigger === "bot_message" && input.returnsToRequester)
   )
+    return { action: "ended", classification: "none" };
+  // A round waiting for its check is the turn's work in progress: pushing the turn on retried the
+  // refused round eight times on staging 11-16 and kept the check from ever being applied.
+  const latest = await deps.prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId: input.roleId },
+    orderBy: { round: "desc" },
+    select: { status: true, statusAt: true, approvedAt: true },
+  });
+  if (latest && !latest.approvedAt && calibrationRoundStatus(latest) !== "shown")
     return { action: "ended", classification: "none" };
   const unsaved = await unsavedFeedback(deps, input);
   if (unsaved) return unsaved;

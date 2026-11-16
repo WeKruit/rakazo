@@ -193,6 +193,23 @@ describe("guardRecruitingTurnEnd", () => {
     );
     expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
     expect(f.postAssistant).not.toHaveBeenCalled();
+    // Staging 11-16: a turn whose round was refused while the last one was being checked was
+    // pushed on eight times, and the check never got the thread. Waiting on the check ends it.
+    const waiting = fixture({
+      round: { round: 2, status: "checking", statusAt: new Date(), approvedAt: null },
+    } as never);
+    await expect(
+      guardRecruitingTurnEnd(waiting.deps, {
+        run,
+        roleId: "role-1",
+        blocks: promiseNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: waiting.postAssistant,
+        max: 3,
+      }),
+    ).resolves.toEqual({ action: "ended", classification: "none" });
+    expect(waiting.sendUserMessage).not.toHaveBeenCalled();
   });
 
   it.each([
