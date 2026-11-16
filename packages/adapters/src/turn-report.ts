@@ -380,14 +380,6 @@ export class TurnReportLedger {
   }
 
   /** Any consequential work in this attempt. */
-  /** A send or booking returned this attempt: its card was shown and confirmed. */
-  sent(): boolean {
-    return this.entries.some((entry) => {
-      const work = this.workOf(entry);
-      return work === "sent" || work === "scheduling";
-    });
-  }
-
   worked(): boolean {
     return this.entries.some((entry) => this.workOf(entry) !== undefined);
   }
@@ -446,27 +438,6 @@ const REQUEST_KINDS: Record<Capability, RegExp> = {
 const NEGATED =
   /\b(?:do not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|book(?:ing)?|schedul\w*|email (?:it|this|them|him|her))\b|\b(?:no|nothing)\b(?:\s+\w+){0,4}?\s+(?:sent|send(?:ing)?)\b|\b(?:before|until)\s+(?:\w+\s+){0,3}?(?:send(?:ing)?|sent)\b|(?:不要|别|先不|不用|不)(?:发|约)/gi;
 
-// Whether it can be done while lacking something (「不连邮箱能直接发吗」, "can I send without
-// connecting Gmail?") is a question about the product, answered in words; it asks for no card.
-const WITHOUT_PRECONDITION =
-  /(?:不连|没连|没有|不用|不接|未连)[^。！？?\n]{0,24}(?:能|可以|可不可以|能不能)[^。！？?\n]{0,24}(?:吗|[?？])|(?:能|可以)不(?:用|连|接)[^。！？?\n]{0,24}(?:吗|[?？])|\b(?:can|could)\b[^.?!\n]{0,60}\bwithout\b[^.?!\n]{0,40}\?/i;
-function asksWithoutPrecondition(request: string): boolean {
-  return WITHOUT_PRECONDITION.test(request);
-}
-
-// A question about how things stand ("现在发送了多少人呢", "为什么一个邮件都发不出去？"), with no
-// instruction in it ("现在就发", "帮我…", "can you…").
-const STATE_QUESTION =
-  /多少|几(?:个|封|位|人|次)|为什么|为啥|怎么回事|哪(?:里|儿|些)|什么时候|从哪|干嘛|有没有|是不是|\b(?:how many|how much|why|where|what|which|when|who)\b/i;
-const INSTRUCTION =
-  /现在就发|现在发(?:吧|掉|出去)?(?=[，。！!？?\s]|$)|直接发|马上|立刻|帮我|请你?|给我|\b(?:can|could|would|will) you\b|\bplease\b|\b(?:send|book|email|draft|find) (?:it|this|them|him|her|the)\b/i;
-function asksAboutState(request: string): boolean {
-  return (
-    /[?？]|[吗呢么][\s。.!！]*$/.test(request) &&
-    STATE_QUESTION.test(request) &&
-    !INSTRUCTION.test(request)
-  );
-}
 /** A bare greeting or a lone question mark: nothing asked of the agent. */
 function asksNothing(request: string): boolean {
   return /^[\s?？!！.。,，]*(?:hi|hello|hey|你好|您好|嗨|哈喽|在吗|안녕하세요)?[\s?？!！.。,，~～]*$/i.test(
@@ -560,36 +531,6 @@ export function declinedSentence(text: string): Declined | undefined {
   return paragraphs.length > 1 && asks && ABOUT_DRAFT.test(last)
     ? { sentence: last, kind: "text_question", keep: paragraphs.slice(0, -1).join("\n\n") }
     : undefined;
-}
-
-/** A reply that talks about the send or booking it was asked for. */
-const CARD_WORK = /\b(?:sen[dt]|e-?mail|draft|book|invit|interview|schedul)|发|约/i;
-
-/**
- * Why a final reply gets the one retry: it declines, defers, picks or asks in text, or a send or
- * booking request ended without its card while the reply talks about that work ("I haven't sent
- * anything; please save the draft"), which leaves the request undone however it is worded.
- */
-export function retryReason(
-  reply: string,
-  request: string,
-  /** The recruiter's own latest words, when a teammate's brief is the request. */
-  person?: string,
-): Declined | undefined {
-  const declined = declinedSentence(reply);
-  if (declined) return declined;
-  // A brief's wording ("no emails will be sent yet") is no send request unless the recruiter's
-  // own message asked for one.
-  const asksCard = (text: string) =>
-    (requests("send", text) || asksBooking(text)) && !asksWithoutPrecondition(text);
-  if (!asksCard(request) || (person !== undefined && !asksCard(person))) return undefined;
-  if (DRAFT_START.test(reply) || !CARD_WORK.test(reply)) return undefined;
-  const sentence = reply
-    .split(/(?<=[.!?。！？\n])/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .findLast((part) => CARD_WORK.test(part));
-  return sentence ? { sentence, kind: "decline" } : undefined;
 }
 
 export type Teammate = { id: string; name: string; about: string };
@@ -822,21 +763,19 @@ export function questionCard(reply: string, declined: Declined): DeclineRetry | 
   return { sentence: declined.sentence, note: "", keep: reply.slice(0, at).trim(), card };
 }
 
-/** Model-facing: the substance of every decline retry; tools or a teammate are named after it. */
+/** Model-facing: the substance of every defer or pick retry; tools or a teammate are named after it. */
 export const DECLINE_RETRY_NOTE =
-  "Do not decline or defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can; for a send, the email is the one written in this conversation, else the role's saved email. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what. When none of your tools does what was asked at all (a send tool sends email only, so not a LinkedIn message, a text or a call), the honest answer stands: say in your first line that it cannot be done from here and nothing was done, then offer the closest thing you can do.";
+  "Do not defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can; for a send, the email is the one written in this conversation, else the role's saved email. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what. When none of your tools does what was asked at all (a send tool sends email only, so not a LinkedIn message, a text or a call), the honest answer stands: say in your first line that it cannot be done from here and nothing was done, then offer the closest thing you can do.";
 
 /** Model-facing: a clarifying question asked in plain text goes on a question card instead. */
 export const TEXT_QUESTION_NOTE =
   "You asked the user in plain text. Ask it with ask_user instead: the question in one sentence, concrete options (the people or choices you listed) and a custom answer, without saying what you could not do or find. Your question was";
 
 /**
- * One retry for a final reply that declines, defers or hands back a pick, when the turn did
- * nothing, or when a send or booking ended without its card. After other work the reply stands:
- * a handed stage reports back and is checked against its brief, and "want me to keep going?" is
- * a fair next step. The note
- * names the tools or teammate for the asked kind of work when there are any. Undefined keeps
- * the reply.
+ * One retry for a final reply that defers, hands back a pick or asks in text, when the turn did
+ * nothing. After other work the reply stands: a handed stage reports back and is checked against
+ * its brief, and "want me to keep going?" is a fair next step. The note names the tools or
+ * teammate for the asked kind of work when there are any. Undefined keeps the reply.
  */
 export function declineRetry(input: {
   reply: string;
@@ -850,33 +789,31 @@ export function declineRetry(input: {
   /** The recruiter's own latest words, when a teammate's brief is the request. */
   personRequest?: string;
 }): DeclineRetry | undefined {
-  const declined = retryReason(input.reply, input.request, input.personRequest);
-  // A reply that shows a drafted email delivered the work; holding it back would lose the draft.
-  if (!declined || (DRAFT_START.test(input.reply) && declined.keep === undefined)) return undefined;
+  const declined = declinedSentence(input.reply);
+  // A reply that says it can't stands: the rules say when that is the honest answer, and the retry
+  // audit (11-16) found its wording check overruling true ones. A reply that shows a drafted email
+  // delivered the work; holding it back would lose the draft.
+  if (
+    !declined ||
+    declined.kind === "decline" ||
+    (DRAFT_START.test(input.reply) && declined.keep === undefined)
+  )
+    return undefined;
   const { sentence } = declined;
   const asked = (Object.keys(REQUEST_KINDS) as Capability[]).filter((kind) =>
     requests(kind, input.request),
   );
-  // A turn that did work reports it, and the coordinator checks it against the brief. Only a send
-  // or booking that ended without its card is retried, since no card means nothing was asked.
+  // A turn that did work reports it, and the coordinator checks it against the brief.
+  if (input.worked) return undefined;
   const cardOwed = asked.includes("send") || asksBooking(input.request);
-  if (input.worked && !(declined.kind === "decline" && cardOwed)) return undefined;
   // A question that asks for nothing to be done ("what interviews do I have") is answered by its
   // reads; a coverage aside in that answer is no refusal.
   // An instruction ("drop the ones without Kafka") is no question, whatever was read for it.
   const question = /[?？]|[吗呢][\s。.!！]*$/.test(input.personRequest ?? input.request);
   if (input.read && question && !cardOwed && asked.every((kind) => kind === "schedule"))
     return undefined;
-  // An honest "no" to a question about the state of things answers it, and a greeting asks for
-  // nothing a card could hold (staging retry audit 11-16: 80 and 243 such retries in 48 h).
+  // A greeting asks for nothing a card could hold (staging retry audit 11-16: 243 such retries).
   const person = input.personRequest ?? input.request;
-  // A count or status answer stands once a read backs it; whether something works without a
-  // connection is about the product and needs none.
-  if (
-    declined.kind === "decline" &&
-    (asksWithoutPrecondition(person) || (input.read && asksAboutState(person)))
-  )
-    return undefined;
   if (declined.kind === "text_question" && asksNothing(person)) return undefined;
   const quoted = sentence.slice(0, 200);
   if (declined.kind === "text_question")
@@ -888,7 +825,7 @@ export function declineRetry(input: {
   const lead =
     declined.kind === "pick"
       ? `Your reply asked the user to choose ("${quoted}"). When the request names the people or a number, use those; otherwise ask that choice as one ask_user question with concrete options (such as the person just discussed or the first results).`
-      : `Your reply ${declined.kind === "defer" ? "deferred" : "declined"} the request ("${quoted}").`;
+      : `Your reply deferred the request ("${quoted}").`;
   const own = asked.flatMap((kind) =>
     input.tools
       .map((tool) => tool.name)
@@ -1040,22 +977,3 @@ export function draftAskedBeforeShown(recruiterText: string, shown: string): boo
 /** Model-facing: the email comes first; a question waits beside it. */
 export const DRAFT_BEFORE_ASKING =
   "Not asked: the recruiter asked you to write an email, and they see the draft before any question. Write the full email now (Subject: and body) from their words and anything saved, for the person they name, with no saved role, profile or address needed and without inventing facts they did not give. Then ask, beside the draft, only the one fact a send still needs (such as the address).";
-
-/** Model-facing retry: a final reply asked for more instead of writing the email asked for. */
-export const DRAFT_FIRST_RETRY = `Not shown: the recruiter asked you to write an email and your reply asked for more instead. ${DRAFT_BEFORE_ASKING.replace(/^Not asked: [^.]*\. /, "")}`;
-
-/**
- * A reply that tells the recruiter how the records read ("当前记录显示岗位和邮件序列均为 0",
- * gate e7805c70 change-mind-mid-run; "记录里没有", first-timer-no-gmail) narrates the working
- * state instead of answering. The working state is for the agent; the recruiter asked a question.
- */
-export function narratesRecords(recruiterText: string, reply: string): boolean {
-  if (/记录|\brecords?\b/i.test(recruiterText)) return false;
-  // Any 记录 but a recruiter's own kind of record (面试记录, 沟通记录…): gate 686a9eae said
-  // 「我查了当前记录：」, which a list of following words missed.
-  return /(?<!面试|沟通|通话|聊天|联系|工作|跟进|会议|教育|发送)记录|\b(?:records?\s+(?:show|say)|on\s+record|in\s+the\s+records|(?:checked|per)\s+the\s+records?)\b/iu.test(
-    reply,
-  );
-}
-export const RECORDS_NARRATED_RETRY =
-  "Not shown: your reply told the recruiter how the records read (records, counts of roles or sequences) instead of answering. That state is for you. Answer what they asked in the first line, in plain words about their role, people or email (for example that the email has not been sent), and add only what they need.";

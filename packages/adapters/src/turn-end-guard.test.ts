@@ -1245,24 +1245,25 @@ describe("planDeclineRetry", () => {
   const input = {
     run: { threadId: "thread-1", botId: "bot-m" },
     groupId: "group-1",
-    reply: "Not ready to send: contact history and suppression unknown.",
-    blocks: [{ kind: "text", text: "Not ready to send." }] as MessageBlock[],
+    reply: "Do you want me to send this to them?",
+    blocks: [{ kind: "text", text: "Do you want me to send this to them?" }] as MessageBlock[],
     request: "send this email to them",
     tools: [{ name: "recruiting_role" }],
   };
 
-  it("retries a decline once per human message, handing it to the teammate who can", async () => {
+  it("retries a deferred request once per human message, handing it to the teammate who can", async () => {
     const retry = await planDeclineRetry(
       { prisma: prisma([{ clientNonce: "send:human" }]) },
       input,
     );
     expect(retry?.note).toContain("bot_id bot-o");
-    expect(
-      await planDeclineRetry(
-        { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) },
-        input,
-      ),
-    ).toBeUndefined();
+    // Retried once already: the offer still typed into the reply goes on a card instead.
+    const again = await planDeclineRetry(
+      { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) },
+      input,
+    );
+    expect(again?.card).toBeDefined();
+    expect(again?.note).toBe("");
   });
 
   // Gate 66a2dd3e, change-mind-mid-run: the recruiter changed the ask while the teammate wrote,
@@ -1308,30 +1309,16 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
-  // Staging 11-12: after the recruiter approved the Send card, "已发送给 Noah" was retried as a refusal.
-  it("keeps a reply that reports the send after its card was answered", async () => {
+  // Staging 11-12: "已发送给 Noah" was retried as a refusal. Retry audit 11-16: a reply that says it
+  // can't was retried on its wording and pushed false capability claims; it stands too.
+  it("keeps a reply that reports a send or says it can't", async () => {
     const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    const sent = {
-      ...input,
-      reply: "初次联系邮件已发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
-    };
-    expect(await planDeclineRetry(human, { ...sent, answersCard: true })).toBeUndefined();
-    // Staging 11-12 rerun: the send went out in the same turn as the confirmed card.
-    expect(
-      await planDeclineRetry(human, {
-        ...sent,
-        reply: "已提交并发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
-        sent: true,
-      }),
-    ).toBeUndefined();
-    expect(await planDeclineRetry(human, sent)).toBeDefined();
-    expect(
-      await planDeclineRetry(human, {
-        ...input,
-        reply: "我无法发送这封邮件。",
-        answersCard: true,
-      }),
-    ).toBeDefined();
+    for (const reply of [
+      "初次联系邮件已发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
+      "我无法发送这封邮件。",
+      "I can't send a LinkedIn message from here; nothing was sent.",
+    ])
+      expect(await planDeclineRetry(human, { ...input, reply })).toBeUndefined();
   });
 
   it("retries once when every memory save failed, so a failed save is not told as saved", async () => {
@@ -1345,17 +1332,6 @@ describe("planDeclineRetry", () => {
         saved,
       ),
     ).toBeUndefined();
-  });
-
-  it("keeps a reply the judge is sure is not a refusal, and retries when it is unsure or absent", async () => {
-    const judged = (p: number | undefined) => ({
-      ...input,
-      judge: async () => ({ yes: vi.fn(async () => p) }),
-    });
-    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
-    expect(await planDeclineRetry(human, judged(0.1))).toBeUndefined();
-    expect((await planDeclineRetry(human, judged(0.9)))?.note).toContain("bot_id bot-o");
-    expect((await planDeclineRetry(human, judged(undefined)))?.note).toContain("bot_id bot-o");
   });
 
   it("keeps a long task going while the server counts work left, until a card or the limit", async () => {

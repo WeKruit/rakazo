@@ -15,26 +15,20 @@ import { calibrationRoundStatus, type PrismaClient, readRecruitingPlaybookStep }
 import { getLogger } from "@rakazo/logging";
 import { askedForRoleInsteadOfOpening, OPEN_DESCRIBED_ROLE_RETRY } from "./intake-open-fields.js";
 import type { ExecutorDeps } from "./executor.js";
-import type { TextJudge } from "./judge.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { AUTOMATIC_CONTINUATION, UNDONE_PROMISE_LEAD } from "./silent-reply.js";
 import type { DeclineRetry } from "./turn-report.js";
 import {
   askedTemplate,
   candidateVoiceDraft,
-  DRAFT_FIRST_RETRY,
-  RECORDS_NARRATED_RETRY,
   declinedSentence,
   declineRetry,
-  draftAskedBeforeShown,
-  narratesRecords,
   draftVariables,
   droppedDay,
   falseOmission,
   questionCard,
   refusedTemplateVariables,
   repastedDraft,
-  retryReason,
   sequenceForOneEmail,
   showsDraft,
   teamSignedDraft,
@@ -42,10 +36,6 @@ import {
 } from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
-
-/** A reply saying the email went out or the interview was booked. */
-const REPORTS_SENT =
-  /已(?:经)?(?:发送|发出|发给|预约|约好)|\b(?:was|were|has been|have been) (?:sent|booked|scheduled)\b|\bsent (?:it|the|your|an?)\b/i;
 
 /**
  * Turns the guard may push: human turns, its own continuations, the research wake that brings
@@ -723,10 +713,6 @@ export function turnRequestText(
     .join("\n");
 }
 
-const REFUSAL_QUESTION =
-  "The recruiter asked `request`; the assistant's final message is `reply`. Does the reply refuse, fail to do, or put off doing what was asked (says it can't or won't, asks permission or offers to do it instead of doing it)? Answer no when the reply delivers the requested result or report and only notes a limit of its sources (for example a calendar or record that isn't connected or is incomplete) as a caveat. A confirmation or approval card waiting for the recruiter counts as doing the request, and a plain answer to a yes/no question is not a refusal.";
-/** Below this probability of a refusal the judge keeps the reply. */
-const JUDGE_KEEPS_BELOW = 0.3;
 const MEMORY_SAVE_FAILED_NOTE =
   "Your memory save failed, so nothing was saved. Read the error it returned, fix the call (read_memory first for the current revision, or send the whole content) and save again now. If it still fails, tell the recruiter in one sentence that it was not saved.";
 
@@ -765,14 +751,8 @@ export async function planDeclineRetry(
     owedWork?: string;
     /** Every memory save this attempt tried failed, so the reply must not say it was saved. */
     memorySaveFailed?: boolean;
-    /** An optional judge that can overrule the wording check when a reply only reads as a refusal. */
-    judge?: () => Promise<TextJudge | undefined>;
     /** A question in the reply stays in text: there is nothing to ask on a card (no role yet). */
     noQuestionCard?: boolean;
-    /** The turn answers a card: a send or booking card was already shown and answered. */
-    answersCard?: boolean;
-    /** A send or booking went out this turn (see TurnReportLedger.sent). */
-    sent?: boolean;
     /** What this turn's tools did and returned (see TurnReportLedger.receipts). */
     receipts?: Receipts;
     /** When this run began: a message the person sent since, that another run answers, wins. */
@@ -841,33 +821,6 @@ export async function planDeclineRetry(
       : undefined;
   if (claim && (await recentContinues()) < 1)
     return { sentence: claim.sentence, note: unbackedClaimNote(claim) };
-  // Gates 808f4f31, df83586a, aceb80c9 (one-off-email): "给 Wei Zhang 写封邮件" ended on a reply
-  // asking for the JD and a LinkedIn link, with no email written. The email comes first.
-  if (
-    !input.blocks.some((block) => CARD_KINDS.has(block.kind)) &&
-    draftAskedBeforeShown(
-      input.personRequest ?? input.request,
-      [
-        input.reply,
-        ...(
-          await deps.prisma.message.findMany({
-            where: { threadId: input.run.threadId, role: "bot" },
-            orderBy: { seq: "desc" },
-            take: 12,
-            select: { blocks: true },
-          })
-        ).map((message) => JSON.stringify(message.blocks)),
-      ].join("\n"),
-    ) &&
-    (await recentContinues()) < 1
-  )
-    return { sentence: "", note: DRAFT_FIRST_RETRY };
-  if (
-    !input.blocks.some((block) => CARD_KINDS.has(block.kind)) &&
-    narratesRecords(input.personRequest ?? input.request, input.reply) &&
-    (await recentContinues()) < 1
-  )
-    return { sentence: "", note: RECORDS_NARRATED_RETRY };
   // Kruit's own chat opens a role the recruiter described; the role's team searches first.
   if (
     input.groupId?.startsWith("recruiting-global-") &&
@@ -921,16 +874,16 @@ export async function planDeclineRetry(
       (await repasted()));
   // After a send went out or its card was answered, a reply that talks about that work ("已发送给
   // Noah") owes no card; only an actual refusal is retried.
-  const reason = !input.request.trim()
-    ? undefined
-    : input.sent || (input.answersCard && REPORTS_SENT.test(input.reply))
-      ? declinedSentence(input.reply)
-      : retryReason(input.reply, input.request, input.personRequest);
-  const declined = input.noQuestionCard && reason?.kind !== "decline" ? undefined : reason;
+  // A reply that says it can't is not retried on its wording: the rules say when "can't" is the
+  // honest answer, and the retry audit (11-16) found the wording check overruling true ones. Only
+  // a question typed into the reply, or an offer or pick handed back, still goes on a card.
+  const reason =
+    !input.request.trim() || input.noQuestionCard ? undefined : declinedSentence(input.reply);
+  const declined = reason?.kind === "decline" ? undefined : reason;
   if (!(variables || declined) || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
   // After the asked work, a closing question or offer stands, on a card rather than in text.
-  if (!variables && declined && declined.kind !== "decline" && input.worked)
+  if (!variables && declined && input.worked)
     return !input.handedIn && QUESTION_STAGES.has((await input.stage?.()) ?? "")
       ? undefined
       : questionCard(input.reply, declined);
@@ -969,16 +922,6 @@ export async function planDeclineRetry(
   }
   if (variables) return variables;
   if (!declined) return undefined;
-  // The wording check reads any "I can't …" as a refusal, including a coverage aside in an
-  // answer. A judge that is clearly sure the reply does what was asked keeps it.
-  if (declined.kind === "decline") {
-    const judge = await input.judge?.();
-    const refuses = await judge?.yes(REFUSAL_QUESTION, {
-      request: input.personRequest ?? input.request,
-      reply: input.reply,
-    });
-    if (refuses !== undefined && refuses < JUDGE_KEEPS_BELOW) return undefined;
-  }
   const members = input.groupId
     ? await deps.prisma.chatGroupMember.findMany({
         where: {
@@ -1005,12 +948,7 @@ export async function planDeclineRetry(
     : [];
   // Intake and calibration questions are the coordinator's own playbook steps; a teammate
   // handed one request asks its question on a card.
-  if (
-    declined.kind !== "decline" &&
-    !input.handedIn &&
-    QUESTION_STAGES.has((await input.stage?.()) ?? "")
-  )
-    return undefined;
+  if (!input.handedIn && QUESTION_STAGES.has((await input.stage?.()) ?? "")) return undefined;
   return declineRetry({
     reply: input.reply,
     request: input.request,

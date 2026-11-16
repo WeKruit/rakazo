@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   draftAskedBeforeShown,
-  narratesRecords,
   DECLINE_RETRY_NOTE,
   declinedSentence,
   declineRetry,
@@ -13,7 +12,6 @@ import {
   withoutRepeatedOpening,
   readsOnly,
   CLAIMS_CARD_PENDING,
-  retryReason,
   TEXT_QUESTION_NOTE,
   TurnReportLedger,
   turnReportText,
@@ -287,57 +285,27 @@ describe("declineRetry", () => {
     "I can't send this message through the available approval flow: it requires replying to an existing email.";
   const notReady = "Not ready to send: contact history and suppression unknown.";
 
-  it("asks for a best-guess action or one question card, never a decline", () => {
-    const retry = declineRetry({ reply: notReady, request: "send it", tools: [], teammates: [] });
-    expect(retry?.note).toContain(DECLINE_RETRY_NOTE);
-    expect(DECLINE_RETRY_NOTE).toContain("Do not decline or defer");
-    expect(DECLINE_RETRY_NOTE).toContain("ask one clear question with ask_user");
-    expect(DECLINE_RETRY_NOTE).toContain("the recipients, the email, the time");
-    expect(DECLINE_RETRY_NOTE).toContain("shows its own card");
-  });
-
-  // Staging retry audit 11-16: 80 honest answers to questions about state were retried as
-  // refusals ("现在发送了多少人呢" → 「目前没有已保存的岗位，因此没有发送人数的记录。」), and 243
-  // replies to a bare greeting were retried to put "what would you like to do?" on a card.
-  it("keeps an honest answer to a question about state and a reply to a greeting", () => {
+  // Staging retry audit 11-16: a reply that said it can't was retried on its wording, and the
+  // retry ("you have send_message for it") pushed false capability claims; 243 replies to a bare
+  // greeting were retried to put "what would you like to do?" on a card.
+  it("keeps a reply that says it can't, and a reply to a greeting", () => {
     const retry = (reply: string, request: string) =>
-      declineRetry({ reply, request, tools: [], teammates: [], read: true });
-    expect(
-      retry("目前没有已保存的岗位，因此没有发送人数的记录。", "现在发送了多少人呢"),
-    ).toBeUndefined();
-    expect(
-      retry("不行；要从你的邮箱发送，需要先连接 Gmail。", "不连邮箱能直接发邮件给候选人吗"),
-    ).toBeUndefined();
-    expect(
-      retry(
-        "我无法确认发送状态：目前没有已保存的岗位。",
-        "你找了这么多人为什么一个邮件都发不出去？",
-      ),
-    ).toBeUndefined();
-    expect(retry("What would you like to work on first?", "hi")).toBeUndefined();
-    expect(retry("你想先处理哪项招聘工作？", "你好")).toBeUndefined();
-    // A request phrased as a question is still a request.
-    expect(
-      declineRetry({
-        reply: "我无法发送。",
-        request: "Ada为什么还没发？现在就发",
-        tools: [],
-        teammates: [],
-      }),
-    ).toBeDefined();
-    expect(
-      declineRetry({
-        reply: "我无法发送。",
-        request: "现在发送了多少人呢",
-        tools: [],
-        teammates: [],
-      }),
-    ).toBeDefined();
+      declineRetry({ reply, request, tools: [{ name: "activate_campaign" }], teammates: [] });
+    for (const [reply, request] of [
+      [notReady, "send it"],
+      [replyThread, "send this email to them"],
+      ["我无法发送。", "Ada为什么还没发？现在就发"],
+      ["I can't send a LinkedIn InMail from here; nothing was sent.", "InMail her"],
+      ["What would you like to work on first?", "hi"],
+      ["你想先处理哪项招聘工作？", "你好"],
+    ] as const)
+      expect(retry(reply, request)).toBeUndefined();
+    expect(retry("Do you want me to send it?", "send it")?.note).toContain(DECLINE_RETRY_NOTE);
   });
 
   it("names calendar tools for a booking, not routine schedules", () => {
     const retry = declineRetry({
-      reply: "I can't book this interview yet.",
+      reply: "Do you want me to book it?",
       request: "帮第一个人约下周三下午的面试",
       tools: [{ name: "schedule_create" }, { name: "cal__main__create_booking" }],
       teammates: [],
@@ -348,7 +316,7 @@ describe("declineRetry", () => {
 
   it("names this bot's own tool first", () => {
     const retry = declineRetry({
-      reply: replyThread,
+      reply: "Do you want me to send it?",
       request: "send this email to them",
       tools: [{ name: "recruiting_role" }, { name: "instantly__mail__activate_campaign" }],
       teammates: [],
@@ -368,70 +336,6 @@ describe("declineRetry", () => {
     ).toBeUndefined();
   });
 
-  it("does not read a lookup that rules out sending as a send request", () => {
-    const reply =
-      "Found 9 saved emails and checked the one gap.\n\nNo email was sent or activated.";
-    expect(
-      retryReason(reply, "Look up emails for the first 10 people. Do not send anything."),
-    ).toBeUndefined();
-    expect(retryReason(reply, "找邮箱，先不要发")).toBeUndefined();
-    // A coordinator's handoff words its limit in other ways.
-    for (const request of [
-      "Goal: find contacts for the ten. No emails will be sent yet.",
-      "Look up contact details; nothing should be sent.",
-      "Find their emails before anything is sent.",
-      "Get contacts. No outreach or sending.",
-      "找联系方式，不发邮件",
-    ])
-      expect(retryReason(reply, request)).toBeUndefined();
-    expect(retryReason(reply, "send them the email")?.kind).toBe("decline");
-    expect(retryReason(reply, "Find contacts, then send them the email")?.kind).toBe("decline");
-    // A teammate's brief that mentions sending is read against the recruiter's own words.
-    const brief = "Goal: find contacts for the ten so we can send outreach after review.";
-    expect(
-      retryReason("Found 7 emails. No messages were sent.", brief, "找contact"),
-    ).toBeUndefined();
-    expect(retryReason("Found 7 emails. No messages were sent.", brief, "发20个人")?.kind).toBe(
-      "decline",
-    );
-  });
-
-  // Stage 5fcecbb8, first-timer-no-gmail: 「不连邮箱能直接发邮件给候选人吗」 was answered 「不能…」,
-  // then retried as a declined send, and the recruiter got the same answer twice more.
-  it("does not read whether something can be done without a precondition as a request for it", () => {
-    const reply =
-      "不能。邮件必须从你的 Gmail 发出；连接后，我会先给你确认发送的邮件卡片，只有你按下“发送”才会发出。";
-    for (const request of [
-      "不连邮箱能直接发邮件给候选人吗",
-      "没有 Gmail 可以发邮件吗？",
-      "Can I send emails without connecting Gmail?",
-    ])
-      expect(retryReason(reply, request)).toBeUndefined();
-    for (const request of ["能帮我发给他吗", "可以直接发给 Wei 吗", "can you send it to her?"])
-      expect(retryReason(reply, request)?.kind).toBe("decline");
-  });
-
-  it("does not read a question about interviews as a booking request", () => {
-    const reply =
-      "Two interviews are coming up: Ana on Tuesday at 10:00 and Li on Thursday at 14:00. No invitation is sent.";
-    for (const request of [
-      "what interviews are coming up",
-      "When is she available?",
-      "show me my calendar this week",
-      "下周有哪些面试",
-    ])
-      expect(retryReason(reply, request)).toBeUndefined();
-    for (const request of [
-      "schedule an interview with Ana",
-      "cancel the interview",
-      "reschedule Li to Friday",
-      "book Ana for Tuesday",
-      "帮我约她下周面试",
-      "取消这个面试",
-    ])
-      expect(retryReason(reply, request)?.kind).toBe("decline");
-  });
-
   it("catches a past-tense refusal of a send", () => {
     expect(
       declinedSentence(
@@ -447,10 +351,9 @@ describe("declineRetry", () => {
     ).toBeUndefined();
   });
 
-  it("points a contact decline at the saved-email lookup, which reuses earlier results", () => {
+  it("points a deferred contact lookup at the saved-email lookup, which reuses earlier results", () => {
     const retry = declineRetry({
-      reply:
-        "I can't verify whether other contact details are saved from the records available here.",
+      reply: "Would you like me to look up their emails?",
       request: "前5个人的contact",
       tools: [{ name: "mcp__wekruit__find_emails" }],
       teammates: [],
@@ -460,7 +363,7 @@ describe("declineRetry", () => {
 
   it("hands off to a teammate who can", () => {
     const retry = declineRetry({
-      reply: notReady,
+      reply: "要不要我把这封邮件发给他？",
       request: "把这封邮件发给他",
       tools: [{ name: "recruiting_role" }],
       teammates: [
@@ -490,48 +393,18 @@ describe("declineRetry", () => {
     ).toMatch(/^Your reply deferred the request/);
   });
 
-  it("keeps a worked answer about upcoming interviews, whatever its coverage aside", () => {
-    const retry = (request: string) =>
-      declineRetry({
-        reply:
-          "No confirmed interviews are booked. Google Calendar isn’t connected, so I can’t verify interviews outside the connected scheduling records.",
-        request,
-        tools: [],
-        teammates: [],
-        worked: true,
-      });
-    expect(retry("What interviews do I have coming up?")).toBeUndefined();
-    expect(retry("Book an interview with Ana for Tuesday at 2 pm")?.note).toMatch(/declined/);
-  });
-
   it("keeps an answer read for a question that asks for nothing to be done", () => {
     const retry = (request: string, read: boolean) =>
       declineRetry({
-        reply:
-          "No confirmed interviews are booked. Google Calendar is not connected, so I can’t verify your full calendar.",
+        reply: "No confirmed interviews are booked. Want me to check your full calendar?",
         request,
         tools: [],
         teammates: [],
         read,
       });
     expect(retry("What interviews do I have coming up?", true)).toBeUndefined();
-    expect(retry("What interviews do I have coming up?", false)?.note).toMatch(/declined/);
-    expect(retry("Find 20 more people for this role", true)?.note).toMatch(/declined/);
-  });
-
-  // verify-musthave 11-14: "drop the ones that don't show kafka" after a roles read got
-  // "There isn't a saved list, so I can't drop anyone" with no retry.
-  it("retries a refused instruction even after a read", () => {
-    expect(
-      declineRetry({
-        reply:
-          "There isn’t a saved role or candidate list to update, so I can’t drop anyone from the pool.",
-        request: "ok drop the ones that don't show kafka then",
-        tools: [],
-        teammates: [],
-        read: true,
-      })?.note,
-    ).toMatch(/declined/);
+    expect(retry("What interviews do I have coming up?", false)?.note).toMatch(/deferred/);
+    expect(retry("Find 20 more people for this role", true)?.note).toMatch(/deferred/);
   });
 
   it("keeps a reply that shows the drafted email, whatever its aside", () => {
@@ -571,37 +444,6 @@ describe("declineRetry", () => {
     ).toBe("text_question");
   });
 
-  it("retries a send that ended without its card however the reply words it", () => {
-    const reply =
-      "I couldn’t find a saved email draft for Acery to send. I haven’t sent anything. Please provide or save the intended draft, and I can present it for approval.";
-    expect(declinedSentence(reply)).toBeUndefined();
-    const retry = declineRetry({
-      reply,
-      request: "send this email to them",
-      tools: [{ name: "activate_campaign" }],
-      teammates: [],
-      worked: true,
-    });
-    expect(retry?.note).toContain("the one written in this conversation");
-    // Not a send or booking request: the same words stand.
-    expect(
-      declineRetry({ reply, request: "这个人怎么样", tools: [], teammates: [] }),
-    ).toBeUndefined();
-  });
-
-  it("retries a send that ended without its card, even after other work", () => {
-    expect(
-      declineRetry({
-        reply:
-          "The saved pool has 134 people, so I can't treat all 20 as eligible by default. I need the original ordered first-20 list.",
-        request: "发20个人的先",
-        tools: [{ name: "activate_campaign" }],
-        teammates: [],
-        worked: true,
-      })?.note,
-    ).toContain("activate_campaign");
-  });
-
   it("keeps an aside or an offer after real work", () => {
     // The declined sentence is about verification, not the requested search.
     expect(
@@ -622,16 +464,6 @@ describe("declineRetry", () => {
         worked: true,
       }),
     ).toBeUndefined();
-    // Refusing the asked kind of work is retried even after other work.
-    expect(
-      declineRetry({
-        reply: "Drafted the email. I can't send it from here.",
-        request: "send this email to them",
-        tools: [{ name: "activate_campaign" }],
-        teammates: [],
-        worked: true,
-      })?.note,
-    ).toContain("activate_campaign");
   });
 });
 
@@ -921,23 +753,5 @@ describe("withoutRepastedDraft", () => {
     ["an email with no lead", email, "最终版是哪封"],
   ])("keeps %s", (_, reply, asked) => {
     expect(withoutRepastedDraft(reply, shown, asked)).toBe(reply);
-  });
-});
-
-describe("narratesRecords", () => {
-  it("catches a reply that reads out the records instead of answering", () => {
-    // Gate e7805c70: change-mind-mid-run and first-timer-no-gmail.
-    const ask = "一句话说下改了什么，确认最终版是新的";
-    expect(narratesRecords(ask, "当前记录显示岗位和邮件序列均为 0；以下是修订后的最终模板")).toBe(
-      true,
-    );
-    expect(narratesRecords("发了吗", "记录里没有这封邮件的发送。")).toBe(true);
-    expect(narratesRecords("did it send?", "The records show no campaign yet.")).toBe(true);
-    expect(narratesRecords(ask, "我把底薪改为 70万–90万元，并加了每周五远程。")).toBe(false);
-    expect(narratesRecords("约了吗", "面试记录里还没有他。")).toBe(false);
-    expect(narratesRecords("记录里有他吗", "记录里没有他。")).toBe(false);
-    // Gate 686a9eae: first-timer-no-gmail.
-    expect(narratesRecords("Sequence 页是干嘛的", "我查了当前记录：没有邮件序列记录。")).toBe(true);
-    expect(narratesRecords("发了吗", "还没发，发送记录里会显示。")).toBe(false);
   });
 });

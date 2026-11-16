@@ -850,7 +850,6 @@ import type { SavedRole } from "./role-reference.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
 import {
-  declinedSentence,
   DRAFT_BEFORE_ASKING,
   draftAskedBeforeShown,
   questionStatesWork,
@@ -1393,9 +1392,6 @@ async function scaleTarget(
   const target = peopleTargetFrom(said, before);
   return target ? { target, total } : undefined;
 }
-
-const ASK_DECLINES =
-  "Not asked: this question refuses the recruiter's request. Never decline a clear request. A search scoped by what people state on their own profiles (a group, association, language, school or place) is an ordinary filter: do the work as asked, without inferring anything from names or photos, and ask only a real decision the recruiter must make.";
 
 /**
  * A handed-in stage used to stay silent for 20-200 s while the specialist read context and ran
@@ -7082,7 +7078,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
         let contactLookupOwed: { target: number; remaining: number } | undefined;
-        let askDeclineBounced = false;
         // A question bounced once as already answered may be asked again: the reply may have been about something else.
         const knownAskBounced = new Set<string>();
         // Bounced up to three times a run: on staging the model asked the same settled fact again
@@ -17555,10 +17550,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       globalRoleBounces++;
                       return { instead: GLOBAL_OPEN_ROLE_FIRST };
                     }
-                    if (!askDeclineBounced && declinedSentence(question)?.kind === "decline") {
-                      askDeclineBounced = true;
-                      return { instead: ASK_DECLINES };
-                    }
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
                     // A number of people the recruiter asked for decides the next step: no card.
@@ -18609,12 +18600,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   worked: turnReport.worked(),
                   read: turnReport.read(),
                   memorySaveFailed: turnReport.memorySaveFailed(),
-                  judge: () => deps.judge?.resolve() ?? Promise.resolve(undefined),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
                   noQuestionCard: noRoleYet(),
-                  answersCard: Boolean(nativeSources?.currentAnswer),
-                  sent: turnReport.sent(),
                   receipts: turnReport.receipts(),
                   since: { at: new Date(attemptStartedAt), runId },
                   ...(handedIn
