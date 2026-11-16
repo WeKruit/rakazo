@@ -5,6 +5,7 @@ import {
   historyCompactJob,
   historyCompactJobKey,
   messagingDeliverJob,
+  routineWakeupJob,
   runContinueJob,
 } from "@rakazo/adapter-kit";
 import { createLogger, createTestSink, installLogger, wrapJobPayload } from "@rakazo/logging";
@@ -149,8 +150,9 @@ describe("GraphileJobPublisher.enqueue", () => {
     const publisher = new GraphileJobPublisher({} as Pool);
     await publisher.enqueue(runContinueJob("run-routine"));
     await publisher.enqueue(runContinueJob("run-user"));
+    await publisher.enqueue(routineWakeupJob("routine-1", new Date("2026-11-16T08:00:00Z")));
     const priorities = addJob.mock.calls.map((call) => (call[2] as { priority?: number }).priority);
-    expect(priorities).toEqual([10, undefined]);
+    expect(priorities).toEqual([10, undefined, 10]);
     expect(query.mock.calls[0]?.[1]).toEqual(["run-routine", expect.arrayContaining(["routine"])]);
     await publisher.close();
   });
