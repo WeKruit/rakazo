@@ -15004,6 +15004,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               threadId: group.thread.id,
               botId: bot.id,
               deliveryKey: roleKey,
+              title,
               earlier: request,
             });
             if (!started) {
