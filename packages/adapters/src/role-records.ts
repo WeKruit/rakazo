@@ -20,7 +20,13 @@ export type RoleRecord = {
   place?: string;
   savedEmail?: { steps: number; first: string; at: Date };
   /** The role's campaign as this product recorded it; delivery itself is the provider's to say. */
-  campaign?: { people: number; waiting: number; adopted: boolean; confirmedAt?: Date };
+  campaign?: {
+    id: string;
+    people: number;
+    waiting: number;
+    adopted: boolean;
+    confirmedAt?: Date;
+  };
 };
 
 type Binding = {
@@ -176,6 +182,7 @@ async function addCampaigns(
     const record = records.get(roleId) ?? {};
     if (record.campaign) continue;
     record.campaign = {
+      id: binding.campaignId,
       people: Object.keys(binding.leads ?? {}).length,
       waiting: Object.keys(binding.staged ?? {}).length,
       adopted: binding.created !== true,

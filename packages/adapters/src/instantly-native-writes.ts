@@ -607,6 +607,15 @@ function emailFor(binding: Copy, person: Person): FirstEmail | undefined {
   if (own) return own;
   return binding?.roleEmail ? fillFor(binding.roleEmail, person) : undefined;
 }
+/**
+ * A lead's own saved email as this product recorded it. The card and the send use it over the
+ * mail service's copy, which can lag a save by seconds (gate deb21fb1: the card and the check at
+ * approval read different text and three approved cards sent nothing).
+ */
+const savedVariables = (binding: Copy, person: Person) => {
+  const own = binding?.drafts?.[person.email.toLowerCase()];
+  return own ? emailVariables(own) : undefined;
+};
 const variablesOf = (binding: Copy, person: Person) => {
   const email = emailFor(binding, person);
   return email ? emailVariables(email) : undefined;
@@ -1395,7 +1404,9 @@ function planSend(
   if ("refusal" in plan || !templated) return plan;
   // A templated first email is in each person's variables: nobody goes out without one.
   const blank = plan.recipients.filter((person) =>
-    leads.includes(person) ? !person.saved : !emailFor(copy, person),
+    leads.includes(person)
+      ? !person.saved && !savedVariables(copy, person)
+      : !emailFor(copy, person),
   );
   return blank.length
     ? {
@@ -1556,7 +1567,7 @@ export async function describeCampaignActivation(
     const own = !templated
       ? undefined
       : people.includes(person)
-        ? person.saved
+        ? (savedVariables(binding, person) ?? person.saved)
         : variablesOf(binding, person);
     const role = binding?.roleEmail && emailVariables(fillFor(binding.roleEmail, person));
     const theirs =
@@ -2700,6 +2711,13 @@ async function sendCampaign(
         `Nothing was sent: ${[...elsewhere].map(([email, name]) => `${email} already gets a first email from ${name}`).join("; ")}, another of this account's campaigns, which is sending or has sent. Tell the recruiter in one line; only if they ask to email them again, call activate_campaign again with resend: true.`,
       );
   }
+  // The approved card showed each lead's saved email: the mail service holds exactly that first.
+  if (templated && plan.send === "activate")
+    for (const person of plan.recipients) {
+      const saved = savedVariables(bound?.binding, person);
+      if (person.id && saved && !isDeepStrictEqual(person.saved, saved))
+        await rest("PATCH", `/leads/${person.id}`, { custom_variables: saved });
+    }
   // A confirmed send goes out now: hours the recruiter never asked for, or any hours on a
   // send-now, are widened first. The provider edits only paused campaigns, so a sending one is
   // paused for it and resumed below.

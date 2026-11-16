@@ -211,6 +211,23 @@ describe("activation card for one person's own first email", () => {
     expect(display.refusal).toBeUndefined();
   });
 
+  it("shows the email saved for that person even before the mail service returns it", async () => {
+    // Gate deb21fb1, stop-after-approve: the card read the mail service right after a save, so
+    // the copy check at approval saw different text and refused three approved cards.
+    const saved = { subject: "Ada, a new note", body: "Hi Ada,\n\nNewer copy." };
+    const display = await describeCampaignActivation(
+      read,
+      "c-1",
+      null,
+      { ...binding, drafts: { "ada@x.test": saved } },
+      ["Ada"],
+    );
+    expect(display.recipients[0]?.firstEmail).toEqual({
+      subject: "Ada, a new note",
+      body: "Hi Ada,<br /><br />Newer copy.",
+    });
+  });
+
   it("shows the real email when the campaign comes from get_campaign, never its step label", async () => {
     // get_campaign labels the variable-only step for agents (#1247); the card read the label.
     const fromTool = async (tool: string) =>

@@ -497,7 +497,8 @@ export async function loadWorkingState(
   const campaignLine = (record: RoleRecord | undefined) => {
     const campaign = record?.campaign;
     if (!campaign) return undefined;
-    const people = `Campaign: ${campaign.people} ${campaign.people === 1 ? "person" : "people"} in it${campaign.waiting ? `, ${campaign.waiting} more added and not in it until a confirmed send` : ""}`;
+    // Send-at-night 11-16: with no id here Kruit's main chat read another role's old campaign.
+    const people = `Campaign (campaign_id ${campaign.id}): ${campaign.people} ${campaign.people === 1 ? "person" : "people"} in it${campaign.waiting ? `, ${campaign.waiting} more added and not in it until a confirmed send` : ""}`;
     if (campaign.confirmedAt)
       return `${people}; the recruiter confirmed a send ${ago(campaign.confirmedAt, now)}. Whether it is sending and who has been emailed are known only from get_campaign this turn, never from the confirmation.`;
     return campaign.adopted
