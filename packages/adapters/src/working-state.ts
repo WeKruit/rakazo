@@ -49,6 +49,7 @@ type StatePrisma = Pick<
   | "externalEffect"
   | "user"
   | "mcpServer"
+  | "connection"
   | "recruitingCalibrationRound"
 >;
 
@@ -72,6 +73,54 @@ async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userI
   return gmail
     ? undefined
     : "- Recruiter's own Gmail: not connected, so no email can go out yet. Each email goes out from it once they press Connect Gmail and then Send on its card.";
+}
+
+/** Calendar connectors the product books interviews through (request_connection's catalog). */
+const CALENDAR_SLUGS = ["google-calendar", "cal-com"];
+const CALENDAR_ENDPOINTS = ["https://calendarmcp.googleapis.com/mcp/v1", "https://mcp.cal.com/mcp"];
+
+/**
+ * No calendar connected: no interview can be booked (team-stuck 11-16: Kruit said "checking" and
+ * handed the booking to the team, which found the missing calendar two minutes later).
+ */
+async function calendarLine(prisma: StatePrisma, scope: { spaceId: string; userId: string }) {
+  const [server, linked] = await Promise.all([
+    prisma.mcpServer.findFirst({
+      where: {
+        spaceId: scope.spaceId,
+        userId: scope.userId,
+        enabled: true,
+        secretId: { not: null },
+        OR: [{ slug: { in: CALENDAR_SLUGS } }, { endpoint: { in: CALENDAR_ENDPOINTS } }],
+      },
+      select: { id: true },
+    }),
+    // A calendar linked through a connector platform counts too, whatever its sync state.
+    prisma.connection.findFirst({
+      where: {
+        spaceId: scope.spaceId,
+        userId: scope.userId,
+        provider: { contains: "calendar", mode: "insensitive" },
+        status: { not: "revoked" },
+      },
+      select: { id: true },
+    }),
+  ]);
+  return server || linked
+    ? undefined
+    : "- Recruiter's calendar: none connected, so no interview can be booked or invited yet. When they ask for one, show the calendar Connect card (request_connection) in that same reply rather than handing the booking to a team.";
+}
+
+/** A role's latest calibration round, as the recruiter sees it. */
+function roundLine(
+  round: { round: number; status: string; statusAt: Date; approvedAt: Date | null } | undefined,
+  now: number,
+) {
+  if (!round) return undefined;
+  if (round.approvedAt) return `round ${round.round} approved`;
+  if (round.status === "checking") return `round ${round.round} being checked, not shown yet`;
+  if (round.status === "checked") return `round ${round.round} checked, not shown yet`;
+  return `round ${round.round} shown in the role team's chat ${ago(round.statusAt, now)}`;
 }
 
 export type WorkingStateThread = {
@@ -235,6 +284,7 @@ export async function loadWorkingState(
 ): Promise<WorkingState> {
   const global = thread.groupId?.startsWith("recruiting-global-") ?? false;
   const gmailLine = ownGmailLine(prisma, scope).catch(() => undefined);
+  const calendarRead = calendarLine(prisma, scope).catch(() => undefined);
   // The recruiter's most recently active conversations, Kruit's included: where their newest
   // words are, and (for Kruit) the role teams on the card. Bounded, so a large account reads few.
   const listed = await prisma.chatGroup.findMany({
@@ -282,6 +332,19 @@ export async function loadWorkingState(
       select: { threadId: true, payload: true, createdAt: true },
     })
     .catch(() => undefined);
+  const teamRoleIds = groups.flatMap((group) =>
+    group.thread?.activeRecruitingRoleId ? [group.thread.activeRecruitingRoleId] : [],
+  );
+  const roundsRead = teamRoleIds.length
+    ? prisma.recruitingCalibrationRound
+        .findMany({
+          where: { roleId: { in: teamRoleIds } },
+          orderBy: [{ roleId: "asc" }, { round: "desc" }],
+          distinct: ["roleId"],
+          select: { roleId: true, round: true, status: true, statusAt: true, approvedAt: true },
+        })
+        .catch(() => [])
+    : Promise.resolve([]);
   const [recruiterRows, roles, recent, runs, completed, handoffs, roleTotal] = await Promise.all([
     recruiterLanguageRows(prisma, thread.id, accountThreadIds),
     global
@@ -303,7 +366,7 @@ export async function loadWorkingState(
           where: { threadId },
           orderBy: { seq: "desc" },
           take: ROLE_MESSAGES,
-          select: { role: true, botId: true, blocks: true },
+          select: { role: true, botId: true, blocks: true, createdAt: true },
         }),
       ),
     ),
@@ -494,6 +557,8 @@ export async function loadWorkingState(
 
   const gmail = await gmailLine;
   if (gmail) lines.push(gmail);
+  const calendar = await calendarRead;
+  if (calendar) lines.push(calendar);
 
   const sendRows = await sendsRead;
   const sent = (sendRows ?? []).filter((event) => {
@@ -526,6 +591,7 @@ export async function loadWorkingState(
         })
       : [];
     const botName = new Map(bots.map((bot) => [bot.id, bot.name]));
+    const roundOf = new Map((await roundsRead).map((round) => [round.roleId, round]));
     // A large account (hundreds of roles, thousands of people) never fits a card: what is not
     // on it is read, never recalled from chat or made up.
     lines.push(
@@ -541,6 +607,7 @@ export async function loadWorkingState(
           role ? `roleId ${role.id}` : `groupId ${group.id}, no saved role yet`,
           role ? `stage ${role.playbookStage}` : undefined,
           role ? `${role._count.candidates} people saved` : undefined,
+          roundLine(roleId ? roundOf.get(roleId) : undefined, now),
           teamState(latestRun.get(threadId), now),
         ]
           .filter(Boolean)
@@ -571,7 +638,7 @@ export async function loadWorkingState(
         : "";
       if (said.trim())
         lines.push(
-          `  Team's last report (${botName.get(report?.botId ?? "") ?? "Team"}): "${flat(said, REPORT_CHARS)}"`,
+          `  Team's last report (${botName.get(report?.botId ?? "") ?? "Team"}${report?.createdAt ? `, ${ago(report.createdAt, now)}` : ""}; its counts may be older than the ones above, which are read now): "${flat(said, REPORT_CHARS)}"`,
         );
     });
   }
