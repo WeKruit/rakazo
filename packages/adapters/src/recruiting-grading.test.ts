@@ -201,15 +201,22 @@ describe("startRecruitingGrading", () => {
       { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
     ];
     const options = {
-      found: [person("fits"), person("misfit")],
-      graded: ["linkedin:/in/fits", "linkedin:/in/misfit"],
-      rounds: round(["linkedin:/in/fits", "linkedin:/in/misfit"]),
+      found: [person("fits"), person("misfit"), person("unshown")],
+      graded: ["linkedin:/in/fits", "linkedin:/in/misfit", "linkedin:/in/unshown"],
+      rounds: round(["linkedin:/in/fits", "linkedin:/in/misfit", "linkedin:/in/unshown"]),
       roundGrades: [
         { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
         {
           candidateKey: "linkedin:/in/misfit",
           name: "Misfit",
           matchFields: { match_tier: "Partial" },
+        },
+        // Staging 11-16: people whose profile doesn't show Kafka stayed in the checked round, and
+        // the recruiter asked why they were there.
+        {
+          candidateKey: "linkedin:/in/unshown",
+          name: "Unshown",
+          matchFields: { match_tier: "Promising" },
         },
       ],
     };
@@ -223,6 +230,7 @@ describe("startRecruitingGrading", () => {
       }),
     });
     expect(promptOf(f)).toContain("Misfit: Partial (candidateKey linkedin:/in/misfit)");
+    expect(promptOf(f)).toContain("Unshown: Promising (candidateKey linkedin:/in/unshown)");
     expect(promptOf(f)).not.toContain("Fits:");
     // Nothing is shown while a round person still waits for a grade made with the feedback.
     const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
