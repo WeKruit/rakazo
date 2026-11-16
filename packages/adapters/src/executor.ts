@@ -11636,6 +11636,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       }),
                     )
                   : undefined;
+              if (waitingSend && "declined" in waitingSend) {
+                const result = {
+                  error:
+                    "Nothing was sent and no card was made: the recruiter already declined this exact send (the same people and the same email) and has not written since. Do not ask again with it; tell the recruiter in one line that it was not sent, and wait for what they want changed.",
+                  dispatched: false,
+                };
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
               if (waitingSend) {
                 const result = {
                   status: "already_waiting",
