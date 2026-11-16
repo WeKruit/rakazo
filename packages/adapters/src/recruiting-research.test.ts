@@ -208,8 +208,8 @@ describe("people-search agent runs", () => {
     });
   });
 
-  it("runs people searches only inside a saved role", async () => {
-    // Staging acd31504: the main chat ran five uncapped people searches before start_role.
+  it("runs long people searches only inside a saved role; the main chat runs quick ones", async () => {
+    // Staging 11-16: refusing every main-chat search made the recruiter wait on a role team.
     const inChat = (groupId: string, roleId: string | null = null) => ({
       run: {
         findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: roleId, groupId } })),
@@ -220,15 +220,10 @@ describe("people-search agent runs", () => {
     const people = { category: "people", query: "Senior SRE Austin" };
     await expect(
       check(inChat("recruiting-global-u"), "web_search_advanced_exa", people),
-    ).rejects.toThrow(/Call start_role now/);
-    await expect(
-      check(inChat("recruiting-global-u"), "web_search_exa", {
-        query: "category:people SRE Austin",
-      }),
-    ).rejects.toThrow(/Call start_role now/);
+    ).resolves.toBeUndefined();
     await expect(
       check(inChat("recruiting-global-u"), "agent_run", { query: "SRE" }),
-    ).rejects.toThrow(/Call start_role now/);
+    ).rejects.toThrow(/start_role/);
     await expect(check(inChat("role-abc"), "web_search_advanced_exa", people)).rejects.toThrow(
       /recruiting_role create/,
     );

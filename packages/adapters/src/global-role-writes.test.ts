@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  globalPeopleSearchRefusal,
-  globalRoleWriteRefusal,
-  roleRequestMessage,
-} from "./global-role-writes.js";
+import { globalRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
 
-function prisma(boundRoleId?: string) {
+function prisma(boundRoleId?: string, openRun?: { status: string }) {
   return {
     externalEffect: {
       findFirst: vi.fn(async () => (boundRoleId ? { request: { roleId: boundRoleId } } : null)),
@@ -15,31 +11,43 @@ function prisma(boundRoleId?: string) {
         where.id === "role-1" ? { id: "role-1", title: "Senior Data Engineer — Seattle" } : null,
       ),
     },
+    run: { findFirst: vi.fn(async () => openRun ?? null) },
   };
 }
-const actor = { spaceId: "s", userId: "u" };
+const actor = { spaceId: "s", userId: "u", threadId: "global" };
 
 describe("globalRoleWriteRefusal", () => {
-  it("sends a write to a role's campaign to that role's team (staging 11-14)", async () => {
+  it("leaves a role's campaign to its conversation while that has a run open (staging 11-14)", async () => {
     // Global Kruit paused a role's confirmed send and rewrote its email while the role's own
     // team was fixing the same campaign.
-    const error = await globalRoleWriteRefusal(prisma("role-1") as never, actor, {
-      toolName: "native_instantly_pause_campaign",
-      args: { campaign_id: "c-1" },
-    });
-    expect(error).toContain('delegate_to_role, role_id "role-1"');
-    expect(error).toContain("Senior Data Engineer — Seattle");
+    for (const status of ["running", "waiting_input"]) {
+      const db = prisma("role-1", { status });
+      const error = await globalRoleWriteRefusal(db as never, actor, {
+        toolName: "native_instantly_pause_campaign",
+        args: { campaign_id: "c-1" },
+      });
+      expect(error).toContain('delegate_to_role, role_id "role-1"');
+      expect(db.run.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            threadId: { not: "global" },
+            thread: { activeRecruitingRoleId: "role-1" },
+          }),
+        }),
+      );
+    }
   });
 
-  it("refuses a role_id write the same way", async () => {
-    const error = await globalRoleWriteRefusal(prisma() as never, actor, {
-      toolName: "native_instantly_ensure_role_campaign",
-      args: { role_id: "role-1", steps: [] },
-    });
-    expect(error).toContain('role_id "role-1"');
+  it("lets Kruit change a role's campaign itself when no other conversation is on it", async () => {
+    expect(
+      await globalRoleWriteRefusal(prisma() as never, actor, {
+        toolName: "native_instantly_ensure_role_campaign",
+        args: { role_id: "role-1", steps: [] },
+      }),
+    ).toBeUndefined();
   });
 
-  it("leaves reads, one-off campaigns and account setup to Kruit", async () => {
+  it("never checks reads, one-off campaigns or account setup", async () => {
     for (const [toolName, args] of [
       ["native_instantly_get_campaign", { campaign_id: "c-1" }],
       ["native_instantly_activate_campaign", { campaign_id: "one-off" }],
@@ -47,7 +55,10 @@ describe("globalRoleWriteRefusal", () => {
     ] as const) {
       const bound = toolName === "native_instantly_get_campaign" ? "role-1" : undefined;
       expect(
-        await globalRoleWriteRefusal(prisma(bound) as never, actor, { toolName, args }),
+        await globalRoleWriteRefusal(prisma(bound, { status: "running" }) as never, actor, {
+          toolName,
+          args,
+        }),
       ).toBeUndefined();
     }
   });
@@ -89,22 +100,5 @@ describe("roleRequestMessage", () => {
       brief: "Goal: use Ana's profile from the other role",
     });
     expect(message).toBe("Goal: use Ana's profile from the other role");
-  });
-});
-
-describe("globalPeopleSearchRefusal", () => {
-  // Staging 11-15: asked "show me people", Kruit's own chat ran people searches and hand-wrote four
-  // lists before any role existed, so nothing was saved, checked or kept out of the next round.
-  it("sends a people search to a role's team, but lets a profile lookup through", () => {
-    for (const toolName of ["web_search_exa", "web_search_advanced_exa", "agent_run"])
-      expect(
-        globalPeopleSearchRefusal(toolName, { query: "Senior Data Engineer Seattle Spark" }),
-      ).toContain("start_role");
-    expect(
-      globalPeopleSearchRefusal("web_search_exa", {
-        query: "https://www.linkedin.com/in/joelazose",
-      }),
-    ).toBeUndefined();
-    expect(globalPeopleSearchRefusal("crm_list", {})).toBeUndefined();
   });
 });

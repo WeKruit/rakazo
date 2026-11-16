@@ -495,7 +495,6 @@ import {
   saveEmailAttachments,
 } from "./email-attachments.js";
 import {
-  globalPeopleSearchRefusal,
   globalRoleWriteRefusal,
   PEOPLE_SEARCH_TOOLS,
   roleRequestMessage,
@@ -1679,7 +1678,7 @@ export function requestTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation; an interview booking for a person named with an email goes to Scheduling here. Never bind a role in global Main; to open a new role use start_role when offered.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Do what you can yourself: a quick people search (up to ten), and a role's campaign with its role_id. Hand work to a role's conversation (delegate_to_role) only when it needs that role's long search or saved people, or a tool says that conversation is working on it now; an interview booking for a person named with an email goes to Scheduling here. To open a new role use start_role when offered.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
@@ -10117,11 +10116,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args: connectorCall.args,
             });
             if (roleWrite) return { error: roleWrite };
-            const search = globalPeopleSearchRefusal(
-              connectorCall.route.toolName,
-              connectorCall.args,
-            );
-            if (search) return { error: search };
           }
           const nativeCrmRoute = connectorCall.route;
           const ordinaryCrmWrite = Boolean(
