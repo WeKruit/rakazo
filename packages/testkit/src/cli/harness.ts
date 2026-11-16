@@ -10,6 +10,9 @@ loadRootEnv();
 
 const integration = process.argv.includes("--integration");
 const e2e = process.argv.includes("--e2e");
+// The e2e stack (API with the emulated email and connectors, a fresh database) kept running for a
+// branch's own simulated-customer plays instead of the Playwright suite.
+const serveMode = process.argv.includes("--serve");
 const sandboxArg = process.argv.find((arg) => arg.startsWith("--sandbox="));
 const specArg = process.argv.find((arg) => arg.startsWith("--spec="));
 const grepArg = process.argv.find((arg) => arg.startsWith("--grep="));
@@ -19,8 +22,8 @@ const e2eSpec = specArg?.slice("--spec=".length);
 const e2eGrep = grepArg?.slice("--grep=".length);
 const agentRuntime = runtimeArg?.slice("--runtime=".length) ?? "scripted";
 
-if (Number(integration) + Number(e2e) !== 1) {
-  throw new Error("Pass exactly one of --integration or --e2e");
+if (Number(integration) + Number(e2e) + Number(serveMode) !== 1) {
+  throw new Error("Pass exactly one of --integration, --e2e or --serve");
 }
 if (!["fake", "e2b", "daytona", "box"].includes(sandboxProvider)) {
   throw new Error('Sandbox must be "fake", "e2b", "daytona", or "box"');
@@ -42,11 +45,11 @@ if (sandboxProvider === "box" && !process.env.BOX_API_KEY) {
 }
 
 async function main() {
-  const mode = integration ? "integration" : "e2e";
+  const mode = integration ? "integration" : serveMode ? "serve" : "e2e";
   const reportDir = path.resolve("test-report", mode);
   await mkdir(reportDir, { recursive: true });
   const container =
-    integration && process.env.INTEGRATION_DATABASE_URL
+    (integration || serveMode) && process.env.INTEGRATION_DATABASE_URL
       ? localDatabase(process.env.INTEGRATION_DATABASE_URL)
       : await new PostgreSqlContainer("postgres:16-alpine").start();
   try {
@@ -79,7 +82,8 @@ async function main() {
     process.env.PLAYWRIGHT_BASE_URL = webOrigin;
     process.env.DATA_DIR = path.join(reportDir, "data");
     process.env.SIGNUPS_ENABLED = "true";
-    process.env.SIGNUP_ALLOWLIST = "";
+    // A served backend may be reachable from outside, so it keeps the caller's signup allowlist.
+    process.env.SIGNUP_ALLOWLIST = serveMode ? (process.env.SIGNUP_ALLOWLIST ?? "") : "";
     process.env.CI = "1";
 
     execSync("pnpm --filter @rakazo/db generate", { stdio: "inherit", env: process.env });
@@ -232,11 +236,20 @@ async function main() {
         }
       },
       port: apiPort,
-      hostname: "127.0.0.1",
+      // A served backend in a remote sandbox is reached through its tunnel, not loopback.
+      hostname: process.env.HARNESS_HOST ?? "127.0.0.1",
     });
     await waitForHealth(`http://127.0.0.1:${apiPort}/health`, 15_000);
 
     try {
+      if (serveMode) {
+        console.log(`SERVING api=http://127.0.0.1:${apiPort}`);
+        await new Promise<void>((resolve) => {
+          process.once("SIGINT", resolve);
+          process.once("SIGTERM", resolve);
+        });
+        return;
+      }
       try {
         await runProcess(
           "pnpm",
