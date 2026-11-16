@@ -874,6 +874,20 @@ export async function nextRoundHeld(
 }
 
 /**
+ * Whether a round this run lists must stay out of chat: it would be held for the check, or the
+ * round before it is still unshown, so recording it is refused. Staging 11-16: six such refused
+ * attempts streamed their lists, and the recruiter saw the same people again and again.
+ */
+export async function roundListHeld(
+  prisma: PrismaClient,
+  input: { threadId: string; roleId: string },
+): Promise<boolean> {
+  const state = await roundState(prisma, input.roleId);
+  if (state && state.status !== "shown") return true;
+  return !!state && (await hasRoundReviewer(prisma, input.threadId));
+}
+
+/**
  * The round waiting for the Reviewer's check right now, if any. Staging 11-15: asked "where's the
  * rest of the round?" while round 2 was held, Kruit listed eight unchecked people from Results and
  * then said only two were in the round.
