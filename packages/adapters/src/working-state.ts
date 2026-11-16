@@ -641,6 +641,17 @@ export async function loadWorkingState(
           `  Team's last report (${botName.get(report?.botId ?? "") ?? "Team"}${report?.createdAt ? `, ${ago(report.createdAt, now)}` : ""}; its counts may be older than the ones above, which are read now): "${flat(said, REPORT_CHARS)}"`,
         );
     });
+  } else if (global && roleTotal === 0) {
+    // Every role opened here is saved to this account, so no roles is a definite none, not an
+    // unknown (honest-limits 8a002815: with nothing said, 「不对啊，我昨天建了三个」 got an apology).
+    const archived = await prisma.recruitingRole
+      .count({
+        where: { spaceId: scope.spaceId, userId: scope.userId, archivedAt: { not: null } },
+      })
+      .catch(() => 0);
+    lines.push(
+      `- Role teams: ${archived ? `none active; ${archived} archived` : "none"}. Every role opened in this product is saved to this account, so this is read now and definite, whatever earlier chat or the recruiter remembers.`,
+    );
   }
 
   return { text: redact(lines.join("\n")), language };

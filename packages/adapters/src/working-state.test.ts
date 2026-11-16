@@ -28,6 +28,9 @@ function fakePrisma(input: {
   round?: Row | null;
   /** Each card role's latest calibration round. */
   rounds?: Row[];
+  /** The account's active roles, and its archived ones. */
+  roleCount?: number;
+  archivedCount?: number;
 }) {
   return {
     recruitingCalibrationRound: {
@@ -39,7 +42,9 @@ function fakePrisma(input: {
       findMany: vi.fn(async ({ where }: { where: { id?: unknown } }) =>
         where.id ? (input.revisions ?? []) : (input.roles ?? []),
       ),
-      count: vi.fn(async () => 1175),
+      count: vi.fn(async ({ where }: { where: { archivedAt?: unknown } }) =>
+        where.archivedAt === null ? (input.roleCount ?? 1175) : (input.archivedCount ?? 0),
+      ),
     },
     message: {
       findMany: vi.fn(async ({ where }: { where: { threadId?: unknown; role?: string } }) =>
@@ -686,5 +691,26 @@ describe("loadWorkingState", () => {
     expect(sent.text).toContain(
       "Emails sent from this account through the product in the last 7 days: 1 send (latest 3 d ago)",
     );
+  });
+
+  // honest-limits 8a002815 (push-back-on-correct-answer#2): with no roles the card said nothing
+  // about roles, so after 「不对啊，我昨天建了三个」 Kruit apologised and called the read unverifiable.
+  it("says an account with no roles has none, as a plain none", async () => {
+    const none = await loadWorkingState(
+      fakePrisma({ roleCount: 0 }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(none.text).toContain("Role teams: none.");
+    const archived = await loadWorkingState(
+      fakePrisma({ roleCount: 0, archivedCount: 2 }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(archived.text).toContain("Role teams: none active; 2 archived");
   });
 });

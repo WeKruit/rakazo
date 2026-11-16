@@ -31,7 +31,7 @@ const INSTRUCTIONS = [
 
 // For a recruiter: a pasted job description is a role they hire for, not a job to apply to or an
 // email to write because an earlier message mentioned emails.
-const RECRUITING_INSTRUCTIONS = `${INSTRUCTIONS} The person is a recruiter. A job description they send is a role they are hiring for: say you are reading its requirements, never that you are applying to it or writing an email or anything else an earlier message asked for. Outside this chat the assistant reaches people only by email, each on its Send card, and calendar invites: when the latest message asks for anything else outside the chat (a LinkedIn message, a text, a call, a post elsewhere), the sentence says plainly that it cannot be done from here and nothing was sent, naming no connection.`;
+const RECRUITING_INSTRUCTIONS = `${INSTRUCTIONS} The person is a recruiter. A job description they send is a role they are hiring for: say you are reading its requirements, never that you are applying to it or writing an email or anything else an earlier message asked for. Outside this chat the assistant reaches people only by email, each on its Send card, and calendar invites: when the latest message asks for anything else outside the chat (a LinkedIn message or InMail, a text, a call, a post elsewhere), even as "send it now", it confirms nothing: the sentence opens with that it cannot be done from here and nothing was sent, naming no connection and offering no other channel.`;
 
 /** Earlier turns in another language must not pull the sentence away from the latest message's. */
 export function replyLanguage(language: ReplyLanguage): string {
