@@ -4,7 +4,9 @@ import type { MessageBlock } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import {
   appendEventInTransaction,
+  createGroupInTransaction,
   createThreadMessageInTransaction,
+  lockSpaceForContentCreation,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -113,6 +115,37 @@ export async function roleStartKey(
   if (!opened) return asked.id;
   const [a, b] = [titleCore(opened.name), titleCore(input.title)];
   return a.includes(b) || b.includes(a) ? asked.id : `${asked.id}:${b}`;
+}
+
+/**
+ * Open (or find) the role conversation for one start_role call. The key is chosen under the
+ * space's content lock, so roles asked for in parallel see each other. Staging 11-16: three
+ * parallel calls for Java, Android and Data Engineer each found no role yet, all took the
+ * message's first-role key, and only "Java" was opened while Kruit said all three were.
+ */
+export async function openRoleGroup(
+  prisma: Pick<PrismaClient, "$transaction">,
+  input: {
+    spaceId: string;
+    userId: string;
+    threadId: string;
+    title: string;
+    fallback: string;
+    botIds: string[];
+  },
+) {
+  return withTransactionRetry(() =>
+    prisma.$transaction(async (tx) => {
+      await lockSpaceForContentCreation(tx, input);
+      const roleKey = await roleStartKey(tx, input);
+      const group = await createGroupInTransaction(
+        tx,
+        { spaceId: input.spaceId, userId: input.userId, email: "", isDeploymentOwner: false },
+        { id: roleGroupId(roleKey), name: input.title.slice(0, 120), botIds: input.botIds },
+      );
+      return { roleKey, group };
+    }),
+  );
 }
 
 /**

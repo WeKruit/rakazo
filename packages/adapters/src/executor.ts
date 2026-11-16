@@ -251,7 +251,6 @@ import {
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
-  createGroupInTransaction,
   createRecruitingSchedulingPlan,
   createRunHistoryCache,
   createSpaceForMember,
@@ -729,9 +728,8 @@ import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
-  roleGroupId,
+  openRoleGroup,
   roleOpenedFromLatestMessage,
-  roleStartKey,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -14968,30 +14966,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               select: { botId: true },
               orderBy: { createdAt: "asc" },
             });
-            const roleKey = await roleStartKey(deps.prisma, {
+            const { roleKey, group } = await openRoleGroup(deps.prisma, {
               spaceId: run.spaceId,
               userId: run.userId,
               threadId: run.threadId,
               title,
               fallback: effectKey,
+              botIds: team.map((member) => member.botId),
             });
-            const groupId = roleGroupId(roleKey);
-            const group = await deps.prisma.$transaction((tx) =>
-              createGroupInTransaction(
-                tx,
-                {
-                  spaceId: run.spaceId,
-                  userId: run.userId,
-                  email: "",
-                  isDeploymentOwner: false,
-                },
-                {
-                  id: groupId,
-                  name: title.slice(0, 120),
-                  botIds: team.map((member) => member.botId),
-                },
-              ),
-            );
             if (!group.thread)
               return finish({
                 error: "The role conversation could not be opened.",
