@@ -41,6 +41,16 @@ const person = (slug: string): Occurrence => ({
   linkedinUrl: `https://x.test/in/${slug}`,
 });
 
+/** A round as stored: one after feedback waits for its check unless the test says otherwise. */
+const stored = (round: { round: number; createdAt: Date; status?: string }) => ({
+  status: round.round >= 2 ? "checking" : "shown",
+  statusAt: round.createdAt,
+  version: 0,
+  ownerBotId: "lead",
+  approvedAt: null,
+  ...round,
+});
+
 function fixture(options: {
   busy?: boolean;
   found?: Occurrence[];
@@ -56,7 +66,13 @@ function fixture(options: {
   /** Bots whose people-search assignment allows agent runs. */
   agentRunBots?: string[];
   /** The role's calibration rounds, latest first. */
-  rounds?: Array<{ id: string; round: number; candidateKeys: string[]; createdAt: Date }>;
+  rounds?: Array<{
+    id: string;
+    round: number;
+    candidateKeys: string[];
+    createdAt: Date;
+    status?: string;
+  }>;
   /** Whether the latest round was recorded as a correction. */
   corrects?: boolean;
   /** Grades of the latest round's people saved since the previous round. */
@@ -105,10 +121,9 @@ function fixture(options: {
       ),
     },
     recruitingCalibrationRound: {
-      findMany: vi.fn(async () =>
-        (options.rounds ?? []).map((round) => ({ ...round, approvedAt: null })),
-      ),
-      findFirst: vi.fn(async () => options.rounds?.[0] ?? null),
+      findMany: vi.fn(async () => (options.rounds ?? []).map(stored)),
+      findFirst: vi.fn(async () => (options.rounds?.[0] ? stored(options.rounds[0]) : null)),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     recruitingRole: {
       findUnique: vi.fn(async () => ({
@@ -290,13 +305,19 @@ describe("startRecruitingGrading", () => {
       }),
     });
     expect(promptOf(f)).toContain("Everyone in it fits.");
-    // Nothing of the next round streams into chat before the check, except in the lead's turn after it.
-    const held = (clientNonce: string | null) =>
-      nextRoundHeld(f.deps.prisma, { threadId: "thread", roleId: "role", clientNonce });
-    await expect(held(null)).resolves.toBe(true);
-    await expect(held(`${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`)).resolves.toBe(
-      false,
-    );
+    // The check's end is stored before the lead is asked to show the round.
+    expect(f.prisma.recruitingCalibrationRound.updateMany).toHaveBeenCalledWith({
+      where: { id: "round-2", version: 0, status: "checking" },
+      data: expect.objectContaining({ status: "checked" }),
+    });
+    // The round after a shown one waits for the check; nothing streams into chat before it.
+    const next = (status: string) => {
+      const g = fixture({ rounds: [{ ...round([])[0]!, createdAt: new Date(), status }] });
+      g.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+      return nextRoundHeld(g.deps.prisma, { threadId: "thread", roleId: "role" });
+    };
+    await expect(next("shown")).resolves.toBe(true);
+    await expect(next("checked")).resolves.toBe(false);
     // Kruit's chat lists none of Results while the round waits (staging 11-15), unless it waited long.
     const waiting = (at: number) =>
       roundAwaitingReview(f.deps.prisma, { threadId: "thread", roleId: "role" }, at);
@@ -306,7 +327,7 @@ describe("startRecruitingGrading", () => {
     const solo = fixture({
       found: [person("fits")],
       graded: ["linkedin:/in/fits"],
-      rounds: round(["linkedin:/in/fits"]),
+      rounds: round(["linkedin:/in/fits"]).map((row) => ({ ...row, status: "shown" })),
       roundGrades: [
         { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
       ],
@@ -314,7 +335,7 @@ describe("startRecruitingGrading", () => {
     await startRecruitingGrading(solo.deps, { threadId: "thread" }, now);
     expect(solo.runCreate).not.toHaveBeenCalled();
     await expect(
-      nextRoundHeld(solo.deps.prisma, { threadId: "thread", roleId: "role", clientNonce: null }),
+      nextRoundHeld(solo.deps.prisma, { threadId: "thread", roleId: "role" }),
     ).resolves.toBe(false);
     await expect(
       roundAwaitingReview(solo.deps.prisma, { threadId: "thread", roleId: "role" }, now),

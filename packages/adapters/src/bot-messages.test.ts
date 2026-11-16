@@ -870,6 +870,8 @@ describe("delegating to a role team in another conversation", () => {
         createdAt: new Date(Date.now() - 60_000),
         approvedAt: null,
         effectId: "effect",
+        status: "checking",
+        statusAt: new Date(Date.now() - 60_000),
       })),
       findMany: vi.fn(async () => []),
     };
@@ -1364,6 +1366,8 @@ describe("teamProgress", () => {
           createdAt: new Date(Date.now() - 60_000),
           approvedAt: null,
           effectId: "effect",
+          status: "checking",
+          statusAt: new Date(Date.now() - 60_000),
         })),
       },
     } as unknown as PrismaClient;
