@@ -16,6 +16,7 @@ import { InterviewCalendar } from "./InterviewCalendar";
 import { RecruitingRoutines } from "./RecruitingRoutines";
 import { RetryNotice } from "./RetryNotice";
 import { formatDate, TabLoading } from "./shared";
+import { useGlobalRecruitingChanges } from "./useGlobalRecruitingChanges";
 
 const GMAIL_MCP_ENDPOINT = "https://gmailmcp.googleapis.com/mcp/v1";
 
@@ -122,6 +123,7 @@ export function AccountRecruitingView({
   const [loadingMore, setLoadingMore] = useState<string>();
   const [taskError, setTaskError] = useState(false);
   const [reload, setReload] = useState(0);
+  useGlobalRecruitingChanges(groups, groupId, () => setReload((value) => value + 1));
   const pageKey = JSON.stringify([
     accountKey,
     view,

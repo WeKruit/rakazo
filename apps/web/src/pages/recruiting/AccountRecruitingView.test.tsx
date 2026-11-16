@@ -3,6 +3,7 @@
 import { ORPCError } from "@orpc/client";
 import type {
   GlobalRecruitingInboxOutput,
+  Group,
   RecruitingAccountViewOutput,
   RecruitingCorrespondence,
 } from "@rakazo/contracts";
@@ -27,6 +28,8 @@ const listContacts = vi.hoisted(() => vi.fn());
 const contactFacets = vi.hoisted(() => vi.fn());
 const updateTags = vi.hoisted(() => vi.fn());
 const listServers = vi.hoisted(() => vi.fn());
+const threadHead = vi.hoisted(() => vi.fn());
+const subscribe = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/auth", () => ({ authClient: { useSession: () => ({ data: null }) } }));
 vi.mock("../../lib/rpc", () => ({
   rpc: {
@@ -37,6 +40,7 @@ vi.mock("../../lib/rpc", () => ({
       contacts: { list: listContacts, facets: contactFacets, updateTags },
     },
     mcp: { servers: { list: listServers } },
+    threads: { head: threadHead, subscribe },
   },
 }));
 vi.mock("./RecruitingRoutines", () => ({ RecruitingRoutines: () => null }));
@@ -360,6 +364,54 @@ it("pages saved mail by number and reads only the chosen page", async () => {
       expect.objectContaining({ offset: 30 }),
       expect.anything(),
     );
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("reads the open Inbox again when Kruit's main conversation says mail was saved", async () => {
+  threadHead.mockResolvedValue({ threadId: "global-thread", cursor: 4 });
+  let announce: (() => void) | undefined;
+  subscribe.mockImplementation(async (_input: unknown, { signal }: { signal: AbortSignal }) => ({
+    async *[Symbol.asyncIterator]() {
+      await new Promise<void>((resolve) => (announce = resolve));
+      yield {
+        id: "event-5",
+        seq: 5,
+        threadId: "global-thread",
+        spaceId: "space",
+        type: "recruiting.changed",
+        payload: { roleId: "one" },
+        createdAt: "2026-11-16T05:57:40Z",
+      };
+      await new Promise((resolve) => signal.addEventListener("abort", resolve));
+    },
+  }));
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[{ id: "recruiting-global-user" } as Group]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(subscribe).toHaveBeenCalledWith(
+      { groupId: "recruiting-global-user", cursor: 4 },
+      expect.anything(),
+    );
+    const reads = globalRead.mock.calls.length;
+    await act(async () => announce?.());
+    expect(globalRead.mock.calls.length).toBeGreaterThan(reads);
   } finally {
     await act(async () => pageRoot.unmount());
   }
