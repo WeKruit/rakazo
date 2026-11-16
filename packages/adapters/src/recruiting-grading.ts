@@ -13,7 +13,6 @@ import {
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { roundCriteria } from "./recruiting-round-check.js";
 
 export { RECRUITING_GRADE_NONCE_PREFIX };
@@ -492,9 +491,11 @@ export async function startRecruitingGrading(
         async () =>
           roundReviewPrompt(
             review.round.round,
-            misfits,
-            review.round.candidateKeys.length,
-            await roundReplacements(deps.prisma, role.id, open),
+            checkedRoundPeople(
+              review.round.candidateKeys,
+              review.grades,
+              await roundReplacements(deps.prisma, role.id, open),
+            ),
           ),
         grader?.botId,
       );
@@ -815,37 +816,7 @@ type RoundGrade = {
   title: string | null;
   company: string | null;
   tier: unknown;
-  /** Requirements the check did not find met, with their verdict, and its concerns. */
-  gaps?: string[];
-  concerns?: string[];
 };
-
-/** The Reviewer's own words for one person in a save_grades request, by candidateKey. */
-function savedGradeNotes(request: unknown) {
-  const notes = new Map<string, Pick<RoundGrade, "gaps" | "concerns">>();
-  const rows = (request as { rows?: unknown } | null)?.rows;
-  for (const row of Array.isArray(rows) ? rows : []) {
-    const grade = row as {
-      linkedin_url?: unknown;
-      concerns?: unknown;
-      requirements_assessment?: unknown;
-    };
-    const key = linkedinPersonKey(grade.linkedin_url);
-    if (!key) continue;
-    const gaps = (
-      Array.isArray(grade.requirements_assessment) ? grade.requirements_assessment : []
-    ).flatMap((item: { requirement?: unknown; status?: unknown }) =>
-      typeof item?.requirement === "string" && item.status !== "met"
-        ? [`${item.requirement} (${String(item.status)})`]
-        : [],
-    );
-    const concerns = (Array.isArray(grade.concerns) ? grade.concerns : []).filter(
-      (concern): concern is string => typeof concern === "string",
-    );
-    notes.set(key, { gaps, concerns });
-  }
-  return notes;
-}
 
 /**
  * The latest calibration round while the recruiter has not approved it, with each of its people's
@@ -902,16 +873,8 @@ async function roundUnderReview(
       title: true,
       company: true,
       matchFields: true,
-      pageId: true,
     },
   });
-  // The lead replacing a misfit reads why from here instead of reading each person again
-  // (staging 11-16: the swap re-read all ten people's sources five times, about 7 minutes).
-  const pages = await prisma.externalEffect.findMany({
-    where: { id: { in: [...new Set(rows.map((row) => row.pageId))] } },
-    select: { id: true, request: true },
-  });
-  const notes = new Map(pages.map((page) => [page.id, savedGradeNotes(page.request)]));
   const grades = new Map<string, RoundGrade>();
   for (const row of rows)
     if (!grades.has(row.candidateKey))
@@ -920,7 +883,6 @@ async function roundUnderReview(
         title: row.title,
         company: row.company,
         tier: (row.matchFields as { match_tier?: unknown } | null)?.match_tier,
-        ...notes.get(row.pageId)?.get(row.candidateKey),
       });
   return { round, grades, held, checked: held && status === "checked" };
 }
@@ -1101,42 +1063,45 @@ async function roundReplacements(
   return [...people.values()].slice(0, open + 5);
 }
 
-export function roundReviewPrompt(
-  round: number,
-  misfits: readonly (RoundGrade & { key: string })[],
-  size = 10,
-  replacements: readonly Replacement[] = [],
-) {
-  // Staging 11-15: two misfits swapped out with no replacement found left a round of 8, and the
-  // recruiter's "only 8?" brought a second list. The checked round is filled to ten first.
-  const open = misfits.length + Math.max(0, 10 - size);
+/** How close a misfit the Reviewer checked is: kept in a place no Strong person can fill. */
+const KEPT_MISFIT_TIERS = ["Promising", "Uncertain"];
+
+/**
+ * The checked round to show, in order: the round's people who fit, then the Strong people from
+ * Results in the misfits' places, then the closest misfits (Promising before Uncertain, never
+ * Partial) in any place still open, up to ten. Staging 11-16 (982a0ac9): told to "keep the round's
+ * other people" without being given them, the lead asked the recruiter which three to keep.
+ */
+export function checkedRoundPeople(
+  candidateKeys: readonly string[],
+  grades: ReadonlyMap<string, Pick<RoundGrade, "name" | "tier">>,
+  replacements: readonly Pick<Replacement, "key" | "name">[] = [],
+): { key: string; name: string }[] {
+  const misfit = (key: string) => {
+    const tier = grades.get(key)?.tier;
+    return tier !== undefined && tier !== FIT_TIER;
+  };
+  const named = (key: string, name?: string | null) => ({ key, name: name || key });
+  const kept = candidateKeys.filter((key) => !misfit(key));
+  const closest = KEPT_MISFIT_TIERS.flatMap((tier) =>
+    candidateKeys.filter((key) => misfit(key) && grades.get(key)?.tier === tier),
+  );
+  const people = [
+    ...kept.map((key) => named(key, grades.get(key)?.name)),
+    ...replacements
+      .filter((person) => !candidateKeys.includes(person.key))
+      .map((person) => named(person.key, person.name)),
+    ...closest.map((key) => named(key, grades.get(key)?.name)),
+  ];
+  return people.slice(0, Math.max(10, kept.length));
+}
+
+export function roundReviewPrompt(round: number, people: readonly { key: string; name: string }[]) {
   return [
-    `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet.${misfits.length ? ` ${misfits.length === 1 ? "This person's profile doesn't" : `These ${misfits.length} people's profiles don't`} show everything the recruiter asked for:` : " Everyone in it fits."}`,
-    ...misfits.map((person) => {
-      const role = [person.title, person.company].filter(Boolean).join(" at ");
-      const notes = [
-        person.gaps?.length ? `not shown: ${person.gaps.join("; ")}` : "",
-        person.concerns?.length ? `concerns: ${person.concerns.join("; ")}` : "",
-      ].filter(Boolean);
-      return `- ${person.name ?? person.key}${role ? `, ${role}` : ""}: ${String(person.tier)} (candidateKey ${person.key})${notes.length ? `; ${notes.join("; ")}` : ""}`;
-    }),
-    ...(open && replacements.length
-      ? [
-          "",
-          "Saved people no round has shown, checked by the Reviewer as Strong:",
-          ...replacements.map((person) => {
-            const about = [
-              [person.title, person.company].filter(Boolean).join(" at "),
-              person.location,
-            ].filter(Boolean);
-            return `- ${person.name ?? person.key}${about.length ? `, ${about.join(", ")}` : ""} (candidateKey ${person.key})`;
-          }),
-        ]
-      : []),
+    `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and exactly these people, in this order:`,
+    ...people.map((person, index) => `${index + 1}. ${person.name} (candidateKey ${person.key})`),
     "",
-    open
-      ? `Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}. Everything you need is above: don't read this round's people or Results again, and don't search, since someone nobody has checked can't take a checked person's place. ${replacements.length ? "Take the checked people listed above, skipping anyone whose title, company or location shows they don't fit. " : ""}Keep the closest of these people (Promising before Uncertain, never Partial) in any place still open; fewer than ten only when none is left. Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
-      : "Show it now: record calibration_round with corrects: true and the same people in the same order (no checks: the Reviewer's grades stand for them). Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
+    "The Reviewer's grades stand for them: no checks, no search, and don't read Results or anyone's profile again. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.",
   ].join("\n");
 }
 
@@ -1231,6 +1196,28 @@ export const ROUND_HELD_NEXT_STEP =
 /** A people search after this turn recorded a held round: the check starts when the turn ends. */
 export const ROUND_HELD_SEARCH_REFUSAL =
   "Not run: this turn recorded the round, and it is shown once the Reviewer has checked it, which starts when this turn ends. A request for the next ten is answered by that round. Save the brief if not saved yet, then end the turn with one short line saying the checked people come in a few minutes.";
+
+/** A people search while an earlier turn's round waits for the check: that round is the answer. */
+export const ROUND_AWAITING_SEARCH_REFUSAL =
+  "Not run: the round is recorded and the Reviewer is checking it now; the checked round is shown in this chat as soon as the check ends, with the next-step card. A request for the next ten is answered by that round. End the turn with one short line in the recruiter's language saying it comes in a minute or two.";
+
+/**
+ * Why a people search must not run now, or null. Staging 11-16 (982a0ac9): the recruiter's "still
+ * waiting" started a new lead turn that searched again while round 2 was being checked, and the
+ * checked round was then steered into that busy turn and not shown before the recruiter gave up.
+ * The owner's turn that shows a checked round may still search to fill its places.
+ */
+export async function heldRoundSearchRefusal(
+  prisma: PrismaClient,
+  input: { roleId: string | null | undefined; botId: string; recordedThisTurn: boolean },
+): Promise<string | null> {
+  if (input.recordedThisTurn) return ROUND_HELD_SEARCH_REFUSAL;
+  if (!input.roleId) return null;
+  const state = await roundState(prisma, input.roleId);
+  if (!state || state.status === "shown") return null;
+  if (state.status === "checked" && state.ownerBotId === input.botId) return null;
+  return ROUND_AWAITING_SEARCH_REFUSAL;
+}
 
 /** Whether a reply lists people: two or more distinct LinkedIn profiles. */
 export function listsPeople(text: string): boolean {

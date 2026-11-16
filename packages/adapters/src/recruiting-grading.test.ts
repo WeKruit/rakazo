@@ -15,7 +15,9 @@ const {
   GRADE_IN_FLIGHT,
   GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
+  checkedRoundPeople,
   gradingTools,
+  heldRoundSearchRefusal,
   listsPeople,
   mentionsPeople,
   nextRoundHeld,
@@ -24,6 +26,7 @@ const {
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
+  ROUND_HELD_SEARCH_REFUSAL,
   startRecruitingGrading,
 } = await import("./recruiting-grading.js");
 
@@ -289,16 +292,13 @@ describe("startRecruitingGrading", () => {
         clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
       }),
     });
+    // The system picks the round: who fits, then Strong people from Results in the misfits'
+    // places, then the closest misfit; the Partial one and anyone unchecked stay out.
     expect(promptOf(f)).toContain(
-      "Misfit: Partial (candidateKey linkedin:/in/misfit); not shown: Kafka in production (unknown); concerns: Architect role",
+      "1. Fits (candidateKey linkedin:/in/fits)\n2. spare (candidateKey linkedin:/in/spare)\n3. Unshown (candidateKey linkedin:/in/unshown)\n\n",
     );
-    // Only people the Reviewer checked as Strong take a checked person's place; no search.
-    expect(promptOf(f)).toContain("- spare (candidateKey linkedin:/in/spare)");
+    expect(promptOf(f)).not.toContain("linkedin:/in/misfit");
     expect(promptOf(f)).not.toContain("linkedin:/in/new");
-    expect(promptOf(f)).toContain("don't search");
-    expect(promptOf(f)).not.toContain("(candidateKey linkedin:/in/fits)");
-    expect(promptOf(f)).toContain("Unshown: Promising (candidateKey linkedin:/in/unshown)");
-    expect(promptOf(f)).not.toContain("Fits:");
     // Nothing is shown while a round person still waits for a grade made with the feedback.
     const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
     waiting.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
@@ -387,7 +387,7 @@ describe("startRecruitingGrading", () => {
         clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
       }),
     });
-    expect(promptOf(f)).toContain("Everyone in it fits.");
+    expect(promptOf(f)).toContain("1. Fits (candidateKey linkedin:/in/fits)\n\n");
     // Staging 11-16 (7838c505): the check ended while the lead was answering "where's round 2?",
     // the start found the conversation busy, and the checked round waited 3.5 min for a free
     // moment. As a teammate's report joins the lead's running turn (S4), so does the round.
@@ -993,5 +993,78 @@ describe("mentionsPeople", () => {
     expect(mentionsPeople("Only karrthikt and Akhil K fit.", held)).toBe(true);
     expect(mentionsPeople("Karthik Tirunagari looks strong.", held)).toBe(false);
     expect(mentionsPeople("The checked round comes in a minute or two.", held)).toBe(false);
+  });
+});
+
+describe("heldRoundSearchRefusal", () => {
+  const prismaWith = (round: Record<string, unknown> | null) =>
+    ({
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
+    }) as never;
+  const held = (status: string, ownerBotId = "lead") => ({
+    id: "r2",
+    round: 2,
+    candidateKeys: [],
+    approvedAt: null,
+    status,
+    statusAt: new Date(),
+    ownerBotId,
+    version: 1,
+  });
+
+  it("refuses a search in a later turn while an earlier turn's round waits for the check", async () => {
+    // Staging 11-16 (982a0ac9): "still waiting" started a new lead turn that searched again while
+    // round 2 was being checked, and the checked round was steered into that busy turn.
+    const refusal = await heldRoundSearchRefusal(prismaWith(held("checking")), {
+      roleId: "role",
+      botId: "lead",
+      recordedThisTurn: false,
+    });
+    expect(refusal).toContain("Not run");
+  });
+
+  it("lets a search run when the latest round is shown, and in the owner's turn showing it", async () => {
+    const shown = { roleId: "role", botId: "lead", recordedThisTurn: false };
+    expect(await heldRoundSearchRefusal(prismaWith(held("shown")), shown)).toBeNull();
+    expect(await heldRoundSearchRefusal(prismaWith(null), shown)).toBeNull();
+    expect(await heldRoundSearchRefusal(prismaWith(held("checked")), shown)).toBeNull();
+    expect(
+      await heldRoundSearchRefusal(prismaWith(held("checked", "other")), shown),
+    ).not.toBeNull();
+  });
+
+  it("refuses after this turn recorded the held round, whatever the stored state", async () => {
+    expect(
+      await heldRoundSearchRefusal(prismaWith(null), {
+        roleId: undefined,
+        botId: "lead",
+        recordedThisTurn: true,
+      }),
+    ).toBe(ROUND_HELD_SEARCH_REFUSAL);
+  });
+});
+
+describe("checkedRoundPeople", () => {
+  const grade = (name: string, tier: string) => ({ name, tier });
+  it("keeps who fits in order, then Strong replacements, then the closest misfits, up to ten", () => {
+    const keys = ["a", "b", "c", "d"];
+    const grades = new Map([
+      ["a", grade("A", "Uncertain")],
+      ["b", grade("B", "Strong")],
+      ["c", grade("C", "Partial")],
+      ["d", grade("D", "Promising")],
+    ]);
+    expect(checkedRoundPeople(keys, grades, [{ key: "e", name: "E" }]).map((p) => p.name)).toEqual([
+      "B",
+      "E",
+      "D",
+      "A",
+    ]);
+    // Ten places at most: Strong replacements go before any misfit.
+    const many = Array.from({ length: 12 }, (_, i) => ({ key: `r${i}`, name: null }));
+    const picked = checkedRoundPeople(keys, grades, many);
+    expect(picked).toHaveLength(10);
+    expect(picked.map((p) => p.key)).not.toContain("d");
+    expect(picked[1]).toEqual({ key: "r0", name: "r0" });
   });
 });

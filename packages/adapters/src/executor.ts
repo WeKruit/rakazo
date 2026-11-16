@@ -651,6 +651,7 @@ import {
   gradingToolRefusal,
   gradingTools,
   heldRoundPeople,
+  heldRoundSearchRefusal,
   listsPeople,
   mentionsPeople,
   nextRoundHeld,
@@ -10093,11 +10094,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Feedback-round 11-15: after recording the held round 2, the lead kept searching for
           // "the next 10" for another minute, and the Reviewer's check waited for its turn to end.
           if (
-            roundHeldRecorded &&
             connectorCall.route?.connectorId === "mcp" &&
-            PEOPLE_SEARCH_TOOLS.has(connectorCall.route.toolName)
-          )
-            return { error: ROUND_HELD_SEARCH_REFUSAL };
+            PEOPLE_SEARCH_TOOLS.has(connectorCall.route.toolName) &&
+            run.trigger !== "recruiting_grade" &&
+            !thread.groupId?.startsWith("recruiting-global-")
+          ) {
+            const held = await heldRoundSearchRefusal(deps.prisma, {
+              roleId: thread.activeRecruitingRoleId,
+              botId: run.botId,
+              recordedThisTurn: roundHeldRecorded,
+            }).catch(() => (roundHeldRecorded ? ROUND_HELD_SEARCH_REFUSAL : null));
+            if (held) return { error: held };
+          }
           if (
             connectorCall.route?.connectorId === "mcp" &&
             thread.groupId?.startsWith("recruiting-global-")
