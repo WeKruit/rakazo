@@ -1371,11 +1371,28 @@ export class McpConnector implements ConnectorProvider {
       let session = await this.sessionFor(assignment.server, context);
       material = this.sessions.get(sessionKey)?.material;
       context.signal.throwIfAborted();
-      const emailScope =
-        assignment.server.endpoint === INSTANTLY_MCP &&
-        ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
-          ? await this.instantlyCampaignScope(context, assignment.server.id)
-          : null;
+      let emailScope: Awaited<ReturnType<typeof this.instantlyCampaignScope>> = null;
+      try {
+        emailScope =
+          assignment.server.endpoint === INSTANTLY_MCP &&
+          ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
+            ? await this.instantlyCampaignScope(context, assignment.server.id)
+            : null;
+      } catch (error) {
+        // Simulated 11-16: "was it sent?" read this as a failure and Kruit could not say. An
+        // account with no campaign has sent nothing, so its mail list is an empty answer.
+        if (
+          call.route.toolName !== "list_emails" ||
+          !(error instanceof IsolationError) ||
+          error.message !== NO_OUTREACH_CAMPAIGN_YET
+        )
+          throw error;
+        yield {
+          type: "result",
+          data: { structuredContent: { items: [], note: NO_EMAIL_HISTORY_YET } },
+        };
+        return;
+      }
       let args = await limitPeopleSearch(
         this.prisma,
         context,

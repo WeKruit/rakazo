@@ -595,6 +595,26 @@ describe("local native Instantly thread history", () => {
       await f.connector.close();
     }
   });
+  // Simulated 11-16, did-you-really-send: "was the email sent?" on an account that never sent
+  // read list_emails, got "no outreach campaign yet" as an error, and Kruit said it could not
+  // tell whether anything was sent. An account with no campaign has sent nothing.
+  it("answers list_emails on an account that never sent with no emails, not a failure", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
+      "instantlyCampaignScope",
+    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const result = await f.collect({}, { ...route, toolName: "list_emails" });
+      expect(result).toMatchObject([
+        { type: "result", data: { structuredContent: { note: NO_EMAIL_HISTORY_YET } } },
+      ]);
+      expect(f.state.calls).toEqual([]);
+    } finally {
+      await f.connector.close();
+    }
+  });
   // Gate 9e15e896, stop-after-approve: on an account with several campaigns every contact read
   // said "failed during native anchor, check the connection", so nobody's status could be read.
   it("names the campaign choice when a contact lookup spans several of the account's campaigns", async () => {
