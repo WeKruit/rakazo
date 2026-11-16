@@ -15,6 +15,13 @@ export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // connection. Reported apart from product failures, so it never reads as a bad reply.
 export class InfraError extends Error {}
 export const INFRA = [429, 500, 502, 503, 504];
+/** Which layer refused a request: Cloudflare answers with cf-ray and "error code: 10xx", Modal's edge
+ * with its own headers and a non-JSON body, the app with JSON. */
+export const edgeDetail = (headers, text, attempts, startedAt) =>
+  ["server", "cf-ray", "x-envoy-upstream-service-time", "retry-after"]
+    .map((name) => `${name === "x-envoy-upstream-service-time" ? "envoy" : name}=${headers.get(name)}`)
+    .concat(`attempts=${attempts}`, `elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`, `body=${text.slice(0, 200)}`)
+    .join(" ");
 // Requests this process made, so a run can say what it cost the server.
 let requests = 0;
 export const requestCount = () => requests;
@@ -71,9 +78,12 @@ export function client() {
   const rpc = async (route, json) => {
     const read = /\/(get|head|messages|list|page|roleSetup|backgroundTasks)$/.test(route);
     let response;
+    let attempts = 0;
+    const startedAt = Date.now();
     // Reads ride out a restart of the test environment (about two minutes); a write is sent once.
     for (let attempt = 0; ; attempt += 1) {
       requests += 1;
+      attempts = attempt + 1;
       response = await fetch(`${BASE}/rpc/${route}`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: ORIGIN, cookie },
@@ -89,8 +99,13 @@ export function client() {
       );
     }
     if (!response) throw new InfraError(`${route}: no response`);
-    const body = await response.json().catch(() => ({}));
-    if (INFRA.includes(response.status)) throw new InfraError(`${route} ${response.status}`);
+    const text = await response.text().catch(() => "");
+    let body = {};
+    try {
+      body = JSON.parse(text);
+    } catch {}
+    if (INFRA.includes(response.status))
+      throw new InfraError(`${route} ${response.status} ${edgeDetail(response.headers, text, attempts, startedAt)}`);
     if (!response.ok) {
       const detail =
         body?.json?.message ?? body?.message ?? body?.error?.message ?? JSON.stringify(body);

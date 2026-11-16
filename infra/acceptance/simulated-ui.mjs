@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { sleep } from "./real-user-session.mjs";
+import { edgeDetail, sleep } from "./real-user-session.mjs";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
 /** Clicks, or false when the control never becomes clickable within 10 s. */
@@ -65,6 +65,7 @@ export async function openUi({ origin, email, password, cookie, chinese, out, mo
         return { name: pair.slice(0, at), value: pair.slice(at + 1), url: origin, secure: origin.startsWith("https:"), httpOnly: true, sameSite: "Lax" };
       }),
     );
+  const startedAt = Date.now();
   for (let attempt = 0; !cookie; attempt += 1) {
     const response = await context.request.post(`${origin}/api/auth/sign-in/email`, {
       headers: { origin },
@@ -72,8 +73,11 @@ export async function openUi({ origin, email, password, cookie, chinese, out, mo
       failOnStatusCode: false,
     });
     if (response.ok()) break;
-    if (response.status() !== 429 || attempt >= 4)
-      throw new Error(`browser sign-in ${response.status()}`);
+    if (response.status() !== 429 || attempt >= 4) {
+      const headers = new Headers(response.headers());
+      const text = await response.text().catch(() => "");
+      throw new Error(`browser sign-in ${response.status()} ${edgeDetail(headers, text, attempt + 1, startedAt)}`);
+    }
     await sleep(60_000);
   }
   // The page language a Chinese recruiter would pick.
