@@ -73,8 +73,8 @@ export async function globalRoleWriteRefusal(
  * What Kruit's handoff of the recruiter's turn tells a role's team. Staging 11-15: "3 and 10
  * aren't a fit, find more like the rest" reached the team as Kruit's brief "find the next 20
  * people", so it scaled out and the next round was never built. The recruiter's own words go
- * first, exactly as written; while a round waits on their answer they are the whole request, so
- * the team reads the feedback itself.
+ * first, exactly as written; while a round waits on their answer they are the whole request (Kruit's
+ * note after them only says who it is about), so the team reads the feedback itself.
  */
 export async function roleRequestMessage(
   prisma: Pick<PrismaClient, "recruitingCalibrationRound">,
@@ -90,6 +90,11 @@ export async function roleRequestMessage(
         select: { approvedAt: true },
       })
     : null;
-  if (round && !round.approvedAt) return quoted;
+  // team-has-no-email 11-16: with the brief dropped, 「没存的话现在怎么办？」 reached the team
+  // without the person Kruit named, and it answered about someone else.
+  if (round && !round.approvedAt)
+    return input.brief.trim()
+      ? `${quoted}\n\nKruit's note, only on who and what this refers to; the request is the recruiter's words above, never a number of people or a scale-out this note adds:\n${input.brief}`
+      : quoted;
   return input.brief.trim() ? `${quoted}\n\nKruit's brief:\n${input.brief}` : quoted;
 }
