@@ -1477,13 +1477,12 @@ export function createRouter(deps: RouterDeps) {
           sandboxKind: deps.env.sandboxProvider,
           firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
         });
-      // Additive setup for older crews runs beside the reads below; it changes no field this
-      // returns, and a failure must not block sign-in.
-      const platformServices = input.offset
-        ? Promise.resolve()
-        : ensurePlatformServices(deps.prisma, actor, {
-            sandboxKind: deps.env.sandboxProvider,
-          }).catch((error: unknown) => getLogger().error("platform service setup failed", error));
+      // Additive setup for older crews runs in the background: it changes no field this returns,
+      // takes about 30 sequential reads, and a failure must not block sign-in.
+      if (!input.offset)
+        void ensurePlatformServices(deps.prisma, actor, {
+          sandboxKind: deps.env.sandboxProvider,
+        }).catch((error: unknown) => getLogger().error("platform service setup failed", error));
       // Fire-and-forget: wake a paused Team Computer so the first run skips the ~5 s wake.
       if (!input.offset) void prewarmTeamComputer(deps, actor).catch(() => undefined);
       const [me, navigation, archivedBots, archivedGroups, groupThread, active] = await Promise.all(
@@ -1531,7 +1530,6 @@ export function createRouter(deps: RouterDeps) {
               listRoutinesDto(deps.prisma, actor, { botId: active.id, offset: input.offset ?? 0 }),
             ])
           : [null, []];
-      await platformServices;
       return {
         me,
         bots,
