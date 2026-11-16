@@ -4871,8 +4871,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
       // Model calls retried after a stalled stream, kept on the run's end event so a slow step
       // can be told apart from a stall in replays.
       let modelRetries = 0;
-      const pauseRunForInput = (input: PauseRunForInput) =>
-        deps.events.pauseRunForInput(modelRetries ? { ...input, modelRetries } : input);
+      const pauseRunForInput = async (input: PauseRunForInput) => {
+        const paused = await deps.events.pauseRunForInput(
+          modelRetries ? { ...input, modelRetries } : input,
+        );
+        // Delegated work waiting on the recruiter shows its card where the recruiter is, whichever
+        // tool paused it. Staging 11-16 (team-stuck): a role team's sign-in and approval cards
+        // stayed in the role chat, because only ask_user cards were copied to Kruit's chat.
+        if (paused && run)
+          void showDelegatedTeamCard(deps, run).catch((error) =>
+            getLogger().error("delegated team card", error),
+          );
+        return paused;
+      };
       setupMark("lease");
       let leaseValid = true;
       /** Why this run's computer would not start, if it did not. */
@@ -18120,11 +18131,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               if (!paused) return;
               logRunTiming("waiting_input");
-              // Delegated work waiting on the recruiter shows its card where the recruiter is.
-              if (thread.groupId)
-                void showDelegatedTeamCard(deps, run).catch((error) =>
-                  getLogger().error("delegated team card", error),
-                );
               // A recruiter message that arrived while this turn was finishing answers the card.
               const answeredBySteering = await answerPausedAskWithSteering(deps.prisma, {
                 spaceId: run.spaceId,

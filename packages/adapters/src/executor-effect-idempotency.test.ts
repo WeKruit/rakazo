@@ -768,6 +768,59 @@ describe("native Cal.com booking approvals", () => {
   );
 });
 
+describe("a role team's card", () => {
+  it("is shown where the recruiter is, whichever tool paused the turn", async () => {
+    // Staging 11-16 (team-stuck-tell-me): a role team's approval and sign-in cards paused its
+    // turn, but only ask_user cards were copied to Kruit's chat, so the recruiter never saw them.
+    const f = fixture("team-card-approval");
+    const tool = {
+      name: "mcp__cal__create_booking",
+      description: "create_booking",
+      readOnly: true,
+      inputSchema: { type: "object" },
+      route: {
+        connectorId: "mcp",
+        resourceId: "cal-1",
+        resourceRevision: 3,
+        toolName: "create_booking",
+      },
+    };
+    const delegating = vi.fn(async () => null);
+    Object.assign(f.prisma.thread, { findFirst: delegating });
+    Object.assign(f.prisma, {
+      botMcpServer: {
+        findFirst: vi.fn(async () => ({
+          allowAllTools: false,
+          allowedTools: ["create_booking"],
+          server: {
+            id: "cal-1",
+            revision: 3,
+            endpoint: "https://mcp.cal.com/mcp?toolsets=bookings",
+          },
+        })),
+      },
+    });
+    f.connector.discoverTools.mockResolvedValue([tool]);
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "always_allow", matchKind: "tool", matchValue: tool.name },
+    ]);
+    f.setCalls([
+      {
+        name: tool.name,
+        args: { start: "2026-10-23T15:00:00Z", attendee: { email: "candidate@example.test" } },
+        executionId: "initial",
+      },
+    ]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    await vi.waitFor(() =>
+      expect(delegating).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ groupId: { not: null } }) }),
+      ),
+    );
+  });
+});
+
 describe("simulated scheduling approval chain", () => {
   it("keeps slot offer, selected booking, and confirmation as separate exact once-only grants", async () => {
     // Synthetic runtime/provider and persisted grants only: this is not candidate mail
