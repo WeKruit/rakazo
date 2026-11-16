@@ -162,6 +162,26 @@ describe("createJobReconciler", () => {
     expect(prisma.messagingOutbound.findFirst).toHaveBeenCalled();
   });
 
+  it("ends a pass in flight at its next step once the worker stops, before the pool closes", async () => {
+    const prisma = fakePrisma();
+    const { jobs } = publisher();
+    let release!: () => void;
+    const auxiliary = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reconciler = createJobReconciler({
+      prisma,
+      jobs,
+      reconcileCloudAgents: () => auxiliary,
+    });
+    const pass = reconciler.reconcileOnce();
+    const stopped = reconciler.stop();
+    release();
+    await Promise.all([pass, stopped]);
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.run.findMany).not.toHaveBeenCalled();
+  });
+
   it("restores a due pending messaging outbox drain", async () => {
     const prisma = fakePrisma();
     vi.mocked(prisma.messagingOutbound.findFirst).mockResolvedValue({ id: "outbound-1" } as never);
