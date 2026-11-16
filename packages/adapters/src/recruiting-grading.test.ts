@@ -370,6 +370,13 @@ describe("startRecruitingGrading", () => {
     await startRecruitingGrading(picking.deps, { threadId: "thread" }, now);
     expect(picking.runCreate).not.toHaveBeenCalled();
     expect(picking.enqueue).toHaveBeenCalledOnce();
+    // The shown round's own people wait too (staging 11-16, feedback-round play 3: grading the
+    // unchecked round 1 after feedback held round 2's check back 80 seconds).
+    const ownPeople = fixture({ found: [person("shown"), person("pool")], rounds: shown });
+    ownPeople.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    ownPeople.prisma.run.findFirst.mockImplementation(picking.prisma.run.findFirst);
+    await startRecruitingGrading(ownPeople.deps, { threadId: "thread" }, now);
+    expect(ownPeople.runCreate).not.toHaveBeenCalled();
     // With the lead idle the pool is graded as before.
     const idle = fixture({ found: [person("pool")], rounds: shown });
     idle.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);

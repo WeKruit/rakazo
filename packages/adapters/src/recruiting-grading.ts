@@ -531,12 +531,12 @@ export async function startRecruitingGrading(
   if (!grader) return skipped("no research teammate");
   // Staging 11-16 (9e15e896): after feedback on a shown round, a batch of other saved people
   // started while the lead was still picking the next round, and that round's check then waited
-  // 2.5 minutes behind it. While the lead works on the next round, the pool waits for it.
+  // 2.5 minutes behind it. While the lead works on the next round, the pool waits for it, and so
+  // do the shown round's own people: the recruiter has already answered that round.
   if (
     grader.tool === "self" &&
     review &&
     !review.held &&
-    ![...people.keys()].some((key) => review.round.candidateKeys.includes(key)) &&
     (await nextRoundComing(deps.prisma, thread.id, review.round.createdAt, grader.botId))
   ) {
     if (attempt + 1 < MAX_ATTEMPTS)
