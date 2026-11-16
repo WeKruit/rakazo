@@ -422,15 +422,19 @@ export async function feedbackBeforeRound(
   });
 }
 
+const GENERIC_COMPANY_WORD =
+  /^(?:data|tech\w*|people|group|global|systems?|solutions?|software|digital|services?|consult\w*|labs?|health\w*|senior|engineer\w*|cloud|inc|corp\w*|company|international|united|american|national|first|new)$/;
+
 /**
- * People of the latest unapproved round that the recruiter's message names, by a name of theirs
- * or their number in the round ("#6"). A message that names some of them is usually turning them
- * down, which is feedback for the next round rather than acceptance of this one.
+ * People of the latest unapproved round that the recruiter's message names, by a name of theirs,
+ * their number in the round ("#6") or their company ("the amazon ones"). A message that names
+ * some of them is usually turning them down, which is feedback for the next round rather than
+ * acceptance of this one. A message handed in by a teammate quotes the recruiter's words.
  */
 export async function roundPeopleNamed(
   prisma: PrismaClient,
   input: { threadId: string; messageId: string },
-): Promise<{ round: number; named: string[] } | null> {
+): Promise<{ round: number; named: string[]; keys: string[] } | null> {
   const [thread, message] = await Promise.all([
     prisma.thread.findUnique({
       where: { id: input.threadId },
@@ -443,7 +447,9 @@ export async function roundPeopleNamed(
   const text = (Array.isArray(message.blocks) ? message.blocks : [])
     .flatMap((block) => {
       const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
-      return kind === "text" && typeof text === "string" ? [text] : [];
+      return (kind === "text" || kind === "bot_message_received") && typeof text === "string"
+        ? [text]
+        : [];
     })
     .join("\n");
   const round = await prisma.recruitingCalibrationRound.findFirst({
@@ -455,25 +461,36 @@ export async function roundPeopleNamed(
   const people = await prisma.recruitingCandidateOccurrence.findMany({
     where: { roleId, candidateKey: { in: round.candidateKeys }, name: { not: null } },
     distinct: ["candidateKey"],
-    select: { candidateKey: true, name: true },
+    select: { candidateKey: true, name: true, company: true },
   });
   const said = text.toLowerCase();
+  const says = (word: string) =>
+    new RegExp(`(?<![\\p{L}])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`, "u").test(
+      said,
+    );
   const numbers = new Set(
     [...said.matchAll(/(?:#|\bno\.?\s*|\bnumber\s+)(\d{1,2})\b/g)].map((match) => Number(match[1])),
   );
-  const named = round.candidateKeys.flatMap((key, index) => {
-    const name = people.find((person) => person.candidateKey === key)?.name?.trim();
-    const words = (name ?? "")
+  const words = (value: string | null | undefined) =>
+    (value ?? "")
       .toLowerCase()
-      .split(/\s+/)
+      .split(/[\s,.()&/-]+/)
       .filter((word) => word.length >= 4);
-    const byName = words.some((word) =>
-      new RegExp(
-        `(?<![\\p{L}])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`,
-        "u",
-      ).test(said),
-    );
-    return byName || numbers.has(index + 1) ? [name ?? `#${index + 1}`] : [];
+  const named = round.candidateKeys.flatMap((key, index) => {
+    const person = people.find((row) => row.candidateKey === key);
+    const name = person?.name?.trim();
+    // The company's first word: "Amazon" for "Amazon Web Services (AWS)"; a generic word such as
+    // "People" (People Tech Group) names nobody.
+    const company = words(person?.company).find((word) => !GENERIC_COMPANY_WORD.test(word));
+    return words(name).some(says) || (company && says(company)) || numbers.has(index + 1)
+      ? [{ key, name: name ?? `#${index + 1}` }]
+      : [];
   });
-  return named.length ? { round: round.round, named } : null;
+  return named.length
+    ? {
+        round: round.round,
+        named: named.map((person) => person.name),
+        keys: named.map((person) => person.key),
+      }
+    : null;
 }
