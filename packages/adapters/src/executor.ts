@@ -4745,14 +4745,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             checkpoint: null,
           },
         });
-      // Automations in one thread take turns: a queued one is claimed only when no earlier run
-      // there is still queued and no other run holds the turn. A person's message, a resumed
-      // takeover and lease recovery keep their own claim path.
+      // Each agent's automations in a thread take turns: a queued one is claimed only when no
+      // earlier run of that agent there is still queued and none holds its turn. Different agents
+      // work at once (reliability plan S3, as Workloop runs child agents in parallel). A person's
+      // message, a resumed takeover and lease recovery keep their own claim path.
       // A fire past its automation's per-minute cap is skipped before it ever starts.
       const leased =
         run.status === "queued" && isAutomationRunTrigger(run.trigger)
           ? await deps.prisma.$transaction(async (tx) => {
-              await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`run-lane:${run.threadId}`}))::text`;
+              await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`run-lane:${run.threadId}:${run.botId}`}))::text`;
               if (run.leaseFence === 0 && (await automationRateLimited(tx, run))) {
                 return (await skipRateLimitedRun(tx, run, now)) ? RATE_LIMITED : { count: 0 };
               }
@@ -20847,6 +20848,7 @@ async function threadLaneBusy(
   const blockers = await tx.run.count({
     where: {
       threadId: run.threadId,
+      botId: run.botId,
       id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
       ...(delegated ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } } : {}),
       OR: [

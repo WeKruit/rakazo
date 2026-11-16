@@ -7,7 +7,7 @@ import { createRunExecutor } from "./executor.js";
 import { handoffToGroupBot } from "./group-handoff.js";
 
 it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
-  "resumes real approved/denied handoffs past their canonical ancestors, preserving unrelated lane blockers",
+  "resumes real approved/denied handoffs past their canonical ancestors, preserving the same agent's lane blockers",
   async () => {
     const db = createDb(process.env.DATABASE_URL!);
     const p = db.prisma;
@@ -56,7 +56,7 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
       const older = await p.run.create({
         data: {
           ...scope,
-          botId: `${id}-unrelated`,
+          botId: `${id}-specialist`,
           taskId: task.id,
           trigger: "bot_message",
           status: "queued",
@@ -80,10 +80,11 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
         where: { id: first.runId },
         data: { status: "running", trigger: "tool_background" },
       });
+      // Another turn of the same agent: one lane per agent (reliability plan S3).
       const unrelated = await p.run.create({
         data: {
           ...scope,
-          botId: `${id}-unrelated`,
+          botId: `${id}-specialist`,
           taskId: task.id,
           trigger: "routine",
           status: "running",
@@ -224,13 +225,11 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
         expect((await p.externalEffect.findUnique({ where: { id: effect.id } }))!.status).toBe(
           answer === "deny" ? "denied" : "approved",
         );
-        // An unrelated live run still owns the lane, even when both true ancestors are exempt.
+        // Another live turn of the same agent still owns its lane, even when both true ancestors are exempt.
         await p.run.update({ where: { id: unrelated.id }, data: { status: "running" } });
         await executor.continueRun(specialist.id, "resume-worker");
         expect((await p.run.findUnique({ where: { id: specialist.id } }))!.status).toBe("queued");
         await p.run.update({ where: { id: unrelated.id }, data: { status: "completed" } });
-        await executor.continueRun(older.id, "resume-worker");
-        expect((await p.run.findUnique({ where: { id: older.id } }))!.status).toBe("queued");
         const source = await p.message.findUniqueOrThrow({
           where: { id: specialist.sourceMessageId! },
         });
