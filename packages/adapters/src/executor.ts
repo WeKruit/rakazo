@@ -20284,7 +20284,10 @@ export function gmailCardNeedsDraft(
   earlierDraft?: string,
 ): boolean {
   if (!/gmail/i.test(String(provider ?? "")) || DRAFT_SUBJECT.test(shown)) return false;
-  if (earlierDraft === undefined) return asksForOutreach(recruiterText);
+  // One-off-email x5 on ce4a9c24: "直接写" with the role's facts got the card and no email,
+  // since the card ends the turn. With no email shown yet, only a plain connect ask skips it.
+  if (earlierDraft === undefined)
+    return asksForOutreach(recruiterText) || !/连|\bconnect/i.test(recruiterText);
   // A send, connect or status ask ("send it via Gmail", "发出去了吗") is about the shown email.
   if (/发|寄|连|\b(?:send|sent|connect)|[?？吗呢]/i.test(recruiterText)) return false;
   return draftLacks(recruiterText, earlierDraft).length > 0;
