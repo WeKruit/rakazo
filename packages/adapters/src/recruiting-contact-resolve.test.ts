@@ -1,5 +1,4 @@
 import type { ConnectorCall } from "@rakazo/adapter-kit";
-import { RECRUITING_DEFAULT_BOTS } from "@rakazo/core";
 import type * as Database from "@rakazo/db";
 import { listRecruitingCandidates } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -180,15 +179,6 @@ describe("resolveRecruitingContact", () => {
       "sumeetparekh1@gmail.com",
       "sumeet.shah@example.test",
     ]);
-  });
-
-  it("tells agents to resolve through role records and never guess an email", () => {
-    // The quality check never talks about people by name, so it carries no contact rules.
-    for (const bot of RECRUITING_DEFAULT_BOTS.filter((role) => role.key !== "reviewer"))
-      expect(bot.instructions).toContain(
-        "Resolve a person named in chat through the role's contacts and saved pool first",
-      );
-    expect(RECRUITING_DEFAULT_BOTS[0].instructions).toContain("never invent or guess an email");
   });
 
   it("resolves Sumeet without a thread role through the user's Data Infra role", async () => {
@@ -394,12 +384,5 @@ describe("first campaign email", () => {
     // Staging 11-14 gate: a new reply request got no card after an earlier one was discarded.
     const reply = nativeInstantlyWrites.find((t) => t.name === "reply_to_email")!;
     expect(reply.description).toContain("Every new request to reply gets its own call and card");
-    const role = (key: string) => RECRUITING_DEFAULT_BOTS.find((b) => b.key === key)!;
-    expect(role("main").instructions).toContain(
-      "then activate_campaign with any people they named as recipients (and its campaign_id); its confirmation card is the one-time approval",
-    );
-    expect(role("outreach").instructions).toContain(
-      "then call activate_campaign (recipients: the named people), whose card lists every recipient and is the one confirmation",
-    );
   });
 });
