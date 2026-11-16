@@ -26,10 +26,16 @@ const db = vi.hoisted(() => ({
 }));
 const overview = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("./recruiting-account.js", () => ({ readRecruitingAccountView: overview.read }));
-const lookups = vi.hoisted(() => ({ saved: vi.fn(async () => new Map()) }));
+const lookups = vi.hoisted(() => ({
+  saved: vi.fn(async () => new Map()),
+  searched: vi.fn(async () => new Map<string, Set<string>>()),
+}));
 vi.mock("./recruiting-research.js", async (original) => ({
   ...(await original<object>()),
-  lookedUpContactEmails: lookups.saved,
+  lookedUpContacts: async () => ({
+    emails: await lookups.saved(),
+    searched: await lookups.searched(),
+  }),
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
@@ -802,7 +808,7 @@ describe("native saved candidate reads", () => {
       const failure = new Error("private candidate URL and database diagnostic");
       const page = {
         candidateKey: "private-candidate",
-        items: operation === "list" ? ["private result"] : [],
+        items: operation === "list" ? [{ candidateKey: "private result" }] : [],
       };
       let entered!: () => void;
       const reading = new Promise<void>((resolve) => {
@@ -833,7 +839,7 @@ describe("native saved candidate reads", () => {
       clock = 17.6;
       if (outcome === "succeeded") {
         resolveRead(page);
-        expect(await pending).toEqual(page);
+        expect(await pending).toMatchObject(page);
       } else {
         rejectRead(failure);
         await expect(pending).rejects.toBe(failure);
@@ -881,7 +887,10 @@ describe("native saved candidate reads", () => {
         { operation: "list", query, limit: 2, cursor: "opaque+/=" },
         context,
       );
-      expect(result).toBe(page);
+      expect(result).toEqual({
+        ...page,
+        items: page.items.map((item) => ({ ...item, email: "not_looked_up" })),
+      });
       expect(db.workspace).toHaveBeenCalledWith(f.deps.prisma, actor, { threadId: "thread" });
       expect(db.candidates).toHaveBeenCalledWith(f.deps.prisma, actor, {
         roleId: "role",
@@ -921,8 +930,9 @@ describe("native saved candidate reads", () => {
       items: [
         { candidateKey: "candidate-one", name: "Example Person", linkedinUrl },
         { candidateKey: "candidate-two", name: "Other Person" },
+        { candidateKey: "candidate-three", name: "Third Person" },
       ],
-      total: 2,
+      total: 3,
       nextCursor: null,
     });
     lookups.saved.mockResolvedValueOnce(
@@ -946,6 +956,9 @@ describe("native saved candidate reads", () => {
         ],
       ]),
     );
+    // Simulated 11-16 on 245ab70b (team-has-no-email, 2/10): "who has no email" had only a
+    // missing field to go on, so the team guessed the wrong person.
+    lookups.searched.mockResolvedValueOnce(new Map([["candidate-two", new Set(["fullenrich"])]]));
     const result = await executeRecruitingCandidatesTool(
       f.deps,
       trusted,
@@ -955,10 +968,10 @@ describe("native saved candidate reads", () => {
     expect(result).toMatchObject({
       items: [
         { candidateKey: "candidate-one", email: { address: "person@example.test", type: "work" } },
-        { candidateKey: "candidate-two" },
+        { candidateKey: "candidate-two", email: "none_found" },
+        { candidateKey: "candidate-three", email: "not_looked_up" },
       ],
     });
-    expect((result as { items: object[] }).items[1]).not.toHaveProperty("email");
   });
 
   it("returns verified selected source reports with unchanged references and pagination", async () => {
