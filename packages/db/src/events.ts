@@ -56,6 +56,7 @@ import {
   commitRecruitingQuestionInTransaction,
   prepareRecruitingQuestionInTransaction,
 } from "./recruiting.js";
+import { retriedReplyInTransaction } from "./retried-reply.js";
 import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -2192,7 +2193,25 @@ async function finalizeRunOnce(
     const events: AppendEventInput[] = [];
     if (input.outcome === "completed") {
       const completedBlocks = completedRunBlocks(input.blocks, writableRun?.startedAt ?? null, now);
-      if (completedBlocks.length > 0) {
+      const retried =
+        completedBlocks.length > 0
+          ? await retriedReplyInTransaction(tx, {
+              threadId: input.threadId,
+              runId: input.runId,
+              blocks: completedBlocks,
+            })
+          : null;
+      if (retried) {
+        await tx.message.update({ where: { id: retried }, data: { blocks: completedBlocks } });
+        events.push({
+          spaceId: input.spaceId,
+          threadId: input.threadId,
+          botId: input.botId,
+          type: "thread.message.updated",
+          runId: input.runId,
+          payload: { messageId: retried, role: "bot", blocks: completedBlocks },
+        });
+      } else if (completedBlocks.length > 0) {
         const message = await createThreadMessageInTransaction(tx, {
           threadId: input.threadId,
           role: "bot",

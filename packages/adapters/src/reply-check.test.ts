@@ -7,6 +7,7 @@ const now = Date.parse("2026-10-30T23:30:00Z");
 function fixture(options: {
   latest?: {
     role: string;
+    clientNonce?: string;
     createdAt?: Date;
     sourceRuns?: Array<{ botId: string; trigger: string; status?: string; error?: string | null }>;
     steeringMessages?: Array<{
@@ -53,6 +54,18 @@ function fixture(options: {
 }
 
 describe("every message gets a reply", () => {
+  it("leaves a retried turn alone: its answer took the place of the reply above its note", async () => {
+    const test = fixture({
+      latest: {
+        role: "user",
+        clientNonce: "autocontinue:run_1:decline",
+        sourceRuns: [{ botId: "main", trigger: "follow_up", status: "completed" }],
+      },
+    });
+    await checkThreadReplied(test, { threadId: "thread" }, now);
+    expect(test.events.sendUserMessage).not.toHaveBeenCalled();
+  });
+
   it("still answers a message whose turn the server cancelled as stuck", async () => {
     const test = fixture({
       latest: {
