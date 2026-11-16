@@ -338,7 +338,37 @@ describe("Codex stream idle watchdog", () => {
 describe("reliableModelStream idle gating", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("hands Codex a composed signal while other providers keep the caller's", async () => {
+  it("bounds another provider's silent stream from the request on, keeping its fetch", async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const inner = new AssistantMessageEventStream();
+    const streamSimple = vi.fn(
+      (_model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => inner,
+    );
+    const other = { provider: "openai", api: "openai-responses" } as Model<Api>;
+    const callerFetch = vi.fn<NonNullable<SimpleStreamOptions["fetch"]>>();
+    // Staging 11-16: an answer stream sent nothing at all and the turn hung for minutes.
+    const stream = reliableModelStream(
+      { streamSimple } as unknown as Models,
+      other,
+      context,
+      { signal: caller.signal, fetch: callerFetch },
+      undefined,
+    );
+    const options = streamSimple.mock.calls[0]?.[2];
+    expect(options?.fetch).toBe(callerFetch);
+    expect(options?.signal).not.toBe(caller.signal);
+    const first = stream[Symbol.asyncIterator]().next();
+    await vi.advanceTimersByTimeAsync(MODEL_STREAM_IDLE_TIMEOUT_MS - 1);
+    expect(options?.signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(options?.signal?.aborted).toBe(true);
+    expect(caller.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await first).value?.type).toBe("error");
+  });
+
+  it("hands Codex a composed signal and its error-body fetch", async () => {
     vi.useFakeTimers();
     const caller = new AbortController();
     const inner = new AssistantMessageEventStream();
@@ -346,7 +376,6 @@ describe("reliableModelStream idle gating", () => {
       (_model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => inner,
     );
     const models = { streamSimple } as unknown as Models;
-    const other = { provider: "openrouter", api: "openai-completions" } as Model<Api>;
     const callerFetch = vi.fn<NonNullable<SimpleStreamOptions["fetch"]>>();
     const options: SimpleStreamOptions = { signal: caller.signal, fetch: callerFetch };
 
@@ -358,12 +387,6 @@ describe("reliableModelStream idle gating", () => {
     expect(guardedOptions?.transport).toBe("sse");
     expect(guarded).not.toBe(inner);
     expect(guarded).toBeInstanceOf(AssistantMessageEventStream);
-
-    const plain = reliableModelStream(models, other, context, options, undefined);
-    const plainOptions = streamSimple.mock.calls[1]?.[2];
-    expect(plainOptions?.signal).toBe(caller.signal);
-    expect(plainOptions?.fetch).toBe(callerFetch);
-    expect(plain).toBe(inner);
 
     // Before the first event the idle budget stays unarmed, so a headers
     // timeout leaves a retried attempt its own full timeoutMs.

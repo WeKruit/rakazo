@@ -4241,30 +4241,32 @@ export function reliableModelStream(
   cacheRetention?: ModelsSimpleStreamOptions["cacheRetention"],
   firstEventTimeoutMs: number = MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
 ): AssistantMessageEventStream {
-  const watchdog = isCodexModel(model)
-    ? codexStreamIdleWatchdog(
-        options?.signal,
-        MODEL_STREAM_IDLE_TIMEOUT_MS,
-        MODEL_STREAM_TOTAL_TIMEOUT_MS,
-        firstEventTimeoutMs,
-      )
-    : undefined;
+  const codex = isCodexModel(model);
+  // Every provider's stream is bounded: staging 11-16, an OpenAI answer stream went silent and
+  // held a recruiter's turn for over four minutes with no retry. Codex arms on its first 2xx and
+  // gets the tight first-event bound. Other providers may not report response headers and may
+  // think silently before their first item, so their bound starts with the request.
+  const watchdog = codexStreamIdleWatchdog(
+    options?.signal,
+    MODEL_STREAM_IDLE_TIMEOUT_MS,
+    MODEL_STREAM_TOTAL_TIMEOUT_MS,
+    codex ? firstEventTimeoutMs : MODEL_STREAM_IDLE_TIMEOUT_MS,
+  );
+  if (!codex) watchdog.ping();
   try {
     const preparedOptions = reliableStreamOptions(
       model,
-      watchdog
-        ? {
-            ...options,
-            signal: watchdog.signal,
-            fetch: codexRequestFetch(options?.fetch, MODEL_ERROR_BODY_TIMEOUT_MS),
-            // Only a 2xx arms the shared watchdog. Error bodies are bounded by
-            // the fetch wrapper, and a caller-supplied hook still sees every status.
-            onResponse: (response, requestModel) => {
-              if (response.status >= 200 && response.status < 300) watchdog.ping();
-              return options?.onResponse?.(response, requestModel);
-            },
-          }
-        : options,
+      {
+        ...options,
+        signal: watchdog.signal,
+        // Error bodies are bounded by the fetch wrapper; only Codex requests go through it.
+        ...(codex ? { fetch: codexRequestFetch(options?.fetch, MODEL_ERROR_BODY_TIMEOUT_MS) } : {}),
+        // Only a 2xx arms the shared watchdog, and a caller-supplied hook still sees every status.
+        onResponse: (response, requestModel) => {
+          if (response.status >= 200 && response.status < 300) watchdog.ping();
+          return options?.onResponse?.(response, requestModel);
+        },
+      },
       configuredMaxTokens,
       accessToken,
       cacheRetention,
@@ -4272,9 +4274,9 @@ export function reliableModelStream(
     const stream = runStream
       ? runStream(preparedOptions)
       : models.streamSimple(model, context, preparedOptions);
-    return watchdog ? watchdog.wrap(stream, model) : stream;
+    return watchdog.wrap(stream, model);
   } catch (error) {
-    watchdog?.dispose();
+    watchdog.dispose();
     throw error;
   }
 }
