@@ -312,6 +312,9 @@ function stdioParams(options: McpStdioOptions): StdioServerParameters {
   };
 }
 
+/** Thrown before a request is sent on a session that was closed. */
+export const MCP_NOT_CONNECTED = "MCP session is not connected";
+
 /** A narrow seam around the official SDK, suitable for the agent tool layer. */
 export class McpSession {
   client: Client;
@@ -459,7 +462,7 @@ export class McpSession {
   }
 
   private assertConnected(): void {
-    if (!this.connected) throw new Error("MCP session is not connected");
+    if (!this.connected) throw new Error(MCP_NOT_CONNECTED);
   }
 }
 

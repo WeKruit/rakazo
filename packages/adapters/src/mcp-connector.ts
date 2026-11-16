@@ -81,7 +81,7 @@ import {
 } from "./lazy-tool-catalog.js";
 import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
-import { type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
+import { MCP_NOT_CONNECTED, type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { addressTypedInConversation } from "./named-address.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
@@ -767,6 +767,19 @@ function directSet(tools: readonly ConnectorTool[]): Set<ConnectorTool> {
 
 export const PLATFORM_PEOPLE_SEARCH_ENDPOINT =
   "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
+/** The platform people searches that only read; a retry costs a search, never a duplicate effect. */
+function peopleSearchRead(
+  server: Pick<McpServer, "transport" | "endpoint"> | undefined,
+  tool: string,
+) {
+  return (
+    server?.transport === "streamable_http" &&
+    server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
+    (tool === "web_search_exa" || tool === "web_search_advanced_exa")
+  );
+}
+const isNeverSent = (error: unknown) =>
+  error instanceof Error && error.message === MCP_NOT_CONNECTED;
 
 let warnedKeylessPeopleSearch = false;
 /**
@@ -1254,6 +1267,8 @@ export class McpConnector implements ConnectorProvider {
     const startedAt = Date.now();
     let calledAt = startedAt;
     let sessionKey: string | undefined;
+    /** The session this call used, so a failure closes only that one and not a fresh replacement. */
+    let usedSession: McpSession | undefined;
     let calledServer: McpServer | undefined;
     /** A people search's arguments, which hold its reserved share of the recruiter's number. */
     let searched: object | undefined;
@@ -1334,6 +1349,7 @@ export class McpConnector implements ConnectorProvider {
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
         ["web_search_exa", "web_search_advanced_exa", "agent_run"].includes(call.route.toolName);
+      const searchRead = peopleSearchRead(assignment.server, call.route.toolName);
       const enrichmentResults =
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === "https://mcp.fullenrich.com/mcp" &&
@@ -1372,6 +1388,7 @@ export class McpConnector implements ConnectorProvider {
           : null;
       sessionKey = this.sessionKey(assignment.server, context);
       let session = await this.sessionFor(assignment.server, context);
+      usedSession = session;
       material = this.sessions.get(sessionKey)?.material;
       context.signal.throwIfAborted();
       let emailScope: Awaited<ReturnType<typeof this.instantlyCampaignScope>> = null;
@@ -1529,6 +1546,7 @@ export class McpConnector implements ConnectorProvider {
       let result: Awaited<ReturnType<McpSession["callTool"]>>;
       const enrichmentDeadline = Date.now() + ENRICHMENT_WAIT_MS;
       const retryDeadline = Date.now() + PEOPLE_SEARCH_RETRY_BUDGET_MS;
+      let reconnected = false;
       for (let attempt = 0; ; attempt += 1) {
         context.signal.throwIfAborted();
         if (peopleSearch) await peopleSearchTurn(context.signal);
@@ -1555,6 +1573,24 @@ export class McpConnector implements ConnectorProvider {
             throw new Error(
               `${call.route.toolName} did not answer within ${REMOTE_READ_MS / 1000} seconds. Continue with the other tools, or tell the user this service is not answering.`,
             );
+          // Staging 11-16: a dropped connection failed a people search as "uncertain", so it was
+          // never run again, and the calls sharing that session then failed as not connected.
+          // A closed session never sent the call, and a search is a read: reconnect once.
+          const neverSent = isNeverSent(error);
+          const readDropped =
+            searchRead && !(error instanceof SdkHttpError) && !context.signal.aborted;
+          if (!reconnected && (neverSent || readDropped)) {
+            reconnected = true;
+            getLogger().warn("mcp.call.reconnect", {
+              tool: call.route.toolName,
+              reason: neverSent ? "not_connected" : "dropped",
+            });
+            await this.evictSession(sessionKey, session);
+            session = await this.sessionFor(assignment.server, context);
+            usedSession = session;
+            material = this.sessions.get(sessionKey)?.material;
+            continue;
+          }
           if (!peopleSearch || !(error instanceof SdkHttpError) || error.status !== 429)
             throw error;
         }
@@ -1577,6 +1613,7 @@ export class McpConnector implements ConnectorProvider {
           call.route.toolName,
         );
         session = await this.sessionFor(current.server, context);
+        usedSession = session;
         material = this.sessions.get(sessionKey)?.material;
       }
       settlePeopleSearch(searched, result?.isError ? "failed" : "done", result);
@@ -1686,7 +1723,7 @@ export class McpConnector implements ConnectorProvider {
       // A caller that stopped waiting (a page closed or ran out of time) leaves the session
       // healthy; closing it would also fail every other call still running on it.
       if (sessionKey && !(error instanceof PeopleSearchRateLimitError) && !context.signal.aborted)
-        await this.evict(sessionKey);
+        await this.evictSession(sessionKey, usedSession);
       let message =
         error instanceof IsolationError
           ? scopeRefusal(error)
@@ -1706,7 +1743,10 @@ export class McpConnector implements ConnectorProvider {
       yield {
         type: "error",
         message,
-        ...(callStarted && !signedOut && !(error instanceof PeopleSearchRateLimitError)
+        ...(callStarted &&
+        !signedOut &&
+        !(error instanceof PeopleSearchRateLimitError) &&
+        !(peopleSearchRead(calledServer, call.route.toolName) || isNeverSent(error))
           ? { outcome: "uncertain" as const }
           : {}),
       };
@@ -2829,6 +2869,12 @@ export class McpConnector implements ConnectorProvider {
     // Identity headers are applied once, at connect time, so a session is only
     // valid for the identity it connected as. The key has to carry that identity.
     return `${server.id} ${context.spaceId} ${context.userId}`;
+  }
+
+  /** Closes a failed session only while it is still the cached one; a replaced one was closed. */
+  private async evictSession(sessionKey: string, session: McpSession | undefined): Promise<void> {
+    if (session && this.sessions.get(sessionKey)?.session !== session) return;
+    await this.evict(sessionKey);
   }
 
   private async evict(sessionKey: string): Promise<void> {

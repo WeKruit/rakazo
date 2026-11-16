@@ -269,9 +269,7 @@ describe("people search rate limits", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(f.calls).toHaveLength(1);
       f.controller.abort(new Error("run cancelled"));
-      expect(await pending).toEqual([
-        { type: "error", message: "run cancelled", outcome: "uncertain" },
-      ]);
+      expect(await pending).toEqual([{ type: "error", message: "run cancelled" }]);
       await vi.advanceTimersByTimeAsync(3_000);
       expect(f.calls).toHaveLength(1);
     } finally {
@@ -290,7 +288,6 @@ describe("people search rate limits", () => {
         {
           type: "error",
           message: `MCP tool is not assigned to this bot. ${PATH_REFUSAL_NOTE}`,
-          outcome: "uncertain",
         },
       ]);
       expect(f.calls).toHaveLength(1);
@@ -313,16 +310,40 @@ describe("people search rate limits", () => {
     },
   );
 
-  it("preserves uncertain outcome for an unrelated transport failure and does not retry it", async () => {
+  // Staging 11-16: a dropped connection left searches "uncertain", so they were never run again.
+  it("searches again once on a fresh connection after the connection drops", async () => {
     const f = fixture([new Error("socket disconnected")]);
     try {
-      expect(await f.read()).toEqual([
-        {
-          type: "error",
-          message: "Could not reach mcp.exa.ai: socket disconnected",
-          outcome: "uncertain",
-        },
+      const pending = f.read();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(await pending).toEqual([{ type: "result", data: success }]);
+      expect(f.calls).toHaveLength(2);
+    } finally {
+      await f.connector.close();
+    }
+  });
+
+  it("reports a search that drops twice as a plain failure the agent can retry", async () => {
+    const f = fixture([new Error("socket disconnected"), new Error("socket disconnected")]);
+    try {
+      const pending = f.read();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(await pending).toEqual([
+        { type: "error", message: "Could not reach mcp.exa.ai: socket disconnected" },
       ]);
+      expect(f.calls).toHaveLength(2);
+    } finally {
+      await f.connector.close();
+    }
+  });
+
+  it("keeps an unrelated service's transport failure uncertain and does not retry it", async () => {
+    const f = fixture([new Error("socket disconnected")], {
+      endpoint: "https://mcp.example.test/mcp",
+      toolName: "send_email",
+    });
+    try {
+      expect(await f.read()).toEqual([expect.objectContaining({ outcome: "uncertain" })]);
       expect(f.calls).toHaveLength(1);
     } finally {
       await f.connector.close();
