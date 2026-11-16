@@ -18562,24 +18562,41 @@ export function createRunExecutor(deps: ExecutorDeps) {
             blocks.some((block) => block.kind === "text") &&
             blocks.every((block) => block.kind === "text" || block.kind === "steps");
           const ownLast = textOnly ? await lastOwnReplyText() : undefined;
-          if (
-            textOnly &&
-            (sameWords(text, ownLast) ||
-              (run.trigger === "bot_message"
+          // Which check dropped the reply is logged: gate b2005684's onemail reply vanished with
+          // no trace of why.
+          const dropped = !textOnly
+            ? undefined
+            : sameWords(text, ownLast)
+              ? "same_as_own_last"
+              : run.trigger === "bot_message"
                 ? hideVendors && restatesUpdate(text, ownLast)
-                : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
-                  restatesUpdate(text, await lastRunMessageText()) ||
-                  (await handbackAnswered(text)) ||
-                  (await handbackSuperseded()) ||
-                  // Gate 95185659, change-mind: the old 60–80万 version came after the recruiter
-                  // changed the base; the coordinator hands the change on with the request. The
-                  // server's retry of a turn is past it too (gate c8855b72).
-                  (hideVendors &&
-                    (handedIn ||
-                      historyMessages.find((message) => message.id === run.sourceMessageId)
-                        ?.internal === true) &&
-                    (await newerMessageAnsweredElsewhere()) !== undefined)))
-          ) {
+                  ? "restates_own_last"
+                  : undefined
+                : restatesUpdate(text, midTurnUserTexts.at(-1))
+                  ? "restates_mid_turn_message"
+                  : restatesUpdate(text, await lastRunMessageText())
+                    ? "restates_run_update"
+                    : (await handbackAnswered(text))
+                      ? "handback_answered"
+                      : (await handbackSuperseded())
+                        ? "handback_superseded"
+                        : // Gate 95185659, change-mind: the old 60–80万 version came after the
+                          // recruiter changed the base; the coordinator hands the change on with
+                          // the request. The server's retry of a turn is past it too (gate c8855b72).
+                          hideVendors &&
+                            (handedIn ||
+                              historyMessages.find((message) => message.id === run.sourceMessageId)
+                                ?.internal === true) &&
+                            (await newerMessageAnsweredElsewhere()) !== undefined
+                          ? "newer_message_answered"
+                          : undefined;
+          if (dropped) {
+            getLogger().info("final_reply.dropped", {
+              runId,
+              reason: dropped,
+              chars: text.length,
+              trigger: run.trigger,
+            });
             text = "";
             blocks = [];
           }
