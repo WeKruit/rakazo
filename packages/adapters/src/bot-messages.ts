@@ -581,7 +581,9 @@ export async function returnBotMessageOutcome(
     return true;
   }
   // Work delegated from another conversation returns once, when the team's whole chain is done.
-  if (source.returnThreadId && intent === "result") {
+  // A teammate's progress or empty status is not that (send-at-night 11-16: each one woke Kruit,
+  // which posted again and asked the team a second time); only a failure goes back at once.
+  if (source.returnThreadId && (intent === "result" || !options?.forceUnread)) {
     await markBotOutcomeReturned(deps.prisma, run.id);
     await returnDelegatedTeamOutcome(deps, run);
     return true;

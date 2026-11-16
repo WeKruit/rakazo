@@ -664,6 +664,20 @@ describe("delegating to a role team in another conversation", () => {
     expect(harness.deps.prisma.run.updateMany).toHaveBeenCalled();
   });
 
+  // Send-at-night 11-16: each teammate's "completed without a summary" status woke Kruit, which
+  // re-read the campaign, posted again and delegated "send now" a second time.
+  it("sends no status back while the team is still on delegated work", async () => {
+    const harness = team({ busy: true, later: [said("Checking Noah and Ada now.")] });
+    await returnBotMessageOutcome(
+      harness.deps,
+      roleRun,
+      kruit,
+      "The delegated bot completed its turn without a written summary.",
+      "status",
+    );
+    expect(returnedTo(harness)).toEqual([]);
+  });
+
   it("retains earlier team progress as context beneath the authoritative card outcome", async () => {
     const text = "I am drafting the reply now.";
     const h = team({ later: [said(text)] });
