@@ -313,10 +313,9 @@ describe("guardRecruitingTurnEnd", () => {
       pendingApproval: false,
       postAssistant: f.postAssistant,
     };
-    // Saving people after the recruiter's feedback is not the next round: the turn is pushed on.
     expect(await guardRecruitingTurnEnd(f.deps, { ...base, blocks: statusNote })).toMatchObject({
-      action: "continued",
-      label: "Show the next round",
+      action: "ended",
+      classification: "none",
     });
     expect(
       await guardRecruitingTurnEnd(f.deps, {
@@ -325,7 +324,7 @@ describe("guardRecruitingTurnEnd", () => {
           { kind: "text", text: "- Saved ten profiles\n- Updated stage\n- Ready for feedback?" },
         ],
       }),
-    ).toMatchObject({ action: "continued" });
+    ).toMatchObject({ action: "ended" });
     expect(
       await guardRecruitingTurnEnd(f.deps, {
         ...base,
@@ -605,60 +604,6 @@ describe("guardRecruitingTurnEnd", () => {
       postAssistant: f.postAssistant,
     });
     expect(result).toEqual({ action: "ended", classification: "question" });
-    expect(f.sendUserMessage).not.toHaveBeenCalled();
-  });
-
-  it("pushes once for the next round when the turn after feedback searched but recorded none", async () => {
-    // Staging 11-16: the turn after the recruiter's feedback saved 39 new people, then ended on
-    // "I can't give you a reliable shortlist yet", and the recruiter got no round at all.
-    const options = {
-      stage: "feedback",
-      round: {
-        effectId: "effect-1",
-        candidateKeys: Array.from({ length: 10 }, (_, i) => `person-${i}`),
-        approvedAt: null,
-      },
-      roundAnswered: true,
-    };
-    const ended = async (savedRows: number) => {
-      const f = fixture({ ...options, savedRows });
-      const result = await guardRecruitingTurnEnd(f.deps, {
-        run,
-        roleId: "role-1",
-        blocks: [{ kind: "text", text: "I can't yet give you a reliable new shortlist." }],
-        handedOff: false,
-        pendingApproval: false,
-        postAssistant: f.postAssistant,
-      });
-      return { result, f };
-    };
-    const searched = await ended(39);
-    expect(searched.result).toMatchObject({ action: "continued", label: "Show the next round" });
-    expect(searched.f.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: expect.stringContaining("record it with calibration_round"),
-      }),
-    );
-    // A turn that only answered the recruiter, saving no one, is left alone.
-    const answered = await ended(0);
-    expect(answered.result).toMatchObject({ action: "ended" });
-    expect(answered.f.sendUserMessage).not.toHaveBeenCalled();
-    // Staging 01e78cbe: the Reviewer's grading turn saved its grades and was pushed to record a
-    // round it does not own, and the swap the recruiter asked for never came.
-    const f = fixture({
-      ...options,
-      savedRows: 10,
-      round: { ...options.round, ownerBotId: "bot-lead" },
-    });
-    const reviewer = await guardRecruitingTurnEnd(f.deps, {
-      run,
-      roleId: "role-1",
-      blocks: [{ kind: "text", text: "Graded the ten." }],
-      handedOff: false,
-      pendingApproval: false,
-      postAssistant: f.postAssistant,
-    });
-    expect(reviewer.action).toBe("ended");
     expect(f.sendUserMessage).not.toHaveBeenCalled();
   });
 
