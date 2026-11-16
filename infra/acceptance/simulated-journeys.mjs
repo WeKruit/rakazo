@@ -72,6 +72,33 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "send-through-blip",
+    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
+    mechanisms: ["state-claims", "reference"],
+    title: "网络刚断过一下，马上要发邮件：发送卡照样要出来",
+    area: "reliability",
+    source:
+      "11-16 reliability inventory: a few seconds of outbound network trouble hid the mail and lookup services for 10 minutes, so send-at-night never got a Send card (513124e9, 2/10 and 3/10)",
+    account: "mailbox",
+    // Outbound network on the test environment is cut for this long just before the first move.
+    blip: { beforeTurn: 1, seconds: 60 },
+    chinese: true,
+    maxTurns: 6,
+    persona: `${AGENCY_RECRUITER} You want these two emails out now and have no patience for system excuses.`,
+    facts: (recipients, tag) =>
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days, 6+ years, Spark and Kafka, base $180k–$220k.\nTwo candidates you found yourself:\n${twoInboxes(
+        recipients,
+        tag,
+      )
+        .map((address, index) => `- ${["Noah Liu", "Ada Chen"][index]} <${address}>`)
+        .join("\n")}\nDeny the send card when it comes: this check is only about the card appearing.`,
+    goals: [
+      "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both.",
+      "Met only when the send confirmation card naming both candidates appears within about two minutes; deny it. A reply that only reports a timeout, or asks you to wait or retry, does not meet it.",
+      "If no card came, ask once where it is.",
+    ],
+  },
+  {
     name: "batch-send-own-roles",
     mechanisms: ["state-claims"],
     title: "在已有的职位里挑几个人批量发第一封邮件，再去 Sequence 看",
@@ -92,6 +119,25 @@ export const JOURNEYS = [
       "When the send confirmation card appears, check it lists those people and the email, and approve it.",
       "Ask how many have gone out and when the rest go.",
       "Open the role's Sequence page and check it matches what Kruit said.",
+    ],
+  },
+  {
+    name: "team-stuck-tell-me",
+    mechanisms: ["state-claims", "guard-dead-end"],
+    title: "让岗位团队做一件做不完的事，主对话要说清楚做不了和为什么",
+    area: "reliability",
+    source:
+      "11-16 reliability inventory: 194 role-team blocks in 24 h were never reported to the main chat, so the recruiter waited for a reply that never came",
+    account: "batch",
+    chinese: true,
+    maxTurns: 6,
+    persona: `${AGENCY_RECRUITER} You have used Kruit for weeks and expect a straight answer fast.`,
+    facts: () =>
+      "Never approve any send or invitation card: deny it. Pick any role you see except one whose name mentions Dyna.",
+    goals: [
+      "In the main Kruit chat, ask it to book a 30-minute interview next Thursday afternoon with one named person from one of your roles and send them the calendar invitation.",
+      "Wait for the outcome in the main chat: met only when, within about two minutes, Kruit either shows the invitation card (deny it) or says plainly that it could not do it, why, and what you can do next, without claiming it was booked or sent.",
+      "If Kruit went quiet or only said the team is on it, ask once where it stands.",
     ],
   },
   {
