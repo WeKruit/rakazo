@@ -107,7 +107,9 @@ image = (
          "MODAL_ENVIRONMENT": MODAL_ENVIRONMENT,
          "RAKAZO_RELEASE_PROFILE": RELEASE_PROFILE, "RAKAZO_GIT_SHA": SOURCE_REVISION,
          # Only the test environment lets the owner inject a network blip for reliability plays.
-         "FAULT_INJECTION": "true" if MODAL_ENVIRONMENT == "test" else "false"},
+         "FAULT_INJECTION": "true" if MODAL_ENVIRONMENT == "test" else "false",
+         # Parallel plays sign in many test accounts, so the test environment has no sign-in limit.
+         "AUTH_RATE_LIMIT": "off" if MODAL_ENVIRONMENT == "test" else "on"},
     port=8000,
     compute_region="us-west",
     unauthenticated=True,  # Native Better Auth protects application/API routes.

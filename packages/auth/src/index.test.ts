@@ -166,6 +166,11 @@ describe("authRateLimitOptions", () => {
   it("stays off outside production so the test suite can sign in", () => {
     expect(authRateLimitOptions("test").enabled).toBe(false);
   });
+
+  it("stays off in a production build whose deployment turns it off", () => {
+    expect(authRateLimitOptions("production", "off").enabled).toBe(false);
+    expect(authRateLimitOptions("production", undefined).enabled).toBe(true);
+  });
 });
 
 describe("buildTrustedOrigins", () => {
