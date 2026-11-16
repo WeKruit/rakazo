@@ -72,7 +72,7 @@ async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userI
   });
   return gmail
     ? undefined
-    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Writing one needs no mailbox: show it in the reply now; it goes out once they press Connect Gmail and then Send on its card.";
+    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Writing one needs no mailbox: show it in the reply now; it goes out once they press Connect Gmail and then Send on its card. Asked where to connect: the Connect button on that card in this chat, or later the menu under their name at the bottom left, then Integrations (集成); no other place exists.";
 }
 
 /** Calendar connectors the product books interviews through (request_connection's catalog). */
@@ -108,7 +108,7 @@ async function calendarLine(prisma: StatePrisma, scope: { spaceId: string; userI
   ]);
   return server || linked
     ? undefined
-    : "- Recruiter's calendar: none connected, so you cannot see when they are free or busy (saved interviews are not their calendar), and no interview can be booked or invited yet. Asked about their time or schedule, say first that you can't see their calendar because it isn't connected; when they ask for that or a booking, show the calendar Connect card (request_connection) in that same reply rather than handing the booking to a team.";
+    : "- Recruiter's calendar: none connected, so you cannot see when they are free or busy (saved interviews are not their calendar), and no interview can be booked or invited yet. Asked about their time or schedule, say first that you can't see their calendar because it isn't connected; when they ask for that or a booking, show the calendar Connect card (request_connection) in that same reply rather than handing the booking to a team. Asked how or where to connect: press Connect on that card in this chat, or later the menu under their name at the bottom left, then Integrations (集成); no other place exists.";
 }
 
 /** A role's latest calibration round, as the recruiter sees it. */
