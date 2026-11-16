@@ -425,6 +425,50 @@ export async function feedbackBeforeRound(
 const GENERIC_COMPANY_WORD =
   /^(?:data|tech\w*|people|group|global|systems?|solutions?|software|digital|services?|consult\w*|labs?|health\w*|senior|engineer\w*|cloud|inc|corp\w*|company|international|united|american|national|first|new)$/;
 
+/** The text of a message, including a teammate's hand-in of the recruiter's turn. */
+function saidText(blocks: unknown): string[] {
+  return (Array.isArray(blocks) ? blocks : []).flatMap((block) => {
+    const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
+    return (kind === "text" || kind === "bot_message_received") && typeof text === "string"
+      ? [text]
+      : [];
+  });
+}
+
+const QUOTED = /^The recruiter wrote, word for word:\n"([\s\S]*)"$/;
+
+/**
+ * What the recruiter wrote in the role's conversation since its first round, oldest first: their
+ * own messages and the words a teammate handed in for them, never a teammate's own report.
+ * Staging 11-16: feedback the lead never saved ("senior only, 6+ years") was missing from the
+ * next round's check, so it reached the Reviewer only if the lead remembered to save it.
+ */
+export async function recruiterWordsSinceFirstRound(
+  prisma: PrismaClient,
+  input: { threadId: string; roleId: string },
+): Promise<string[]> {
+  const first = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId: input.roleId },
+    orderBy: { round: "asc" },
+    select: { createdAt: true },
+  });
+  if (!first) return [];
+  const messages = await prisma.message.findMany({
+    where: { threadId: input.threadId, role: "user", createdAt: { gt: first.createdAt } },
+    orderBy: { createdAt: "desc" },
+    take: 8,
+    select: { blocks: true },
+  });
+  return messages.reverse().flatMap((message) =>
+    (Array.isArray(message.blocks) ? message.blocks : []).flatMap((block) => {
+      const { kind } = (block ?? {}) as { kind?: unknown };
+      const [text] = saidText([block]);
+      const words = kind === "text" ? text : text?.match(QUOTED)?.[1];
+      return words?.trim() ? [words.trim().slice(0, 400)] : [];
+    }),
+  );
+}
+
 /**
  * People of the latest unapproved round that the recruiter's message names, by a name of theirs,
  * their number in the round ("#6") or their company ("the amazon ones"). A message that names
@@ -444,14 +488,7 @@ export async function roundPeopleNamed(
   ]);
   const roleId = thread?.activeRecruitingRoleId;
   if (!roleId || !message) return null;
-  const text = (Array.isArray(message.blocks) ? message.blocks : [])
-    .flatMap((block) => {
-      const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
-      return (kind === "text" || kind === "bot_message_received") && typeof text === "string"
-        ? [text]
-        : [];
-    })
-    .join("\n");
+  const text = saidText(message.blocks).join("\n");
   const round = await prisma.recruitingCalibrationRound.findFirst({
     where: { roleId },
     orderBy: { round: "desc" },
