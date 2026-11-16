@@ -10,6 +10,7 @@ import {
   lastOwnUpdate,
   restatesUpdate,
   withoutRepeatedClosing,
+  withoutRepeatedOpening,
   readsOnly,
   CLAIMS_CARD_PENDING,
   retryReason,
@@ -650,6 +651,25 @@ describe("withoutRepeatedClosing", () => {
     expect(withoutRepeatedClosing(asked, ["我写好了草稿。Wei 的邮箱是什么？"])).toBe(asked);
     const only = "发来职位描述，或提供职位名称、地点和必备条件，我就可以开始。";
     expect(withoutRepeatedClosing(only, [earlier])).toBe(only);
+  });
+});
+
+// Sim cannot-do-that-honestly on 982a0ac9: Kruit said 「这里无法发送 LinkedIn InMail，也没有发送任何
+// 内容。」, then the writer's retried reply opened with the same line before its draft.
+describe("withoutRepeatedOpening", () => {
+  const shown = ["这里无法发送 LinkedIn InMail，也没有发送任何内容。"];
+  const draft =
+    "以下是可直接粘贴的消息：\n\n**主题：Staff ML 职位**\n\nHi Li Wei,\n\nA role.\n\nBest,\nAlex Morgan";
+  it("drops an opening line the chat already shows", () => {
+    expect(
+      withoutRepeatedOpening(`无法发送 LinkedIn InMail；没有发送任何内容。${draft}`, shown),
+    ).toBe(draft);
+  });
+  it("keeps a new opening and a reply that is only that line", () => {
+    const fresh = `未找到 Li Wei 的已保存资料。${draft}`;
+    expect(withoutRepeatedOpening(fresh, shown)).toBe(fresh);
+    const only = "无法发送 LinkedIn InMail；没有发送任何内容。";
+    expect(withoutRepeatedOpening(only, shown)).toBe(only);
   });
 });
 

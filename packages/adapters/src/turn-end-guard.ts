@@ -1,5 +1,5 @@
 import type { Receipts } from "./claim-receipts.js";
-import { unbackedClaim, unbackedClaimNote } from "./claim-receipts.js";
+import { claimsIn, unbackedClaim, unbackedClaimNote } from "./claim-receipts.js";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
@@ -36,6 +36,7 @@ import {
   repastedDraft,
   retryReason,
   sequenceForOneEmail,
+  showsDraft,
   teamSignedDraft,
   templateBlanks,
 } from "./turn-report.js";
@@ -806,11 +807,36 @@ export async function planDeclineRetry(
     (await recentContinues()) < 1
   )
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
+  // Earlier bot replies, newest first: this turn's own reply may already sit in its line.
+  let earlierBotTexts: Promise<string[]> | undefined;
+  const earlier = () =>
+    (earlierBotTexts ??= deps.prisma.message
+      .findMany({
+        where: {
+          threadId: input.run.threadId,
+          role: "bot",
+          ...(input.since ? { NOT: { runId: input.since.runId } } : {}),
+        },
+        orderBy: { seq: "desc" },
+        take: 6,
+        select: { blocks: true },
+      })
+      .then((rows) =>
+        rows.map((message) =>
+          (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+            .join("\n"),
+        ),
+      ));
   // Anything the reply says was saved, sent, connected, booked or created needs this turn's result.
   const claim =
     input.receipts && !input.blocks.some((block) => CARD_KINDS.has(block.kind))
       ? unbackedClaim(input.reply, input.receipts, {
           question: /[?？]|[吗呢][\s。.!！]*$/.test(input.personRequest ?? input.request),
+          // Read only when the reply claims something: most turns claim nothing.
+          draftShown:
+            claimsIn(input.reply).length > 0 &&
+            (showsDraft(input.reply) || (await earlier()).some(showsDraft)),
         })
       : undefined;
   if (claim && (await recentContinues()) < 1)
@@ -871,27 +897,6 @@ export async function planDeclineRetry(
         })
       ).some((message) =>
         askedTemplate(
-          (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
-            .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-            .join("\n"),
-        ),
-      ));
-  // Earlier bot replies, newest first: this turn's own reply may already sit in its line.
-  let earlierBotTexts: Promise<string[]> | undefined;
-  const earlier = () =>
-    (earlierBotTexts ??= deps.prisma.message
-      .findMany({
-        where: {
-          threadId: input.run.threadId,
-          role: "bot",
-          ...(input.since ? { NOT: { runId: input.since.runId } } : {}),
-        },
-        orderBy: { seq: "desc" },
-        take: 6,
-        select: { blocks: true },
-      })
-      .then((rows) =>
-        rows.map((message) =>
           (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
             .flatMap((block) => (block.kind === "text" ? [block.text] : []))
             .join("\n"),

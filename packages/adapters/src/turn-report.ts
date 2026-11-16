@@ -501,6 +501,8 @@ export type Declined = { sentence: string; kind: DeclineKind; keep?: string };
 
 /** Where a drafted email starts in a reply: an "Email N" heading or a Subject: line. */
 const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:|主题[:：]|第\s*\d+\s*封)/i;
+/** Whether the text shows an email or template (a Subject: line, 主题：, Email 1). */
+export const showsDraft = (text: string) => DRAFT_START.test(text);
 const DRAFT_GREETING = /(?:^|\n)\s*(?:Hi|Hello|Hey|Dear)\s+[^\n,，]{1,40}[,，]\s*\n/i;
 /** A question to the user about the draft itself, after the draft (not the candidate's "open to a chat?"). */
 const ABOUT_DRAFT =
@@ -947,6 +949,20 @@ export function withoutRepeatedClosing(reply: string, earlier: readonly string[]
     .join("")
     .trimEnd()
     .replace(/[；;]$/, "。");
+  return rest.length >= 20 ? rest : reply;
+}
+
+/**
+ * The reply without an opening line the conversation already shows, from this bot or a teammate
+ * (sim cannot-do-that-honestly, 982a0ac9: the writer's retry opened with Kruit's line again). A
+ * reply that is only that line stays as it is.
+ */
+export function withoutRepeatedOpening(reply: string, shown: readonly string[]): string {
+  const opening = /^[^。！？!?\n]+(?:[。！？!?]+|\n)/.exec(reply.trimStart())?.[0];
+  if (!opening) return reply;
+  const said = shown.flatMap((text) => text.match(/[^。！？!?\n]+[。！？!?]*/g) ?? []);
+  if (!said.some((sentence) => sameSentence(opening, sentence))) return reply;
+  const rest = reply.trimStart().slice(opening.length).trimStart();
   return rest.length >= 20 ? rest : reply;
 }
 
