@@ -507,6 +507,20 @@ describe("account recruiting reads", () => {
     const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
     expect(result.items.map((item) => item.roleId)).toEqual(["a", "c"]);
   });
+  it("skips one role whose agent was removed instead of failing every role", async () => {
+    const { deps } = fixture();
+    vi.mocked(db.createRepos).mockReturnValue({
+      getBot: async (_actor: Actor, id: string) => {
+        if (id === "bot-b") throw new db.IsolationError();
+        return { id, thread: { id: `thread-${id.slice(4)}` } };
+      },
+    } as never);
+    const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
+    expect(result.items.map((item) => item.roleId)).toEqual(["a", "c"]);
+    await expect(
+      readRecruitingAccountView(deps, actor, { view: "shortlist", roleId: "b", limit: 20 }),
+    ).rejects.toThrow("Resource not found");
+  });
   it("filters shortlist dates before paging instead of hiding rows after the page", async () => {
     const { deps } = fixture();
     await readRecruitingAccountView(deps, actor, {
