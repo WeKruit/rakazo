@@ -1091,96 +1091,94 @@ export async function ensurePlatformServices(
 }
 
 /**
- * A Google Calendar the recruiter added reaches Scheduling, which books interviews on it, even
- * when it was first granted only to the coordinator. Before it is connected Scheduling still
- * holds it, so its own calls ask for the connection (simulated 11-16: without it Scheduling
- * handed the booking back twice and the connect card came two minutes late). Adds only a
- * missing grant.
+ * A Google Calendar the recruiter added lets Scheduling and Main book interviews on it, and a
+ * Gmail they connected lets Outreach and Main send from it; each booking and email still waits
+ * for the recruiter on its card. Main holds them too so it does the work itself instead of handing
+ * it on (simulated 11-16, calendar-not-connected: Main handed a booking to Scheduling, which told
+ * the recruiter "日历连接由 Main 管理"). Before the calendar is connected its holders' own calls
+ * ask for the connection. Adds only missing grants and missing tools; nothing else changes.
  */
-async function ensureSchedulingCalendar(prisma: PrismaClient, actor: Actor): Promise<void> {
+async function ensureGrants(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { roleKeys: readonly string[]; servers: { id: string }[]; tools: readonly string[] },
+): Promise<void> {
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "scheduling");
-  if (!role) return;
-  const servers = await prisma.mcpServer.findMany({
-    where: { ...scope, endpoint: GOOGLE_CALENDAR_ENDPOINT, enabled: true },
-    select: { id: true },
-  });
-  if (!servers.length) return;
+  const roles = RECRUITING_DEFAULT_BOTS.filter((item) => input.roleKeys.includes(item.key));
+  if (!roles.length || !input.servers.length) return;
   const bots = await prisma.bot.findMany({
     where: {
       ...scope,
       archivedAt: null,
-      OR: [{ spawnKey: `recruiting:${actor.userId}:${role.key}` }, { name: role.name }],
+      OR: roles.flatMap((role) => [
+        { spawnKey: `recruiting:${actor.userId}:${role.key}` },
+        { name: role.name },
+      ]),
     },
     select: { id: true },
   });
   if (!bots.length) return;
-  await prisma.botMcpServer.createMany({
-    data: servers.flatMap((server) =>
-      bots.map((bot) => ({
-        ...scope,
-        botId: bot.id,
-        serverId: server.id,
-        allowAllTools: false,
-        allowedTools: GOOGLE_CALENDAR_SCHEDULING_TOOLS,
-      })),
-    ),
-    skipDuplicates: true,
-  });
-}
-
-/**
- * A Gmail the recruiter connected lets Outreach send from it, each email on its own card. An
- * Outreach grant from before sending gains the send tools; nothing else in it changes.
- */
-async function ensureOutreachGmail(prisma: PrismaClient, actor: Actor): Promise<void> {
-  const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "outreach");
-  if (!role) return;
-  const servers = await prisma.mcpServer.findMany({
-    where: { ...scope, endpoint: GMAIL_MCP_ENDPOINT, enabled: true, secretId: { not: null } },
-    select: { id: true },
-  });
-  if (!servers.length) return;
-  const bots = await prisma.bot.findMany({
-    where: {
-      ...scope,
-      archivedAt: null,
-      OR: [{ spawnKey: `recruiting:${actor.userId}:${role.key}` }, { name: role.name }],
-    },
-    select: { id: true },
-  });
-  if (!bots.length) return;
-  const tools = [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS];
+  const serverIds = input.servers.map((server) => server.id);
   const grants = await prisma.botMcpServer.findMany({
-    where: {
-      ...scope,
-      botId: { in: bots.map((bot) => bot.id) },
-      serverId: { in: servers.map((server) => server.id) },
-    },
+    where: { ...scope, botId: { in: bots.map((bot) => bot.id) }, serverId: { in: serverIds } },
     select: { botId: true, serverId: true, allowAllTools: true, allowedTools: true },
   });
   for (const grant of grants) {
     const allowed = Array.isArray(grant.allowedTools)
       ? grant.allowedTools.filter((tool): tool is string => typeof tool === "string")
       : [];
-    if (grant.allowAllTools || GMAIL_SEND_TOOLS.every((tool) => allowed.includes(tool))) continue;
+    if (grant.allowAllTools || input.tools.every((tool) => allowed.includes(tool))) continue;
     await prisma.botMcpServer.updateMany({
       where: { ...scope, botId: grant.botId, serverId: grant.serverId },
-      data: { allowedTools: [...new Set([...allowed, ...tools])] },
+      data: { allowedTools: [...new Set([...allowed, ...input.tools])] },
     });
   }
   await prisma.botMcpServer.createMany({
-    data: servers.flatMap((server) =>
+    data: serverIds.flatMap((serverId) =>
       bots.map((bot) => ({
         ...scope,
         botId: bot.id,
-        serverId: server.id,
+        serverId,
         allowAllTools: false,
-        allowedTools: tools,
+        allowedTools: [...input.tools],
       })),
     ),
     skipDuplicates: true,
+  });
+}
+
+async function ensureSchedulingCalendar(prisma: PrismaClient, actor: Actor): Promise<void> {
+  const servers = await prisma.mcpServer.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      endpoint: GOOGLE_CALENDAR_ENDPOINT,
+      enabled: true,
+    },
+    select: { id: true },
+  });
+  await ensureGrants(prisma, actor, {
+    roleKeys: ["scheduling", "main"],
+    servers,
+    tools: GOOGLE_CALENDAR_SCHEDULING_TOOLS,
+  });
+}
+
+async function ensureOutreachGmail(prisma: PrismaClient, actor: Actor): Promise<void> {
+  const servers = await prisma.mcpServer.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      endpoint: GMAIL_MCP_ENDPOINT,
+      enabled: true,
+      secretId: { not: null },
+    },
+    select: { id: true },
+  });
+  await ensureGrants(prisma, actor, {
+    roleKeys: ["outreach", "main"],
+    servers,
+    tools: [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS],
   });
 }
 
