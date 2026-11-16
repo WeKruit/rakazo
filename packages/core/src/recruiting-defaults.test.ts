@@ -265,7 +265,7 @@ describe("recruitingNextStepCard", () => {
 
 describe("roleOpenedNote", () => {
   it("gives its example in the language of the recruiter's newest message", () => {
-    expect(roleOpenedNote(true)).toContain("「岗位已经开好");
+    expect(roleOpenedNote(true)).toContain("「岗位开好了");
     expect(roleOpenedNote(true)).not.toContain("I opened the role");
     expect(roleOpenedNote(false)).toContain("I opened the role");
   });
