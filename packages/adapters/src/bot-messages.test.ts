@@ -574,6 +574,9 @@ describe("delegating to a role team in another conversation", () => {
         where: expect.objectContaining({
           threadId: "thread-role",
           status: { in: ["leased", "running"] },
+          // The teammate the work was handed to counts too: with one lane per agent, a request
+          // that missed it would start a second search beside it (reliability plan S3/S4).
+          OR: expect.arrayContaining([{ trigger: "follow_up" }]),
         }),
       }),
     );
