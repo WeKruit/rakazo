@@ -192,7 +192,7 @@ export function recruitingGradePrompt(
   const list = [
     ...(asked.length
       ? [
-          "The recruiter also asked for these; grade each as a hard requirement (someone like the people they turned down is not_met):",
+          "The recruiter also asked for these; grade each as a hard requirement (someone like the people they turned down is not_met), except the job's own terms (pay, office days, benefits), which are about the job, not the person:",
           ...asked.map((statement) => `* ${statement}`),
           "",
         ]
@@ -211,7 +211,7 @@ export function recruitingGradePrompt(
   if (service.tool === "agent_run")
     return [
       `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements.`,
-      `Call the people-search agent run once: mcp__${service.slug}__agent_run when it is listed, otherwise connectors_execute_tool with id "${service.serverId}:agent_run". Pass effort "auto", input.data with one {name, linkedin_url} per person below, and a query that names the role and lists every hard requirement and every preference by name, asking for each person: current title, company, location, education (each degree with school, degree and dates), evidence links, match_score 0 to 100, match_tier Strong, Promising, Partial or Uncertain, fit_reasons naming the evidence, concerns, and requirements_assessment with each requirement as met, not_met or unknown and the profile text that shows it. When the role is a job opening, the query also says that match_score and match_tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most, and Strong needs current work that fits the job and every hard requirement met. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, the query lists each with the details that make them a fit and asks how closely every person matches them on those details; wrong-fit profiles and companies to avoid are listed the same way. A requirement the public profile does not show is unknown, never met; never judge ethnicity, race or background from a name or photo. The server adds the output format.`,
+      `Call the people-search agent run once: mcp__${service.slug}__agent_run when it is listed, otherwise connectors_execute_tool with id "${service.serverId}:agent_run". Pass effort "auto", input.data with one {name, linkedin_url} per person below, and a query that names the role and lists every hard requirement and every preference by name, asking for each person: current title, company, location, education (each degree with school, degree and dates), evidence links, match_score 0 to 100, match_tier Strong, Promising, Partial or Uncertain, fit_reasons naming the evidence, concerns, and requirements_assessment with each requirement as met, not_met or unknown and the profile text that shows it. When the role is a job opening, the query also says that match_score and match_tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most, and Strong needs current work that fits the job and every hard requirement met. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, the query lists each with the details that make them a fit and asks how closely every person matches them on those details; wrong-fit profiles and companies to avoid are listed the same way. A requirement the public profile does not show is unknown, never met; the job's own terms (pay, office days, benefits) are not requirements on the person and are left out; never judge ethnicity, race or background from a name or photo. The server adds the output format.`,
       "While it reports running, call it again with its runId. When it has finished, call recruiting_research save_results with providerTaskId set to the run's id, then end the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
       "",
       ...list,
@@ -234,6 +234,7 @@ export const SELF_GRADE_RUBRIC = [
   "- met: the profile clearly shows it; quote its words as evidence.",
   "- not_met: the profile shows the opposite (located elsewhere, clearly fewer years, only worked at the school, a different field).",
   "- unknown: the profile is silent or too vague. Never assume, and never judge ethnicity, race or background from a name or photo: only what the profile states counts.",
+  "- The job's own terms (pay range, office days or hybrid schedule, benefits) are what the job offers, not something a profile shows: leave them out of requirements_assessment, and they never lower a tier. The person's side of them still counts: a hybrid job needs someone living within a commute.",
   "- Years of experience: add up the dated roles that match the requirement, counting overlapping roles once; a stated total in the person's own summary counts too.",
   "- Location: the current location; a nearby commuting area counts.",
   "Score and tier: Strong needs every hard requirement met; any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
@@ -527,6 +528,22 @@ export async function startRecruitingGrading(
     return skipped("nobody to grade");
   }
   if (!grader) return skipped("no research teammate");
+  // Staging 11-16 (9e15e896): after feedback on a shown round, a batch of other saved people
+  // started while the lead was still picking the next round, and that round's check then waited
+  // 2.5 minutes behind it. While the lead works on the next round, the pool waits for it.
+  if (
+    grader.tool === "self" &&
+    review &&
+    !review.held &&
+    ![...people.keys()].some((key) => review.round.candidateKeys.includes(key)) &&
+    (await nextRoundComing(deps.prisma, thread.id, review.round.createdAt, grader.botId))
+  ) {
+    if (attempt + 1 < MAX_ATTEMPTS)
+      await deps.jobs.enqueue(
+        laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + BUSY_RETRY_MS),
+      );
+    return skipped("next round coming");
+  }
   const asked = review
     ? (await roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId })).map(
         (criterion) => criterion.statement,
@@ -840,7 +857,7 @@ async function roundUnderReview(
   reviewer: boolean,
   now = Date.now(),
 ): Promise<{
-  round: { id: string; round: number; candidateKeys: string[]; version: number };
+  round: { id: string; round: number; candidateKeys: string[]; version: number; createdAt: Date };
   grades: Map<string, RoundGrade>;
   /** Not shown yet: it waits for the Reviewer's check, or for its owner to show it. */
   held: boolean;
@@ -906,6 +923,26 @@ async function roundUnderReview(
         ...notes.get(row.pageId)?.get(row.candidateKey),
       });
   return { round, grades, held, checked: held && status === "checked" };
+}
+
+/** The recruiter wrote since the shown round and a teammate's turn is working on it. */
+async function nextRoundComing(
+  prisma: PrismaClient,
+  threadId: string,
+  shownAt: Date,
+  graderBotId: string,
+): Promise<boolean> {
+  const [said, working] = await Promise.all([
+    prisma.message.findFirst({
+      where: { threadId, role: "user", createdAt: { gt: shownAt } },
+      select: { id: true },
+    }),
+    prisma.run.findFirst({
+      where: { threadId, botId: { not: graderBotId }, status: { in: BUSY_STATUSES } },
+      select: { id: true },
+    }),
+  ]);
+  return Boolean(said && working);
 }
 
 export type RoundState = {
