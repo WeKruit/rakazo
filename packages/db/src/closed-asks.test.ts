@@ -1,6 +1,8 @@
+import type { MessageBlock } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
-import type { PrismaClient } from "./client.js";
+import type { Prisma, PrismaClient } from "./client.js";
 import { findClosedAskAnswer, recordClosedAskAnswer } from "./closed-asks.js";
+import { mirrorAskInTransaction, syncMirroredAsksInTransaction } from "./mirrored-asks.js";
 
 const card = {
   kind: "ask",
@@ -137,6 +139,149 @@ describe("closed cards", () => {
         botId: "sourcer",
         payload: { messageId: "ask-1", role: "bot", blocks: blocks() },
       }),
+    ]);
+  });
+});
+
+describe("a role team's card copied into the conversation that delegated the work", () => {
+  type Row = {
+    id: string;
+    threadId: string;
+    runId: string;
+    botId: string;
+    role: string;
+    blocks: unknown[];
+    clientNonce?: string;
+  };
+  function store(sourceBlocks: unknown[]) {
+    const rows: Row[] = [
+      {
+        id: "source",
+        threadId: "role",
+        runId: "team-run",
+        botId: "main",
+        role: "bot",
+        blocks: sourceBlocks,
+      },
+    ];
+    const events: Array<Record<string, unknown>> = [];
+    const tx = {
+      message: {
+        findFirst: vi.fn(
+          async ({ where }: { where: { id?: string; threadId?: string; clientNonce?: string } }) =>
+            rows.find((row) =>
+              where.clientNonce
+                ? row.clientNonce === where.clientNonce
+                : row.id === where.id && row.threadId === where.threadId,
+            ) ?? null,
+        ),
+        findUnique: vi.fn(
+          async ({
+            where,
+          }: {
+            where: { threadId_clientNonce: { threadId: string; clientNonce: string } };
+          }) =>
+            rows.find(
+              (row) =>
+                row.threadId === where.threadId_clientNonce.threadId &&
+                row.clientNonce === where.threadId_clientNonce.clientNonce,
+            ) ?? null,
+        ),
+        findMany: vi.fn(
+          async ({ where }: { where: { runId: string; threadId: { not: string } } }) =>
+            rows.filter((row) => row.runId === where.runId && row.threadId !== where.threadId.not),
+        ),
+        create: vi.fn(async ({ data }: { data: Omit<Row, "id"> }) => {
+          const row = { ...data, id: `copy-${rows.length}` };
+          rows.push(row);
+          return row;
+        }),
+        update: vi.fn(
+          async ({ where, data }: { where: { id: string }; data: { blocks: unknown[] } }) => {
+            rows.find((row) => row.id === where.id)!.blocks = data.blocks;
+            return {};
+          },
+        ),
+      },
+      thread: {
+        update: vi.fn(async () => ({ nextEventSeq: 7, nextMessageSeq: 3, userId: "user-1" })),
+      },
+      run: { findUnique: vi.fn(async () => ({ status: "waiting_input", startedAt: null })) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          events.push(data);
+          return data;
+        }),
+      },
+    };
+    return { tx: tx as unknown as Prisma.TransactionClient, rows, events };
+  }
+  const question = {
+    kind: "ask",
+    text: "Remote or onsite?",
+    status: "pending",
+    actions: card.actions,
+  };
+  const mirror = {
+    spaceId: "space-1",
+    sourceThreadId: "role",
+    sourceMessageId: "source",
+    runId: "team-run",
+    targetThreadId: "main-chat",
+    botId: "kruit",
+  };
+
+  it("writes one copy that points at the card, however often the pause is replayed", async () => {
+    const { tx, rows } = store([question]);
+    await expect(mirrorAskInTransaction(tx, mirror)).resolves.toMatchObject({
+      threadId: "main-chat",
+    });
+    await expect(mirrorAskInTransaction(tx, mirror)).resolves.toBeNull();
+    const copies = rows.filter((row) => row.threadId === "main-chat");
+    expect(copies).toEqual([
+      expect.objectContaining({
+        botId: "kruit",
+        runId: "team-run",
+        blocks: [
+          {
+            ...question,
+            answerTarget: { threadId: "role", runId: "team-run", messageId: "source" },
+          },
+        ],
+      }),
+    ]);
+  });
+
+  it("leaves sign-in and secret cards with the team", async () => {
+    const connect = {
+      kind: "ask",
+      text: "Connect Gmail",
+      status: "pending",
+      connection: { serverId: "s", name: "Gmail", reason: "send" },
+    };
+    const { tx, rows } = store([connect]);
+    await expect(mirrorAskInTransaction(tx, mirror)).resolves.toBeNull();
+    expect(rows).toHaveLength(1);
+  });
+
+  it("closes the copy when the card is answered or expires", async () => {
+    const { tx, rows } = store([question]);
+    await mirrorAskInTransaction(tx, mirror);
+    const answered = [{ ...question, status: "answered", answer: "remote" }];
+    await expect(
+      syncMirroredAsksInTransaction(tx, {
+        spaceId: "space-1",
+        sourceThreadId: "role",
+        sourceMessageId: "source",
+        runId: "team-run",
+        blocks: answered as MessageBlock[],
+      }),
+    ).resolves.toEqual([expect.objectContaining({ threadId: "main-chat" })]);
+    expect(rows.find((row) => row.threadId === "main-chat")?.blocks).toEqual([
+      {
+        ...answered[0],
+        answerTarget: { threadId: "role", runId: "team-run", messageId: "source" },
+      },
     ]);
   });
 });

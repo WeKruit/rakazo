@@ -255,6 +255,7 @@ import {
   lockOwnedGroup,
   mapRoutine,
   markRecruitingInbox,
+  mirroredAskSource,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
   openVerifiedRecruitingCrmWorkspace,
@@ -3323,6 +3324,33 @@ export function createRouter(deps: RouterDeps) {
           username: input.username,
         });
         if (!answered) {
+          // A role team's card copied here answers the team's own card.
+          const source = await mirroredAskSource(deps.prisma, {
+            spaceId: context.actor.spaceId,
+            userId: context.actor.userId,
+            threadId: target.threadId,
+            messageId: input.messageId,
+          });
+          if (source) {
+            const answeredSource = await deps.events.answerRunInput({
+              spaceId: context.actor.spaceId,
+              threadId: source.threadId,
+              runId: source.runId,
+              messageId: source.messageId,
+              answeredByUserId: context.actor.userId,
+              answer: input.answer,
+              clientNonce: input.clientNonce,
+              username: input.username,
+            });
+            if (!answeredSource)
+              throw new ORPCError("CONFLICT", {
+                message: "This prompt is no longer awaiting an answer",
+              });
+            await deps.jobs.enqueue(runContinueJob(source.runId)).catch((error) => {
+              getLogger().error("thread answer enqueue", error);
+            });
+            return { ok: true as const };
+          }
           if (MailReplySendAnswerSchema.safeParse(input.answer).success)
             throw new ORPCError("CONFLICT", {
               message: "This reply is no longer awaiting approval",

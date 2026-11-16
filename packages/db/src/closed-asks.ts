@@ -9,6 +9,7 @@ import {
 } from "@rakazo/core";
 import type { Prisma, PrismaClient } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
+import { syncMirroredAsksInTransaction } from "./mirrored-asks.js";
 
 /**
  * Close every card a run is still waiting on, so web, mobile and the agent history all read the
@@ -40,6 +41,13 @@ export async function closeRunAsksInTransaction(
       runId: input.runId,
       allowCancelledRun: true,
       payload: { messageId: message.id, role: "bot", blocks },
+    });
+    await syncMirroredAsksInTransaction(tx, {
+      spaceId: input.spaceId,
+      sourceThreadId: input.threadId,
+      sourceMessageId: message.id,
+      runId: input.runId,
+      blocks,
     });
     closed += 1;
   }
