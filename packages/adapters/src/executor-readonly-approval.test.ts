@@ -1644,12 +1644,11 @@ describe("native Instantly activation card", () => {
     // Sim 11-14: after this card was shown, a second card re-saved everyone's email.
     effect.status = "approved";
     effect.result = { instantlyActivationCard: "0".repeat(64) };
-    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    f.setCalls([]);
     await f.run();
-    expect(f.results.at(-1)).toMatchObject({
-      error: expect.stringContaining("changed after this card was shown"),
-      dispatched: false,
-    });
+    const prompt = () =>
+      (f.runtimeRun.mock.calls.at(-1)?.[0] as { prompt?: string } | undefined)?.prompt;
+    expect(prompt()).toContain("changed after this card was shown");
     const sent = () =>
       f.execute.mock.calls.filter(
         (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
@@ -1658,6 +1657,28 @@ describe("native Instantly activation card", () => {
     effect.result = { instantlyActivationCard: shown };
     await f.run();
     expect(sent()).toHaveLength(1);
+  });
+
+  it("sends an approved card as soon as the run resumes, without waiting for the model", async () => {
+    // Gate ce4a9c24, stop-after-approve: on resume the model called other tools first and the
+    // run failed "Approved tool requests were not fully replayed"; nothing was sent.
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    f.effects[0]!.status = "approved";
+    f.setCalls([]);
+    await f.run();
+    const sent = f.execute.mock.calls.filter(
+      (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+    );
+    expect(sent).toHaveLength(1);
+    const prompt = f.runtimeRun.mock.calls.at(-1)?.[0] as { prompt?: string } | undefined;
+    expect(prompt?.prompt).toContain("already ran");
   });
 
   it("resolves the role's bound campaign when campaign_id is omitted", async () => {
