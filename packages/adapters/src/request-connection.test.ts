@@ -113,6 +113,17 @@ describe("request_connection", () => {
     }
   });
 
+  it("never shows a recruiter a card for a service the product runs", async () => {
+    const f = fixture({ endpoint: "https://mcp.instantly.ai/mcp" });
+    expect(await requestConnection(f.db, scope, args, f.pause, "", true)).toMatchObject({
+      error: expect.stringContaining("provider gmail"),
+    });
+    expect(f.pause).not.toHaveBeenCalled();
+    const gmail = fixture({ name: "Gmail" });
+    expect(await requestConnection(gmail.db, scope, args, gmail.pause, "", true)).toBeUndefined();
+    expect(gmail.pause).toHaveBeenCalled();
+  });
+
   it("pauses on one native connect card when not connected", async () => {
     const f = fixture();
     expect(await requestConnection(f.db, scope, args, f.pause)).toBeUndefined();

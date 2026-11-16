@@ -1,4 +1,9 @@
-import { INSTANTLY_MCP_ENDPOINT, sendRecipients, textLanguage } from "@rakazo/core";
+import {
+  INSTANTLY_MCP_ENDPOINT,
+  isVendorService,
+  sendRecipients,
+  textLanguage,
+} from "@rakazo/core";
 import {
   connectAskBlock,
   findAccountConnectAsk,
@@ -130,6 +135,8 @@ export async function requestConnection(
   args: Record<string, unknown>,
   pause: (block: ConnectBlock) => Promise<void>,
   recruiterText = "",
+  /** A recruiter connects only their own accounts (Gmail, calendar), never a product service. */
+  recruiter = false,
 ) {
   let serverId = typeof args.serverId === "string" ? args.serverId.trim() : "";
   const provider = typeof args.provider === "string" ? args.provider.trim() : "";
@@ -149,6 +156,12 @@ export async function requestConnection(
     return {
       status: "connected" as const,
       message: `${server.name} is already connected and assigned to you: use its tools now (connectors_search_tools group "${server.slug}"). Never tell the user it is not connected.`,
+    };
+  // One-off-email on 7c5c1c30: a card for the product's email sending sat beside the Gmail card,
+  // so the recruiter saw two Connect buttons and an English reason.
+  if (recruiter && isVendorService(server))
+    return {
+      error: `Not shown: ${server.name} is run for the recruiter by the product, never theirs to connect. They connect only their own Gmail and calendar: for an email from them, use provider gmail; otherwise carry on without it.`,
     };
   if (!server.assigned)
     return {

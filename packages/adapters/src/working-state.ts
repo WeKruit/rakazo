@@ -108,7 +108,7 @@ async function calendarLine(prisma: StatePrisma, scope: { spaceId: string; userI
   ]);
   return server || linked
     ? undefined
-    : "- Recruiter's calendar: none connected, so no interview can be booked or invited yet. When they ask for one, show the calendar Connect card (request_connection) in that same reply rather than handing the booking to a team.";
+    : "- Recruiter's calendar: none connected, so you cannot see when they are free or busy (saved interviews are not their calendar), and no interview can be booked or invited yet. Asked about their time or schedule, say first that you can't see their calendar because it isn't connected; when they ask for that or a booking, show the calendar Connect card (request_connection) in that same reply rather than handing the booking to a team.";
 }
 
 /** A role's latest calibration round, as the recruiter sees it. */

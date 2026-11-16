@@ -3966,6 +3966,14 @@ describe("gmailCardNeedsDraft", () => {
     expect(gmailCardNeedsDraft("gmail", ask, "**主题：** Go 后端工程师\n\nWei 你好，")).toBe(false);
     expect(gmailCardNeedsDraft("google_calendar", ask, "")).toBe(false);
     expect(gmailCardNeedsDraft("gmail", "连一下我的日历", "")).toBe(false);
+    // One-off-email x5 on ce4a9c24: the facts and "直接写" got the card, which ends the turn.
+    expect(
+      gmailCardNeedsDraft(
+        "gmail",
+        "后端 Go 做支付，纽约，base 190-230k，wei@example.com，直接写",
+        "",
+      ),
+    ).toBe(true);
   });
 
   // Gate 14d33ed1 one-off-email: the role details came after a generic first draft, and the card
