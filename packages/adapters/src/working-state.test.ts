@@ -24,8 +24,11 @@ function fakePrisma(input: {
   /** Role campaign bindings and activate_campaign receipts. */
   bindings?: Row[];
   sends?: Row[];
+  /** The focus role's latest calibration round. */
+  round?: Row | null;
 }) {
   return {
+    recruitingCalibrationRound: { findFirst: vi.fn(async () => input.round ?? null) },
     chatGroup: { findMany: vi.fn(async () => input.groups ?? []) },
     recruitingRole: {
       findMany: vi.fn(async ({ where }: { where: { id?: unknown } }) =>
@@ -176,6 +179,26 @@ describe("loadWorkingState", () => {
       "sent the email (1 min ago), saved people to the role ×2 (latest 2 min ago)",
     );
     expect(card).toContain('Team\'s last report (Sourcer): "[redacted] draft ready"');
+  });
+
+  it("tells Kruit to hand work on a round waiting for the recruiter to its team first", async () => {
+    const load = (round: Row | null) =>
+      loadWorkingState(
+        fakePrisma({
+          groups,
+          roles,
+          recruiter: [text("Ref 0303 的 #8 不行，再找类似的")],
+          round,
+        }) as never,
+        scope,
+        globalThread,
+        (t) => t,
+        now,
+      );
+    expect((await load({ round: 1, approvedAt: null })).text).toContain(
+      "Its round 1 waits on the recruiter's answer",
+    );
+    expect((await load({ round: 1, approvedAt: new Date(now) })).text).not.toContain("waits on");
   });
 
   // Feedback-round 11-16: the recruiter's feedback on round one reached the role, but its
