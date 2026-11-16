@@ -42,6 +42,9 @@ export class GraphileJobPublisher implements JobPublisher {
   }
 
   private async priority(utils: WorkerUtils, job: BackgroundJob): Promise<number> {
+    // Staging 11-16: about 20,000 routine wakeups due in one hour queued ahead of recruiters'
+    // turns at the same priority, and a first reply waited 12 s to start.
+    if (job.name === "routine.wakeup") return BACKGROUND_PRIORITY;
     if (job.name !== "run.continue") return 0;
     const background = await utils.withPgClient(async (client) => {
       const found = await client.query(
