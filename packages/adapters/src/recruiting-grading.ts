@@ -928,7 +928,7 @@ export function roundReviewPrompt(
     "",
     open
       ? `${misfits.length ? "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). " : ""}Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}: first saved people no round has shown who fit every requirement (recruiting_candidates list), then one quick search for the rest, and one more differently worded search only if places are still open. Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones. When both searches leave places open, keep the closest of these people (Promising before Uncertain, never Partial) in them; fewer than ten only when none is left. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
-      : "Show it now: record calibration_round with corrects: true and the same people in the same order, with their checks. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
+      : "Show it now: record calibration_round with corrects: true and the same people in the same order (no checks: the Reviewer's grades stand for them). Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
   ].join("\n");
 }
 
