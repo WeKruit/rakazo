@@ -17,6 +17,7 @@ const {
   mentionsPeople,
   nextRoundHeld,
   roundAwaitingReview,
+  roundListHeld,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
@@ -318,6 +319,14 @@ describe("startRecruitingGrading", () => {
     };
     await expect(next("shown")).resolves.toBe(true);
     await expect(next("checked")).resolves.toBe(false);
+    // Staging 11-16: attempts made while a round was unshown streamed their lists, then were
+    // refused, so the recruiter saw the same people again. Nothing of them is listed.
+    const listed = (status: string) => {
+      const g = fixture({ rounds: [{ ...round([])[0]!, createdAt: new Date(), status }] });
+      return roundListHeld(g.deps.prisma, { threadId: "thread", roleId: "role" });
+    };
+    await expect(listed("checking")).resolves.toBe(true);
+    await expect(listed("checked")).resolves.toBe(true);
     // Kruit's chat lists none of Results while the round waits (staging 11-15), unless it waited long.
     const waiting = (at: number) =>
       roundAwaitingReview(f.deps.prisma, { threadId: "thread", roleId: "role" }, at);

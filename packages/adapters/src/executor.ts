@@ -655,6 +655,7 @@ import {
   ROUND_HELD_NEXT_STEP,
   ROUND_HELD_SEARCH_REFUSAL,
   roundAwaitingReview,
+  roundListHeld,
   roundState,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
@@ -7204,7 +7205,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return heldRoundPeople(deps.prisma, { threadId: thread.id, roleId }).catch(() => null);
         };
         const roundHeld = (roleId: string) =>
-          (roundHeldThisTurn ??= nextRoundHeld(deps.prisma, {
+          (roundHeldThisTurn ??= roundListHeld(deps.prisma, {
             threadId: run.threadId,
             roleId,
           }).catch(() => false));
