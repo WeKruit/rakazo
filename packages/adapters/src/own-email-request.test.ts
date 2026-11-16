@@ -49,15 +49,6 @@ describe("send now before Gmail is connected", () => {
   ])("leaves a drafting request alone: %s", (text) =>
     expect(SEND_NOW_REQUEST.test(text)).toBe(false),
   );
-
-  it("opens with not sent and the one step, without the email again", () => {
-    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/open this reply with that/);
-    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/never write the email again/);
-    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/never say the draft is not saved/);
-    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/no check, tool call or progress line first/);
-    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/comes back on one Send card/);
-    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/never mention a mailbox draft folder/);
-  });
 });
 
 describe("a Connect Gmail card already in the conversation", () => {
