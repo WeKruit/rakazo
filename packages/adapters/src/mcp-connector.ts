@@ -155,7 +155,10 @@ const MailboxEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
   eaccount: z
     .email()
     .max(254)
-    .describe("Your connected Instantly mailbox to list. Never a contact address."),
+    .optional()
+    .describe(
+      "Your connected Instantly mailbox to list. Never a contact address. Optional when you have one mailbox.",
+    ),
   search: z
     .string()
     .max(500)
@@ -2457,7 +2460,8 @@ export class McpConnector implements ConnectorProvider {
         : input.campaign_id;
       if (anchor && campaignId && anchor.campaign_id !== campaignId)
         throw new IsolationError("Email anchor does not belong to the requested role campaign");
-      if (contactInput && !contactInput.eaccount) {
+      const defaulted = contactInput ?? mailboxInput;
+      if (defaulted && !defaulted.eaccount) {
         // Same rule as ensure_role_campaign: one connected mailbox is the default sending side.
         phase = "default mailbox";
         const accounts = await safeFetch(
@@ -2473,7 +2477,12 @@ export class McpConnector implements ConnectorProvider {
           ? (JSON.parse(text) as { items?: { email?: unknown }[] }).items
           : [];
         if (items?.length === 1 && typeof items[0]?.email === "string")
-          contactInput.eaccount = items[0].email;
+          defaulted.eaccount = items[0].email;
+        if (mailboxInput && !mailboxInput.eaccount) {
+          reason =
+            " Several Instantly mailboxes are connected: pass eaccount, the mailbox that sent the role's mail (get_campaign lists it).";
+          throw new Error(reason);
+        }
       }
       const url = new URL("https://api.instantly.ai/api/v2/emails");
       url.search = new URLSearchParams({
@@ -2481,7 +2490,7 @@ export class McpConnector implements ConnectorProvider {
           ? { search: `thread:${anchor.thread_id}`, eaccount: anchor.eaccount }
           : mailboxInput
             ? {
-                eaccount: mailboxInput.eaccount,
+                eaccount: mailboxInput.eaccount!,
                 ...(mailboxInput.search ? { search: mailboxInput.search } : {}),
                 ...(mailboxInput.min_timestamp_created
                   ? { min_timestamp_created: mailboxInput.min_timestamp_created }
