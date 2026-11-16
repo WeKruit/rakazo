@@ -446,6 +446,14 @@ const REQUEST_KINDS: Record<Capability, RegExp> = {
 const NEGATED =
   /\b(?:do not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|book(?:ing)?|schedul\w*|email (?:it|this|them|him|her))\b|\b(?:no|nothing)\b(?:\s+\w+){0,4}?\s+(?:sent|send(?:ing)?)\b|\b(?:before|until)\s+(?:\w+\s+){0,3}?(?:send(?:ing)?|sent)\b|(?:不要|别|先不|不用|不)(?:发|约)/gi;
 
+// Whether it can be done while lacking something (「不连邮箱能直接发吗」, "can I send without
+// connecting Gmail?") is a question about the product, answered in words; it asks for no card.
+const WITHOUT_PRECONDITION =
+  /(?:不连|没连|没有|不用|不接|未连)[^。！？?\n]{0,24}(?:能|可以|可不可以|能不能)[^。！？?\n]{0,24}(?:吗|[?？])|(?:能|可以)不(?:用|连|接)[^。！？?\n]{0,24}(?:吗|[?？])|\b(?:can|could)\b[^.?!\n]{0,60}\bwithout\b[^.?!\n]{0,40}\?/i;
+function asksWithoutPrecondition(request: string): boolean {
+  return WITHOUT_PRECONDITION.test(request);
+}
+
 function requests(kind: Capability, request: string): boolean {
   return REQUEST_KINDS[kind].test(request.replace(NEGATED, " "));
 }
@@ -550,7 +558,8 @@ export function retryReason(
   if (declined) return declined;
   // A brief's wording ("no emails will be sent yet") is no send request unless the recruiter's
   // own message asked for one.
-  const asksCard = (text: string) => requests("send", text) || asksBooking(text);
+  const asksCard = (text: string) =>
+    (requests("send", text) || asksBooking(text)) && !asksWithoutPrecondition(text);
   if (!asksCard(request) || (person !== undefined && !asksCard(person))) return undefined;
   if (DRAFT_START.test(reply) || !CARD_WORK.test(reply)) return undefined;
   const sentence = reply

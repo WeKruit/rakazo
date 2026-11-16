@@ -356,6 +356,21 @@ describe("declineRetry", () => {
     );
   });
 
+  // Stage 5fcecbb8, first-timer-no-gmail: 「不连邮箱能直接发邮件给候选人吗」 was answered 「不能…」,
+  // then retried as a declined send, and the recruiter got the same answer twice more.
+  it("does not read whether something can be done without a precondition as a request for it", () => {
+    const reply =
+      "不能。邮件必须从你的 Gmail 发出；连接后，我会先给你确认发送的邮件卡片，只有你按下“发送”才会发出。";
+    for (const request of [
+      "不连邮箱能直接发邮件给候选人吗",
+      "没有 Gmail 可以发邮件吗？",
+      "Can I send emails without connecting Gmail?",
+    ])
+      expect(retryReason(reply, request)).toBeUndefined();
+    for (const request of ["能帮我发给他吗", "可以直接发给 Wei 吗", "can you send it to her?"])
+      expect(retryReason(reply, request)?.kind).toBe("decline");
+  });
+
   it("does not read a question about interviews as a booking request", () => {
     const reply =
       "Two interviews are coming up: Ana on Tuesday at 10:00 and Li on Thursday at 14:00. No invitation is sent.";
