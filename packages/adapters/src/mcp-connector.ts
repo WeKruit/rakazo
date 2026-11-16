@@ -2681,7 +2681,11 @@ export class McpConnector implements ConnectorProvider {
           redactions,
         ),
       };
-    } catch {
+    } catch (error) {
+      // Which campaign to name is the one fix the agent can make; "check the connection" is not
+      // (gate 9e15e896, stop-after-approve: every mailbox and contact read failed this way).
+      if (!reason && error instanceof IsolationError && error.message.startsWith("Select an exact"))
+        reason = ` ${error.message}.`;
       yield {
         type: "error",
         message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}${rejectedCode ? ` (${rejectedCode})` : ""}.` : reason || " Check the current assigned connection and requested scope."}${hint}`,

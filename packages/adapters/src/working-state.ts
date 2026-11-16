@@ -445,6 +445,35 @@ export async function loadWorkingState(
       `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat stays in this conversation as the email above (the one a send card takes up), but is in no role, campaign or mailbox draft until a save tool returns it.`,
     );
 
+  // A campaign started outside any role has no role card: without its id here, a later "stop it"
+  // or "who got it" had nothing to read or pause (gate 9e15e896, stop-after-approve).
+  const oneOff = await prisma.externalEffect
+    .findMany({
+      where: {
+        spaceId: scope.spaceId,
+        run: { userId: scope.userId, spaceId: scope.spaceId, threadId: thread.id },
+        kind: "instantly_role_campaign",
+        status: "completed",
+        request: { path: ["direct"], equals: true },
+        createdAt: { gte: new Date(now - 7 * 86_400_000) },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+      select: { idempotencyKey: true, result: true, createdAt: true },
+    })
+    .catch(() => []);
+  for (const effect of oneOff) {
+    const result = (effect.result ?? {}) as { campaignId?: unknown; campaignName?: unknown };
+    if (
+      !effect.idempotencyKey?.startsWith("instantly-direct-campaign:") ||
+      typeof result.campaignId !== "string"
+    )
+      continue;
+    lines.push(
+      `- Campaign started in this conversation outside any role, ${ago(effect.createdAt, now)}: ${typeof result.campaignName === "string" ? `"${flat(result.campaignName, 80)}" ` : ""}(campaign_id ${result.campaignId}). Who it emailed or still holds is known only from get_campaign with that campaign_id; to stop or hold it, pause_campaign with that campaign_id.`,
+    );
+  }
+
   const gmail = await gmailLine;
   if (gmail) lines.push(gmail);
 

@@ -595,6 +595,30 @@ describe("local native Instantly thread history", () => {
       await f.connector.close();
     }
   });
+  // Gate 9e15e896, stop-after-approve: on an account with several campaigns every contact read
+  // said "failed during native anchor, check the connection", so nobody's status could be read.
+  it("names the campaign choice when a contact lookup spans several of the account's campaigns", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as {
+        instantlyCampaignScope: () => Promise<{ campaignIds: string[]; workspaceKey: string }>;
+      },
+      "instantlyCampaignScope",
+    ).mockResolvedValue({ campaignIds: ["campaign-a", "campaign-b"], workspaceKey: "account" });
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const result = await f.collect({ email: "alex@example.test" }, contactRoute);
+      expect(result).toMatchObject([
+        {
+          type: "error",
+          message: expect.stringContaining("pass campaign_id, one of campaign-a, campaign-b"),
+        },
+      ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it("refuses an agent contact lookup with an email not stored for that person", async () => {
     const f = fixture();
     vi.spyOn(

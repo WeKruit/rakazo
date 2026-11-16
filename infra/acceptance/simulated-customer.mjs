@@ -365,7 +365,7 @@ async function replyAfter(journey, rpc, since, quick = false) {
 }
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone), but make each message mean what your goal means: if a stranger could read it as a different question, reword it. Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
-{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
+{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send and deny_send only press the card's button and send no text, so say what you want changed in your next move>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
 Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
 // With --ui the recruiter works in the browser and can also open pages and press buttons.
 const UI_RULES = `${SIMULATOR_RULES}
@@ -1200,12 +1200,21 @@ const takeMailbox = () =>
   freeMailboxes.length ? Promise.resolve(freeMailboxes.pop()) : new Promise((r) => waiting.push(r));
 const giveBack = (mailbox) =>
   waiting.length ? waiting.shift()(mailbox) : freeMailboxes.push(mailbox);
+// The batch copy is one account with one main chat, so its journeys play one after another:
+// side by side, each judge would read the other plays' replies.
+let batchTurn = Promise.resolve();
 const rows = [];
 let next = 0;
 await Promise.all(
   Array.from({ length: Math.min(CONCURRENCY, plays.length) }, async () => {
     while (next < plays.length) {
       const { journey, sample } = plays[next++];
+      if (journey.account === "batch") {
+        const play = batchTurn.then(() => runOne(journey, sample, owner));
+        batchTurn = play.catch(() => undefined);
+        rows.push(await play);
+        continue;
+      }
       if (journey.account !== "mailbox") {
         rows.push(await runOne(journey, sample, owner));
         continue;

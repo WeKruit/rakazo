@@ -419,6 +419,32 @@ describe("account-wide conversation handoff", () => {
     expect(runCreate).not.toHaveBeenCalled();
   });
 
+  // Staging 11-16 (stop-after-approve): 「新岗位 … ref 09071 … 首封邮件你写，两个都发」 went to
+  // Outreach as a one-off campaign outside any role, so later "stop it" had nothing to act on.
+  it("sends a new role's request to start_role, not to Outreach", async () => {
+    const { deps, runCreate, tx } = harness(
+      [
+        {
+          kind: "text",
+          text: "新岗位 Senior Data Engineer 西雅图 ref 09071，首封邮件你写，两个都发",
+        },
+      ],
+      undefined,
+      { spawnKeys, activeRecruitingRoleId: null },
+    );
+    Object.assign(tx, {
+      recruitingRole: {
+        findMany: vi.fn(async () => [{ id: "role-9", title: "Senior Data Engineer — Seattle" }]),
+      },
+    });
+    const result = await handoffToGroupBot(deps as never, run, global, {
+      bot_id: "bot-b",
+      message: "Write the first email",
+    });
+    expect(result).toMatchObject({ error: expect.stringContaining("start_role") });
+    expect(runCreate).not.toHaveBeenCalled();
+  });
+
   it("keeps role work with the role's team", async () => {
     const { deps, runCreate } = harness([{ kind: "text", text: "find people" }], undefined, {
       spawnKeys,
