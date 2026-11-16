@@ -397,9 +397,11 @@ const REPLY_IN: Record<ReplyLanguage, string> = {
  * every other language sees the English names (11-14: a Korean recruiter was told 收件箱).
  */
 export function menuNames(language: ReplyLanguage): string {
+  // Send-at-night 11-16: asked where the sent mail is, Kruit sent the recruiter to a "Sent"
+  // filter the Inbox does not have. The screen's own controls, as it shows them.
   return language === "zh"
-    ? "Candidates = 候选人, Inbox = 收件箱, Sequence = 邮件序列, Interview = 面试, Roles = 岗位 (say only the Chinese name)"
-    : "Candidates, Inbox, Sequence, Interview, Roles (these English names, never translated)";
+    ? "Candidates = 候选人, Inbox = 收件箱, Sequence = 邮件序列, Interview = 面试, Roles = 岗位 (say only the Chinese name). 收件箱 lists each email conversation, sent and received, with only the filters 全部 and 未读 and a search box"
+    : "Candidates, Inbox, Sequence, Interview, Roles (these English names, never translated). Inbox lists each email conversation, sent and received, with only the filters All and Unread and a search box";
 }
 
 export const REPLY_LANGUAGE_NAME: Record<ReplyLanguage, string> = {

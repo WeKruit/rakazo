@@ -18826,8 +18826,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.text,
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
-          } else if (thread.groupId) {
+          } else if (thread.groupId && !retryRunId) {
             // A teammate's turn may be the last one of work delegated from another conversation.
+            // Send-at-night 11-16: a reply held for a retry (it claimed a record no tool read) went
+            // back as the result, and the retry's real answer never followed. The retry returns it.
             await returnDelegatedTeamOutcome(deps, {
               ...run,
               sourceMessageId: run.sourceMessageId,
