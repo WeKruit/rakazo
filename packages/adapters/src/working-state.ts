@@ -31,6 +31,8 @@ const RECRUITER_MESSAGES = 8;
 const REPORT_CHARS = 300;
 const QUESTION_CHARS = 180;
 const RECEIPT_WINDOW_MS = 24 * 3_600_000;
+/** How far back the account's own sends are counted: long enough for "did you send it yesterday". */
+const SEND_WINDOW_DAYS = 7;
 const RECEIPTS_SHOWN = 8;
 const ROLES_FOR_REFERENCE = 500;
 /** Calls in this conversation read for the role it last handed work to. */
@@ -264,6 +266,22 @@ export async function loadWorkingState(
   const roleThreadIds = groups.flatMap((group) => (group.thread ? [group.thread.id] : []));
   const threadIds = [thread.id, ...roleThreadIds];
   const since = new Date(now - RECEIPT_WINDOW_MS);
+  // Every send in the product runs only after its card is confirmed and leaves this receipt,
+  // so the account's own sends are a definite count, not an unknown.
+  const sendsRead = prisma.event
+    .findMany({
+      where: {
+        spaceId: scope.spaceId,
+        type: "agent.tool.completed",
+        createdAt: { gte: new Date(now - SEND_WINDOW_DAYS * 86_400_000) },
+        thread: { userId: scope.userId },
+        payload: { path: ["work"], equals: "sent" },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { threadId: true, payload: true, createdAt: true },
+    })
+    .catch(() => undefined);
   const [recruiterRows, roles, recent, runs, completed, handoffs, roleTotal] = await Promise.all([
     recruiterLanguageRows(prisma, thread.id, accountThreadIds),
     global
@@ -476,6 +494,18 @@ export async function loadWorkingState(
 
   const gmail = await gmailLine;
   if (gmail) lines.push(gmail);
+
+  const sendRows = await sendsRead;
+  const sent = (sendRows ?? []).filter((event) => {
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    return payload.outcome === "succeeded" && payload.work === "sent";
+  });
+  if (sendRows)
+    lines.push(
+      sent.length
+        ? `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: ${sent.length >= 50 ? "50 or more sends" : `${sent.length} send${sent.length === 1 ? "" : "s"}`} (latest ${ago(sent[0]!.createdAt, now)}), each confirmed on its card. A campaign send queues its emails: who has received one is known from get_campaign.`
+        : `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: none. Every send needs its card and leaves a record, so this is a definite none: nothing was sent from here and nothing is waiting to go out, whatever earlier chat or the recruiter remembers. A mailbox or CRM that is not connected does not make it unknown; only a campaign imported from another tool sends outside this record, and get_campaign reads it.`,
+    );
 
   const own = receiptLine(receiptsOf(thread.id), now);
   lines.push(
