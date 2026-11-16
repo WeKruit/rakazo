@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { PeopleSearchEmulator } from "./people-search-emulator.js";
 import type { ResolveHostname } from "./remote-mcp.js";
 
 type EmulatorRecord =
@@ -30,6 +31,7 @@ export class ThirdPartyConnectorEmulator {
   private readonly connectedApps = new Map<string, Set<string>>();
   private readonly accountOwners = new Map<string, { externalUserId: string; app: string }>();
   private readonly pendingUsers = new Set<string>();
+  private readonly peopleSearch = new PeopleSearchEmulator();
 
   readonly fetch: typeof globalThis.fetch = async (input, init) => {
     const url = urlFromPinnedFetch(input, init);
@@ -39,6 +41,15 @@ export class ThirdPartyConnectorEmulator {
     }
     if (url.hostname === "mcp.example.test" || url.hostname === "executor.example.test") {
       return this.mcp(url, init);
+    }
+    if (url.hostname === "mcp.exa.ai") {
+      const request = parseBody(init?.body);
+      if (request.method === "notifications/initialized")
+        return new Response(null, { status: 202 });
+      const result = this.peopleSearch.handle(request);
+      return result === undefined
+        ? jsonRpcError(request.id, -32601, `Unhandled MCP method ${String(request.method)}`)
+        : jsonRpc(request.id, result);
     }
     if (url.hostname === "api.example.test") return this.openapi(url, init);
     if (url.hostname === "graphql.example.test") return this.graphql(url, init);
