@@ -140,8 +140,10 @@ export async function handoffToGroupBot(
         targetKey !== "scheduling"
       )
         return { error: GLOBAL_HANDOFF_ROLE_WORK } as const;
-      // Work in a role the recruiter names (such as replying in that role's email thread) needs
-      // that role's campaign and threads, which only its own team holds.
+      // Work in a role the recruiter names is Main's own: it reads that role's records and writes,
+      // sends and books itself (#1545). Staging 11-16, team-has-no-email: this refusal once sent
+      // Main to delegate_to_role, so the recruiter got "still checking" twice while the role's
+      // team picked the wrong person.
       if (groupId.startsWith("recruiting-global-")) {
         // A request steered into a running turn is not its source message; the brief quotes it.
         const asked = roleTitleText(
@@ -156,7 +158,7 @@ export async function handoffToGroupBot(
           roles.find((role) => namesRole(asked, role.title) === "core");
         if (named)
           return {
-            error: `Not handed off: the recruiter named the role "${named.title}", whose email threads and campaign only its team holds. Hand this to that team with delegate_to_role, role_id "${named.id}".`,
+            error: `Not handed off: do this yourself, in this reply. The recruiter named the role "${named.title}" (role_id "${named.id}"): read its people, emails and sends with your own tools and that role_id, and write, send or book from their own Gmail and calendar on its card. Only a new search, round or feedback on its people goes to its conversation (delegate_to_role).`,
           } as const;
         // Staging 11-16: a new role's request went to Outreach as a one-off campaign outside any
         // role, so its later "stop it" and "who got it" had nothing to act on.
