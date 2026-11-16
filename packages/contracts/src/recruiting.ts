@@ -1128,7 +1128,7 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       .record(RecruitingId, z.record(RecruitingId, z.enum(["shown", "unknown", "fails"])))
       .optional()
       .describe(
-        'candidateKey → { requirementId → verdict } for every requirement of the role (a refusal lists them with their ids: the brief fields in the recruiter\'s words, the hard criteria and the reasons they turned people down): "shown" when the person\'s row shows it, "unknown" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), "fails" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round\'s "not verified" notes are written from the unknown verdicts.',
+        'candidateKey → { requirementId → verdict } for every requirement of the role (a refusal lists them with their ids: the brief fields in the recruiter\'s words, the hard criteria and the reasons they turned people down): "shown" when the person\'s row shows it, "unknown" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), "fails" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round\'s "not verified" notes are written from the unknown verdicts. Leave checks out of a round the Reviewer checks (after the recruiter\'s feedback, and its corrected version): its grades from full profiles stand for them.',
       ),
     unverified: z
       .record(
@@ -1630,7 +1630,13 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     // As for list: a role conversation always reads its own role.
     roleId: RecruitingId.optional(),
   }),
-  z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
+  // A role conversation always resolves in its own role; a roleId the agent adds is ignored
+  // (staging 11-16: two resolves of named people were refused for carrying one).
+  z.strictObject({
+    operation: z.literal("resolve"),
+    nameOrEmail: Text.max(240),
+    roleId: RecruitingId.optional(),
+  }),
   // As for list: a role conversation always reads its own role.
   z.strictObject({ operation: z.literal("round"), roleId: RecruitingId.optional() }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("replies") }),

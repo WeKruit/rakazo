@@ -188,11 +188,13 @@ export async function executeRecruitingCandidatesTool(
       next: `If one of these roles is the one the recruiter named, call again with its roleId. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
     });
     if (input.operation === "resolve") {
-      const result = roleId
+      // A role conversation resolves in its own role; elsewhere a named role narrows it.
+      const resolveRoleId = roleId ?? input.roleId;
+      const result = resolveRoleId
         ? await resolveRecruitingContact(
             deps,
             trusted.actor,
-            { roleId, nameOrEmail: input.nameOrEmail },
+            { roleId: resolveRoleId, nameOrEmail: input.nameOrEmail },
             context,
           )
         : await resolveRecruitingContactAcrossRoles(

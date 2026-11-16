@@ -8795,18 +8795,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               shown: keys.length,
               ...(left ? { notShown: left } : {}),
               // The requirements calibration_round's checks take a verdict on, so it records the
-              // first time.
-              checksOn: Object.fromEntries(
-                (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).map(
-                  (criterion) => [criterion.id, criterion.statement],
-                ),
-              ),
+              // first time. A held round is checked by the Reviewer from full profiles instead:
+              // writing ten people's verdicts took the lead 56 s on staging 11-16.
+              ...(held
+                ? {}
+                : {
+                    checksOn: Object.fromEntries(
+                      (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).map(
+                        (criterion) => [criterion.id, criterion.statement],
+                      ),
+                    ),
+                  }),
               ...(late.length
                 ? {
                     lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
                   }
                 : {}),
-              next: `${held ? "These people are kept for the round; the recruiter sees the round once it is recorded and checked, so never list them in chat." : "These people are in chat now;"} the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
+              next: `${held ? "These people are kept for the round; the recruiter sees the round once it is recorded and checked, so never list them in chat." : "These people are in chat now;"} the round is not recorded yet. Next, record the full ten with calibration_round${held ? " (candidateKeys only, without checks: the Reviewer checks each person from their full profile)" : ""}, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
           }
           if (
