@@ -316,6 +316,39 @@ describe("ensurePlatformServices", () => {
     });
   });
 
+  it("lets Main book on the calendar itself, adding the booking tools to its read grant", async () => {
+    // Simulated 11-16, calendar-not-connected: Main could only read the calendar, so it handed the
+    // booking to Scheduling, which told the recruiter the calendar was Main's to connect.
+    const reads = ["list_calendars", "list_events", "get_event", "search_events", "suggest_time"];
+    const f = fixture({
+      calendars: [{ id: "calendar" }],
+      scheduling: [{ id: "main-bot" }],
+      gmailGrants: [
+        { botId: "main-bot", serverId: "calendar", allowAllTools: false, allowedTools: reads },
+      ],
+    });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.bot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([{ spawnKey: `recruiting:${actor.userId}:main` }]),
+        }),
+      }),
+    );
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ botId: "main-bot", serverId: "calendar" }),
+      data: {
+        allowedTools: [
+          ...reads,
+          "create_event",
+          "update_event",
+          "delete_event",
+          "respond_to_event",
+        ],
+      },
+    });
+  });
+
   it("adds no calendar grant when no Google Calendar was added", async () => {
     const f = fixture({ scheduling: [{ id: "scheduling-bot" }] });
     await ensurePlatformServices(f.prisma, actor);

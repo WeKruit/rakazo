@@ -72,7 +72,7 @@ async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userI
   });
   return gmail
     ? undefined
-    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Each email goes out from it once they press Connect Gmail and then Send on its card.";
+    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Writing one needs no mailbox: show it in the reply now; it goes out once they press Connect Gmail and then Send on its card.";
 }
 
 /** Calendar connectors the product books interviews through (request_connection's catalog). */

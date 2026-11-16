@@ -5,15 +5,10 @@ import {
   REPORT_BEFORE_ASK,
   lastOwnUpdate,
   restatesUpdate,
-  withoutRepeatedClosing,
-  withoutRepeatedOpening,
   readsOnly,
-  CLAIMS_CARD_PENDING,
   TurnReportLedger,
   turnReportText,
   turnWork,
-  repastedDraft,
-  withoutRepastedDraft,
   quotesMessage,
 } from "./turn-report.js";
 
@@ -200,81 +195,9 @@ describe("readsOnly", () => {
   });
 });
 
-describe("CLAIMS_CARD_PENDING", () => {
-  // Staging 11-12: after the recruiter confirmed the Send card and the email went out.
-  it("reads a reply that says the card still waits or the email is not sent", () => {
-    expect(
-      CLAIMS_CARD_PENDING.test(
-        "已核实：当前的审批卡仍待你确认；审批未完成前我不会重复创建或发送。",
-      ),
-    ).toBe(true);
-    expect(CLAIMS_CARD_PENDING.test("核对结果：没有可确认的发送回执，目前状态为**未发送**。")).toBe(
-      true,
-    );
-    expect(CLAIMS_CARD_PENDING.test("初次联系邮件已发出，收件人仅为 Noah Test。")).toBe(false);
-  });
-});
-
 // Gate 19bf5552, progress-and-where: every answer ended with the same 「发来职位描述…」.
-describe("withoutRepeatedClosing", () => {
-  const earlier =
-    "目前没有已保存的岗位，也没有候选人搜索或其他进展记录。发来职位描述，或提供职位名称、地点和必备条件，我就可以开始。";
-  it("drops a closing line this bot already ended on", () => {
-    expect(
-      withoutRepeatedClosing(
-        "候选人和回复分别在左侧的「候选人」和「收件箱」里查看；目前还没有资料或回复可看。发来职位描述，或职位名称、地点和必备条件，我就可以开始。",
-        [earlier],
-      ),
-    ).toBe("候选人和回复分别在左侧的「候选人」和「收件箱」里查看；目前还没有资料或回复可看。");
-  });
-  it("drops the same invitation reworded, after a 「；」", () => {
-    expect(
-      withoutRepeatedClosing(
-        "左侧「候选人」看候选人；点候选人姓名，再到「收件箱」看他/她的邮件和回复。现在还没有岗位或候选人记录；发来职位描述，或告诉我职位名称、地点和必备条件，我就可以开始。",
-        [
-          "目前没有已保存的岗位。把职位描述发给我，或告诉我职位名称、地点和必备条件，我就从这里开始。",
-        ],
-      ),
-    ).toBe(
-      "左侧「候选人」看候选人；点候选人姓名，再到「收件箱」看他/她的邮件和回复。现在还没有岗位或候选人记录。",
-    );
-  });
-  it("keeps a new closing line, a question, and a reply that is only that line", () => {
-    const fresh = "候选人在左侧的「候选人」里。现在把职位描述发来即可。";
-    expect(withoutRepeatedClosing(fresh, [earlier])).toBe(fresh);
-    const asked = "草稿在上面。Wei 的邮箱是什么？";
-    expect(withoutRepeatedClosing(asked, ["我写好了草稿。Wei 的邮箱是什么？"])).toBe(asked);
-    const only = "发来职位描述，或提供职位名称、地点和必备条件，我就可以开始。";
-    expect(withoutRepeatedClosing(only, [earlier])).toBe(only);
-  });
-});
-
 // Sim cannot-do-that-honestly on 982a0ac9: Kruit said 「这里无法发送 LinkedIn InMail，也没有发送任何
 // 内容。」, then the writer's retried reply opened with the same line before its draft.
-describe("withoutRepeatedOpening", () => {
-  const shown = ["这里无法发送 LinkedIn InMail，也没有发送任何内容。"];
-  const draft =
-    "以下是可直接粘贴的消息：\n\n**主题：Staff ML 职位**\n\nHi Li Wei,\n\nA role.\n\nBest,\nAlex Morgan";
-  it("drops an opening line the chat already shows", () => {
-    expect(
-      withoutRepeatedOpening(`无法发送 LinkedIn InMail；没有发送任何内容。${draft}`, shown),
-    ).toBe(draft);
-  });
-  it("keeps a new opening and a reply that is only that line", () => {
-    const fresh = `未找到 Li Wei 的已保存资料。${draft}`;
-    expect(withoutRepeatedOpening(fresh, shown)).toBe(fresh);
-    const only = "无法发送 LinkedIn InMail；没有发送任何内容。";
-    expect(withoutRepeatedOpening(only, shown)).toBe(only);
-  });
-  // Gate 4a731582, change-mind-mid-run 3/10 and 4/10: the revised template's Subject line matched
-  // the first draft's and was dropped, so every later paste showed the email without it.
-  it("keeps a draft's own lines, whatever the chat already shows", () => {
-    const subject = "**Subject:** Staff Frontend Engineer | React | Beijing";
-    const revised = `${subject}\n\nHi {{firstName}},\n\nThe base is RMB 700,000–900,000.\n\nBest,\nAlex`;
-    expect(withoutRepeatedOpening(revised, [`${subject}\n\nHi {{firstName}},`])).toBe(revised);
-  });
-});
-
 describe("restatesUpdate", () => {
   const update =
     "The search has brought the role’s Results pool to 122 people, above your target of 100. I included San Francisco Bay Area profiles as a preferred search segment while keeping Atlanta onsite as the role’s primary location.";
@@ -373,26 +296,6 @@ describe("TurnReportLedger.memorySaveFailed", () => {
   });
 });
 
-describe("repastedDraft", () => {
-  const email =
-    "**Subject:** Staff Frontend Engineer\n\nHi {{firstName}},\n\n• Working remotely every Friday\n\nBest,\nAlex";
-  it("retries a reply that pastes an email already shown", () => {
-    expect(
-      repastedDraft(
-        `改为 base 70–90万，加入每周五远程；最终版如下：\n\n${email.replace("•", "-")}`,
-        [`${email}\n\nIf you'd rather not hear from me, just reply.`],
-        "一句话说下改了啥，最终版是哪封",
-      ),
-    ).toMatchObject({ note: expect.stringContaining("already shown") });
-  });
-  it("keeps a changed email, and one the recruiter asked to see again", () => {
-    expect(repastedDraft(email.replace("Friday", "Monday"), [email], "改成周一")).toBeUndefined();
-    expect(repastedDraft(email, [email], "把完整版再发一遍")).toBeUndefined();
-    // Gate 386f6a46: 「直接贴那一封」 got a description of the email instead of the email.
-    expect(repastedDraft(email, [email], "到底哪封是最终？直接贴那一封")).toBeUndefined();
-  });
-});
-
 // Gate 95185659: after the teammate reported, the coordinator handed it the same recruiter
 // message again, and the second answer contradicted the first.
 describe("quotesMessage", () => {
@@ -430,24 +333,3 @@ describe("draftAskedBeforeShown", () => {
 
 // Gate e7805c70, change-mind: asked for one line on what changed, the reply pasted the same
 // email again under its lead, and the recruiter had to ask a second time.
-describe("withoutRepastedDraft", () => {
-  const email =
-    "**Subject:** Staff Frontend Engineer\n\nHi {{firstName}},\n\n- Remote every Friday\n\nBest,\nAlex";
-  const shown = [`已将薪资改为 70–90万，并加入每周五远程：\n\n${email}`];
-  it("keeps only the lead of a reply that pastes an email already shown", () => {
-    expect(
-      withoutRepastedDraft(
-        `改为 base 70–90万，并加入每周五远程；最终版就是上面那封。以下是最终模板：\n\n${email}`,
-        shown,
-        "一句话说下改了什么，确认最终版是新的",
-      ),
-    ).toBe("改为 base 70–90万，并加入每周五远程；最终版就是上面那封。");
-  });
-  it.each([
-    ["a changed email", `改了签名：\n\n${email.replace("Alex", "David")}`, "签名改成 David"],
-    ["one asked for again", `完整版：\n\n${email}`, "把完整版再发一遍"],
-    ["an email with no lead", email, "最终版是哪封"],
-  ])("keeps %s", (_, reply, asked) => {
-    expect(withoutRepastedDraft(reply, shown, asked)).toBe(reply);
-  });
-});

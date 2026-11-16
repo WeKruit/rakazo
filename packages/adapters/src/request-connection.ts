@@ -159,7 +159,7 @@ export async function requestConnection(
     return {
       status: "pending" as const,
       askId: pending.askId,
-      message: `The ${server.name} card is still showing above, waiting for the recruiter. Do not show another: answer what they asked in your reply, and if it needs ${server.name}, say in one line to press Connect on that card.`,
+      message: `The ${server.name} card is still showing above, waiting for the recruiter. Do not show another: do now what needs no ${server.name} (an email is written and shown in your reply without any mailbox), and say in one line that only the step through ${server.name} waits on Connect on that card.`,
     };
   const elsewhere = await findAccountConnectAsk(prisma, {
     spaceId: scope.spaceId,

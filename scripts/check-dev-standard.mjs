@@ -22,6 +22,19 @@ export const AGENT_TEXT_FILES = [
   "packages/core/src/recruiting-defaults.ts",
   "packages/core/src/recruiting-playbook.ts",
 ];
+/** Code that decides what Kruit does in a turn; a change here also needs an eval (pnpm sim:branch). */
+export const AGENT_BEHAVIOUR_PREFIXES = [
+  "packages/adapters/src/executor",
+  "packages/adapters/src/turn-end-guard",
+  "packages/adapters/src/global-role-writes",
+  "packages/adapters/src/group-handoff",
+  "packages/adapters/src/pi-",
+  "packages/core/src/recruiting-",
+];
+const isAgentBehaviour = (path) =>
+  AGENT_TEXT_FILES.includes(path) ||
+  (AGENT_BEHAVIOUR_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
+    !/\.test\.[cm]?[jt]s$/.test(path));
 /** Where reusable test and ops entry points live; a new one must be wired in, not left orphaned. */
 export const ENTRY_POINT_DIRS = ["infra/acceptance/", "scripts/"];
 
@@ -77,13 +90,14 @@ export function evaluate({ files, body, isReferenced }) {
     }
   }
 
-  const agentText = files.filter((file) => AGENT_TEXT_FILES.includes(file.path));
+  const agentText = files.filter((file) => isAgentBehaviour(file.path));
   if (agentText.length > 0 && body !== undefined && !EVAL_LINE.test(body)) {
     fail(
       "eval",
-      `This changes agent instructions (${agentText.map((file) => file.path).join(", ")}). Add an ` +
+      `This changes how Kruit behaves (${agentText.map((file) => file.path).join(", ")}). Add an ` +
         '"Eval:" line naming the simulated journey or eval case that failed before and passes after ' +
-        "(with both results). Fix the mechanism first; instruction text is the last resort.",
+        "(with both results); `pnpm sim:branch` plays this branch before it merges. Fix the " +
+        "mechanism first; instruction text is the last resort.",
     );
   }
 
