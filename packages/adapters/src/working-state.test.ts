@@ -575,4 +575,26 @@ describe("loadWorkingState", () => {
     expect(await card({ id: "gmail-1" }, 10_000)).not.toContain("Gmail: not connected");
     expect(await card(null, null)).not.toContain("Gmail");
   });
+  // Gate 9e15e896, stop-after-approve: a campaign Kruit started outside any role was confirmed,
+  // then "stop until Monday" and "who got it" had no campaign to read or pause.
+  it("names a campaign this conversation started outside any role, with its id", async () => {
+    const state = await loadWorkingState(
+      fakePrisma({
+        groups,
+        bindings: [
+          {
+            idempotencyKey: "instantly-direct-campaign:server:campaign-7",
+            result: { campaignId: "campaign-7", campaignName: "Data Engineer ref 09071" },
+            createdAt: new Date(now - 5 * 60_000),
+          },
+        ],
+      }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(state.text).toContain('"Data Engineer ref 09071" (campaign_id campaign-7)');
+    expect(state.text).toContain("pause_campaign with that campaign_id");
+  });
 });
