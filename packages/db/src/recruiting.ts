@@ -12319,19 +12319,8 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         `Not recorded: round ${previous.round} is checked and is shown by the teammate who recorded it, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
       );
-    // A shown round is corrected only where the recruiter turned someone in it down: the swap is
-    // the next round, the others kept. Simulated 11-16: "swap Gaya for someone new" saved a
-    // replacement, but no round could hold the shown ten minus Gaya plus him.
-    if (input.corrects && state === "shown" && previous) {
-      const dropped = previous.candidateKeys.filter((key) => !keys.includes(key));
-      const seen = dropped.length
-        ? await readRecruiterSeen(tx, actor, { roleId: role.id, candidateKeys: dropped })
-        : undefined;
-      if (!seen || dropped.some((key) => seen.people.get(key)?.verdict !== "not_fit"))
-        throw new RecruitingCalibrationRoundError(
-          `Not recorded: a shown round is corrected only to replace people the recruiter turned down in it${dropped.length ? `, and ${dropped.filter((key) => seen?.people.get(key)?.verdict !== "not_fit").join(", ")} ${dropped.length === 1 ? "was" : "were"} not turned down` : ""}. For a swap the recruiter asked for, save their turn-down of those people (recruiting_feedback) and record it again. Otherwise the next round holds only new people, so record it without corrects: people who fit, none shown before or turned down. If fewer than ten fit, record the ones who do.`,
-        );
-    }
+    // A swap within the shown round is recorded as the next round: the others kept, the swapped-out
+    // people stay seen.
     const now = new Date();
     let round: { round: number; candidateKeys: string[]; status: string };
     if (previous && state === "checked") {
