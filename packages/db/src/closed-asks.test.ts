@@ -252,16 +252,23 @@ describe("a role team's card copied into the conversation that delegated the wor
     ]);
   });
 
-  it("leaves sign-in and secret cards with the team", async () => {
+  // team-stuck-tell-me 11-16: the team's calendar sign-in sat in the role, where the recruiter
+  // never looks. The person signs in from the copy; the server is theirs and the team's bot has it.
+  it("copies a sign-in card, and leaves a secret card with the team", async () => {
     const connect = {
       kind: "ask",
-      text: "Connect Gmail",
+      text: "Connect Google Calendar",
       status: "pending",
-      connection: { serverId: "s", name: "Gmail", reason: "send" },
+      connection: { serverId: "s", name: "Google Calendar", reason: "book the interview" },
     };
-    const { tx, rows } = store([connect]);
-    await expect(mirrorAskInTransaction(tx, mirror)).resolves.toBeNull();
-    expect(rows).toHaveLength(1);
+    const signIn = store([connect]);
+    await expect(mirrorAskInTransaction(signIn.tx, mirror)).resolves.toMatchObject({
+      threadId: "main-chat",
+    });
+    expect(signIn.rows).toHaveLength(2);
+    const secret = store([{ kind: "ask", text: "API key?", status: "pending", input: "secret" }]);
+    await expect(mirrorAskInTransaction(secret.tx, mirror)).resolves.toBeNull();
+    expect(secret.rows).toHaveLength(1);
   });
 
   it("closes the copy when the card is answered or expires", async () => {
