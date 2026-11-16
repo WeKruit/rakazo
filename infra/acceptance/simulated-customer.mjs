@@ -471,6 +471,7 @@ async function play(journey, label, owner, mailbox, out) {
     watchFrom(user.rpc, Date.now());
     await stopAll(user.rpc);
     await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
+    await closeStaleCards(user.rpc, label);
     // Roles earlier plays of this journey left behind (idle an hour, so not a play running now).
     if (journey.leftover) {
       const old = (await groupsOf(user.rpc)).filter((group) => journey.leftover.test(group.name ?? ""));
@@ -699,6 +700,36 @@ async function play(journey, label, owner, mailbox, out) {
         log(`${label}: routines not stopped: ${error.message}`),
       );
   }
+}
+/**
+ * Closes the cards earlier plays left waiting on a reused account (over an hour old), without
+ * approving anything, so a play measures what Kruit does now: a pending card from before makes
+ * Kruit rightly hold back a new one, and the play would grade that leftover.
+ */
+async function closeStaleCards(rpc, label) {
+  const LATER = /(稍后|以后|先不|跳过|暂不|不用|取消|later|skip|not now|cancel)/i;
+  let closed = 0;
+  for (const group of await groupsOf(rpc)) {
+    if (!group.needsInput && !group.id.startsWith("recruiting-global-")) continue;
+    for (const message of await messagesOf(rpc, group.id)) {
+      if (!message.runId || Date.now() - Date.parse(message.createdAt) < 60 * 60_000) continue;
+      for (const block of openCards(message)) {
+        const later = (block.actions ?? []).find((action) => LATER.test(action.label ?? ""));
+        const answer = block.approvalEffectId
+          ? "deny"
+          : later
+            ? later.id
+            : block.requestedSchema
+              ? { action: "decline" }
+              : undefined;
+        if (answer === undefined || block.input === "secret") continue;
+        await rpc("threads/answer", { groupId: group.id, runId: message.runId, messageId: message.id, answer })
+          .then(() => (closed += 1))
+          .catch(() => {});
+      }
+    }
+  }
+  if (closed) log(`${label}: closed ${closed} card(s) earlier plays left waiting`);
 }
 /** Archives the roles one play opened on a reused account, through the shared archive script. */
 function archiveRoles([email, password], groupIds, label, { idleHours = 0 } = {}) {
