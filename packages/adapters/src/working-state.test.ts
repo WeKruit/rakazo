@@ -26,9 +26,14 @@ function fakePrisma(input: {
   sends?: Row[];
   /** The focus role's latest calibration round. */
   round?: Row | null;
+  /** Each card role's latest calibration round. */
+  rounds?: Row[];
 }) {
   return {
-    recruitingCalibrationRound: { findFirst: vi.fn(async () => input.round ?? null) },
+    recruitingCalibrationRound: {
+      findFirst: vi.fn(async () => input.round ?? null),
+      findMany: vi.fn(async () => input.rounds ?? []),
+    },
     chatGroup: { findMany: vi.fn(async () => input.groups ?? []) },
     recruitingRole: {
       findMany: vi.fn(async ({ where }: { where: { id?: unknown } }) =>
@@ -178,7 +183,9 @@ describe("loadWorkingState", () => {
     expect(card).toContain(
       "sent the email (1 min ago), saved people to the role ×2 (latest 2 min ago)",
     );
-    expect(card).toContain('Team\'s last report (Sourcer): "[redacted] draft ready"');
+    expect(card).toContain(
+      'Team\'s last report (Sourcer; its counts may be older than the ones above, which are read now): "[redacted] draft ready"',
+    );
   });
 
   it("tells Kruit to hand work on a round waiting for the recruiter to its team first", async () => {
@@ -574,6 +581,50 @@ describe("loadWorkingState", () => {
     expect(await card(null, 10_000)).toContain("Gmail: not connected");
     expect(await card({ id: "gmail-1" }, 10_000)).not.toContain("Gmail: not connected");
     expect(await card(null, null)).not.toContain("Gmail");
+  });
+  // team-stuck 11-16: Kruit said "checking" and handed an interview to the team, which found the
+  // missing calendar two minutes later; feedback-round 11-16: "34 found" came from an old report.
+  it("says when no calendar is connected and reads each team's round from records", async () => {
+    const card = (server: Row | null, linked: Row | null) =>
+      loadWorkingState(
+        {
+          ...fakePrisma({
+            groups,
+            roles,
+            rounds: [
+              {
+                roleId: "role-1",
+                round: 2,
+                status: "shown",
+                statusAt: new Date(now - 5 * 60_000),
+                approvedAt: null,
+              },
+            ],
+            messagesByThread: {
+              t1: [
+                {
+                  role: "bot",
+                  botId: "bot-sourcer",
+                  createdAt: new Date(now - 30 * 60_000),
+                  ...text("Found 34 people"),
+                },
+              ],
+            },
+          }),
+          mcpServer: { findFirst: vi.fn(async () => server) },
+          connection: { findFirst: vi.fn(async () => linked) },
+        } as never,
+        scope,
+        globalThread,
+        (t) => t,
+        now,
+      ).then((state) => state.text ?? "");
+    const none = await card(null, null);
+    expect(none).toContain("calendar: none connected");
+    expect(none).toContain("12 people saved · round 2 shown in the role team's chat 5 min ago");
+    expect(none).toContain("(Sourcer, 30 min ago; its counts may be older");
+    expect(await card({ id: "gcal" }, null)).not.toContain("calendar: none connected");
+    expect(await card(null, { id: "composio-gcal" })).not.toContain("calendar: none connected");
   });
   // Gate 9e15e896, stop-after-approve: a campaign Kruit started outside any role was confirmed,
   // then "stop until Monday" and "who got it" had no campaign to read or pause.
