@@ -227,6 +227,40 @@ describe("resolveRecruitingContact", () => {
     );
   });
 
+  it("still resolves when another role's conversation was removed (simulated 2026-11-16, team-has-no-email)", async () => {
+    const f = fixture([crmRow("4", "Sumeet Parekh", "sumeetparekh1@gmail.com")]);
+    const { IsolationError } = await vi.importActual<typeof Database>("@rakazo/db");
+    vi.mocked(listRecruitingCandidates).mockImplementation(async (_prisma, _actor, input) => {
+      if (input.roleId === "removed") throw new IsolationError();
+      return {
+        crmTarget: input.roleId === "data-infra" ? { bindingEffectId: "b", target } : null,
+        items: [],
+        nextCursor: null,
+      } as never;
+    });
+    const result = await resolveRecruitingContactAcrossRoles(
+      {
+        prisma: {
+          recruitingRole: {
+            findMany: async () => [
+              { id: "removed", title: "Removed" },
+              { id: "data-infra", title: "Data Infra" },
+            ],
+          },
+          externalEffect: { findMany: async () => [] },
+        } as never,
+        connector: f.connector,
+      },
+      actor,
+      "sumeet",
+      { runId: "run-roleless", operationId: "op", signal: new AbortController().signal } as never,
+    );
+    expect(result).toMatchObject({
+      status: "resolved",
+      matches: [{ name: "Sumeet Parekh", roleId: "data-infra" }],
+    });
+  });
+
   it("says what this account sent when nobody by the name is saved (simulated 2026-11-16, did-you-really-send)", async () => {
     const f = fixture([]);
     const queryRaw = vi.fn(async (..._query: unknown[]) => [{ sent: 0, waiting: 0, unknown: 0 }]);
