@@ -181,6 +181,7 @@ function fixture(options: {
   return {
     deps: { prisma: prisma as unknown as PrismaClient, jobs: { enqueue } },
     prisma,
+    tx,
     runCreate,
     taskCreate,
     enqueue,
@@ -618,6 +619,13 @@ describe("startRecruitingGrading", () => {
         where: expect.objectContaining({ threadId: "thread", botId: "sourcer" }),
       }),
     );
+    // Staging 11-16 (d06ea499): the lead recorded round 2 mid-turn, the start saw the lead's turn
+    // when it created the check, gave up without a retry, and the round sat unchecked 4 minutes.
+    const leadWorking = fixture({ found: [person("a")] });
+    leadWorking.tx.run.findFirst.mockImplementation((async ({ where }: { where: object }) =>
+      "status" in where && !("botId" in where) ? { id: "lead-turn" } : null) as never);
+    await startRecruitingGrading(leadWorking.deps, { threadId: "thread" }, now);
+    expect(leadWorking.runCreate).toHaveBeenCalledOnce();
   });
 
   it("keeps a few batches in flight and waits when all of them are", async () => {
