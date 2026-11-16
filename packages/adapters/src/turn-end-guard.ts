@@ -449,7 +449,13 @@ export async function guardRecruitingTurnEnd(
     const round = await deps.prisma.recruitingCalibrationRound.findFirst({
       where: { roleId: input.roleId },
       orderBy: { round: "desc" },
-      select: { effectId: true, candidateKeys: true, approvedAt: true, createdAt: true },
+      select: {
+        effectId: true,
+        candidateKeys: true,
+        approvedAt: true,
+        createdAt: true,
+        ownerBotId: true,
+      },
     });
     if (
       round &&
@@ -481,7 +487,9 @@ export async function guardRecruitingTurnEnd(
       });
       if (latest?.clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX))
         return { action: "ended", classification: "question" };
-      roundOwed = true;
+      // Only the bot that records the rounds owes the next one. Staging 01e78cbe: the Reviewer's
+      // grading turn was pushed to record it, and the swap the recruiter asked for never came.
+      roundOwed = !round.ownerBotId || round.ownerBotId === run.botId;
     }
   }
   const classification = classifyTurnEnd(
