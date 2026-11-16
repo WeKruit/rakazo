@@ -570,7 +570,7 @@ export async function loadWorkingState(
     lines.push(
       sent.length
         ? `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: ${sent.length >= 50 ? "50 or more sends" : `${sent.length} send${sent.length === 1 ? "" : "s"}`} (latest ${ago(sent[0]!.createdAt, now)}), each confirmed on its card. A campaign send queues its emails: who has received one is known from get_campaign.`
-        : `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: none. Every send needs its card and leaves a record, so this is a definite none: nothing was sent from here and nothing is waiting to go out, whatever earlier chat or the recruiter remembers. A mailbox or CRM that is not connected does not make it unknown; only a campaign imported from another tool sends outside this record, and get_campaign reads it.`,
+        : `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: none. Every send needs its card and leaves a record, so this is a definite none: nothing was sent from here and nothing is waiting to go out, whatever earlier chat or the recruiter remembers. A mailbox or CRM that is not connected, or a mailbox read that fails, does not make it unknown; only a campaign imported from another tool sends outside this record, and get_campaign reads it.`,
     );
 
   const own = receiptLine(receiptsOf(thread.id), now);
