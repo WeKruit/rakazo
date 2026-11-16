@@ -129,6 +129,40 @@ describe("startRoleFromRecruiterMessage", () => {
     );
   });
 
+  it("names the role when the message asks for several at once (simulated 2026-11-16, honest-limits)", async () => {
+    const { deps: d, tx } = deps({
+      role: "user",
+      botId: null,
+      clientNonce: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text: "所以到底有没有？没有就直接帮我建这三个" }],
+    });
+    expect(
+      await startRoleFromRecruiterMessage(d as never, run, { ...role, title: "Data Engineer" }),
+    ).toBe(true);
+    const prompt = (
+      tx.task.create.mock.calls as unknown as [{ data: { prompt: string } }][]
+    )[0]?.[0].data.prompt as string;
+    expect(prompt.split("\n")[0]).toContain("Data Engineer");
+    expect(prompt).toContain("所以到底有没有？没有就直接帮我建这三个");
+  });
+
+  it("leaves a message that already names its role as the recruiter wrote it", async () => {
+    const { deps: d, tx } = deps({
+      role: "user",
+      botId: null,
+      clientNonce: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text: "Open a senior data engineer role in Seattle" }],
+    });
+    await startRoleFromRecruiterMessage(d as never, run, { ...role, title: "Data Engineer" });
+    expect(tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ prompt: "Open a senior data engineer role in Seattle" }),
+      }),
+    );
+  });
+
   it("starts the role from a JD sent only as a file", async () => {
     const { deps: d, tx } = deps({
       role: "user",

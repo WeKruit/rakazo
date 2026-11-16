@@ -145,6 +145,8 @@ export async function startRoleFromRecruiterMessage(
     threadId: string;
     botId: string;
     deliveryKey: string;
+    /** The role this conversation is for, named when the recruiter's words don't. */
+    title?: string;
     /** Requirements Kruit gathered from earlier messages, when the latest one alone lacks them. */
     earlier?: string;
   },
@@ -165,10 +167,17 @@ export async function startRoleFromRecruiterMessage(
   // Staging 11-13: "现在开始找候选人" opened the role with only those words, so its team asked
   // for the location the recruiter had given earlier, and that card held every later request.
   const earlier = role.earlier?.trim();
-  const prompt =
+  const asked =
     earlier && !text.includes(earlier)
       ? `${text}\n\nWhat the recruiter said about this role earlier, in the main conversation:\n${earlier}`
       : text;
+  // Staging 11-16: 「没有就直接帮我建这三个」 opened three roles with the same words, so the
+  // Java team asked what the other two are called and Data Engineer asked what 「三个」 means.
+  const title = role.title?.trim();
+  const prompt =
+    title && !titleCore(text).includes(titleCore(title))
+      ? `This conversation is for one role: ${title}. The recruiter wrote the message below in the main conversation; any other roles it mentions have their own conversations.\n\n${asked}`
+      : asked;
   const clientNonce = `${ROLE_START_NONCE}${role.deliveryKey}`;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
