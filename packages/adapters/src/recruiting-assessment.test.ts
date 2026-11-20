@@ -884,7 +884,9 @@ describe("native saved candidate reads", () => {
       const result = await executeRecruitingCandidatesTool(
         f.deps,
         trusted,
-        { operation: "list", query, limit: 2, cursor: "opaque+/=" },
+        // Branch a2d787f8: show (whether Kruit posts the page) reached the saved-people read,
+        // which refused it, and Kruit told the recruiter it would drop the parameter.
+        { operation: "list", query, limit: 2, cursor: "opaque+/=", show: true },
         context,
       );
       expect(result).toEqual({
