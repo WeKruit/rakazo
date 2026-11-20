@@ -140,6 +140,24 @@ async function requireRecruitingRun(
   if (run.threadId !== trusted.threadId || run.botId !== trusted.botId) throw new IsolationError();
 }
 
+/**
+ * The mark Results shows for a round's person, by the page's own rule: a pass, or the recruiter's
+ * "not a fit" with no decision after it, shows as passed. fosp x5 11-20: asked whether the people
+ * turned down were marked, Kruit read their empty decision as unmarked although Results showed them
+ * passed.
+ */
+export function resultsMark(person: {
+  decision?: "hold" | "pass";
+  recruiterVerdict?: "good_example" | "not_fit";
+}): "on hold" | "not a fit" | undefined {
+  // Results labels these "Passed" in English and 不合适 in Chinese. Branch d29d7154: relayed as
+  // "passed", Kruit told a Chinese recruiter they were 已通过 (approved).
+  if (person.decision === "hold") return "on hold";
+  return person.decision === "pass" || person.recruiterVerdict === "not_fit"
+    ? "not a fit"
+    : undefined;
+}
+
 /** People per numbered page of a candidate list read. */
 const PAGE_SIZE = 10;
 
@@ -605,6 +623,10 @@ export async function executeRecruitingCandidatesTool(
           : {}),
         round: {
           ...round,
+          candidates: round.candidates.map((person) => {
+            const shown = resultsMark(person);
+            return shown ? { ...person, onResults: shown } : person;
+          }),
           repeats: await roundRepeats(deps.prisma, {
             roleId: roundRoleId ?? input.roleId ?? "",
             round: round.round,

@@ -768,6 +768,29 @@ describe("native saved candidate reads", () => {
     });
   });
 
+  it("says which mark Results shows for each person in the round", async () => {
+    // fosp x5 11-20: Kruit read an empty decision as unmarked, but Results shows the recruiter's
+    // "not a fit" as passed.
+    const f = fixture();
+    const candidates = [
+      { candidateKey: "turned-down", recruiterVerdict: "not_fit" },
+      { candidateKey: "held", decision: "hold", recruiterVerdict: "not_fit" },
+      { candidateKey: "new" },
+    ];
+    db.round.mockResolvedValue({ roleId: "role-named", round: { round: 1, candidates } });
+    const result = (await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "round", roleId: "role-named" },
+      context,
+    )) as { round: { candidates: Array<{ onResults?: string }> } };
+    expect(result.round.candidates.map((person) => person.onResults)).toEqual([
+      "not a fit",
+      "on hold",
+      undefined,
+    ]);
+  });
+
   it("says with the round that it repeats no one and what the recruiter said about the last one", async () => {
     // Staging 11-15: global Kruit called two round-1 people repeats in round 2, and could not find
     // the feedback the recruiter gave in the role's chat.
