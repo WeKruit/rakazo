@@ -25,8 +25,13 @@ const agentRuntime = runtimeArg?.slice("--runtime=".length) ?? "scripted";
 if (Number(integration) + Number(e2e) + Number(serveMode) !== 1) {
   throw new Error("Pass exactly one of --integration, --e2e or --serve");
 }
-if (!["fake", "e2b", "daytona", "box"].includes(sandboxProvider)) {
-  throw new Error('Sandbox must be "fake", "e2b", "daytona", or "box"');
+// "desktop" runs the agent's commands as host processes: only for --serve on a branch backend,
+// whose own Modal Sandbox is the boundary, so the agent's code really runs in plays.
+if (
+  !["fake", "e2b", "daytona", "box"].includes(sandboxProvider) &&
+  !(serveMode && sandboxProvider === "desktop")
+) {
+  throw new Error('Sandbox must be "fake", "e2b", "daytona", or "box" ("desktop" with --serve)');
 }
 if (integration && sandboxProvider !== "fake") {
   throw new Error("Integration tests only support the fake sandbox");
