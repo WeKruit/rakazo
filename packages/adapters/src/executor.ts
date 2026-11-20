@@ -16850,6 +16850,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // connector tool itself (gate 06e70043: the resumed turn listed the tools directly
             // and the wrapper call was refused "must be replayed before connectors_execute_tool").
             const inner = catalog?.args.arguments;
+            // A wrapper this turn hides (before a role's first round) still carries the send it
+            // approved (gate 94b302cd: "must be replayed via its catalog execute tool").
+            const hiddenWrapper =
+              catalog && !connectorTools.has(catalog.toolName)
+                ? discovered.find((tool) => tool.name === catalog.toolName)
+                : undefined;
+            if (hiddenWrapper) connectorTools.set(hiddenWrapper.name, hiddenWrapper);
             const viaWrapper = !catalog || connectorTools.has(catalog.toolName);
             const outcome = await applyTool(
               catalog && viaWrapper ? catalog.toolName : approvedEffectReplays.nextToolName()!,
@@ -16861,7 +16868,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : {}
                 : (direct?.args ?? {}),
               `send-approval:${effect.id}`,
-            );
+            ).finally(() => {
+              if (hiddenWrapper) connectorTools.delete(hiddenWrapper.name);
+            });
             if (approvedEffectReplays.nextRequest() === request) {
               // Not taken: never leave it for the model to repeat (gate 245ab70b: it called six
               // other tools, each refused, and the run failed). Close it and say why.
@@ -16882,7 +16891,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               continue;
             }
             sendOutcomes.push(
-              `The recruiter confirmed the send card and that approved send already ran just now, before this turn, with the result below; never call activate_campaign for it again (an error in it means nothing was sent). Result: ${redactSecrets(JSON.stringify(outcome), runSecrets).slice(0, 4_000)}`,
+              // A send the service refused outright sent nothing, so the recruiter is offered it
+              // again (gate 94b302cd: "Bad Gateway", and Kruit offered no next step).
+              toolResultError(outcome) &&
+                (
+                  ((outcome as { details?: unknown } | null)?.details ?? outcome) as {
+                    uncertain?: unknown;
+                  } | null
+                )?.uncertain !== true
+                ? `The recruiter confirmed the send card and it ran just now, before this turn, but the mail service refused it, so nothing was sent: ${redactSecrets(String(toolResultError(outcome)), runSecrets).slice(0, 1_000)} Tell the recruiter in one line and offer to send it again; if they want that, call activate_campaign again, and its new card is theirs to confirm.`
+                : `The recruiter confirmed the send card and that approved send already ran just now, before this turn, with the result below; never call activate_campaign for it again. Result: ${redactSecrets(JSON.stringify(outcome), runSecrets).slice(0, 4_000)}`,
             );
             continue;
           }
