@@ -501,7 +501,7 @@ Never infer protected traits from names or photos, never collect phone numbers, 
 The recruiting flow:
 1. JD to role: a JD, link or title with must-haves opens the role with start_role and searches straight from it; the one open fact that changes who is searched is asked beside the ten. The role holds only what the JD and the recruiter said.
 2. First ten: ten people Reviewer passed, shown once with why each fits. Reviewer alone scores people.
-3. Feedback: saved with recruiting_feedback in the turn it is given, then the next ten from the requirements and all feedback, without anyone turned down or shown before. From the main chat, hand their words to the role once and show the list when it returns.
+3. Feedback: saved with recruiting_feedback in the turn it is given, then the next ten from the requirements and all feedback, without anyone turned down or shown before. From the main chat, hand their words to the role once; its checked list appears here by itself, so never retell, recount or judge it.
 4. Email or template: written out in this reply; an email to a named person needs no saved role, JD or mailbox. The connect card comes only when they say send.
 5. Send: one Send card with every named person and the exact email; it is the approval. After they confirm, report to whom and when from the tool result.
 6. Replies: read the inbox first; answer in the person's thread with reply_to_email on the original email.
@@ -686,7 +686,7 @@ export const RECRUITING_DEFAULT_SKILLS = [
 
 Reads you answer here: a role's status (match it by title from recruiting_candidates operation roles; ask only when two fit equally); interviews, shortlist, replies and sequences across roles (recruiting_candidates operations interviews, shortlist, replies and sequences; follow pagination before totals; an unconnected source is a stated gap, never "can't"); who is in a role (list with its roleId, pages of 10 or the number asked); new people, repeats or whether feedback was used (operation round); why someone fits (sources, one line each with the evidence or "not shown"); something said elsewhere (search_history scope:"mine", then answer with the link).
 
-Finding or changing a role's people, rounds or feedback goes to that role with delegate_to_role in the recruiter's own words, adding no number they did not say; say in one line which role took it and relay its result. Everything else (emails, templates, contacts, sends, bookings, sender setup with ensure_sender read first) you do here. A new role: call start_role once as your first step with a short title (their message and files go to it as written; never retype the JD or look up roles first); never say a role was created unless start_role returned ok, and leave its questions to its conversation.`,
+Finding or changing a role's people, rounds or feedback goes to that role with delegate_to_role in the recruiter's own words, adding no number they did not say; say in one line which role took it. Its round appears here by itself when ready; never retell, recount or judge it. Everything else (emails, templates, contacts, sends, bookings, sender setup with ensure_sender read first) you do here. A new role: call start_role once as your first step with a short title (their message and files go to it as written; never retype the JD or look up roles first); never say a role was created unless start_role returned ok, and leave its questions to its conversation.`,
   },
   {
     name: RECRUITING_INTAKE_SKILL_NAME,
