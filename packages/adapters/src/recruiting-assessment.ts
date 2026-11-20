@@ -59,6 +59,14 @@ import {
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
 /** A missing record never stops work the recruiter's own words already describe. */
+/**
+ * What a role's status numbers mean. Staging 44c1ad44 (what-happened): Kruit said 153 people
+ * where the shortlist page showed 0, and read a check in the role's chat at 07:38 as new activity
+ * after saying nothing was new since yesterday.
+ */
+const ROLE_STATUS_NOTE =
+  "status.savedPeople counts everyone saved in the role's Results; status.shortlisted counts only the shortlist page's people, so name which one you give. status.lastActivityAt is the last message in the role's chat (a check or a question counts), not a new person, send or reply: for what is new since a time, read operation activity.";
+
 export const NOTHING_SAVED_IS_NO_BLOCKER =
   "Nothing saved is not a blocker: when the recruiter's own words describe the work (an email to a person they name, a role they describe), do it now from those words, and ask only the one missing fact the result still needs (such as the address to send to) beside it.";
 /** Role sequences are all this read covers; a one-off email's reply lives only in the mailbox. */
@@ -384,6 +392,7 @@ export async function executeRecruitingCandidatesTool(
       const paged = { ...result, roles: result.roles.filter((role) => listed.has(role.id)) };
       if (operation === "roles" && !result.roles.length && !input.cursor)
         return { ...paged, ...(await noOpenRoles(deps.prisma, trusted.actor)) };
+      if (operation === "roles") return { ...paged, note: ROLE_STATUS_NOTE };
       return operation === "replies"
         ? {
             ...paged,
