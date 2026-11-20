@@ -1344,6 +1344,28 @@ describe("native cross-role recruiting reads", () => {
     expect(result).toMatchObject({ roles: [{ id: "role" }], nextCursor: "role", total: 2 });
   });
 
+  it("pages a read too large for the model's context at the roles that fit", async () => {
+    // Staging 11-20 (what-happened-since-yesterday): a sequences read of 20 roles, each with its
+    // stored mail, did not fit the model's context and the turn failed with nothing said.
+    const f = fixture();
+    const mail = "x".repeat(30_000);
+    overview.read.mockResolvedValue({
+      roles: ["a", "b", "c"].map((id) => ({ id, title: id })),
+      items: ["a", "b", "c"].map((roleId) => ({ roleId, mail })),
+      nextCursor: null,
+      total: 3,
+    });
+    const result = (await executeRecruitingCandidatesTool(
+      { ...f.deps, connector: { execute: vi.fn() } },
+      trusted,
+      { operation: "sequences" },
+      context,
+    )) as { items: { roleId: string }[]; roles: { id: string }[]; nextCursor: string | null };
+    expect(result.items.map((item) => item.roleId)).toEqual(["a"]);
+    expect(result.roles.map((role) => role.id)).toEqual(["a"]);
+    expect(result.nextCursor).toBe("a");
+  });
+
   it("lists a named role's people where no role is linked, never overriding a linked role", async () => {
     const f = fixture();
     db.candidates.mockResolvedValue({ roleId: "selected", items: [], total: 0, nextCursor: null });
