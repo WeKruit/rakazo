@@ -1160,12 +1160,7 @@ export function roundSize(messages: readonly unknown[]): number {
           : [],
       )
       .join("\n");
-    // The last clause naming a number is the ask: in "你说的7个和23个到底哪个对，再来5个" it is 5.
-    const asked = text
-      .split(/[，,。！!？?；;\n]/)
-      .reverse()
-      .map(requestedPeopleTarget)
-      .find(Boolean);
+    const asked = requestedPeopleTarget(text);
     if (asked) return asked < 10 ? asked : 10;
   }
   return 10;
