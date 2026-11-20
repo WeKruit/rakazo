@@ -919,8 +919,8 @@ export async function getRecruitingRoleCampaign(
           },
         ];
       }),
-      ...(typeof campaign.queuedFirstEmail === "string"
-        ? { queuedFirstEmail: campaign.queuedFirstEmail.slice(0, 100) }
+      ...(typeof campaign.firstEmailGoesOut === "string"
+        ? { queuedFirstEmail: campaign.firstEmailGoesOut.slice(0, 100) }
         : {}),
     };
     if (result.campaign) {

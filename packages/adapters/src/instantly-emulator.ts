@@ -115,6 +115,13 @@ export class InstantlyEmulator {
     const campaign = this.campaigns.get(id);
     if (!campaign) throw new Refused(404, "Campaign not found");
     if (method === "GET" && !action) return campaign;
+    if (method === "GET" && action === "sending-status") {
+      const status = { 0: "campaign_draft", 2: "campaign_paused" }[campaign.status] ?? "healthy";
+      return {
+        diagnostics: { campaign_id: campaign.id, status, last_updated: this.now().toISOString() },
+        summary: { status, status_message: status.replaceAll("_", " ") },
+      };
+    }
     if (method === "PATCH" && !action) {
       Object.assign(campaign, body, { id: campaign.id, status: campaign.status });
       return campaign;
