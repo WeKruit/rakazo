@@ -11,7 +11,10 @@ import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
-import { loadRecruitingRunContext } from "./recruiting-context.js";
+import {
+  loadRecruitingRunContext,
+  RECRUITING_PRESENTATION_INSTRUCTION,
+} from "./recruiting-context.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
 const db = vi.hoisted(() => ({
@@ -634,9 +637,7 @@ describe("recruiting run context", () => {
     expect(result!.workspace).toEqual(workspace);
     expect(result!.text).toContain("Seven years; [redacted]");
     expect(result!.text).toContain("Bay Area first");
-    expect(result!.text).not.toContain(
-      "Internal routing identifiers belong only in tool arguments",
-    );
+    expect(result!.text).not.toContain(RECRUITING_PRESENTATION_INSTRUCTION);
     expect(result!.text).toContain(memory.text);
     expect(result!.text).not.toContain("secret-value");
     const stored = bytes.get("blob-1")!;
