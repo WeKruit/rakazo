@@ -255,7 +255,10 @@ export async function prepareCodeToolCalls(io: {
   used(): boolean;
   settled(): Promise<void>;
 }> {
-  await io.install(CODE_TOOLS_MODULE_PATH, new TextEncoder().encode(CODE_TOOLS_MODULE));
+  // A command still runs when the helper cannot be written; its code then sees no rakazo_tools.
+  await io
+    .install(CODE_TOOLS_MODULE_PATH, new TextEncoder().encode(CODE_TOOLS_MODULE))
+    .catch(() => undefined);
   let used = false;
   let finished = false;
   const server = serveCodeToolCalls({
