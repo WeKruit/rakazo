@@ -115,6 +115,9 @@ describe("computer lifecycle command guard", () => {
     expect(desktopProtectionGuardMessage("unresolved variable $f")).toBe(
       "This command was not run: desktop-protection guard: unresolved variable $f. Shell access is still available. Do not stop or restart browser or desktop processes.",
     );
+    // Staging 11-20: each refused heredoc cost a round; the refusal names a form the guard runs.
+    expect(desktopProtectionGuardMessage("heredoc")).toContain("python3 path/to/script.py");
+    expect(protectedComputerLifecycleRefusal("python3 path/to/script.py")).toBeUndefined();
   });
 
   it("allows comments, literal assignments, activate scripts, and quoted heredoc data", () => {

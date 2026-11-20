@@ -3953,7 +3953,12 @@ export function isProtectedComputerLifecycleCommand(command: string): boolean {
 }
 
 export function desktopProtectionGuardMessage(reason: string): string {
-  return `This command was not run: desktop-protection guard: ${reason}. Shell access is still available. Do not stop or restart browser or desktop processes.`;
+  // Staging 11-20: every refused heredoc cost the agent a round before it found the file form.
+  const instead =
+    reason === "heredoc"
+      ? " Write the script to a file with write_file and run that file (python3 path/to/script.py)."
+      : "";
+  return `This command was not run: desktop-protection guard: ${reason}. Shell access is still available.${instead} Do not stop or restart browser or desktop processes.`;
 }
 
 /** Cap the roster so a large Space cannot flood the prompt. */
