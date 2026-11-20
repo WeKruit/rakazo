@@ -108,6 +108,8 @@ export async function observeShellCommand(
     secrets: string[];
     idleMs?: number;
     onOutput?: (snapshot: ShellCommandSnapshot) => void;
+    /** True while quiet output is expected (the command waits on its own tool calls). */
+    holdIdle?: () => boolean;
   },
 ): Promise<{
   result: ShellCommandResult;
@@ -138,7 +140,7 @@ export async function observeShellCommand(
       resolveIdle?.("idle");
       return;
     }
-    timer = setTimeout(() => resolveIdle?.("idle"), idleMs);
+    timer = setTimeout(() => (options.holdIdle?.() ? armIdle() : resolveIdle?.("idle")), idleMs);
   };
 
   const done = (async (): Promise<FinishedShellCommand> => {

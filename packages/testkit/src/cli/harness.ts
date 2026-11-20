@@ -1,4 +1,5 @@
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
+import { lookup } from "node:dns/promises";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
@@ -25,8 +26,13 @@ const agentRuntime = runtimeArg?.slice("--runtime=".length) ?? "scripted";
 if (Number(integration) + Number(e2e) + Number(serveMode) !== 1) {
   throw new Error("Pass exactly one of --integration, --e2e or --serve");
 }
-if (!["fake", "e2b", "daytona", "box"].includes(sandboxProvider)) {
-  throw new Error('Sandbox must be "fake", "e2b", "daytona", or "box"');
+// "desktop" runs the agent's commands as host processes: only for --serve on a branch backend,
+// whose own Modal Sandbox is the boundary, so the agent's code really runs in plays.
+if (
+  !["fake", "e2b", "daytona", "box"].includes(sandboxProvider) &&
+  !(serveMode && sandboxProvider === "desktop")
+) {
+  throw new Error('Sandbox must be "fake", "e2b", "daytona", or "box" ("desktop" with --serve)');
 }
 if (integration && sandboxProvider !== "fake") {
   throw new Error("Integration tests only support the fake sandbox");
@@ -56,7 +62,9 @@ async function main() {
     const databaseUrl = container.getConnectionUri();
     const apiPort = Number(process.env.API_PORT ?? 3110);
     const webPort = Number(process.env.WEB_PORT ?? 5180);
-    const webOrigin = `http://127.0.0.1:${webPort}`;
+    // A branch backend serving its web pages through a tunnel signs in from that public origin.
+    const webOrigin =
+      (serveMode && process.env.HARNESS_WEB_ORIGIN) || `http://127.0.0.1:${webPort}`;
 
     process.env.DATABASE_URL = databaseUrl;
     process.env.REALTIME_DATABASE_URL = databaseUrl;
@@ -208,10 +216,10 @@ async function main() {
       pipedream,
       email,
       ...(journey ? { runtime: journey } : {}),
-      remoteConnectors: {
-        fetch: journey ? journey.fetch(thirdParties.fetch) : thirdParties.fetch,
-        resolveHostname: thirdParties.resolveHostname,
-      },
+      remoteConnectors: liveConnectors(
+        journey ? journey.fetch(thirdParties.fetch) : thirdParties.fetch,
+        thirdParties.resolveHostname,
+      ),
       integrationsCatalogUrl: "https://catalog.example.test/",
     });
     journey?.bind(handles.prisma);
@@ -243,11 +251,19 @@ async function main() {
 
     try {
       if (serveMode) {
+        // Pages already built into apps/web/dist, served on the tunnelled origin like staging's.
+        const pages = process.env.HARNESS_WEB_ORIGIN
+          ? spawn("pnpm", ["--filter", "@rakazo/web", "exec", "vite", "preview", "--strictPort"], {
+              stdio: "inherit",
+              env: { ...process.env, RAKAZO_ALLOWED_HOSTS: new URL(webOrigin).host },
+            })
+          : undefined;
         console.log(`SERVING api=http://127.0.0.1:${apiPort}`);
         await new Promise<void>((resolve) => {
           process.once("SIGINT", resolve);
           process.once("SIGTERM", resolve);
         });
+        pages?.kill();
         return;
       }
       try {
@@ -334,6 +350,35 @@ async function main() {
 }
 
 type AppHandles = Awaited<ReturnType<typeof createApp>>;
+
+/**
+ * A branch backend reaches the real services named in HARNESS_LIVE_HOSTS (such as the people
+ * search), with the keys its caller passed; every other connector host stays emulated.
+ */
+function liveConnectors(
+  fetch: typeof globalThis.fetch,
+  resolveHostname: (hostname: string) => Promise<{ address: string; family: number }[]>,
+) {
+  const live = new Set(
+    (serveMode ? (process.env.HARNESS_LIVE_HOSTS ?? "") : "")
+      .split(",")
+      .map((host) => host.trim())
+      .filter(Boolean),
+  );
+  if (!live.size) return { fetch, resolveHostname };
+  const hostOf = (input: string | URL | Request) =>
+    new URL(typeof input === "string" || input instanceof URL ? input : input.url).hostname;
+  return {
+    fetch: ((input, init) =>
+      live.has(hostOf(input))
+        ? globalThis.fetch(input, init)
+        : fetch(input, init)) as typeof globalThis.fetch,
+    resolveHostname: (hostname: string) =>
+      live.has(hostname)
+        ? lookup(hostname, { all: true, verbatim: true })
+        : resolveHostname(hostname),
+  };
+}
 
 async function managedComputers(handles: AppHandles) {
   if (!["e2b", "daytona", "box"].includes(sandboxProvider)) return [];
