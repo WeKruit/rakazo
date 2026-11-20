@@ -211,8 +211,12 @@ def main(argv):
             env.update({f"RAKAZO_MAILBOX_EMAIL{suffix}": sender, f"RAKAZO_MAILBOX_PASSWORD{suffix}": sender_password})
         started = time.time()
         code = subprocess.call(["node", str(ROOT / "infra/acceptance/simulated-customer.mjs"), *plays], env=env, cwd=ROOT)
-        print(f"plays finished in {round((time.time() - started) / 60)} min, exit {code}; backend log {log_path}",
-              flush=True)
+        # The test database too (fake accounts only), to read what a play's tools returned.
+        dump_path = log_path.with_suffix(".dump")
+        dump = sandbox.exec("bash", "-c", f"pg_dump -Fc {DATABASE_URL}", text=False)
+        dump_path.write_bytes(dump.stdout.read())
+        print(f"plays finished in {round((time.time() - started) / 60)} min, exit {code}; backend log {log_path},"
+              f" database {dump_path} (pg_restore it to inspect)", flush=True)
         return code
     finally:
         sandbox.terminate()
