@@ -63,5 +63,9 @@ describe("a number the recruiter asked for", () => {
     expect(askAfterPeopleTarget(20, 10)).toMatch(/keep searching toward 20 without asking/);
     expect(askAfterPeopleTarget(undefined, 64)).toBeUndefined();
     expect(askAfterPeopleTarget(20, undefined)).toBeUndefined();
+    // fosp 11-20: "再来5个" was shown, then the turn reported the 48 people Results holds.
+    expect(askAfterPeopleTarget(5, 48, true)).toMatch(/empty reply/);
+    expect(askAfterPeopleTarget(5, 48, true)).not.toMatch(/48/);
+    expect(askAfterPeopleTarget(50, 30, true)).toMatch(/keep searching toward 50/);
   });
 });

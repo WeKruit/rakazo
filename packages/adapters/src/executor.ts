@@ -15060,9 +15060,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         await readRecruitingPlaybookStep(deps.prisma, roleNow).catch(() => null)
                       )?.savedCandidates;
                       // Below the number, only after a round: intake questions come before any search.
+                      const round = Boolean(await roundRecordedThisRun());
                       const instead =
-                        saved !== undefined && (saved >= askedFor || (await roundRecordedThisRun()))
-                          ? askAfterPeopleTarget(askedFor, saved)
+                        saved !== undefined && (saved >= askedFor || round)
+                          ? askAfterPeopleTarget(askedFor, saved, round)
                           : undefined;
                       if (instead) return { instead };
                     }

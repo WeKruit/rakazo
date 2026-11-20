@@ -566,8 +566,9 @@ describe("delegating to a role team in another conversation", () => {
     expect(harness.tx.run.create).not.toHaveBeenCalled();
     expect(harness.enqueue).not.toHaveBeenCalled();
     expect(sent.note).toContain(
-      "Sourcer has been working on the recruiter's request for 3 min and has found 2 people on this request so far",
+      "Sourcer has been working on the recruiter's request for 3 min; the next round",
     );
+    expect(sent.note).toContain("give no count of people found or saved");
     expect(sent.note).toContain("never say it has not started");
     expect(harness.tx.run.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -632,7 +633,7 @@ describe("delegating to a role team in another conversation", () => {
   };
   /** A role team's conversation after Kruit's request, with what the team said since. */
   function team(
-    options: { busy?: boolean; later?: unknown[]; root?: unknown; roleId?: string } = {},
+    options: { busy?: boolean; later?: unknown[]; shown?: unknown[]; root?: unknown; roleId?: string } = {},
   ) {
     const harness = deps({ bots: mainBot, hopBlocks: [delegation] });
     const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
@@ -647,7 +648,9 @@ describe("delegating to a role team in another conversation", () => {
       createdAt: new Date("2026-11-13T09:06:40Z"),
       blocks: [options.root ?? delegation],
     }));
-    prisma.message!.findMany = vi.fn(async () => options.later ?? []);
+    prisma.message!.findMany = vi.fn(async (args?: { where?: { threadId?: string } }) =>
+      args?.where?.threadId === "thread-global" ? (options.shown ?? []) : (options.later ?? []),
+    );
     prisma.run!.findFirst = vi.fn(async () => (options.busy ? { id: "run-sourcer" } : null));
     return harness;
   }
@@ -824,6 +827,14 @@ describe("delegating to a role team in another conversation", () => {
     expect(toKruit).toMatchObject({ kind: "bot_message_received", intent: "result" });
     expect(toKruit?.text).not.toContain("Sathya G");
     expect(toKruit?.text).toMatch(/already sees/);
+  });
+
+  it("posts a round once where it was asked, though two requests return it", async () => {
+    // fosp 11-20 (1ae3a9c3): "再来5个" and a correction a minute later both got the round, 11 s apart.
+    const round = "5 people this round:\n\n1. **Yu Zhang** · Data Engineer · EcoWater";
+    const harness = team({ later: [said(round)], shown: [said(round)] });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).not.toContainEqual({ kind: "text", text: round });
   });
 
   it("brings the round's people back with the team's closing line", async () => {
