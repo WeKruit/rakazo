@@ -634,6 +634,108 @@ describe("loadWorkingState", () => {
     expect(await card({ id: "gcal" }, null)).not.toContain("calendar: none connected");
     expect(await card(null, { id: "composio-gcal" })).not.toContain("calendar: none connected");
   });
+  // Gate 44c1ad44 team-has-no-email: Kruit answered from its own read with another person than
+  // the team it had handed the email to, then said it had asked the team again.
+  it("shows work this conversation handed a team: the ask, the step it is on and all it posted since", async () => {
+    const handoff = (returnThreadId: string) => ({
+      role: "user",
+      createdAt: new Date(now - 4 * 60_000),
+      blocks: [
+        {
+          kind: "bot_message_received",
+          fromBotId: "bot-kruit",
+          fromBotName: "Kruit",
+          text: "Goal: email one person with no saved email",
+          returnThreadId,
+        },
+      ],
+    });
+    const working = (returnThreadId: string) =>
+      loadWorkingState(
+        fakePrisma({
+          groups,
+          roles,
+          runs: [{ threadId: "t1", status: "running", updatedAt: new Date(now) }],
+          messagesByThread: {
+            t1: [
+              {
+                role: "bot",
+                botId: "bot-sourcer",
+                createdAt: new Date(now - 60_000),
+                blocks: [
+                  { kind: "steps", steps: [{ label: "recruiting_candidates", count: 1 }] },
+                  { kind: "progress", activity: true, text: "", pendingToolNames: ["web_search"] },
+                ],
+              },
+              {
+                role: "bot",
+                botId: "bot-sourcer",
+                createdAt: new Date(now - 2 * 60_000),
+                ...text("Picked Tomas Vale: no saved email"),
+              },
+              {
+                role: "bot",
+                botId: "bot-sourcer",
+                createdAt: new Date(now - 3 * 60_000),
+                ...text("Reading the role's people"),
+              },
+              handoff(returnThreadId),
+              { role: "bot", botId: "bot-sourcer", ...text("Older round report") },
+            ],
+          },
+        }) as never,
+        scope,
+        globalThread,
+        (t) => t,
+        now,
+      ).then((state) => state.text ?? "");
+    const card = await working("tg");
+    expect(card).toContain(
+      'You handed this team work 4 min ago: "Goal: email one person with no saved email"',
+    );
+    expect(card).toContain("Doing now: searching the web (1 step done this run).");
+    expect(card.indexOf('(Sourcer, 3 min ago): "Reading the role')).toBeLessThan(
+      card.indexOf('(Sourcer, 2 min ago): "Picked Tomas Vale: no saved email"'),
+    );
+    expect(card).not.toContain("Older round report");
+    // A hand-off from another conversation is not this one's job: the plain report stays.
+    const other = await working("t-other");
+    expect(other).not.toContain("You handed this team work");
+    expect(other).toContain("Team's last report");
+    // A role opened from this conversation carries the recruiter's message, not a brief.
+    const opened = await loadWorkingState(
+      fakePrisma({
+        groups,
+        roles,
+        messagesByThread: {
+          t1: [
+            {
+              role: "bot",
+              botId: "bot-sourcer",
+              createdAt: new Date(now - 60_000),
+              ...text("8 searches failed, nobody saved yet"),
+            },
+            // The recruiter's answer to the team's card keeps the same job going.
+            { role: "user", createdAt: new Date(now - 90_000), ...text("On site in Shanghai") },
+            {
+              role: "user",
+              clientNonce: "start-role:k1",
+              createdAt: new Date(now - 2 * 60_000),
+              ...text("Senior Go engineer, Shanghai, start searching"),
+            },
+          ],
+        },
+      }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    ).then((state) => state.text ?? "");
+    expect(opened).toContain(
+      'You handed this team work 2 min ago: "Senior Go engineer, Shanghai, start searching"',
+    );
+    expect(opened).toContain('(Sourcer, 1 min ago): "8 searches failed, nobody saved yet"');
+  });
   // Gate 9e15e896, stop-after-approve: a campaign Kruit started outside any role was confirmed,
   // then "stop until Monday" and "who got it" had no campaign to read or pause.
   it("names a campaign this conversation started outside any role, with its id", async () => {

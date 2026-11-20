@@ -1,6 +1,12 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import type { ReplyLanguage } from "@rakazo/core";
-import { GMAIL_MCP_ENDPOINT, REPLY_LANGUAGE_NAME, recruiterLanguage } from "@rakazo/core";
+import {
+  GMAIL_MCP_ENDPOINT,
+  REPLY_LANGUAGE_NAME,
+  recruiterLanguage,
+  runWorkSteps,
+  workActivityLabel,
+} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { recruitingHomeGroupId } from "@rakazo/db";
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
@@ -25,10 +31,14 @@ import { isTurnWork, workDoneLabel } from "./turn-report.js";
 /** Role teams shown to the account-wide agent, most recently active first. */
 const STATE_ROLES = 8;
 /** Latest messages read per role conversation, for its pending questions and last report. */
-const ROLE_MESSAGES = 6;
+const ROLE_MESSAGES = 8;
 /** Recruiter messages read for their language and the role they name. */
 const RECRUITER_MESSAGES = 8;
 const REPORT_CHARS = 300;
+/** What this conversation asked a team, and each team message since, on the card. */
+const HANDOFF_CHARS = 240;
+const SINCE_CHARS = 400;
+const SINCE_MESSAGES = 3;
 const QUESTION_CHARS = 180;
 const RECEIPT_WINDOW_MS = 24 * 3_600_000;
 /** How far back the account's own sends are counted: long enough for "did you send it yesterday". */
@@ -369,7 +379,7 @@ export async function loadWorkingState(
           where: { threadId },
           orderBy: { seq: "desc" },
           take: ROLE_MESSAGES,
-          select: { role: true, botId: true, blocks: true, createdAt: true },
+          select: { role: true, botId: true, blocks: true, createdAt: true, clientNonce: true },
         }),
       ),
     ),
@@ -635,8 +645,64 @@ export async function loadWorkingState(
       if (campaign) lines.push(`  ${campaign}`);
       const done = receiptLine(receiptsOf(threadId), now);
       if (done) lines.push(`  Done in the last 24 h (tool receipts): ${done}`);
+      // Work this conversation handed the team, as a parent sees its job: what it asked, the step
+      // the team is on now and everything the team posted since (gap analysis 11-16; gate 44c1ad44
+      // team-has-no-email: Kruit answered from its own read with another person than the team's,
+      // then said it had asked the team again). A role is opened from this conversation with the
+      // recruiter's message (start_role), and later work reaches it as this conversation's brief
+      // (delegate_to_role); the recruiter's answers to the team's cards keep the same job going.
+      const briefOf = (m: (typeof messages)[number]) =>
+        m.role !== "user"
+          ? undefined
+          : m.clientNonce?.startsWith(ROLE_START_NONCE)
+            ? (m.blocks as MessageBlock[]).map(blockText).filter(Boolean).join(" ")
+            : (m.blocks as MessageBlock[]).flatMap((block) =>
+                block.kind === "bot_message_received" && block.returnThreadId === thread.id
+                  ? [block.text]
+                  : [],
+              )[0];
+      const handIndex = messages.findIndex((m) => briefOf(m)?.trim());
+      const handed = handIndex === -1 ? undefined : messages[handIndex]!;
+      const brief = handed ? briefOf(handed) : undefined;
+      if (handed && brief?.trim()) {
+        lines.push(
+          `  You handed this team work ${ago(handed.createdAt, now)}: "${flat(brief, HANDOFF_CHARS)}"`,
+        );
+        const since = messages.slice(0, handIndex).filter((m) => m.botId && m.role !== "user");
+        const live = latestRun.get(threadId);
+        if (live && ["queued", "leased", "running"].includes(live.status)) {
+          const steps = runWorkSteps({ blocks: (since[0]?.blocks ?? []) as MessageBlock[] });
+          const last = steps.done.at(-1);
+          const activity = steps.current ?? (typeof last === "string" ? last : last?.activity);
+          lines.push(
+            `  Doing now: ${activity ? workActivityLabel(activity).toLowerCase() : "starting"}${steps.done.length ? ` (${steps.done.length} step${steps.done.length === 1 ? "" : "s"} done this run)` : ""}.`,
+          );
+        }
+        const posted = since
+          .slice(0, SINCE_MESSAGES)
+          .reverse()
+          .flatMap((m) => {
+            const said = (m.blocks as MessageBlock[]).map(blockText).filter(Boolean).join(" ");
+            return said.trim()
+              ? [
+                  `  Team posted since (${botName.get(m.botId ?? "") ?? "Team"}, ${ago(m.createdAt, now)}): "${flat(said, SINCE_CHARS)}"`,
+                ]
+              : [];
+          });
+        lines.push(
+          ...(posted.length ? posted : ["  Team posted since: nothing yet."]),
+          "  Asked how this work is going, answer from these lines in this reply: never say you asked or will ask the team, and never name a person or count the team has not posted or the records above do not show.",
+        );
+        return;
+      }
       // The team's newest message is its report, as a worker's report summary.
-      const report = messages.find((m) => m.botId && m.role !== "user");
+      // A run still working posts steps first: its report is the newest message with words.
+      const report = messages.find(
+        (m) =>
+          m.botId &&
+          m.role !== "user" &&
+          (m.blocks as MessageBlock[]).some((block) => blockText(block)?.trim()),
+      );
       const said = report
         ? (report.blocks as MessageBlock[]).map(blockText).filter(Boolean).join(" ")
         : "";
