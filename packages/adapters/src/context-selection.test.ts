@@ -287,7 +287,7 @@ describe("bounded context selection", () => {
       encode.mockRestore();
     }
     // Freeze the original longest-leaf policy, including JSON escaping and tie order.
-    const notice = "\n[Tool result truncated to fit context; omitted evidence is unavailable.]\n";
+    const notice = "\n[Tool result truncated to fit context; check any full copy named below.]\n";
     expect(result).toBe(
       JSON.stringify({
         ...payload,
