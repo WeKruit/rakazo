@@ -648,19 +648,22 @@ export async function loadWorkingState(
       // Work this conversation handed the team, as a parent sees its job: what it asked, the step
       // the team is on now and everything the team posted since (gap analysis 11-16; gate 44c1ad44
       // team-has-no-email: Kruit answered from its own read with another person than the team's,
-      // then said it had asked the team again). Only while the recruiter has not written there.
-      const handIndex = messages.findIndex((m) => m.role === "user");
-      // A role is opened from this conversation with the recruiter's message (start_role), and
-      // later work reaches it as this conversation's brief (delegate_to_role).
+      // then said it had asked the team again). A role is opened from this conversation with the
+      // recruiter's message (start_role), and later work reaches it as this conversation's brief
+      // (delegate_to_role); the recruiter's answers to the team's cards keep the same job going.
+      const briefOf = (m: (typeof messages)[number]) =>
+        m.role !== "user"
+          ? undefined
+          : m.clientNonce?.startsWith(ROLE_START_NONCE)
+            ? (m.blocks as MessageBlock[]).map(blockText).filter(Boolean).join(" ")
+            : (m.blocks as MessageBlock[]).flatMap((block) =>
+                block.kind === "bot_message_received" && block.returnThreadId === thread.id
+                  ? [block.text]
+                  : [],
+              )[0];
+      const handIndex = messages.findIndex((m) => briefOf(m)?.trim());
       const handed = handIndex === -1 ? undefined : messages[handIndex]!;
-      const handedBlocks = (handed?.blocks ?? []) as MessageBlock[];
-      const brief = handed?.clientNonce?.startsWith(ROLE_START_NONCE)
-        ? handedBlocks.map(blockText).filter(Boolean).join(" ")
-        : handedBlocks.flatMap((block) =>
-            block.kind === "bot_message_received" && block.returnThreadId === thread.id
-              ? [block.text]
-              : [],
-          )[0];
+      const brief = handed ? briefOf(handed) : undefined;
       if (handed && brief?.trim()) {
         lines.push(
           `  You handed this team work ${ago(handed.createdAt, now)}: "${flat(brief, HANDOFF_CHARS)}"`,

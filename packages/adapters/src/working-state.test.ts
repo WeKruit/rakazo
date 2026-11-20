@@ -715,6 +715,8 @@ describe("loadWorkingState", () => {
               createdAt: new Date(now - 60_000),
               ...text("8 searches failed, nobody saved yet"),
             },
+            // The recruiter's answer to the team's card keeps the same job going.
+            { role: "user", createdAt: new Date(now - 90_000), ...text("On site in Shanghai") },
             {
               role: "user",
               clientNonce: "start-role:k1",
