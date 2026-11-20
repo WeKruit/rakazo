@@ -922,6 +922,14 @@ export async function getRecruitingRoleCampaign(
       ...(typeof campaign.firstEmailGoesOut === "string"
         ? { queuedFirstEmail: campaign.firstEmailGoesOut.slice(0, 100) }
         : {}),
+      ...(typeof (campaign.mailServiceSays as { message?: unknown } | undefined)?.message ===
+      "string"
+        ? {
+            notSendingBecause: String(
+              (campaign.mailServiceSays as { message: string }).message,
+            ).slice(0, 300),
+          }
+        : {}),
     };
     if (result.campaign) {
       const snapshot = {

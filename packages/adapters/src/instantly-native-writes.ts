@@ -2965,12 +2965,23 @@ async function sendingHeld(rest: InstantlyRest, campaignId: string) {
   const diagnostics = read?.diagnostics as Record<string, unknown> | null | undefined;
   const status = typeof summary?.status === "string" ? summary.status : diagnostics?.status;
   if (typeof status !== "string" || status === "healthy") return null;
+  // Which mailboxes cannot send and why, so "no sending accounts available" names the cause.
+  const accounts = diagnostics?.accounts_summary as Record<string, unknown> | undefined;
+  const unavailable = Object.entries(
+    (accounts?.unavailable as Record<string, unknown> | undefined) ?? {},
+  ).flatMap(([why, count]) =>
+    typeof count === "number" && count > 0 ? [`${count} ${why.replaceAll("_", " ")}`] : [],
+  );
+  const said =
+    typeof summary?.status_message === "string"
+      ? summary.status_message
+      : status.replaceAll("_", " ");
   return {
     status,
     message:
-      typeof summary?.status_message === "string"
-        ? summary.status_message
-        : status.replaceAll("_", " "),
+      typeof accounts?.total_connected === "number"
+        ? `${said} (${accounts.available ?? 0} of ${accounts.total_connected} sending mailboxes available${unavailable.length ? `; ${unavailable.join(", ")}` : ""})`
+        : said,
     ...(typeof summary?.issue_started_at === "string" ? { since: summary.issue_started_at } : {}),
     ...(typeof diagnostics?.next_open_at === "string"
       ? { nextOpenAt: diagnostics.next_open_at }
