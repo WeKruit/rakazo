@@ -10928,6 +10928,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   prisma: deps.prisma,
                   artifacts: deps.artifacts,
                   connector: deps.connector,
+                  ...(deps.webOrigin ? { webOrigin: deps.webOrigin } : {}),
                 },
                 {
                   actor: researchActor.actor,
