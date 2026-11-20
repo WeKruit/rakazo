@@ -12,7 +12,8 @@
 //   title      A new role's title replaces "New role" once the JD names the role.
 //   greeting   A greeting in a role team with no role saves no role, asks no role question,
 //              and the next unrelated message starts no people search.
-//   onemail    One request to Kruit for an email reply shows one Send card, not two. The card
+//   onemail    One request to Kruit for an email reply shows one Send card, not two, in the
+//              role's chat or Kruit's. The card
 //              and any left by an earlier run are discarded, pass or fail; nothing is sent.
 //   reminder   The corner reminder never covers the composer in a role chat.
 //   twochats   Kruit with no role open shows one chat; a role's chat shows Kruit beside it, and
@@ -367,12 +368,22 @@ try {
           (block) => block.kind === "ask" && block.mailReply?.body?.includes(mailTag),
         ),
       );
-    const cards = async () => tagged(await messages(role.id).catch(() => []));
+    // The card may be in the role's chat or in Kruit's, where the recruiter asked: Kruit does the
+    // reply itself when the role team is not needed. One card in either is a pass.
+    const both = async () =>
+      (
+        await Promise.all(
+          [role.id, kruit.id].map(async (groupId) =>
+            (await messages(groupId)).map((message) => ({ ...message, groupId })),
+          ),
+        )
+      ).flat();
+    const cards = async () => tagged(await both().catch(() => []));
     // A read that fails while staging restarts is not zero cards: wait for the chat to answer.
     const recount = async () => {
       for (let end = Date.now() + 3 * 60_000; ; await sleep(10_000)) {
         try {
-          return tagged(await messages(role.id));
+          return tagged(await both());
         } catch (error) {
           if (Date.now() > end) throw new Error(`could not read the role chat: ${error.message}`);
         }
@@ -381,7 +392,7 @@ try {
     // Discards, without sending, every waiting reply card whose body matches: a card left by an
     // earlier run makes Kruit rightly refuse a second card for the same email.
     const discard = async (match) => {
-      for (const message of await messages(role.id).catch(() => []))
+      for (const message of await both().catch(() => []))
         for (const block of message.blocks ?? [])
           if (
             block.kind === "ask" &&
@@ -390,7 +401,7 @@ try {
             match.test(block.mailReply?.body ?? "")
           )
             await rpc("threads/answer", {
-              groupId: role.id,
+              groupId: message.groupId,
               runId: message.runId,
               messageId: message.id,
               answer: "deny",
