@@ -270,7 +270,7 @@ describe("startRecruitingGrading", () => {
       { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
     ];
     const options = {
-      found: [person("fits"), person("misfit"), person("unshown"), person("spare"), person("new")],
+      found: [person("fits"), person("misfit"), person("unshown"), person("spare")],
       graded: [
         "linkedin:/in/fits",
         "linkedin:/in/misfit",
@@ -330,7 +330,16 @@ describe("startRecruitingGrading", () => {
       "1. Fits (candidateKey linkedin:/in/fits)\n2. spare (candidateKey linkedin:/in/spare)\n3. Unshown (candidateKey linkedin:/in/unshown)\n\n",
     );
     expect(promptOf(f)).not.toContain("linkedin:/in/misfit");
-    expect(promptOf(f)).not.toContain("linkedin:/in/new");
+    // fosp 11-20: a short round has saved people no round showed checked first, once, then shows.
+    const short = fixture({ ...options, found: [...options.found, person("new")] });
+    short.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    short.prisma.externalEffect.findMany.mockResolvedValue([] as never);
+    await startRecruitingGrading(short.deps, { threadId: "thread" }, now);
+    expect(short.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({ botId: "reviewer" }),
+    });
+    expect(promptOf(short)).toContain("x.test/in/new");
+    expect(promptOf(short)).not.toContain("x.test/in/fits");
     // Nothing is shown while a round person still waits for a grade made with the feedback.
     const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
     waiting.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
