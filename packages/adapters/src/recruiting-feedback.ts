@@ -39,8 +39,8 @@ const NEW_ROLE_TEXT =
 const DEFAULT_SCALE_MORE = 20;
 
 /**
- * Round direction marks no one. fosp x5 11-20 (753783e2): "4、5、7不行…" and "Tao Yang…Qiang Qin…
- * Liang Z. …" were saved as round scope with no people, so Results showed none of them as not a fit
+ * Round direction marks no one. fosp x5 11-20 (753783e2): "4、5、7不行…" and a turn-down naming three
+ * people were saved as round scope with no people, so Results showed none of them as not a fit
  * until the recruiter complained. The result names the round's people by number so the agent can
  * mark the ones the recruiter's words were about.
  */
