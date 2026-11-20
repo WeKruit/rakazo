@@ -721,25 +721,19 @@ describe("quick reply", () => {
     expect(saysSomething([{ kind: "ask", question: "Which city?" } as never])).toBe(true);
   });
 
-  it("posts a short first reply beside setup", async () => {
+  // Staging 11-20: a first line written by a model without tools said "no records" before the
+  // run read anything. The first line only acknowledges; the run's answer takes its place.
+  it("posts a fixed first line beside setup, with no model writing it", async () => {
     const { runtimeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       finalText: "On it.",
       quickReplies: true,
     });
-    const quick = runtimeRun.mock.calls.find(([call]) => call.runId === "run-1:quick-reply")?.[0];
-    expect(quick?.tools).toEqual([]);
-    expect(quick?.prompt).toContain("what was in the screenshot?");
+    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply")).toBe(false);
     expect(prisma.message.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ blocks: [{ kind: "text", text: "On it." }] }),
+        data: expect.objectContaining({ blocks: [{ kind: "text", text: "Got it, on it." }] }),
       }),
     );
-    // It starts before the main model call.
-    const main = runtimeRun.mock.calls.findIndex(([call]) => call.runId === "run-1");
-    const quickIndex = runtimeRun.mock.calls.findIndex(
-      ([call]) => call.runId === "run-1:quick-reply",
-    );
-    expect(quickIndex).toBeLessThan(main);
   });
 
   // Gate 0f20231b, one-off-email: a run paused on the Connect card resumed for each new message
@@ -775,25 +769,6 @@ describe("quick reply", () => {
 
   // Gate 1625bfd4: the first line already answered, the answer had nothing to add, and an
   // empty-reply fallback was posted after it.
-  it("posts no fallback when the first line already answered and the answer adds nothing", async () => {
-    const { prisma, runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "",
-      quickText: "Your signature is Jules Hou.",
-      quickReplies: true,
-    });
-    // The runtime posts "No response. Try again." for an empty answer unless silence is allowed.
-    const main = runtimeRun.mock.calls.find(([call]) => call.runId === "run-1")?.[0];
-    expect(main?.allowSilentEmpty).toBe(true);
-    const texts = prisma.message.create.mock.calls.flatMap(([args]) =>
-      ((args as { data: { blocks: Array<{ kind: string; text?: string }> } }).data.blocks ?? [])
-        .filter((block) => block.kind === "text")
-        .map((block) => block.text),
-    );
-    expect(texts).toContain("Your signature is Jules Hou.");
-    expect(texts).not.toContain("done.");
-    expect(texts.some((text) => /No response/.test(text ?? ""))).toBe(false);
-  });
-
   // Gate b19c9913: an answer that read the records first still came as a second message.
   it("puts an answer that used tools in place of the first line", async () => {
     const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {

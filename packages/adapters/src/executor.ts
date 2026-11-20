@@ -618,7 +618,6 @@ import {
   isFixedAck,
   oneLineNote,
   progressInOtherLanguage,
-  quickReply,
   withoutLeadingAck,
 } from "./quick-reply.js";
 import { recruiterSigningNote } from "./recruiter-name.js";
@@ -5202,57 +5201,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The reply slot is a teammate's line this bot took over: the answer becomes this bot's.
         let lineFromTeammate = false;
         let quickReplyPosted: Promise<unknown> = Promise.resolve();
-        // The records card, so the first line can already answer when the records do.
-        let setQuickReplyRecords: (text: string | undefined) => void = () => {};
-        const quickReplyRecords = Promise.race([
-          new Promise<string | undefined>((resolve) => {
-            setQuickReplyRecords = resolve;
-          }),
-          new Promise<undefined>((resolve) => setTimeout(resolve, QUICK_REPLY_RECORDS_WAIT_MS)),
-        ]);
-        // Earlier turns, once history is loaded; the first line starts before that.
-        let quickReplyEarlier: () => Array<{
-          role: "user" | "assistant";
-          text: string;
-        }> = () => [];
-        const writeQuickReply = (userText: string, key?: string) =>
-          Promise.all([resolvedPending(), key ? undefined : quickReplyRecords]).then(
-            ([resolved, records]) =>
-              quickReply({
-                runtime: deps.runtime,
-                model: runModelFromResolved(
-                  runModelProvider ?? "",
-                  runModelId ?? "",
-                  resolved,
-                  "off",
-                ),
-                earlier: quickReplyEarlier(),
-                userText,
-                ...(records ? { records } : {}),
-                runId,
-                ...(key ? { key } : {}),
-                ...(hideVendors ? { recruiting: true } : {}),
-                spaceId: run.spaceId,
-                userId: run.userId,
-                botId: bot.id,
-                threadId: thread.id,
-                onUsage: (event) =>
-                  recordUsage(
-                    deps.prisma,
-                    event,
-                    {
-                      spaceId: run.spaceId,
-                      userId: run.userId,
-                      botId: bot.id,
-                      parentRunId: runId,
-                      runId,
-                      operationId: `quick-reply:${runId}${key ? `:${key}` : ""}`,
-                      operationKind: "setup",
-                    },
-                    estimateCatalogTokenCostUsd,
-                  ),
-              }),
-          );
         const turnStartedAt = new Date();
         if (
           quickRepliesOn &&
@@ -5271,9 +5219,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   if (line) fixedAckOpen = fixedAckSent = true;
                   return line;
                 })
-              : // Gate 5fed6e53: "你好" got no usable line and nothing showed for 18 s. The answer
-                // takes the line's place, so a fixed one is enough when the written one is unusable.
-                writeQuickReply(quickReplyText).then((line) => line ?? fixedAck(turnLanguage))
+              : // Staging 11-20: a first line written by a model with no tools stated facts it had
+                // not read ("我没有…记录", "我不能从这里发送邮件"). The answer takes the line's place,
+                // so it only acknowledges; facts come from the run's tool results.
+                Promise.resolve(fixedAck(turnLanguage))
           )
             .then(async (text) => {
               if (!text) return;
@@ -5604,17 +5553,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Without the lookup the answer is posted as its own message.
           }
         }
-        quickReplyEarlier = () =>
-          historyMessages
-            .filter(
-              (message) =>
-                message.id !== currentTurnMessage?.id &&
-                ((message.role === "user" && !message.internal) || message.role === "bot"),
-            )
-            .map((message) => ({
-              role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-              text: blocksText(message.blocks),
-            }));
         const allowSilentPeerMessage = botMessageAllowsSilence(
           peerMessage?.intent,
           peerMessage?.repliesToRequest,
@@ -5704,10 +5642,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }),
               )
             : Promise.resolve(undefined);
-        void workingState.then(
-          (state) => setQuickReplyRecords(state?.text),
-          () => setQuickReplyRecords(undefined),
-        );
         const workingStateNotes = lateNote(workingState.then((state) => state?.text));
         const memoryContextPromise = ownTime(
           "memoryContext",
