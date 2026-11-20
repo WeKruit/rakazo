@@ -19,19 +19,13 @@ export const PEOPLE_SEARCH_TOOLS: ReadonlySet<string> = new Set([
   "agent_run",
 ]);
 
-/**
- * One owner per role's campaign: Kruit changes a role's campaign itself unless that role's own
- * conversation has a run open right now (working, or paused on the recruiter's card), which then
- * owns it. Staging 11-14: global Kruit paused a role's confirmed send while the role's team was
- * fixing the same campaign, so a mistyped address reached the card. Read from the run records, not
- * from which conversation asks. Returns the model-facing refusal.
- */
-export async function globalRoleWriteRefusal(
-  prisma: Pick<PrismaClient, "externalEffect" | "recruitingRole" | "run">,
-  actor: { spaceId: string; userId: string; threadId: string },
+/** The saved role a campaign write is for, by its role_id or the role its campaign is bound to. */
+async function campaignRole(
+  prisma: Pick<PrismaClient, "externalEffect" | "recruitingRole">,
+  actor: { spaceId: string; userId: string },
   call: { toolName: string; args: Record<string, unknown> },
-): Promise<string | undefined> {
-  if (!ROLE_CAMPAIGN_WRITES.has(call.toolName)) return undefined;
+): Promise<{ id: string; title: string } | null> {
+  if (!ROLE_CAMPAIGN_WRITES.has(call.toolName)) return null;
   let roleId = typeof call.args.role_id === "string" ? call.args.role_id : undefined;
   const campaignId = typeof call.args.campaign_id === "string" ? call.args.campaign_id : undefined;
   if (!roleId && campaignId) {
@@ -47,11 +41,42 @@ export async function globalRoleWriteRefusal(
     const bound = (binding?.request as { roleId?: unknown } | null)?.roleId;
     roleId = typeof bound === "string" ? bound : undefined;
   }
-  if (!roleId) return undefined;
+  if (!roleId) return null;
   const role = await prisma.recruitingRole.findFirst({
     where: { id: roleId, spaceId: actor.spaceId, userId: actor.userId },
     select: { id: true, title: true },
   });
+  return role;
+}
+
+/**
+ * A role's conversation changes only its own role's campaigns. Simulated 11-20 (stop-after-approve):
+ * 「全停掉」 in one role's conversation also paused two other roles' campaigns.
+ */
+export async function otherRoleWriteRefusal(
+  prisma: Pick<PrismaClient, "externalEffect" | "recruitingRole">,
+  actor: { spaceId: string; userId: string },
+  activeRoleId: string,
+  call: { toolName: string; args: Record<string, unknown> },
+): Promise<string | undefined> {
+  const role = await campaignRole(prisma, actor, call);
+  if (!role || role.id === activeRoleId) return undefined;
+  return `Not done: that campaign belongs to another role, "${role.title}". This conversation changes only its own role's emails; leave other roles' as they are and say in one line what you changed here.`;
+}
+
+/**
+ * One owner per role's campaign: Kruit changes a role's campaign itself unless that role's own
+ * conversation has a run open right now (working, or paused on the recruiter's card), which then
+ * owns it. Staging 11-14: global Kruit paused a role's confirmed send while the role's team was
+ * fixing the same campaign, so a mistyped address reached the card. Read from the run records, not
+ * from which conversation asks. Returns the model-facing refusal.
+ */
+export async function globalRoleWriteRefusal(
+  prisma: Pick<PrismaClient, "externalEffect" | "recruitingRole" | "run">,
+  actor: { spaceId: string; userId: string; threadId: string },
+  call: { toolName: string; args: Record<string, unknown> },
+): Promise<string | undefined> {
+  const role = await campaignRole(prisma, actor, call);
   if (!role) return undefined;
   const open = await prisma.run.findFirst({
     where: {

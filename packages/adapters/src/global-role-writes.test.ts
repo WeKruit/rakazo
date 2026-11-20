@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { globalRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
+import {
+  globalRoleWriteRefusal,
+  otherRoleWriteRefusal,
+  roleRequestMessage,
+} from "./global-role-writes.js";
 
 function prisma(boundRoleId?: string, openRun?: { status: string }) {
   return {
@@ -61,6 +65,29 @@ describe("globalRoleWriteRefusal", () => {
         }),
       ).toBeUndefined();
     }
+  });
+});
+
+describe("otherRoleWriteRefusal", () => {
+  it("keeps a role's conversation to its own role's campaigns (stop-after-approve, 11-20)", async () => {
+    // "全停掉" in one role's conversation also paused two other roles' campaigns.
+    const error = await otherRoleWriteRefusal(prisma("role-1") as never, actor, "role-2", {
+      toolName: "native_instantly_pause_campaign",
+      args: { campaign_id: "c-1" },
+    });
+    expect(error).toContain("Senior Data Engineer — Seattle");
+    expect(
+      await otherRoleWriteRefusal(prisma("role-1") as never, actor, "role-1", {
+        toolName: "native_instantly_pause_campaign",
+        args: { campaign_id: "c-1" },
+      }),
+    ).toBeUndefined();
+    expect(
+      await otherRoleWriteRefusal(prisma() as never, actor, "role-2", {
+        toolName: "native_instantly_pause_campaign",
+        args: { campaign_id: "one-off" },
+      }),
+    ).toBeUndefined();
   });
 });
 

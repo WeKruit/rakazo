@@ -97,6 +97,7 @@ import {
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
+  spillRequiredResult,
   type ToolOutputStore,
   withoutUndeclaredArguments,
 } from "./pi-runtime-limits.js";
@@ -2120,7 +2121,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
         })();
         clearTimeout(promotionTimer);
         await promotion;
-        if (VERBATIM_TOOL_RESULTS.has(tool.name)) return result as AgentToolResult<unknown>;
+        if (VERBATIM_TOOL_RESULTS.has(tool.name))
+          return spillRequiredResult(
+            result as AgentToolResult<unknown>,
+            toolOutputStore(host, tool.name, executionId),
+            host.activeModel.config.contextWindow ?? host.activeModel.model.contextWindow,
+          );
         return boundAgentToolResult(
           result as AgentToolResult<unknown>,
           toolOutputStore(host, tool.name, executionId),
