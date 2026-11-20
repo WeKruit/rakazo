@@ -5,6 +5,7 @@ import {
   GLOBAL_HANDOFF_ROLE_WORK,
   handoffToGroupBot,
   isQuietStageReport,
+  loadGroupContext,
   NO_ROLE_HANDOFF,
   namesRole,
   REVIEWER_TAKES_NO_HANDOFF,
@@ -1152,5 +1153,32 @@ describe("a role named in a handoff", () => {
     expect(
       namesRole("新岗位 senior data engineer — seattle", "Senior Data Engineer — Seattle"),
     ).toBeUndefined();
+  });
+});
+
+describe("group roster", () => {
+  it("never offers the Reviewer to hand work to", async () => {
+    // Branch feedback-round 11-20 (2ff3f187): the lead tried 19 hand-offs to the Reviewer, all refused.
+    const member = (id: string, name: string, spawnKey: string) => ({
+      bot: { id, name, spawnKey, title: null, description: null, mcpServers: [] },
+    });
+    const prisma = {
+      chatGroup: {
+        findUnique: vi.fn(async () => ({
+          name: "Role",
+          members: [
+            member("main", "Main", "recruiting:x:main"),
+            member("rev", "Reviewer", "recruiting:x:reviewer"),
+            member("src", "Sourcer", "recruiting:x:sourcer"),
+          ],
+        })),
+      },
+    } as unknown as PrismaClient;
+    const roster = await loadGroupContext(prisma, "g", { id: "main", name: "Main" });
+    expect(roster).toContain("Sourcer");
+    expect(roster).not.toContain("Reviewer");
+    expect(await loadGroupContext(prisma, "g", { id: "rev", name: "Reviewer" })).toContain(
+      "Sourcer",
+    );
   });
 });

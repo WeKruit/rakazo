@@ -707,6 +707,7 @@ export async function loadGroupContext(
             select: {
               id: true,
               name: true,
+              spawnKey: true,
               title: true,
               description: true,
               mcpServers: {
@@ -728,21 +729,25 @@ export async function loadGroupContext(
   if (!group) return undefined;
   return renderGroupMembersContext(
     group.name,
-    group.members.map(({ bot: { mcpServers, ...bot } }) => ({
-      ...bot,
-      // Read from the bot's real service assignments, so the roster never drifts from them.
-      capabilities: mcpServers.map(({ server, allowAllTools, allowedTools }) => {
-        const tools =
-          !allowAllTools && Array.isArray(allowedTools)
-            ? allowedTools.filter((tool): tool is string => typeof tool === "string")
-            : [];
-        const about = server.description
-          .trim()
-          .split(/(?<=\.)\s/)[0]
-          ?.slice(0, 120);
-        return `${server.name}${about ? ` (${about})` : ""}${tools.length ? `: ${tools.join(", ")}` : ""}`;
-      }),
-    })),
+    // The Reviewer takes only the batches the server sends it, so it is never offered as someone
+    // to hand work to: branch feedback-round 11-20 (2ff3f187) tried 19 refused hand-offs to it.
+    group.members
+      .filter(({ bot }) => bot.id === self.id || recruitingBotKey(bot) !== "reviewer")
+      .map(({ bot: { mcpServers, spawnKey: _spawnKey, ...bot } }) => ({
+        ...bot,
+        // Read from the bot's real service assignments, so the roster never drifts from them.
+        capabilities: mcpServers.map(({ server, allowAllTools, allowedTools }) => {
+          const tools =
+            !allowAllTools && Array.isArray(allowedTools)
+              ? allowedTools.filter((tool): tool is string => typeof tool === "string")
+              : [];
+          const about = server.description
+            .trim()
+            .split(/(?<=\.)\s/)[0]
+            ?.slice(0, 120);
+          return `${server.name}${about ? ` (${about})` : ""}${tools.length ? `: ${tools.join(", ")}` : ""}`;
+        }),
+      })),
     self,
   );
 }
