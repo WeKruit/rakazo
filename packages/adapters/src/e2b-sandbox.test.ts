@@ -81,6 +81,36 @@ describe("E2B computer backend", () => {
     ]);
   });
 
+  it("streams output while the command is still running", async () => {
+    // Staging 11-20: output arrived only at exit, so code waiting on a printed tool call hung
+    // until the command timed out (about five minutes per call).
+    let seenLive!: () => void;
+    const consumerSaw = new Promise<void>((resolve) => {
+      seenLive = resolve;
+    });
+    const run = vi.fn(async (_cmd: string, opts: { onStdout: (data: string) => void }) => {
+      opts.onStdout("marker\n");
+      await consumerSaw;
+      return { stdout: "marker\ndone\n", stderr: "", exitCode: 0 };
+    });
+    const provider = new E2BSandboxProvider("test-key", {
+      connect: vi.fn(async () => ({ sandboxId: "existing", commands: { run } })),
+    } as unknown as E2BSandboxSdk);
+    const events = [];
+    for await (const event of provider.execute(
+      { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+      { argv: ["python3", "script.py"] },
+      context,
+    )) {
+      events.push(event);
+      if (event.type === "stdout") seenLive();
+    }
+    expect(events).toEqual([
+      { type: "stdout", data: "marker\n" },
+      { type: "exit", code: 0 },
+    ]);
+  });
+
   it("still throws unknown execution errors even when they carry a result property", async () => {
     const failure = Object.assign(new Error("transport unavailable"), {
       result: { exitCode: 0, stdout: "", stderr: "" },
