@@ -150,7 +150,7 @@ import {
   listRecruitingSavedProfiles,
   mergeRecruitingProfileFacts,
 } from "./recruiting-saved-profiles.js";
-import { readRecruiterSeen } from "./recruiting-search-quality.js";
+import { readRecruiterSeen, readRecruiterVerdicts } from "./recruiting-search-quality.js";
 import { IsolationError, scoped } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -11536,6 +11536,12 @@ export async function listRecruitingCandidates(
         }) => (row.candidateKey === null ? [] : [row]),
       );
       const selected = rows.slice(0, limit);
+      // Fosp 11-20 (2a781497): "these three, no" was saved as the recruiter's not-a-fit, yet
+      // Results showed them unmarked, since only a hold/pass decision was shown.
+      const verdicts = await readRecruiterVerdicts(tx, actor, {
+        roleId: role.id,
+        candidateKeys: selected.map((row) => row.candidateKey),
+      });
       // The list renders match fields and page provenance only, never action artifacts.
       const sourceReceipts = new Map<string, unknown>();
       const pages = await candidateProfilePages(
@@ -11733,6 +11739,7 @@ export async function listRecruitingCandidates(
               crm: syncs.get(profile.candidateKey) ?? null,
               savedProfile: savedProfiles.get(profile.candidateKey) ?? null,
               decision: decision?.operation ?? null,
+              recruiterVerdict: verdicts.get(profile.candidateKey) ?? null,
               decisionReason: decision?.source.quote ?? null,
               decisionAt: decision?.source.createdAt ?? null,
               ...(sourcePageId && sourceRowIndex !== null

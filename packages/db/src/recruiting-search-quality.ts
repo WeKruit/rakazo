@@ -216,17 +216,12 @@ export async function readRecruiterSeen(
     });
     for (const row of pages) people.get(row.candidateKey)!.seenBeforeLatestRound = true;
   }
-  const verdicts = await prisma.$queryRaw<{ person: string; fit: "good_example" | "not_fit" }[]>(
-    Prisma.sql`
-      WITH roles AS (
-        SELECT id FROM recruiting_roles
-        WHERE id = ${roleId} AND "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId}
-      ), ${latestVerdictsSql(actor)}
-      SELECT person, fit FROM latest WHERE person IN (${Prisma.join(keys)})`,
-  );
-  for (const row of verdicts) {
-    const person = people.get(row.person);
-    if (person) person.verdict = row.fit;
+  for (const [key, fit] of await readRecruiterVerdicts(prisma, actor, {
+    roleId,
+    candidateKeys: keys,
+  })) {
+    const person = people.get(key);
+    if (person) person.verdict = fit;
   }
   return {
     latestRound: latest
@@ -239,6 +234,24 @@ export async function readRecruiterSeen(
       : null,
     people,
   };
+}
+
+/** The recruiter's latest good example or not a fit on each of these people for one role. */
+export async function readRecruiterVerdicts(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  actor: Actor,
+  input: { roleId: string; candidateKeys: readonly string[] },
+): Promise<Map<string, "good_example" | "not_fit">> {
+  if (!input.candidateKeys.length) return new Map();
+  const rows = await prisma.$queryRaw<{ person: string; fit: "good_example" | "not_fit" }[]>(
+    Prisma.sql`
+      WITH roles AS (
+        SELECT id FROM recruiting_roles
+        WHERE id = ${input.roleId} AND "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId}
+      ), ${latestVerdictsSql(actor)}
+      SELECT person, fit FROM latest WHERE person IN (${Prisma.join([...input.candidateKeys])})`,
+  );
+  return new Map(rows.map((row) => [row.person, row.fit]));
 }
 
 /** How many people a role's search has saved since a moment, for live progress while it runs. */
