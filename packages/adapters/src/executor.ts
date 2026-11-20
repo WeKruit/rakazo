@@ -6306,10 +6306,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             },
             select: { id: true },
           }));
+        // A role that emails people the recruiter named may never have a round: once its sending
+        // campaign exists, the role keeps the catalog that holds its sending tools (gate 44c1ad44:
+        // a turn after the card could not save a corrected email or answer about its sends).
+        const hideCatalog =
+          firstRoundPending &&
+          !(await deps.prisma.externalEffect.findFirst({
+            where: {
+              spaceId: run.spaceId,
+              kind: "instantly_role_campaign",
+              status: "completed",
+              request: { path: ["roleId"], equals: thread.activeRecruitingRoleId ?? "" },
+            },
+            select: { id: true },
+          }));
         const exposedConnectorTools = discovered.filter(
           (tool) =>
             !builtinAgentTools.some((builtin) => builtin.name === tool.name) &&
-            !(firstRoundPending && /_(search_tools|load_tool|execute_tool)$/.test(tool.name)),
+            !(hideCatalog && /_(search_tools|load_tool|execute_tool)$/.test(tool.name)),
         );
         const connectorTools = new Map(
           exposedConnectorTools.map((tool) => [tool.name, tool] as const),

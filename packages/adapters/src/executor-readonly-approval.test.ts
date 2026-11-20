@@ -246,11 +246,12 @@ function fixture({
   };
   const externalEffect = {
     findFirst: vi.fn(
-      async ({ where }: { where: { id?: string; status?: string } }) =>
+      async ({ where }: { where: { id?: string; status?: string; kind?: unknown } }) =>
         effects.find(
           (effect) =>
             (!where.id || effect.id === where.id) &&
-            (!where.status || effect.status === where.status),
+            (!where.status || effect.status === where.status) &&
+            (typeof where.kind !== "string" || effect.kind === where.kind),
         ) ?? null,
     ),
     findMany: vi.fn(
@@ -1770,6 +1771,68 @@ describe("native Instantly activation card", () => {
     );
     expect(sent).toHaveLength(1);
     expect(f.effects[0]!.status).not.toBe("failed");
+  });
+
+  it("keeps the role's sending tools on a role that emails named people and has no round", async () => {
+    // Gate 44c1ad44: after the card, every turn of a role with no round hid the tool catalog, so
+    // the role could not save a corrected email ("I can't call save and resubmit here").
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+      catalog: true,
+      artifacts: true,
+      listed: [
+        {
+          name: "exa__web_search_advanced_exa",
+          description: "People search",
+          readOnly: true,
+          inputSchema: { type: "object" },
+        },
+      ],
+    });
+    Object.assign(f.prisma.thread, {
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: "thread-1",
+        groupId: null,
+        activeRecruitingRoleId: "role-1",
+      })),
+      findFirst: vi.fn(async () => ({
+        id: "thread-1",
+        spaceId: "space-1",
+        userId: "user-1",
+        botId: "bot-1",
+        groupId: null,
+        externalConversationId: null,
+        activeRecruitingRoleId: null,
+      })),
+    });
+    Object.assign(f.prisma.bot, {
+      findFirst: vi.fn(async () => ({ spaceId: "space-1", userId: "user-1" })),
+    });
+    Object.assign(f.prisma, {
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+    });
+    const listed = async () => {
+      f.setCalls([]);
+      await f.run();
+      const request = f.runtimeRun.mock.calls.at(-1)?.[0] as { tools?: { name: string }[] };
+      return request.tools?.some((tool) => tool.name === catalogExecuteToolName("mcp"));
+    };
+    // Before anything is set up for sending, the first round still skips the lookup step.
+    expect(await listed()).toBe(false);
+    f.effects.push({
+      id: "binding",
+      kind: "instantly_role_campaign",
+      idempotencyKey: "instantly-role-campaign:instantly-1:role-1",
+      status: "completed",
+      request: { roleId: "role-1", serverId: "instantly-1" },
+      result: { campaignId: "c-1" },
+      runId: "run-0",
+      spaceId: "space-1",
+    } as never);
+    expect(await listed()).toBe(true);
   });
 
   it("closes a confirmed send that cannot start instead of failing the run", async () => {
