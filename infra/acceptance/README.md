@@ -15,6 +15,8 @@ script: a new test is almost always a new entry in an existing file, not a new f
 
 To play a branch before it merges, `pnpm sim:branch` starts that checkout's own backend in a Modal
 sandbox (fresh database, emulated email, the real model only) and runs the free plays against it.
+`--search` adds staging's people search (feedback rounds, long searches), `--web` serves the branch's
+web pages for `--ui` and page plays, e.g. `pnpm sim:branch --search --web -- --journeys us-recruiter-feedback-round --samples 5`.
 
 Every conversation tool talks to the product through `real-user-session.mjs`: sign-in, sending,
 answering cards and waiting for replies. Wait on the live updates the web app uses, never poll on a
