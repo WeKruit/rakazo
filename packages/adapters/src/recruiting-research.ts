@@ -5,6 +5,7 @@ import type {
   RecruitingCandidateSource,
   RecruitingResearchObservation,
 } from "@rakazo/contracts";
+import { RECRUITING_CALIBRATION_ROUND_SIZE } from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
@@ -465,10 +466,14 @@ export async function peopleRoomForRequest(
     const seen = new Set(before);
     const fresh = since.filter((key) => !seen.has(key)).length;
     const target = peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0;
-    // Staging 11-20 (44c1ad44): "先找10个人" was met, then "再来5个" (no number the cap reads)
-    // was refused as done, twice. A message written once the number was reached is a new
-    // request, whatever its wording, so the old number no longer caps it.
-    if (newerAsk && (await heldBefore(newerAsk)).length >= target) return undefined;
+    // Staging 11-20 (44c1ad44): "先找10个人" was met, then a numberless ask was refused as
+    // done, twice. A message written once the number was reached is a new request, whatever its
+    // wording; with no number of its own it is one round (branch e57f71af: left uncapped,
+    // "下一批按这个调" saved 25 more).
+    if (newerAsk) {
+      const held = (await heldBefore(newerAsk)).length;
+      if (held >= target) return Math.max(0, held + RECRUITING_CALIBRATION_ROUND_SIZE - total);
+    }
     return Math.max(0, target - total);
   }
   return undefined;
