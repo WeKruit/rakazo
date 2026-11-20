@@ -24,6 +24,7 @@ const {
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
+  roundSize,
   ROUND_HELD_SEARCH_REFUSAL,
   scheduleRecruitingGrading,
   startRecruitingGrading,
@@ -1040,6 +1041,50 @@ describe("checkedRoundPeople", () => {
     expect(picked).toHaveLength(10);
     expect(picked.map((p) => p.key)).not.toContain("d");
     expect(picked[1]).toEqual({ key: "r0", name: "r0" });
+  });
+
+  it("fills a mostly turned-down round with checked Promising people from Results, never Partial", () => {
+    // Branch 2026-11-20 (feedback-round x5): the Reviewer graded 1–5 of up to 84 saved people
+    // Strong, so round 2 kept its 5 Promising, dropped its 5 Partial, found no Strong replacement
+    // and came back with 5 while 16 checked Promising people sat in Results.
+    const keys = ["p1", "p2", "p3", "p4", "p5", "x1", "x2", "x3", "x4", "x5"];
+    const grades = new Map([
+      ...keys.slice(0, 5).map((key) => [key, grade(key, "Promising")] as const),
+      ...keys.slice(5).map((key) => [key, grade(key, "Partial")] as const),
+    ]);
+    const replacements = [
+      { key: "s1", name: "S1", tier: "Strong" },
+      ...Array.from({ length: 6 }, (_, i) => ({ key: `q${i}`, name: `Q${i}`, tier: "Promising" })),
+    ];
+    expect(checkedRoundPeople(keys, grades, replacements).map((p) => p.key)).toEqual([
+      "s1",
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+      "p5",
+      "q0",
+      "q1",
+      "q2",
+      "q3",
+    ]);
+  });
+});
+
+describe("roundSize", () => {
+  it("shows the few people the recruiter asked for, else ten", () => {
+    // fosp 11-20: "再来5个" was filled to 6.
+    const handIn = (words: string) => [
+      {
+        kind: "bot_message_received",
+        text: `The recruiter wrote, word for word:\n"${words}"\n\nKruit's note: find 10 more`,
+      },
+    ];
+    expect(roundSize(handIn("再来5个"))).toBe(5);
+    expect(roundSize([{ kind: "text", text: "2 more people like the rest" }])).toBe(2);
+    expect(roundSize(handIn("#7 and #8 aren't a fit, find more like the rest"))).toBe(10);
+    expect(roundSize([{ kind: "text", text: "find 50" }])).toBe(10);
+    expect(checkedRoundPeople(["a", "b", "c"], new Map(), [], 2)).toHaveLength(2);
   });
 });
 
