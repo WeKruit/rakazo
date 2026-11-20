@@ -1338,11 +1338,11 @@ export const ROUND_HELD_NEXT_STEP =
 
 /** A people search after this turn recorded a held round: the check starts when the turn ends. */
 export const ROUND_HELD_SEARCH_REFUSAL =
-  "Not run: this turn recorded the round, and it is shown once the Reviewer has checked it, which starts when this turn ends. A request for the next ten is answered by that round. Save the brief if not saved yet, then end the turn with one short line saying the checked people come in a few minutes.";
+  "Not run: this turn recorded the round, and it is shown once the Reviewer has checked it, which starts when this turn ends. A request for more people (“再来5个”, “the next ten”) is answered by that round, at the number they asked, so never say another batch can't start. Save the brief if not saved yet, then end the turn with one short line saying the checked people come in a few minutes.";
 
 /** A people search while an earlier turn's round waits for the check: that round is the answer. */
 export const ROUND_AWAITING_SEARCH_REFUSAL =
-  "Not run: the round is recorded and the Reviewer is checking it now; the checked round is shown in this chat as soon as the check ends, with the next-step card. A request for the next ten is answered by that round. End the turn with one short line in the recruiter's language saying it comes in a minute or two.";
+  "Not run: the round is recorded and the Reviewer is checking it now; the checked round is shown in this chat as soon as the check ends, with the next-step card. A request for more people (“再来5个”, “the next ten”) is answered by that round, at the number they asked, so never say another batch can't start. End the turn with one short line in the recruiter's language saying it comes in a minute or two.";
 
 /**
  * Why a people search must not run now, or null. Staging 11-16 (982a0ac9): the recruiter's "still
