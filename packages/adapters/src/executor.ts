@@ -730,6 +730,8 @@ import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
   openRoleGroup,
   roleOpenedFromLatestMessage,
+  roleAlreadyOpenedHere,
+  roleAlreadyOpenNote,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -14936,6 +14938,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : undefined;
             if (savedReference?.kind === "saved" && savedReference.by.startsWith("ref "))
               return finish({ error: savedRoleNote(savedReference) });
+            const openHere = await roleAlreadyOpenedHere(deps.prisma, {
+              spaceId: run.spaceId,
+              userId: run.userId,
+              threadId: run.threadId,
+              title,
+            });
+            if (openHere && !roleReferenceOverruled.has(openHere.groupId)) {
+              roleReferenceOverruled.add(openHere.groupId);
+              return finish({ error: roleAlreadyOpenNote(openHere) });
+            }
             const team = await deps.prisma.chatGroupMember.findMany({
               where: { groupId: thread.groupId },
               select: { botId: true },

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  roleAlreadyOpenedHere,
   roleGroupId,
   roleOpenedFromLatestMessage,
   roleStartKey,
@@ -341,5 +342,51 @@ describe("roleOpenedFromLatestMessage", () => {
   it("delegates to a role opened from an earlier message", async () => {
     const role = { groupId: roleGroupId("m-earlier"), title: "Senior Data Engineer" };
     expect(await roleOpenedFromLatestMessage(prisma as never, "t-global", role)).toBe(false);
+  });
+});
+
+describe("roleAlreadyOpenedHere", () => {
+  const message = (id: string, text: string) => ({
+    id,
+    role: "user",
+    botId: null,
+    clientNonce: null,
+    externalTranscriptFor: null,
+    blocks: [{ kind: "text", text }],
+  });
+  const feedback = message("m-feedback", "这三个不合适，下一批按这个改");
+  const jd = message("m-jd", "新职位：Senior Data Engineer，上海");
+  function prisma(groups: { id: string; name: string }[]) {
+    return {
+      message: { findMany: vi.fn(async () => [feedback, jd]) },
+      chatGroup: {
+        findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
+          groups.filter((group) => where.id.in.includes(group.id)),
+        ),
+      },
+    };
+  }
+  const where = { spaceId: "s", userId: "u", threadId: "t-global" };
+
+  it("finds the role an earlier message opened, so feedback goes to it (simulated 2026-11-20)", async () => {
+    // Feedback on round one opened a second, empty "Senior Data Engineer" role, and the
+    // turned-down people came back in it.
+    const opened = { id: roleGroupId("m-jd"), name: "Senior Data Engineer（上海）" };
+    expect(
+      await roleAlreadyOpenedHere(prisma([opened]) as never, {
+        ...where,
+        title: "Senior Data Engineer｜上海",
+      }),
+    ).toEqual({ groupId: opened.id, title: opened.name });
+  });
+
+  it("opens a role with a different title", async () => {
+    const opened = { id: roleGroupId("m-jd"), name: "Senior Data Engineer（上海）" };
+    expect(
+      await roleAlreadyOpenedHere(prisma([opened]) as never, {
+        ...where,
+        title: "Product Designer",
+      }),
+    ).toBeUndefined();
   });
 });
