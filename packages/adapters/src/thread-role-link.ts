@@ -14,8 +14,14 @@ export async function linkSavedThreadRole(
 ): Promise<void> {
   if (thread.activeRecruitingRoleId || !toolName.includes("recruiting_")) return;
   if (thread.groupId?.startsWith("recruiting-global-")) return;
-  const linked = await prisma.thread
-    .findUnique({ where: { id: thread.id }, select: { activeRecruitingRoleId: true } })
+  // A failed read leaves the run as it was; it never fails the tool call.
+  const linked = await Promise.resolve()
+    .then(() =>
+      prisma.thread.findUnique({
+        where: { id: thread.id },
+        select: { activeRecruitingRoleId: true },
+      }),
+    )
     .catch(() => null);
   if (linked?.activeRecruitingRoleId) thread.activeRecruitingRoleId = linked.activeRecruitingRoleId;
 }
