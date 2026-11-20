@@ -147,7 +147,12 @@ export function client() {
       }
     }
   };
-  return { auth, rpc, cookie: () => cookie };
+  /** The signed-in account's own display name, as the product shows it and Kruit signs with it. */
+  const name = async () => {
+    const response = await fetch(`${BASE}/api/auth/get-session`, { headers: { origin: ORIGIN, cookie } });
+    return response.ok ? ((await response.json().catch(() => null))?.user?.name ?? null) : null;
+  };
+  return { auth, rpc, name, cookie: () => cookie };
 }
 
 // Waiting without polling: each watched chat keeps one live event stream open, like the web app,
