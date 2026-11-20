@@ -90,7 +90,6 @@ import {
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
-  asksForPeople,
   asksForOutreach,
   assertTransition,
   attachmentExtensionForMimeType,
@@ -4908,7 +4907,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               total: page?.total,
               teamWorking: `${working?.note ?? `The team is checking round ${held} before it is shown.`} The next round is shown here once, already checked: never list, name or count people from Results before it comes. Asked to see people now, say in one line that the checked round arrives here in a minute or two; never just decline.`,
             };
-          if (!asksForPeople(lastRecruiterText)) return undefined;
+          // The agent says when a page is for the recruiter: asked whether the people they turned
+          // down are marked, a keyword match posted a page that leaves out every round's people.
+          if (args.show !== true) return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
             where: {
               id: args.roleId,

@@ -266,23 +266,6 @@ export function asksForTemplate(text: string): boolean {
   );
 }
 
-/**
- * A recruiter message that asks to see people, "the new ones" included. Staging 11-13: "现在must-have
- * 有哪些" made Kruit read the role's people and post all of Results, unpicked people included, as
- * the answer.
- */
-export function asksForPeople(text: string): boolean {
-  // Staging 11-15: "一共找到多少人？" posted a one-person page under the answer "19".
-  if (
-    /多少|几(?:个|位|人)|how many|\bcount\b/i.test(text) &&
-    !/看|名单|列|谁|页|show|list|see|who|page/i.test(text)
-  )
-    return false;
-  return /人|候选|名单|简历|名字|页|谁|新的|candidate|people|person|profile|resume|who|list|page|show|results|\bones\b|\bsee (?:them|the)\b/i.test(
-    text,
-  );
-}
-
 /** Model-facing, in a new role's conversation opened to email people the recruiter named. */
 export const NAMED_SEND_ROLE_NOTE =
   "The recruiter named the people to email, with their addresses: this role has no search unless they ask for one. Never run people searches, never ask whether to look for others and never show or record a round; save the role from what they wrote and put the email for exactly those people on its send card.";
