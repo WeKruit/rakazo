@@ -4173,6 +4173,8 @@ describe("local native Instantly campaign and lead tools", () => {
       rejectPatch: "",
       /** The campaign read after an edit fails, as a timed-out request does. */
       failReadAfterPatch: false,
+      /** What the mail service's sending-status read says about the role campaign. */
+      sendingStatus: null as Record<string, unknown> | null,
       lookups: [] as Record<string, unknown>[],
       /** The role's saved candidates, as a role-wide candidate read returns them. */
       candidates: [] as Record<string, unknown>[],
@@ -4300,6 +4302,8 @@ describe("local native Instantly campaign and lead tools", () => {
           if (request.method === "PATCH") Object.assign(state.campaign, body);
           return Response.json(state.campaign);
         }
+        if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}/sending-status`)
+          return Response.json(state.sendingStatus ?? { diagnostics: null, summary: null });
         if (url.pathname.startsWith(`/api/v2/campaigns/${CAMPAIGN}/`))
           return Response.json(state.campaign);
         const listed = state.campaigns.find((c) => url.pathname === `/api/v2/campaigns/${c.id}`);
@@ -5644,6 +5648,44 @@ describe("local native Instantly campaign and lead tools", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("says why the mail service is holding a confirmed send instead of promising an hour", async () => {
+      // Staging 11-20: three confirmed one-person sends sat unsent over two hours after "within
+      // about 60 minutes at the latest".
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      f.state.campaign.campaign_schedule = {
+        schedules: [
+          {
+            ...WEEKDAYS_9_TO_5.schedules[0],
+            name: "Any time",
+            timing: { from: "00:00", to: "23:59" },
+            days: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((day) => [String(day), true])),
+          },
+        ],
+      };
+      for (const lead of f.state.campaignLeads.slice(1))
+        lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+      f.state.sendingStatus = {
+        diagnostics: { status: "account_daily_limit_met", next_open_at: null },
+        summary: {
+          status: "account_daily_limit_met",
+          status_message: "All sending accounts reached their daily limit",
+          issue_started_at: "2026-11-20T19:30:00Z",
+        },
+      };
+      const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+      expect(read).toMatchObject({
+        notEmailedYet: ["abe@x.test"],
+        mailServiceSays: { status: "account_daily_limit_met" },
+        next: expect.stringContaining("All sending accounts reached their daily limit"),
+      });
+      expect(read.next).not.toMatch(/within/);
+      f.state.sendingStatus = { summary: { status: "healthy" } };
+      const sending = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+      expect(sending).not.toHaveProperty("mailServiceSays");
+      expect(sending.next).toMatch(/going out now/);
     });
 
     it("says people queued inside the sending hours are going out, and a send-now sends them one a minute", async () => {
