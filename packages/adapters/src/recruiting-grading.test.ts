@@ -1089,10 +1089,24 @@ describe("roundSize", () => {
         text: `The recruiter wrote, word for word:\n"${words}"\n\nKruit's note: find 10 more`,
       },
     ];
-    expect(roundSize(handIn("再来5个"))).toBe(5);
-    expect(roundSize([{ kind: "text", text: "2 more people like the rest" }])).toBe(2);
-    expect(roundSize(handIn("#7 and #8 aren't a fit, find more like the rest"))).toBe(10);
-    expect(roundSize([{ kind: "text", text: "find 50" }])).toBe(10);
+    expect(roundSize([handIn("再来5个")])).toBe(5);
+    expect(roundSize([[{ kind: "text", text: "2 more people like the rest" }]])).toBe(2);
+    expect(roundSize([handIn("#7 and #8 aren't a fit, find more like the rest")])).toBe(10);
+    expect(roundSize([[{ kind: "text", text: "find 50" }]])).toBe(10);
+    // fosp 11-20 (a2d787f8): the newest message only asked where they were; the ask before set 5.
+    expect(
+      roundSize([
+        [{ kind: "text", text: "那5个出来了吗？Results页面里标了没" }],
+        handIn("再来5个"),
+      ]),
+    ).toBe(5);
+    // fosp 11-20 (f69df234): "你说的7个和23个到底哪个对，再来5个" read 23 and showed ten.
+    expect(
+      roundSize([
+        handIn("下一批具体改了什么？另外你说的7个和23个到底哪个对，再来5个，别让1、5、6回来"),
+      ]),
+    ).toBe(5);
+    expect(roundSize([])).toBe(10);
     expect(checkedRoundPeople(["a", "b", "c"], new Map(), [], 2)).toHaveLength(2);
   });
 });
