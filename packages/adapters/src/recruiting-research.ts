@@ -24,6 +24,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
+import { handedInRecruiterWords } from "./global-role-writes.js";
 import { peopleTargetFrom } from "./people-target.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
@@ -416,10 +417,7 @@ export const PEOPLE_SEARCH_MAX_RESULTS = 10;
 function recruiterText(block: Record<string, unknown> | undefined): string {
   const text = typeof block?.text === "string" ? block.text : "";
   if (block?.kind !== "bot_message_received") return text;
-  return (
-    /^The recruiter wrote, word for word:\n"([\s\S]*?)"(?:\n\nKruit's brief:|$)/.exec(text)?.[1] ??
-    ""
-  );
+  return handedInRecruiterWords(text) ?? "";
 }
 
 /**

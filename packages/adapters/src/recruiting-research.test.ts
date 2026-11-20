@@ -404,7 +404,33 @@ describe("people-search agent runs", () => {
         },
       ]);
       found(0, 20);
-      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      const handedIn = await limit();
+      expect(handedIn).toMatchObject({ numResults: 10 });
+      settlePeopleSearch(handedIn, "done");
+      // Branch ed7512fa: with round one waiting on the recruiter the hand-in ends with Kruit's
+      // note instead of a brief, so "再来5个" went unread and the role's "先找10个" refused it.
+      db.message.findMany.mockResolvedValue([
+        {
+          createdAt: new Date("2026-11-15T11:55:00Z"),
+          blocks: [
+            {
+              kind: "bot_message_received",
+              text: "The recruiter wrote, word for word:\n\"然后再找10个，那三个别再出现\"\n\nKruit's note, only on who and what this refers to; the request is the recruiter's words above:\nthe three are A, B, C",
+            },
+          ],
+        },
+        {
+          createdAt: new Date("2026-11-15T10:05:00Z"),
+          blocks: [{ kind: "text", text: "Senior SRE，Austin。先找10个人" }],
+        },
+      ]);
+      db.recruitingCandidate.count.mockResolvedValue(10);
+      savedAt(10, new Date("2026-11-15T10:40:00Z"));
+      const noted = await limit();
+      expect(noted).toMatchObject({ numResults: 10 });
+      settlePeopleSearch(noted, "done");
+      db.recruitingCandidate.count.mockResolvedValue(20);
+      found(0, 20);
       // Staging 11-20 (44c1ad44): "先找10个人" was met at 08:11, then "再来5个" (no number the
       // cap reads) came after it and was refused as done, twice. Written once the 10 were in,
       // it is a new request. A nudge while the 10 are still coming stays capped.

@@ -43,6 +43,11 @@ describe("referredRole", () => {
     expect(
       referredRole(["新岗位 Senior Data Engineer Seattle，2026年开始"], roles),
     ).toBeUndefined();
+    // Branch plays 11-20 stop-after-approve: a role's requirements with an unsaved ref but no
+    // 「新」 went to Outreach as a campaign outside any role, which no page shows.
+    const described =
+      "Senior Data Engineer 西雅图 ref 12401，hybrid 3天，6年+，Spark Kafka，base 180-220k。两个都发";
+    expect(referredRole([described], roles)).toEqual({ kind: "new", ref: "12401" });
   });
 
   it("matches a title by its distinctive words, not generic ones", () => {
