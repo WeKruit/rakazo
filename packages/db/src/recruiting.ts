@@ -12306,7 +12306,12 @@ export async function saveRecruitingCalibrationRound(
     const kept = new Set(
       input.corrects ? keys.filter((key) => previous?.candidateKeys.includes(key)) : [],
     );
-    if (input.corrects && !kept.size)
+    // The checked version of a held round may replace all of it: the recruiter never saw it.
+    if (
+      input.corrects &&
+      !kept.size &&
+      (!previous || calibrationRoundStatus(previous) !== "checked")
+    )
       throw new RecruitingCalibrationRoundError(
         `corrects is for swapping some people of round ${previous?.round ?? 1} after the recruiter's feedback: keep the ones they did not turn down and add the replacements. None of these people were in that round, so record them as a new round without corrects.`,
       );
