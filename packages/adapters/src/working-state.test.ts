@@ -702,6 +702,37 @@ describe("loadWorkingState", () => {
     const other = await working("t-other");
     expect(other).not.toContain("You handed this team work");
     expect(other).toContain("Team's last report");
+    // A role opened from this conversation carries the recruiter's message, not a brief.
+    const opened = await loadWorkingState(
+      fakePrisma({
+        groups,
+        roles,
+        messagesByThread: {
+          t1: [
+            {
+              role: "bot",
+              botId: "bot-sourcer",
+              createdAt: new Date(now - 60_000),
+              ...text("8 searches failed, nobody saved yet"),
+            },
+            {
+              role: "user",
+              clientNonce: "start-role:k1",
+              createdAt: new Date(now - 2 * 60_000),
+              ...text("Senior Go engineer, Shanghai, start searching"),
+            },
+          ],
+        },
+      }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    ).then((state) => state.text ?? "");
+    expect(opened).toContain(
+      'You handed this team work 2 min ago: "Senior Go engineer, Shanghai, start searching"',
+    );
+    expect(opened).toContain('(Sourcer, 1 min ago): "8 searches failed, nobody saved yet"');
   });
   // Gate 9e15e896, stop-after-approve: a campaign Kruit started outside any role was confirmed,
   // then "stop until Monday" and "who got it" had no campaign to read or pause.

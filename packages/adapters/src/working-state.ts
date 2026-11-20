@@ -379,7 +379,7 @@ export async function loadWorkingState(
           where: { threadId },
           orderBy: { seq: "desc" },
           take: ROLE_MESSAGES,
-          select: { role: true, botId: true, blocks: true, createdAt: true },
+          select: { role: true, botId: true, blocks: true, createdAt: true, clientNonce: true },
         }),
       ),
     ),
@@ -650,16 +650,20 @@ export async function loadWorkingState(
       // team-has-no-email: Kruit answered from its own read with another person than the team's,
       // then said it had asked the team again). Only while the recruiter has not written there.
       const handIndex = messages.findIndex((m) => m.role === "user");
-      const handoff =
-        handIndex === -1
-          ? undefined
-          : (messages[handIndex]!.blocks as MessageBlock[]).find(
-              (block) =>
-                block.kind === "bot_message_received" && block.returnThreadId === thread.id,
-            );
-      if (handoff?.kind === "bot_message_received") {
+      // A role is opened from this conversation with the recruiter's message (start_role), and
+      // later work reaches it as this conversation's brief (delegate_to_role).
+      const handed = handIndex === -1 ? undefined : messages[handIndex]!;
+      const handedBlocks = (handed?.blocks ?? []) as MessageBlock[];
+      const brief = handed?.clientNonce?.startsWith(ROLE_START_NONCE)
+        ? handedBlocks.map(blockText).filter(Boolean).join(" ")
+        : handedBlocks.flatMap((block) =>
+            block.kind === "bot_message_received" && block.returnThreadId === thread.id
+              ? [block.text]
+              : [],
+          )[0];
+      if (handed && brief?.trim()) {
         lines.push(
-          `  You handed this team work ${ago(messages[handIndex]!.createdAt, now)}: "${flat(handoff.text, HANDOFF_CHARS)}"`,
+          `  You handed this team work ${ago(handed.createdAt, now)}: "${flat(brief, HANDOFF_CHARS)}"`,
         );
         const since = messages.slice(0, handIndex).filter((m) => m.botId && m.role !== "user");
         const live = latestRun.get(threadId);
