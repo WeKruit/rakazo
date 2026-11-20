@@ -1073,6 +1073,62 @@ it("excludes duplicate tool bookkeeping from the native prompt budget for a save
   ).toMatchObject({ content: [{ type: "text", text: JSON.stringify(assessment) }] });
 });
 
+it("saves a required result larger than the context and gives the model a readable preview", async () => {
+  const { target, input } = compactionRequest(false);
+  input.tools = [
+    {
+      name: "recruiting_candidates",
+      description: "Read saved candidates",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+  ];
+  const account = {
+    roles: Array.from({ length: 2_000 }, (_, index) => ({
+      roleId: `role-${index}`,
+      people: `${index}: ${"p".repeat(400)}`,
+    })),
+  };
+  input.executeTool = vi.fn(async () => account);
+  const saved: string[] = [];
+  input.storeToolOutput = vi.fn(async ({ text }) => {
+    saved.push(text);
+    return { artifactId: "full-result", length: Array.from(text).length };
+  });
+  let turns = 0;
+  providerState.stream.mockImplementation(() => {
+    turns++;
+    return stream(
+      target,
+      message(
+        target,
+        turns === 1
+          ? [{ type: "toolCall", id: "read-account", name: "recruiting_candidates", arguments: {} }]
+          : [{ type: "text", text: "Read the saved roles." }],
+        turns === 1 ? "toolUse" : "stop",
+      ),
+    );
+  });
+  const events = await run(input);
+  expect(events.at(-1)).toEqual({ type: "done", text: "Read the saved roles." });
+  expect(saved).toHaveLength(1);
+  expect(JSON.parse(saved[0]!)).toEqual(account);
+  const final = providerState.stream.mock.calls.at(-1)![1] as Context;
+  const result = final.messages.find(
+    (entry) => entry.role === "toolResult" && entry.toolCallId === "read-account",
+  );
+  const part = result?.role === "toolResult" ? result.content[0] : undefined;
+  const preview = JSON.parse(part?.type === "text" ? part.text : "{}");
+  expect(preview).toMatchObject({
+    contextTruncated: true,
+    fullResultArtifactId: "full-result",
+    totalChars: Array.from(saved[0]!).length,
+  });
+  expect(saved[0]!.startsWith(preview.preview)).toBe(true);
+  expect(preview.nextOffset).toBe(Array.from(preview.preview).length);
+  expect(estimateModelContextTokens(final)).toBeLessThan(target.contextWindow - target.maxTokens);
+});
+
 it("updates the previous native summary when protected history leaves only a split turn prefix", async () => {
   const { target, input } = compactionRequest(false);
   target.contextWindow = 8_192;
