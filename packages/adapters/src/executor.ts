@@ -1165,6 +1165,13 @@ export async function filledRecruitingFeedbackArgs(
   args: Record<string, unknown>,
 ): Promise<{ args: Record<string, unknown>; error?: string }> {
   const filled: Record<string, unknown> = { ...args };
+  // Only a preference has expectedRevision; on role, round or candidate feedback it is the role's
+  // revision misnamed. fosp x5 11-20 (1ae3a9c3): three identical calls refused for it, no marks.
+  if (filled.target !== "preference" && "expectedRevision" in filled) {
+    if (typeof filled.expectedRoleRevision !== "number")
+      filled.expectedRoleRevision = filled.expectedRevision;
+    delete filled.expectedRevision;
+  }
   if (typeof filled.roleId !== "string" || !filled.roleId.trim()) filled.roleId = roleId;
   if (typeof filled.expectedRoleRevision !== "number" && filled.roleId === roleId) {
     const role = await prisma.recruitingRole.findUnique({

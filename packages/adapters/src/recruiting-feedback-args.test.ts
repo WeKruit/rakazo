@@ -80,6 +80,29 @@ describe("recruiting_feedback arguments", () => {
     expect(RecruitingFeedbackInputSchema.safeParse(args).success).toBe(true);
   });
 
+  it("reads expectedRevision on role feedback as the role's revision, and keeps it on a preference", async () => {
+    // Branch 1ae3a9c3 (fosp3): three identical candidate calls refused for expectedRevision.
+    const { args } = await filledRecruitingFeedbackArgs(prisma(), "role-1", {
+      target: "candidate",
+      operation: "review",
+      fit: "not_fit",
+      expectedRevision: 3,
+      candidateKeys: ["Jane Doe"],
+      intent,
+    });
+    expect(args).toMatchObject({
+      expectedRoleRevision: 3,
+      candidateKeys: [people[0]?.candidateKey],
+    });
+    expect(args).not.toHaveProperty("expectedRevision");
+    expect(RecruitingFeedbackInputSchema.safeParse(args).success).toBe(true);
+    const preference = await filledRecruitingFeedbackArgs(prisma(), "role-1", {
+      target: "preference",
+      expectedRevision: 2,
+    });
+    expect(preference.args).toMatchObject({ expectedRevision: 2 });
+  });
+
   it("names people by their full name or profile link", async () => {
     const { args, error } = await filledRecruitingFeedbackArgs(prisma(), "role-1", {
       target: "candidate",

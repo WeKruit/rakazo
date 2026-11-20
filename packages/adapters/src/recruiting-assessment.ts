@@ -31,6 +31,7 @@ import {
   readRecruiterSeen,
   readRecruitingActivity,
   readRecruitingCalibrationRound,
+  readRecruitingResultsMarks,
   recordRecruitingWebMaterial,
   saveRecruitingAssessment,
   scoped,
@@ -616,8 +617,23 @@ export async function executeRecruitingCandidatesTool(
               .catch(() => null)
           : null;
       const groupId = group?.sourceThread?.groupId;
+      const marks = roundRoleId
+        ? await readRecruitingResultsMarks(deps.prisma, trusted.actor, {
+            roleId: roundRoleId,
+          }).catch(() => null)
+        : null;
       return {
         status: "found" as const,
+        ...(marks
+          ? {
+              markedOnResults: marks.length
+                ? marks.map(
+                    (person) =>
+                      `${person.name ?? person.candidateKey}${person.round ? ` (round ${person.round})` : ""}: ${person.mark}`,
+                  )
+                : "Results marks no one on this role yet.",
+            }
+          : {}),
         ...(groupId && deps.webOrigin
           ? { resultsPage: new URL(`/app/g/${groupId}?view=results`, deps.webOrigin).href }
           : {}),

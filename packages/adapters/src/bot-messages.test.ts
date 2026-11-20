@@ -1001,6 +1001,48 @@ describe("delegating to a role team in another conversation", () => {
     ]);
   });
 
+  it("copies neither the card nor the result when the recruiter is in the role's chat (branch sends 2026-11-20)", async () => {
+    const harness = team({ busy: true });
+    const card = { kind: "ask", text: "Send?", status: "pending", actions: [] };
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const delegated = prisma.message!.findFirst as (args: { where: { runId?: string } }) => unknown;
+    prisma.message!.findFirst = vi.fn(async (args: { where: { runId?: string } }) =>
+      args.where.runId ? { id: "card-1", blocks: [card] } : delegated(args),
+    );
+    (harness.tx.message as Record<string, unknown>).findFirst = vi.fn(async () => ({
+      id: "card-1",
+      blocks: [card],
+    }));
+    const human = (threadId: string, text: string) => ({
+      threadId,
+      role: "user",
+      clientNonce: null,
+      botId: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text }],
+    });
+    const recent = vi.fn(async (args: { where: { threadId?: unknown } }) =>
+      typeof args.where.threadId === "object"
+        ? [human("thread-role", "use my subject line"), human("thread-global", "email Ethan")]
+        : [said("Queued; sends within 58 minutes.")],
+    );
+    prisma.message!.findMany = recent;
+    await showDelegatedTeamCard(harness.deps, roleRun);
+    prisma.run!.findFirst = vi.fn(async () => null);
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([]);
+    // Back in Kruit's chat, both come there again.
+    prisma.message!.findMany = vi.fn(async (args: { where: { threadId?: unknown } }) =>
+      typeof args.where.threadId === "object"
+        ? [human("thread-global", "is it sent?"), human("thread-role", "use my subject line")]
+        : [said("Queued; sends within 58 minutes.")],
+    );
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([
+      expect.objectContaining({ text: expect.stringContaining("Queued") }),
+    ]);
+  });
+
   it("reports nothing when no other conversation delegated the work", async () => {
     const harness = team({ root: { ...delegation, intent: "result" } });
     await reportDelegatedTeamBlocked(harness.deps, roleRun, { kind: "failed", text: "boom" });

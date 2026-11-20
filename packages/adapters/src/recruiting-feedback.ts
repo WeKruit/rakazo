@@ -38,6 +38,42 @@ const NEW_ROLE_TEXT =
 /** People to add when the recruiter accepts a round without naming a number: one small try. */
 const DEFAULT_SCALE_MORE = 20;
 
+/**
+ * Round direction marks no one. fosp x5 11-20 (753783e2): "4、5、7不行…" and a turn-down naming three
+ * people were saved as round scope with no people, so Results showed none of them as not a fit
+ * until the recruiter complained. The result names the round's people by number so the agent can
+ * mark the ones the recruiter's words were about.
+ */
+function roundDirectionNext(people: string[]) {
+  return `Saved as direction for the next round; it marks no one on Results. The latest round as numbered for the recruiter: ${people.join("; ")}. If their words turned down or praised any of these people, by name or by number, record those people now with target "candidate", operation "review" and fit "not_fit" or "good_example" (one call per fit), using these keys.`;
+}
+
+/** The latest round the recruiter saw, as "1. Name = key" in the order its list numbers them. */
+async function latestRoundPeople(prisma: PrismaClient, roleId: string): Promise<string[]> {
+  return Promise.resolve()
+    .then(async () => {
+      const round = await prisma.recruitingCalibrationRound.findFirst({
+        where: { roleId, status: "shown" },
+        orderBy: { round: "desc" },
+        select: { candidateKeys: true },
+      });
+      if (!round?.candidateKeys.length) return [];
+      const names = new Map(
+        (
+          await prisma.recruitingCandidateOccurrence.findMany({
+            where: { roleId, candidateKey: { in: round.candidateKeys }, name: { not: null } },
+            select: { name: true, candidateKey: true },
+            distinct: ["candidateKey"],
+          })
+        ).map((row) => [row.candidateKey, row.name]),
+      );
+      return round.candidateKeys.map(
+        (key, index) => `${index + 1}. ${names.get(key) ?? "?"} = ${key}`,
+      );
+    })
+    .catch(() => []);
+}
+
 export class RecruitingFeedbackValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -197,7 +233,16 @@ export async function executeRecruitingFeedback(
       next: `Target for this request: ${target} people in Results (${inResults} now). Use this number; do not work it out again. ${RECRUITING_SCALE_START}`,
     };
   }
-  if (feedback.target === "round" || feedback.target === "candidate")
+  if (feedback.target === "round") {
+    const people = await latestRoundPeople(deps.prisma, feedback.roleId);
+    return {
+      ...result,
+      status: choice ? "already_recorded" : "recorded",
+      ...(choice ? { choice } : {}),
+      ...(people.length ? { next: roundDirectionNext(people) } : {}),
+    };
+  }
+  if (feedback.target === "candidate")
     return {
       ...result,
       status: choice ? "already_recorded" : "recorded",

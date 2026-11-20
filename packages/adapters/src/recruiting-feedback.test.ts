@@ -329,6 +329,45 @@ describe("recruiting feedback", () => {
     expect(f.commit).not.toHaveBeenCalled();
   });
 
+  it("names the shown round's people by number after round direction, since it marks no one", async () => {
+    const f = fixture();
+    const findFirst = vi.fn(async () => ({ candidateKeys: ["key-a", "key-b"] }));
+    Object.assign(f.deps.prisma, {
+      recruitingCalibrationRound: { findFirst },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: "key-b", name: "Person B" }]),
+      },
+    });
+    const roundIntent = { basis: "direct", quote: "4 and 7 are out, more streaming next" } as const;
+    db.readContext.mockResolvedValueOnce({
+      source: { ...source, quote: roundIntent.quote },
+      workspace,
+      threadId: "thread",
+      botId: "bot",
+    });
+    const result = await executeRecruitingFeedback(
+      f.deps,
+      trusted,
+      {
+        target: "round",
+        operation: "scope",
+        roleId: "role",
+        expectedRoleRevision: 1,
+        summary: roundIntent.quote,
+        intent: roundIntent,
+        sourceRefs: [],
+      },
+      context,
+    );
+    expect(result).toMatchObject({ status: "recorded" });
+    const next = (result as { next?: string }).next ?? "";
+    expect(next).toContain("1. ? = key-a; 2. Person B = key-b");
+    expect(next).toContain('fit "not_fit"');
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { roleId: "role", status: "shown" } }),
+    );
+  });
+
   it.each([["candidate"], ["candidate", "second", "third"]])(
     "records exactly the selected candidate subset %j without local assessment or memory",
     async (...candidateKeys) => {

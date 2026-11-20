@@ -22,6 +22,7 @@ const db = vi.hoisted(() => ({
   candidates: vi.fn(),
   sources: vi.fn(),
   round: vi.fn(),
+  marks: vi.fn(async () => [] as unknown[]),
   seen: vi.fn(async (): Promise<RecruiterSeen> => ({ latestRound: null, people: new Map() })),
 }));
 const overview = vi.hoisted(() => ({ read: vi.fn() }));
@@ -48,6 +49,7 @@ vi.mock("@rakazo/db", async (original) => ({
   listRecruitingCandidates: db.candidates,
   listRecruitingCandidateSources: db.sources,
   readRecruitingCalibrationRound: db.round,
+  readRecruitingResultsMarks: db.marks,
   readRecruiterSeen: db.seen,
 }));
 
@@ -834,6 +836,35 @@ describe("native saved candidate reads", () => {
         ],
       },
     });
+  });
+
+  it("says who Results marks on the role, whichever round is read", async () => {
+    // fosp x5 11-20 (1ae3a9c3): asked about round 1's turned-down people, Kruit read round 2.
+    const f = fixture();
+    db.roleId.mockResolvedValueOnce(null);
+    db.round.mockResolvedValue({
+      roleId: "role-named",
+      round: {
+        round: 2,
+        createdAt: "2026-11-20T20:52:00.000Z",
+        candidates: [{ candidateKey: "c9" }],
+      },
+    });
+    db.marks.mockResolvedValueOnce([
+      { candidateKey: "c3", name: "Person C", round: 1, mark: "not a fit" },
+      { candidateKey: "c4", name: null, mark: "on hold" },
+    ]);
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "round", roleId: "role-named" },
+      context,
+    );
+    expect(result).toMatchObject({
+      status: "found",
+      markedOnResults: ["Person C (round 1): not a fit", "c4: on hold"],
+    });
+    expect(db.marks).toHaveBeenCalledWith(f.deps.prisma, actor, { roleId: "role-named" });
   });
 
   it.each([
