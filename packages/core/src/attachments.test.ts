@@ -328,6 +328,27 @@ describe("approval card history", () => {
       "Confirm interview booking → Adam Test\nAnswer: Allow once",
     );
   });
+
+  it("keeps what the card showed, so a reply like 'not this subject' can be read against it", () => {
+    const detail =
+      "To (1):\n- Ethan Park <ethan@example.test>\nSubject: Senior Data Engineer opportunity";
+    expect(
+      blocksToAgentHistoryText([
+        {
+          ...card,
+          text: "Confirm sending the first email",
+          detail,
+          status: "answered",
+          answer: "deny",
+        },
+      ]),
+    ).toBe(`Confirm sending the first email\n${detail}\nAnswer: Deny`);
+    const long = blocksToAgentHistoryText([
+      { ...card, detail: `Body: ${"x".repeat(5_000)}`, status: "pending" },
+    ]);
+    expect(long.length).toBeLessThan(2_200);
+    expect(long).toMatch(/…\n\(Approval card waiting for the user; not answered\)$/);
+  });
 });
 
 describe("role chat context", () => {

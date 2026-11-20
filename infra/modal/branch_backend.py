@@ -195,11 +195,11 @@ def main(argv):
         sign_up(url, origin, owner, password, "Branch Owner")
         sign_up(url, origin, batch, batch_password, "Batch Recruiter")
         # The send plays' accounts, three so plays run side by side: the owner assigns each one of
-        # the emulated mail service's mailboxes.
+        # the emulated mail service's mailboxes. Emails are signed with this name, so it reads as a person's.
         for n, (sender, sender_password) in enumerate(senders, 1):
-            sign_up(url, origin, sender, sender_password, "Sender Recruiter")
+            sign_up(url, origin, sender, sender_password, "Noah Reed")
             owner_rpc(url, origin, owner, password, "deployment/assignSendingMailbox",
-                      {"accountEmail": sender, "mailbox": MAILBOX.format(n=n), "displayName": "Sender Recruiter"})
+                      {"accountEmail": sender, "mailbox": MAILBOX.format(n=n), "displayName": "Noah Reed"})
         print(f"branch backend up at {url}{f' (web {origin})' if web else ''}; playing {' '.join(plays)}", flush=True)
         # Mailbox, copied-account and recipient settings point at staging accounts, not this backend.
         env = {k: v for k, v in os.environ.items()

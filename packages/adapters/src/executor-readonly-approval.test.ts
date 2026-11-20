@@ -4332,6 +4332,36 @@ describe("connector read-only metadata and approval enforcement", () => {
       expect(f.pauseRunForInput).toHaveBeenCalledOnce();
     });
 
+    it("asks again when the recruiter writes after denying, even with the same arguments", async () => {
+      const f = fixture({
+        catalog,
+        rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "demo_get_item" }],
+      });
+      await f.run();
+      f.effects[0]!.status = "denied";
+      f.effects[0]!.updatedAt = new Date(Date.now() - 60_000);
+      f.prisma.message.findFirst.mockImplementation((async (query: { where?: { id?: string } }) =>
+        query?.where?.id === "new-human" ? { createdAt: new Date() } : null) as never);
+      f.claimSteering.mockResolvedValueOnce([
+        {
+          id: "steering",
+          messageId: "new-human",
+          text: "Use my subject instead",
+          blocks: [{ kind: "text", text: "Use my subject instead" }],
+        },
+      ]);
+      const model = f.runtimeRun.getMockImplementation()!;
+      f.runtimeRun.mockImplementationOnce(async function* (request) {
+        await request.claimSteering?.([]);
+        yield* model(request);
+      });
+      f.setCalls([{ args: { id: "item-1" }, executionId: "call-2" }]);
+      await f.run();
+      expect(f.effects).toHaveLength(2);
+      expect(f.effects[1]!.status).not.toBe("denied");
+      expect(f.pauseRunForInput).toHaveBeenCalledTimes(2);
+    });
+
     it("consumes the saved approval after the user chooses always allow", async () => {
       const rules: ActionApprovalRule[] = [
         { effect: "require_approval", matchKind: "tool", matchValue: "demo_get_item" },
