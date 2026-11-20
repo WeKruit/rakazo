@@ -5614,8 +5614,8 @@ describe("local native Instantly campaign and lead tools", () => {
           lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
         const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(read).toMatchObject({
-          queued: ["abe@x.test"],
-          queuedFirstEmail: "Fri 09:00 America/Chicago",
+          notEmailedYet: ["abe@x.test"],
+          firstEmailGoesOut: "Fri 09:00 America/Chicago",
           next: expect.stringContaining("send_now"),
         });
         expect(read.emailed).toHaveLength(f.state.campaignLeads.length - 1);
@@ -5667,7 +5667,7 @@ describe("local native Instantly campaign and lead tools", () => {
           lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
         const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(read).toMatchObject({
-          queuedFirstEmail: "now",
+          firstEmailGoesOut: "now",
           next: expect.stringMatching(
             /all 2 should be out within about \d+ minutes from now \(by 07:40 UTC\).*send_now/,
           ),

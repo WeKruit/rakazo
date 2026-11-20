@@ -2915,7 +2915,7 @@ async function sendCampaign(
  */
 /** A paused campaign emails nobody until it is activated again, which only activate_campaign does. */
 const PAUSED_NEXT =
-  "Paused: nobody still queued is emailed while it stays paused. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.";
+  "Paused: nobody still waiting is emailed while it stays paused. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.";
 async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
   const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });
   const people = (
@@ -2931,16 +2931,16 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
     emailedAt: Object.fromEntries(
       people.flatMap((person) => (person.contactedAt ? [[person.email, person.contactedAt]] : [])),
     ),
-    queued,
+    notEmailedYet: queued,
     ...(isTemplated(campaign) ? { firstEmails: ownFirstEmails(people) } : {}),
-    ...(window ? { queuedFirstEmail: window.now ? "now" : window.local } : {}),
+    ...(window ? { firstEmailGoesOut: window.now ? "now" : window.local } : {}),
     ...(window && !window.now
       ? {
-          next: `The queued people are waiting for the sending hours, not failed. Tell the recruiter who and that their first email goes out ${window.local}, and call activate_campaign with send_now so their card offers to send now.`,
+          next: `The people not emailed yet are waiting for the sending hours, not failed. Tell the recruiter who and that their first email goes out ${window.local}, and call activate_campaign with send_now so their card offers to send now.`,
         }
       : window
         ? {
-            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still waiting to be emailed with that time, the same time each check, in plain words (never "queue"); do not send them again. Nobody queued has been emailed yet, so if the recruiter asks to stop or hold, pause_campaign holds every one of them.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten." : ""}`,
+            next: `The people not emailed yet are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still waiting to be emailed with that time, the same time each check, in plain words (never "queue"); do not send them again. None of them has been emailed yet, so if the recruiter asks to stop or hold, pause_campaign holds every one of them.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone waiting one a minute instead of one every ten." : ""}`,
           }
         : campaign.status === PAUSED && queued.length
           ? { next: PAUSED_NEXT }
