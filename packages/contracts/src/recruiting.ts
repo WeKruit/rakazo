@@ -1640,7 +1640,12 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     roleId: RecruitingId.optional(),
   }),
   // As for list: a role conversation always reads its own role.
-  z.strictObject({ operation: z.literal("round"), roleId: RecruitingId.optional() }),
+  // An earlier round by number: "are the people I turned down marked?" is about round 1.
+  z.strictObject({
+    operation: z.literal("round"),
+    round: z.number().int().min(1).optional(),
+    roleId: RecruitingId.optional(),
+  }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("replies") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("roles") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
@@ -3037,6 +3042,8 @@ export const RecruitingCalibrationRoundSchema = z.strictObject({
       linkedinUrl: z.string().nullable(),
       /** The recruiter's saved decision on this person, when one stands. */
       decision: z.enum(["hold", "pass"]).optional(),
+      /** What the recruiter said of this person, when it is saved. */
+      recruiterVerdict: z.enum(["good_example", "not_fit"]).optional(),
     }),
   ),
 });
