@@ -326,6 +326,7 @@ import {
   protectedComputerLifecycleRefusal,
 } from "./computer-lifecycle-guard.js";
 import { buildApprovalAskBlock } from "./approval-ask.js";
+import { approvalKeyAfterDenial } from "./approval-key-after-denial.js";
 import {
   approvalPausedToolResult,
   approvalReplayPathError,
@@ -8157,7 +8158,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             replyAdmission?.effect.idempotencyKey ??
             crmImportAdmission?.effect.idempotencyKey ??
             (usesApprovalKey && occurrence === 0
-              ? approvalEffectKey(runId, replayEffectToolName, args)
+              ? await approvalKeyAfterDenial(
+                  deps.prisma,
+                  approvalEffectKey(runId, replayEffectToolName, args),
+                  recruitingSourceMessageId,
+                )
               : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
           // Connector read-only hints must not bypass approval, review, or replay decisions.
           const domainEffect =
