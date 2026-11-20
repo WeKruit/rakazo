@@ -12401,7 +12401,11 @@ export async function saveRecruitingCalibrationRound(
 }
 
 async function calibrationRoundView(
-  tx: Pick<Tx, "recruitingCalibrationRound" | "recruitingCandidateOccurrence">,
+  tx: Pick<
+    Tx,
+    "recruitingCalibrationRound" | "recruitingCandidateOccurrence" | "recruitingCandidate"
+  >,
+  actor: Actor,
   roleId: string,
 ): Promise<RecruitingCalibrationRound | null> {
   const round = await tx.recruitingCalibrationRound.findFirst({
@@ -12431,12 +12435,28 @@ async function calibrationRoundView(
     if (row.page.observedAt <= round.createdAt && !latest.has(row.candidateKey))
       latest.set(row.candidateKey, row);
   for (const row of rows) if (!latest.has(row.candidateKey)) latest.set(row.candidateKey, row);
+  const decisions = new Map(
+    (
+      await tx.recruitingCandidate.findMany({
+        where: {
+          roleId,
+          candidateKey: { in: round.candidateKeys },
+          consideration: { not: Prisma.DbNull },
+        },
+        select: { candidateKey: true, consideration: true },
+      })
+    ).map((candidate) => [
+      candidate.candidateKey,
+      candidateConsideration(actor, candidate.consideration)?.operation,
+    ]),
+  );
   return {
     round: round.round,
     createdAt: round.createdAt.toISOString(),
     approvedAt: round.approvedAt?.toISOString() ?? null,
     candidates: round.candidateKeys.map((candidateKey) => {
       const row = latest.get(candidateKey);
+      const decision = decisions.get(candidateKey);
       return {
         candidateKey,
         name: row?.name ?? null,
@@ -12444,6 +12464,7 @@ async function calibrationRoundView(
         company: row?.company ?? null,
         location: row?.location ?? null,
         linkedinUrl: row?.linkedinUrl ?? null,
+        ...(decision === "hold" || decision === "pass" ? { decision } : {}),
       };
     }),
   };
@@ -12461,7 +12482,7 @@ export async function readRecruitingCalibrationRound(
     const roleId = thread.activeRecruitingRoleId ?? input.roleId;
     if (!roleId) return { roleId: null, round: null };
     const role = await requireRole(tx, actor, roleId, false, thread);
-    return { roleId: role.id, round: await calibrationRoundView(tx, role.id) };
+    return { roleId: role.id, round: await calibrationRoundView(tx, actor, role.id) };
   });
 }
 

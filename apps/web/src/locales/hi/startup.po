@@ -3427,6 +3427,7 @@ msgid "On a call with {0}"
 msgstr "{0} के साथ कॉल पर"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "On hold"
 msgstr ""
@@ -3657,6 +3658,7 @@ msgid "Partial saved-history coverage. Replies follow the original observed cont
 msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Passed"
 msgstr ""

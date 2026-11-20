@@ -3033,6 +3033,8 @@ export const RecruitingCalibrationRoundSchema = z.strictObject({
       company: z.string().nullable(),
       location: z.string().nullable(),
       linkedinUrl: z.string().nullable(),
+      /** The recruiter's saved decision on this person, when one stands. */
+      decision: z.enum(["hold", "pass"]).optional(),
     }),
   ),
 });

@@ -98,3 +98,12 @@ it("shows an accepted round without feedback controls", async () => {
   expect(container!.querySelector("form")).toBeNull();
   expect(container!.querySelectorAll("a")).toHaveLength(10);
 });
+
+it("marks a person the recruiter already passed on", async () => {
+  const value = round();
+  value.candidates[3] = { ...value.candidates[3]!, decision: "pass" };
+  await mount(value);
+  const rows = [...container!.querySelectorAll("li")];
+  expect(rows[3]!.textContent).toContain("Passed");
+  expect(rows.filter((row) => row.textContent?.includes("Passed"))).toHaveLength(1);
+});
