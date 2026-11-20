@@ -157,6 +157,17 @@ describe("resolveRecruitingContact", () => {
     expect((await f.resolve("JOSE@example.test")).matches).toHaveLength(1);
   });
 
+  it("says first that a resolved person has no saved email (team-has-no-email 11-20)", async () => {
+    // Main chat resolved Bhargav with no email, then drafted and asked to connect Gmail before
+    // ever saying nothing could be sent to him.
+    const f = fixture([], [{ name: "Bhargav P", linkedinUrl: "https://www.linkedin.com/in/b" }]);
+    const result = await f.resolve("Bhargav");
+    expect(result).toMatchObject({ status: "resolved", matches: [{ email: null }] });
+    expect((result as { next?: string }).next).toMatch(/^Bhargav P has no saved email/);
+    const found = fixture([crmRow("4", "Sumeet Parekh", "sumeetparekh1@gmail.com")]);
+    expect((await found.resolve("Sumeet")) as { next?: string }).not.toHaveProperty("next");
+  });
+
   it("uses the lead address stored when a saved person was added to the role's campaign", async () => {
     const f = fixture([], [{ name: "Adam Test", linkedinUrl: "https://www.linkedin.com/in/adam" }]);
     f.leadBindings.push({
