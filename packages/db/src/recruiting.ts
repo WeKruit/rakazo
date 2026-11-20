@@ -150,7 +150,7 @@ import {
   listRecruitingSavedProfiles,
   mergeRecruitingProfileFacts,
 } from "./recruiting-saved-profiles.js";
-import { readRecruiterSeen } from "./recruiting-search-quality.js";
+import { readRecruiterSeen, readRecruiterVerdicts } from "./recruiting-search-quality.js";
 import { IsolationError, scoped } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -11771,7 +11771,21 @@ export async function listRecruitingCandidates(
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
   for (const verify of afterRead) verify();
-  return result;
+  // Fosp 11-20 (2a781497): "these three, no" was saved as the recruiter's not-a-fit, yet
+  // Results showed them unmarked, since only a hold/pass decision was shown.
+  const verdicts = await readRecruiterVerdicts(prisma, actor, {
+    roleId: result.roleId,
+    candidateKeys: result.items.map((item) => item.candidateKey),
+  });
+  return verdicts.size
+    ? {
+        ...result,
+        items: result.items.map((item) => ({
+          ...item,
+          recruiterVerdict: verdicts.get(item.candidateKey) ?? null,
+        })),
+      }
+    : result;
 }
 
 /** Every LinkedIn URL Autumn observed for a role (owner-fenced); identity only, never a profile. */

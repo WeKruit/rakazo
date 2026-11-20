@@ -240,15 +240,51 @@ export class E2BSandboxProvider implements SandboxProvider {
     const desktop = await this.box(computer);
     const cmd = sandboxCommandArgv(request).map(shellQuote).join(" ");
     const timeoutMs = boundedSandboxCommandTimeoutMs(request.timeoutMs);
-    let result: CommandResult;
-    try {
-      result = await desktop.commands.run(cmd, {
+    // Output streams as the command prints it (the SDK's onStdout/onStderr), so a reader of
+    // live output, such as code calling the run's tools, sees it before the command ends.
+    const streamed: ProcessEvent[] = [];
+    let wake: (() => void) | undefined;
+    const push = (type: "stdout" | "stderr") => (data: string) => {
+      if (!data) return;
+      streamed.push({ type, data });
+      wake?.();
+    };
+    let sawOutput = false;
+    let settled = false;
+    const run = desktop.commands
+      .run(cmd, {
         cwd: e2bCwd(request.cwd),
         envs: request.env,
         signal: context.signal,
         timeoutMs,
+        onStdout: push("stdout"),
+        onStderr: push("stderr"),
+      })
+      .then(
+        (result): { result: CommandResult } | { error: unknown } => ({ result }),
+        (error: unknown) => ({ error }),
+      )
+      .finally(() => {
+        settled = true;
+        wake?.();
       });
-    } catch (error) {
+    while (!settled || streamed.length) {
+      const next = streamed.shift();
+      if (next) {
+        sawOutput = true;
+        yield next;
+        continue;
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        if (settled || streamed.length) resolve();
+      });
+      wake = undefined;
+    }
+    const outcome = await run;
+    let result: CommandResult;
+    if ("error" in outcome) {
+      const { error } = outcome;
       if (error instanceof TimeoutError) {
         yield {
           type: "stderr",
@@ -259,9 +295,11 @@ export class E2BSandboxProvider implements SandboxProvider {
       }
       if (!(error instanceof CommandExitError)) throw error;
       result = error;
+    } else result = outcome.result;
+    if (!sawOutput) {
+      if (result.stdout) yield { type: "stdout", data: result.stdout };
+      if (result.stderr) yield { type: "stderr", data: result.stderr };
     }
-    if (result.stdout) yield { type: "stdout", data: result.stdout };
-    if (result.stderr) yield { type: "stderr", data: result.stderr };
     yield { type: "exit", code: result.exitCode ?? 0 };
   }
 

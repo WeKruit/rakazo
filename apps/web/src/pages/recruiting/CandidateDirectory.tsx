@@ -309,13 +309,18 @@ const Fit = memo(function Fit({
   );
 });
 
+/** Passed on: a recorded pass, or the recruiter's own "not a fit" with no decision after it. */
+const passed = (row: RoleCandidate) =>
+  row.autumn?.decision === "pass" ||
+  (!row.autumn?.decision && row.autumn?.recruiterVerdict === "not_fit");
+
 const Status = memo(function Status({ row }: { row: RoleCandidate }) {
   const { t } = useLingui();
   const activity = row.crm?.stage
     ? statusText(row.crm.stage)
     : row.autumn?.decision === "hold"
       ? t`On hold`
-      : row.autumn?.decision === "pass"
+      : passed(row)
         ? t`Passed`
         : null;
   return (
@@ -388,7 +393,7 @@ export function CandidateDirectory({
     row.crm?.stage ||
     (row.autumn?.decision === "hold"
       ? t`On hold`
-      : row.autumn?.decision === "pass"
+      : passed(row)
         ? t`Passed`
         : row.autumn?.shortlisted
           ? t`Shortlisted`
