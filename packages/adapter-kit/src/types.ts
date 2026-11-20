@@ -211,6 +211,10 @@ export interface AgentToolExecutionObserver {
   onShellStillRunning?: (
     completion: Promise<{ stdout: string; stderr: string; code: number }>,
   ) => void;
+  /** Given to a shell command: runs a call its code made to one of this run's tools. */
+  callTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  /** This call came from code on the computer, so it may not wait for the person. */
+  fromCode?: true;
 }
 
 /** Ephemeral completion data for audit hooks; result contents must be redacted before persistence. */

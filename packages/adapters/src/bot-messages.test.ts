@@ -808,8 +808,22 @@ describe("delegating to a role team in another conversation", () => {
       }),
     );
     expect(returnedTo(harness)).toEqual([
-      expect.objectContaining({ text: "10 people this round: …", intent: "result" }),
+      { kind: "text", text: "10 people this round: …" },
+      expect.objectContaining({ intent: "result" }),
     ]);
+  });
+
+  it("shows a returned round to the recruiter itself, so Kruit never retells it (feedback-round 11-20)", async () => {
+    // feedback-round x5 on 44c1ad44: Kruit retold the team's round, graded the people itself and
+    // listed another eight from the pool, so the recruiter got three versions of one round.
+    const round = "7 people this round:\n\n1. **Sathya G** · Sr Engineer · Zillow";
+    const harness = team({ later: [said(round)] });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    const [shown, toKruit] = returnedTo(harness) as Array<{ kind: string; text: string }>;
+    expect(shown).toEqual({ kind: "text", text: round });
+    expect(toKruit).toMatchObject({ kind: "bot_message_received", intent: "result" });
+    expect(toKruit?.text).not.toContain("Sathya G");
+    expect(toKruit?.text).toMatch(/already sees/);
   });
 
   it("brings the round's people back with the team's closing line", async () => {
@@ -820,9 +834,10 @@ describe("delegating to a role team in another conversation", () => {
       later: [said("Recording the feedback."), said(round), said("Round 2 is posted.")],
     });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    expect(returnedTo(harness)).toEqual([
-      expect.objectContaining({ text: `Round 2 is posted.\n\n${round}` }),
-    ]);
+    expect(returnedTo(harness)[0]).toEqual({
+      kind: "text",
+      text: `Round 2 is posted.\n\n${round}`,
+    });
   });
 
   it("lists everyone the request saved from the record, beside the round, each once", async () => {

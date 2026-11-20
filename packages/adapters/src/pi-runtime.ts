@@ -58,6 +58,7 @@ import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
+import { callToolFromCode } from "./code-tool-calls.js";
 import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
 import {
   RECORD_TOOL_DEADLINE_MS,
@@ -1175,7 +1176,10 @@ function toAgentTools(toolDefs: readonly ConnectorTool[], host: ToolHost): Agent
     )
     .map(({ tool }) => tool);
   const names = normalizeAgentToolNames(ordered);
-  return ordered.map((tool, index) => toAgentTool(tool, host, names[index]!));
+  const tools = ordered.map((tool, index) => toAgentTool(tool, host, names[index]!));
+  host.agentTools = new Map(tools.map((tool) => [tool.name, tool]));
+  host.codeCallIds ??= new Set();
+  return tools;
 }
 
 function auditUndispatchedToolFailure(
@@ -2067,6 +2071,13 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               onShellStillRunning: (completion) => {
                 host.pendingShells.push(completion);
               },
+              ...(host.codeCallIds?.has(toolCallId) ? { fromCode: true } : {}),
+              ...(tool.name === "shell" && host.agentTools
+                ? {
+                    callTool: (name: string, codeArgs: Record<string, unknown>) =>
+                      callToolFromCode(host.agentTools!, host.codeCallIds!, name, codeArgs),
+                  }
+                : {}),
             });
             const result = await untilStopped(
               RECORD_TOOLS.has(tool.name)
@@ -3342,6 +3353,10 @@ interface ToolHost {
   forceCompaction?: string;
   /** Shell commands that returned output and are still running. */
   pendingShells: Array<Promise<FinishedShellCommand>>;
+  /** This host's tools by exposed name, for calls from the agent's own code. */
+  agentTools?: Map<string, AgentTool>;
+  /** Tool call ids that code on the computer made (see code-tool-calls.ts). */
+  codeCallIds?: Set<string>;
   /** Helpers this run started, by handle (shared with nested hosts, used at depth 0 only). */
   subagents: Map<string, SubagentHelper>;
   subagentCount: { value: number };
