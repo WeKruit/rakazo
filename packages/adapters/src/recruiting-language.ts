@@ -319,10 +319,13 @@ export function roundByLanguage(
   unverified: Readonly<Record<string, string>> | undefined,
   levels: ReadonlyMap<string, LanguageSignal>,
   requirement: string,
-): { candidateKeys: string[]; unverified: Record<string, string> | undefined } {
+): { candidateKeys: string[]; unverified?: Record<string, string> } {
   const names = languageFilters([requirement]);
   if (!names.length || !candidateKeys.some((key) => levels.has(key)))
-    return { candidateKeys: [...candidateKeys], unverified: unverified && { ...unverified } };
+    return {
+      candidateKeys: [...candidateKeys],
+      ...(unverified && Object.keys(unverified).length ? { unverified: { ...unverified } } : {}),
+    };
   const level = (key: string) => levels.get(key) ?? "unknown";
   const ordered = candidateKeys
     .map((key, index) => ({ key, index }))
@@ -338,5 +341,9 @@ export function roundByLanguage(
     if (ORDER[level(key)] > ORDER.strong) parts.unshift(`${names[0]} not confirmed`);
     if (parts.length) notes[key] = parts.join("; ");
   }
-  return { candidateKeys: ordered, unverified: Object.keys(notes).length ? notes : undefined };
+  // No unverified key at all when nothing is unverified: the call's arguments are keyed as JSON,
+  // and an undefined value refused every fosp round with a required language (11-20).
+  return Object.keys(notes).length
+    ? { candidateKeys: ordered, unverified: notes }
+    : { candidateKeys: ordered };
 }

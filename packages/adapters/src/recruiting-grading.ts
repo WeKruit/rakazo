@@ -478,41 +478,67 @@ export async function startRecruitingGrading(
     // A round held for the Reviewer is shown once it is checked, swapped or not: the check's end is
     // stored, so its owner's turn that shows it is the only one that may record it.
     if (review.held) {
-      if (!review.checked && !(await markCalibrationRoundChecked(deps.prisma, review.round)))
-        return skipped("round changed");
       const latest = await deps.prisma.message.findFirst({
         where: { threadId: thread.id, role: "user" },
         orderBy: { seq: "desc" },
         select: { id: true, blocks: true },
       });
-      // Once per recruiter message, so the corrected round is never corrected again on its own.
-      const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
       const size = roundSize(latest?.blocks);
       const open = Math.max(0, size - (review.round.candidateKeys.length - misfits.length));
-      const runId = await startLeadRun(
-        deps,
-        thread,
-        clientNonce,
-        async () =>
-          roundReviewPrompt(
-            review.round.round,
-            checkedRoundPeople(
-              review.round.candidateKeys,
-              review.grades,
-              await roundReplacements(deps.prisma, role.id, open),
-              size,
-            ),
-          ),
-        grader?.botId,
+      const shownPeople = checkedRoundPeople(
+        review.round.candidateKeys,
+        review.grades,
+        await roundReplacements(deps.prisma, role.id, open),
+        size,
       );
-      if (runId) {
-        getLogger().info("recruiting.round.review", {
-          runId,
-          roleId: role.id,
-          round: review.round.round,
-          misfits: misfits.length,
-        });
-        return;
+      // fosp 11-20 (4eb42c98): "再来5个" came back with 2 while ten saved people no round had shown
+      // were never graded, so none could fill a place. A short round first has those people
+      // checked, once each, then shows.
+      const unshown =
+        shownPeople.length < size && grader?.tool === "self"
+          ? await unshownUngraded(deps.prisma, role.id, found, graded)
+          : [];
+      if (unshown.some((row) => waiting.has(row.linkedinUrl))) return skipped("filling round");
+      // One batch per round, so a role with eighty unchecked saved people never checks them all first.
+      const roundPeople = new Set(
+        found.flatMap((row) =>
+          review.round.candidateKeys.includes(row.candidateKey) && row.linkedinUrl
+            ? [row.linkedinUrl]
+            : [],
+        ),
+      );
+      const filled = requests.some(
+        (request) =>
+          request.createdAt >= review.round.createdAt &&
+          [...sentUrls(request.task?.prompt ?? "")].some((url) => !roundPeople.has(url)),
+      );
+      const fill = filled ? [] : unshown.filter((row) => !sent.has(row.linkedinUrl));
+      if (fill.length) {
+        for (const row of fill.slice(0, SELF_GRADE_BATCH)) {
+          skip.add(row.candidateKey);
+          people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
+        }
+      } else {
+        if (!review.checked && !(await markCalibrationRoundChecked(deps.prisma, review.round)))
+          return skipped("round changed");
+        // Once per recruiter message, so the corrected round is never corrected again on its own.
+        const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
+        const runId = await startLeadRun(
+          deps,
+          thread,
+          clientNonce,
+          async () => roundReviewPrompt(review.round.round, shownPeople),
+          grader?.botId,
+        );
+        if (runId) {
+          getLogger().info("recruiting.round.review", {
+            runId,
+            roleId: role.id,
+            round: review.round.round,
+            misfits: misfits.length,
+          });
+          return;
+        }
       }
     }
   }
@@ -1023,6 +1049,31 @@ type Replacement = {
   company: string | null;
   location: string | null;
 };
+
+/** Saved people with a profile link whom no round has shown and nobody has graded, newest first. */
+async function unshownUngraded(
+  prisma: PrismaClient,
+  roleId: string,
+  found: readonly { candidateKey: string; name: string | null; linkedinUrl: string | null }[],
+  graded: readonly { candidateKey: string }[],
+): Promise<{ candidateKey: string; name: string | null; linkedinUrl: string }[]> {
+  const rounds = await prisma.recruitingCalibrationRound.findMany({
+    where: { roleId },
+    select: { candidateKeys: true },
+  });
+  const done = new Set([
+    ...rounds.flatMap((round) => round.candidateKeys),
+    ...graded.map((row) => row.candidateKey),
+  ]);
+  const people = new Map<
+    string,
+    { candidateKey: string; name: string | null; linkedinUrl: string }
+  >();
+  for (const row of found)
+    if (row.linkedinUrl && !done.has(row.candidateKey) && !people.has(row.candidateKey))
+      people.set(row.candidateKey, { ...row, linkedinUrl: row.linkedinUrl });
+  return [...people.values()];
+}
 
 /**
  * Saved people no round has shown whom the Reviewer graded Strong, then Promising, for the lead to
