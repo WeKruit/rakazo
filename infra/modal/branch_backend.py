@@ -48,7 +48,8 @@ ORIGIN = "http://127.0.0.1:5180"  # the harness's web origin, which sign-in chec
 # The emulated outreach mail service's mailboxes (added in the harness's serve mode) and the inbox the
 # send plays write to; neither reaches real mail.
 MAILBOX = "sender{n}@branch-mail.example.test"
-RECIPIENT = "inbox@branch-mail.example.test"
+# Not "inbox+…": Kruit read "Ethan Park inbox+noah…@" as the word inbox and dropped it (11-20).
+RECIPIENT = "noah-sim@branch-mail.example.test"
 PLAYS = ",".join([
     "change-mind-mid-run", "did-you-really-send", "progress-and-where", "one-off-email",
     "korean-recruiter-template", "template-sign-with-my-name", "two-asks-one-message",
