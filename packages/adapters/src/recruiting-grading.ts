@@ -13,6 +13,8 @@ import {
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { handedInRecruiterWords } from "./global-role-writes.js";
+import { requestedPeopleTarget } from "./people-target.js";
 import { recruiterWordsSinceFirstRound, roundCriteria } from "./recruiting-round-check.js";
 
 export { RECRUITING_GRADE_NONCE_PREFIX };
@@ -481,12 +483,12 @@ export async function startRecruitingGrading(
       const latest = await deps.prisma.message.findFirst({
         where: { threadId: thread.id, role: "user" },
         orderBy: { seq: "desc" },
-        select: { id: true },
+        select: { id: true, blocks: true },
       });
       // Once per recruiter message, so the corrected round is never corrected again on its own.
       const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
-      // Only the misfits' places: a round recorded short ("再来5个") stays that size.
-      const open = misfits.length;
+      const size = roundSize(latest?.blocks);
+      const open = Math.max(0, size - (review.round.candidateKeys.length - misfits.length));
       const runId = await startLeadRun(
         deps,
         thread,
@@ -498,6 +500,7 @@ export async function startRecruitingGrading(
               review.round.candidateKeys,
               review.grades,
               await roundReplacements(deps.prisma, role.id, open),
+              size,
             ),
           ),
         grader?.botId,
@@ -1074,6 +1077,24 @@ async function roundReplacements(
   return [...people.values()].slice(0, open + 5);
 }
 
+/**
+ * How many people a checked round shows: the few the recruiter's latest words ask for ("再来5个"),
+ * else ten. fosp 11-20: "再来5个" was filled to 6; capping at the recorded size instead left
+ * "the next ten" rounds short when the lead recorded fewer.
+ */
+export function roundSize(blocks: unknown): number {
+  const text = (Array.isArray(blocks) ? (blocks as { kind?: string; text?: unknown }[]) : [])
+    .flatMap((block) =>
+      (block.kind === "text" || block.kind === "bot_message_received") &&
+      typeof block.text === "string"
+        ? [handedInRecruiterWords(block.text) ?? block.text]
+        : [],
+    )
+    .join("\n");
+  const asked = requestedPeopleTarget(text);
+  return asked && asked < 10 ? asked : 10;
+}
+
 /** How close a misfit the Reviewer checked is: kept in a place no Strong person can fill. */
 const KEPT_MISFIT_TIERS = ["Promising", "Uncertain"];
 /** Checked people from Results who may fill a round's open places, best first. */
@@ -1082,14 +1103,15 @@ const REPLACEMENT_TIERS = [FIT_TIER, "Promising"];
 /**
  * The checked round to show, in order: the round's people who fit, then the Strong people from
  * Results in the misfits' places, then the round's Promising people, then Promising people from
- * Results, then the round's Uncertain people (never Partial) in any place still open, up to the
- * round's own size: fosp 11-20 asked for 5 more and the filled round showed 6. Staging 11-16 (982a0ac9): told to "keep the round's
+ * Results, then the round's Uncertain people (never Partial) in any place still open, up to
+ * `size` (roundSize). Staging 11-16 (982a0ac9): told to "keep the round's
  * other people" without being given them, the lead asked the recruiter which three to keep.
  */
 export function checkedRoundPeople(
   candidateKeys: readonly string[],
   grades: ReadonlyMap<string, Pick<RoundGrade, "name" | "tier">>,
   replacements: readonly (Pick<Replacement, "key" | "name"> & { tier?: string })[] = [],
+  size = 10,
 ): { key: string; name: string }[] {
   const misfit = (key: string) => {
     const tier = grades.get(key)?.tier;
@@ -1117,7 +1139,7 @@ export function checkedRoundPeople(
     ...fromResults(false),
     ...(uncertain ?? []),
   ];
-  return people.slice(0, candidateKeys.length);
+  return people.slice(0, size);
 }
 
 export function roundReviewPrompt(round: number, people: readonly { key: string; name: string }[]) {

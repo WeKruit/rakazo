@@ -24,6 +24,7 @@ const {
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
+  roundSize,
   ROUND_HELD_SEARCH_REFUSAL,
   scheduleRecruitingGrading,
   startRecruitingGrading,
@@ -1020,7 +1021,7 @@ describe("gradingTools", () => {
 
 describe("checkedRoundPeople", () => {
   const grade = (name: string, tier: string) => ({ name, tier });
-  it("keeps who fits in order, then Strong replacements, then the closest misfits, up to the round's size", () => {
+  it("keeps who fits in order, then Strong replacements, then the closest misfits, up to ten", () => {
     const keys = ["a", "b", "c", "d"];
     const grades = new Map([
       ["a", grade("A", "Uncertain")],
@@ -1034,10 +1035,10 @@ describe("checkedRoundPeople", () => {
       "D",
       "A",
     ]);
-    // The round's own size at most: Strong replacements go before any misfit.
+    // Ten places at most: Strong replacements go before any misfit.
     const many = Array.from({ length: 12 }, (_, i) => ({ key: `r${i}`, name: null }));
     const picked = checkedRoundPeople(keys, grades, many);
-    expect(picked).toHaveLength(4);
+    expect(picked).toHaveLength(10);
     expect(picked.map((p) => p.key)).not.toContain("d");
     expect(picked[1]).toEqual({ key: "r0", name: "r0" });
   });
@@ -1067,6 +1068,23 @@ describe("checkedRoundPeople", () => {
       "q2",
       "q3",
     ]);
+  });
+});
+
+describe("roundSize", () => {
+  it("shows the few people the recruiter asked for, else ten", () => {
+    // fosp 11-20: "再来5个" was filled to 6.
+    const handIn = (words: string) => [
+      {
+        kind: "bot_message_received",
+        text: `The recruiter wrote, word for word:\n"${words}"\n\nKruit's note: find 10 more`,
+      },
+    ];
+    expect(roundSize(handIn("再来5个"))).toBe(5);
+    expect(roundSize([{ kind: "text", text: "2 more people like the rest" }])).toBe(2);
+    expect(roundSize(handIn("#7 and #8 aren't a fit, find more like the rest"))).toBe(10);
+    expect(roundSize([{ kind: "text", text: "find 50" }])).toBe(10);
+    expect(checkedRoundPeople(["a", "b", "c"], new Map(), [], 2)).toHaveLength(2);
   });
 });
 
