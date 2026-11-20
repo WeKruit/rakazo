@@ -12421,13 +12421,17 @@ export async function saveRecruitingCalibrationRound(
 async function calibrationRoundView(
   tx: Pick<
     Tx,
-    "recruitingCalibrationRound" | "recruitingCandidateOccurrence" | "recruitingCandidate"
+    | "recruitingCalibrationRound"
+    | "recruitingCandidateOccurrence"
+    | "recruitingCandidate"
+    | "$queryRaw"
   >,
   actor: Actor,
   roleId: string,
+  number?: number,
 ): Promise<RecruitingCalibrationRound | null> {
   const round = await tx.recruitingCalibrationRound.findFirst({
-    where: { roleId },
+    where: { roleId, ...(number ? { round: number } : {}) },
     orderBy: { round: "desc" },
   });
   if (!round) return null;
@@ -12468,6 +12472,10 @@ async function calibrationRoundView(
       candidateConsideration(actor, candidate.consideration)?.operation,
     ]),
   );
+  const verdicts = await readRecruiterVerdicts(tx, actor, {
+    roleId,
+    candidateKeys: round.candidateKeys,
+  });
   return {
     round: round.round,
     createdAt: round.createdAt.toISOString(),
@@ -12483,6 +12491,7 @@ async function calibrationRoundView(
         location: row?.location ?? null,
         linkedinUrl: row?.linkedinUrl ?? null,
         ...(decision === "hold" || decision === "pass" ? { decision } : {}),
+        ...(verdicts.has(candidateKey) ? { recruiterVerdict: verdicts.get(candidateKey) } : {}),
       };
     }),
   };
@@ -12492,7 +12501,7 @@ async function calibrationRoundView(
 export async function readRecruitingCalibrationRound(
   prisma: PrismaClient,
   actor: Actor,
-  input: { threadId: string; roleId?: string },
+  input: { threadId: string; roleId?: string; round?: number },
 ): Promise<{ roleId: string | null; round: RecruitingCalibrationRound | null }> {
   return prisma.$transaction(async (tx) => {
     const thread = await requireThread(tx, actor, input.threadId);
@@ -12500,7 +12509,10 @@ export async function readRecruitingCalibrationRound(
     const roleId = thread.activeRecruitingRoleId ?? input.roleId;
     if (!roleId) return { roleId: null, round: null };
     const role = await requireRole(tx, actor, roleId, false, thread);
-    return { roleId: role.id, round: await calibrationRoundView(tx, actor, role.id) };
+    return {
+      roleId: role.id,
+      round: await calibrationRoundView(tx, actor, role.id, input.round),
+    };
   });
 }
 
