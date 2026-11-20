@@ -87,6 +87,7 @@ function deps(
           where.page.observedAt.lt ? [] : held.map((candidateKey) => ({ candidateKey })),
         ),
       },
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
     },
     artifacts: { put: vi.fn(async () => ({ id: "artifact-1" })) },
   } as never;

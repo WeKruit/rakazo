@@ -426,16 +426,33 @@ function recruiterText(block: Record<string, unknown> | undefined): string {
  * because every search was capped but nothing held the request's total.
  */
 export async function peopleRoomForRequest(
-  prisma: Pick<PrismaClient, "message" | "recruitingCandidate" | "recruitingCandidateOccurrence">,
+  prisma: Pick<
+    PrismaClient,
+    | "message"
+    | "recruitingCandidate"
+    | "recruitingCandidateOccurrence"
+    | "recruitingCalibrationRound"
+  >,
   roleId: string,
   threadId: string,
 ): Promise<number | undefined> {
-  const messages = await prisma.message.findMany({
-    where: { threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    take: 10,
-    select: { createdAt: true, blocks: true },
-  });
+  // A round shown for feedback is followed by another round, and a round itself shows the
+  // number asked. Its four overlapping searches are how the ten are picked: branch 80ab9951,
+  // the cap counted each in flight as ten, so three were refused and the round never came.
+  const [round, messages] = await Promise.all([
+    prisma.recruitingCalibrationRound.findFirst({
+      where: { roleId },
+      orderBy: { round: "desc" },
+      select: { approvedAt: true },
+    }),
+    prisma.message.findMany({
+      where: { threadId, role: "user" },
+      orderBy: { seq: "desc" },
+      take: 10,
+      select: { createdAt: true, blocks: true },
+    }),
+  ]);
+  if (round && !round.approvedAt) return undefined;
   const heldBefore = async (at: Date) =>
     (
       await prisma.recruitingCandidateOccurrence.findMany({
@@ -450,7 +467,8 @@ export async function peopleRoomForRequest(
       .map((block) => recruiterText(record(block)))
       .join(" ");
     if (!text.trim()) continue;
-    if (!peopleTargetFrom(text, 0)) {
+    const asked = peopleTargetFrom(text, 0);
+    if (!asked) {
       newerAsk ??= message.createdAt;
       continue;
     }
@@ -463,6 +481,11 @@ export async function peopleRoomForRequest(
     ]);
     const seen = new Set(before);
     const fresh = since.filter((key) => !seen.has(key)).length;
+    // The first ten on a new role are the round the recruiter sees, picked from overlapping
+    // searches: branch 72b51e70, "先找10个" had two of its three first searches refused as in
+    // flight. Until the role holds them, those searches are not capped by the ten.
+    const firstRound = !round && total === fresh && asked <= RECRUITING_CALIBRATION_ROUND_SIZE;
+    if (firstRound && total < asked) return undefined;
     const target = peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0;
     // Staging 11-20 (44c1ad44): "先找10个人" was met, then a numberless ask was refused as
     // done, twice. A message written once the number was reached is a new request, whatever its
@@ -479,7 +502,7 @@ export async function peopleRoomForRequest(
 
 /** Model-facing: a search refused because the role already holds the number asked for. */
 export const PEOPLE_TARGET_MET =
-  "Not searched: the role already holds the number of people the recruiter asked for, so their request is done. Do not search again: tell them in one short message, in their language, how many people this role holds and that the search is finished.";
+  "Not searched: the role already holds the number of people the recruiter asked for. Do not search again. If people saved since the last round have not been shown to the recruiter, show the ones that fit as this round (record them with calibration_round); otherwise tell them in one short message, in their language, how many people this role holds and that the search is finished.";
 
 /** The conversation and role a run works in. */
 async function runRole(

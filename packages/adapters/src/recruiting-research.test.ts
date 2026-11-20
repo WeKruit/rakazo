@@ -77,6 +77,9 @@ describe("people-search agent runs", () => {
       recruitingCandidateOccurrence: {
         findMany: vi.fn(async (_query?: unknown): Promise<Array<{ candidateKey: string }>> => []),
       },
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async (): Promise<{ approvedAt: Date | null } | null> => null),
+      },
       // Searches still running at the provider, by their countdowns.
       externalEffect: {
         findMany: vi.fn(
@@ -478,6 +481,27 @@ describe("people-search agent runs", () => {
         return [...first, ...next].filter((row) => !lt || row.observedAt < lt);
       });
       await expect(limit()).rejects.toThrow(/already holds/);
+      // Branch 80ab9951: with round one shown and waiting on feedback, the next round's four
+      // searches each counted as ten in flight, so three were refused and no round came. The
+      // round shows the number asked; its searches are not capped by it.
+      db.recruitingCalibrationRound.findFirst.mockResolvedValue({ approvedAt: null });
+      db.message.findMany.mockResolvedValue([
+        { createdAt: at("08:15:30"), blocks: [{ kind: "text", text: "再给我5个" }] },
+        feedback,
+        ask,
+      ]);
+      const searches = [await limit(), await limit(), await limit(), await limit()];
+      expect(searches.map((search) => search.numResults)).toEqual([10, 10, 10, 10]);
+      // Branch 72b51e70: "先找10个" with no round yet had two of three first searches refused as
+      // in flight. The first round shows the ten; its searches are not capped either.
+      db.recruitingCalibrationRound.findFirst.mockResolvedValue(null);
+      db.recruitingCandidate.count.mockResolvedValue(0);
+      found(0);
+      db.message.findMany.mockResolvedValue([
+        { createdAt: at("08:16:00"), blocks: [{ kind: "text", text: "先找10个人" }] },
+      ]);
+      const first = [await limit(), await limit(), await limit()];
+      expect(first.map((search) => search.numResults)).toEqual([10, 10, 10]);
     } finally {
       vi.useRealTimers();
     }

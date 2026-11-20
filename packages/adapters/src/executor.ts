@@ -515,12 +515,7 @@ import {
   shouldEnqueueCompaction,
   steppedHistoryWindow,
 } from "./history-compaction.js";
-import {
-  intakeFieldsNote,
-  openFactAsked,
-  settledFactAsked,
-  settledFactNote,
-} from "./intake-open-fields.js";
+import { INTAKE_FIRST_STEP_NOTE } from "./intake-open-fields.js";
 import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
 import { describeReplyToEmail, type InstantlyReplyDisplay } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
@@ -4738,29 +4733,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // People still to look up for a find_emails next_from_role request after this run's last batch.
         // A question bounced once as already answered may be asked again: the reply may have been about something else.
         const knownAskBounced = new Set<string>();
-        // Bounced up to three times a run: on staging the model asked the same settled fact again
-        // right after one bounce. A search is always open to it, so this never dead-ends.
-        const settledAskBounces = new Map<string, number>();
-        // A JD read from a file or link is in no message; the first-step note keeps its text here.
-        let intakeJobText = "";
-        /** The recruiter's own words in this conversation, with a JD read from a file or link. */
-        const recruiterWordsText = async () =>
-          [
-            intakeJobText,
-            ...(
-              await deps.prisma.message
-                .findMany({
-                  where: { threadId: thread.id, role: "user" },
-                  orderBy: { seq: "asc" },
-                  select: { blocks: true },
-                })
-                .catch(() => [])
-            ).flatMap((message) =>
-              (message.blocks as MessageBlock[]).flatMap((block) =>
-                block.kind === "text" ? [block.text] : [],
-              ),
-            ),
-          ].join("\n");
         // New people the searches planned with the last answer returned. Once the first picks come
         // from them and there are this many, the ten come from them instead of another search.
         let plannedNewPeople = 0;
@@ -13556,12 +13528,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           // Asked to write to the people they named, the team writes to them: no question, no search.
           const words = texts.map((item) => item.text).join("\n");
-          const ask = (jd: string) => {
-            intakeJobText = jd;
-            return writesToNamedPeople(words)
+          const ask = () =>
+            writesToNamedPeople(words)
               ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
-              : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${intakeFieldsNote(`${jd}\n${words}`)}`;
-          };
+              : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${INTAKE_FIRST_STEP_NOTE}`;
           // A role Kruit opened (start_role) is already named after it: keep that title.
           const roleChatName = async () => {
             const named = thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
@@ -13582,7 +13552,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!title) return undefined;
             return {
               saving: create(title, [], request),
-              note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask(request)}`,
+              note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask()}`,
             };
           }
           try {
@@ -13606,7 +13576,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .trim() || file.name;
               return {
                 saving: create(title, [], quote),
-                note: `The recruiter's attached JD (${file.name}) is read and is being saved as a new role titled "${title}" with no brief yet. Do not read the file again and do not create, rename or update a role in this turn. Its text:\n\n${read.text}\n\n${ask(read.text)}`,
+                note: `The recruiter's attached JD (${file.name}) is read and is being saved as a new role titled "${title}" with no brief yet. Do not read the file again and do not create, rename or update a role in this turn. Its text:\n\n${read.text}\n\n${ask()}`,
               };
             }
             if (!block) return undefined;
@@ -13614,7 +13584,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const title = pastedJobTitle(pasted.text)!;
               return {
                 saving: create(title, [], block.text),
-                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask(pasted.text)}`,
+                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask()}`,
               };
             }
             const url = jobLinkIn(block.text)!;
@@ -13655,7 +13625,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ],
                 block.text,
               ),
-              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask(read.text)}`,
+              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask()}`,
             };
           } catch (error) {
             getLogger().warn("job link not read before the first step", {
@@ -15079,26 +15049,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       knownAskBounced.add(known.key);
                       return `"${known.key}" → "${known.value}"`;
                     }
-                    // A fact the recruiter's own words state is never asked again (staging 11-15:
-                    // "6+ years" drew a years-cap card, "Seattle hybrid" a work-scope card).
-                    const settled = settledFactAsked(
-                      question,
-                      [
-                        intakeJobText,
-                        ...messages
-                          .filter((message) => message.role === "user")
-                          .flatMap((message) =>
-                            (message.blocks as MessageBlock[]).flatMap((block) =>
-                              block.kind === "text" ? [block.text] : [],
-                            ),
-                          ),
-                      ].join("\n"),
-                    );
-                    const bounces = settled ? (settledAskBounces.get(settled) ?? 0) : 3;
-                    if (settled && bounces < 3) {
-                      settledAskBounces.set(settled, bounces + 1);
-                      return { instead: settledFactNote(settled) };
-                    }
                     return undefined;
                   },
                   onToolCompleted: async (completion) => {
@@ -15424,10 +15374,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               if (!event.requestedSchema) {
-                // The one question allowed beside the ten asks a fact still open; it stands.
-                const card = openFactAsked(event.text ?? "", await recruiterWordsText())
-                  ? undefined
-                  : await nextStepCardInstead();
+                // Beside the first ten the model's own question stands: it is the one open fact
+                // that changes who is searched for, if it judged there is one.
+                const shown = (await roundRecordedThisRun())?.result as { round?: unknown } | null;
+                const card = shown?.round === 1 ? undefined : await nextStepCardInstead();
                 if (card) {
                   turnReport.report();
                   event.text = card.text;

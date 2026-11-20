@@ -379,6 +379,19 @@ test("a factual answer with a caveat is not a dead end", () => {
   assert(!deadEnd(bot("目前还没有已建立的岗位，所以暂时没有候选人回复可查看。")));
 });
 
+test("a send on its way with the time it will be out is not a dead end", () => {
+  // The mail service's real pacing, said truthfully with the latest time (branch 80b80e6b).
+  assert(
+    !deadEnd(
+      bot(
+        "Ethan Park 和 Ada Chen 的首封邮件都已进入发送队列，正在发送途中；邮件服务会按自己的节奏启动新邮件，无法通过再次发送加快。两封预计最迟约 **61 分钟内**发出。",
+      ),
+    ),
+  );
+  assert(!deadEnd(bot("Both emails are queued and can't go faster; they'll be out by 3:40 pm.")));
+  assert(deadEnd(bot("现在还不能发送邮件，因为没有可用的发件邮箱。")));
+});
+
 test("a reply that blames a permission or tells the recruiter to open a role fails", () => {
   for (const reply of [
     "测试邮件尚未发出。当前权限不支持创建一次性邮件，因此无法提交发送确认；需要开通支持单封邮件发送的权限后才能完成。",
