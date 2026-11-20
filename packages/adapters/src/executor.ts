@@ -424,7 +424,7 @@ import {
   readCalBookingSnapshot,
 } from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
-import { connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
+import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
@@ -11223,12 +11223,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 spaceId: run.spaceId,
                 executionId,
               });
-              if (campaignSendCardHash(sendCard(display, args.send_now === true)) !== shownCard)
+              const current = sendCard(display, args.send_now === true);
+              if (campaignSendCardHash(current) !== shownCard) {
+                // Which parts moved (paths only, no values), to tell a real edit from a lagging read.
+                getLogger().warn("send.approval.card_changed", {
+                  runId,
+                  effectId: applied?.effect.id,
+                  changed: changedPaths(
+                    (applied?.effect.result as { instantlyActivationShown?: unknown } | null)
+                      ?.instantlyActivationShown,
+                    current,
+                  ),
+                });
                 return {
                   error:
                     "Nothing was sent: the emails or people changed after this card was shown, so it no longer shows what would go out. Tell the recruiter in one line, then call activate_campaign again; its new card shows the current emails.",
                   dispatched: false,
                 };
+              }
             }
             const claim = from === "approved" ? claimApprovedEffect : claimIntendedEffect;
             let claimed: boolean;

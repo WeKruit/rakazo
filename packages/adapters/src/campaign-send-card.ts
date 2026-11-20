@@ -146,3 +146,22 @@ export const sendCard = (display: InstantlyActivationDisplay, sendNow: boolean) 
   firstEmail: display.firstEmail ?? null,
   ...(display.takenOut?.length ? { takenOut: display.takenOut } : {}),
 });
+
+/** Where two send cards differ, as paths such as "recipients[1].firstEmail.body" (no values). */
+export function changedPaths(shown: unknown, current: unknown, path = "", out: string[] = []) {
+  if (out.length >= 10) return out;
+  if (!path && shown === undefined) return ["card not recorded"];
+  const object = (value: unknown) => value && typeof value === "object";
+  if (!object(shown) || !object(current)) {
+    if (shown !== current) out.push(path || "card");
+    return out;
+  }
+  const a = shown as Record<string, unknown>;
+  const b = current as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const next = Array.isArray(a) ? `${path}[${key}]` : path ? `${path}.${key}` : key;
+    if (!(key in a) || !(key in b)) out.push(next);
+    else changedPaths(a[key], b[key], next, out);
+  }
+  return out.slice(0, 10);
+}

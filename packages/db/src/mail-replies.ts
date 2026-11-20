@@ -395,6 +395,8 @@ export async function findWaitingCampaignSend(
         ...(object(current?.result) ?? {}),
         instantlyActivationCampaign: input.campaignId,
         instantlyActivationCard: card,
+        // What the card showed, so a send refused at approval can say what changed.
+        instantlyActivationShown: input.card,
       } as Prisma.InputJsonValue,
     },
   });
