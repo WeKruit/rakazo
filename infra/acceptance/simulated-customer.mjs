@@ -501,6 +501,7 @@ async function play(journey, label, owner, mailbox, out) {
       const old = (await groupsOf(user.rpc)).filter((group) => journey.leftover.test(group.name ?? ""));
       if (old.length) await archiveRoles(credentials, old.map((group) => group.id), label, { idleHours: 1 });
     }
+    if (journey.account === "mailbox") await forgetEarlierPlays(user.rpc, label);
   } else {
     const email = `kruit-sim-${journey.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
     const password = `Sim-${crypto.randomUUID()}`;
@@ -764,6 +765,21 @@ async function closeStaleCards(rpc, label) {
     }
   }
   if (closed) log(`${label}: closed ${closed} card(s) earlier plays left waiting`);
+}
+/**
+ * Empties what earlier plays had Kruit remember on a reused mailbox account (one play holds it at
+ * a time). A preference one play's recruiter stated, such as "send nothing before Monday", is
+ * otherwise followed in the next play, which then grades a refusal its recruiter never caused.
+ */
+async function forgetEarlierPlays(rpc, label) {
+  let emptied = 0;
+  for (const scope of ["user", "bot"])
+    for (const doc of await rpc("memory/list", { scope })) {
+      if (!doc.content) continue;
+      await rpc("memory/update", { documentId: doc.id, content: "", expectedRevision: doc.revision });
+      emptied += 1;
+    }
+  if (emptied) log(`${label}: emptied ${emptied} memory document(s) earlier plays left`);
 }
 /** Archives the roles one play opened on a reused account, through the shared archive script. */
 function archiveRoles([email, password], groupIds, label, { idleHours = 0 } = {}) {
