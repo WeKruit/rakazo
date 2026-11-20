@@ -478,27 +478,12 @@ export async function startRecruitingGrading(
     // A round held for the Reviewer is shown once it is checked, swapped or not: the check's end is
     // stored, so its owner's turn that shows it is the only one that may record it.
     if (review.held) {
-      const before = await deps.prisma.recruitingCalibrationRound.findFirst({
-        where: { roleId: role.id, round: { lt: review.round.round } },
-        orderBy: { round: "desc" },
-        select: { createdAt: true },
-      });
-      const asked = await deps.prisma.message.findMany({
-        where: {
-          threadId: thread.id,
-          role: "user",
-          ...(before ? { createdAt: { gt: before.createdAt } } : {}),
-        },
-        orderBy: { seq: "desc" },
-        take: 10,
-        select: { blocks: true },
-      });
       const latest = await deps.prisma.message.findFirst({
         where: { threadId: thread.id, role: "user" },
         orderBy: { seq: "desc" },
         select: { id: true },
       });
-      const size = roundSize(asked.map((message) => message.blocks));
+      const size = await askedRoundSize(deps.prisma, role.id, review.round.round, thread.id);
       const open = Math.max(0, size - (review.round.candidateKeys.length - misfits.length));
       const shownPeople = checkedRoundPeople(
         review.round.candidateKeys,
@@ -1164,6 +1149,27 @@ export function roundSize(messages: readonly unknown[]): number {
     if (asked) return asked < 10 ? asked : 10;
   }
   return 10;
+}
+
+/** roundSize for `round` of a role, from the recruiter's messages in `threadId` since the round before. */
+export async function askedRoundSize(
+  prisma: PrismaClient,
+  roleId: string,
+  round: number,
+  threadId: string,
+): Promise<number> {
+  const before = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId, round: { lt: round } },
+    orderBy: { round: "desc" },
+    select: { createdAt: true },
+  });
+  const asked = await prisma.message.findMany({
+    where: { threadId, role: "user", ...(before ? { createdAt: { gt: before.createdAt } } : {}) },
+    orderBy: { seq: "desc" },
+    take: 10,
+    select: { blocks: true },
+  });
+  return roundSize(asked.map((message) => message.blocks));
 }
 
 /** How close a misfit the Reviewer checked is: kept in a place no Strong person can fill. */

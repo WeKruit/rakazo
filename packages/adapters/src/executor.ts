@@ -627,6 +627,7 @@ import {
 } from "./recruiting-feedback.js";
 import { FULL_PROFILE_READS, withRequirementEvidence } from "./recruiting-full-profile.js";
 import {
+  askedRoundSize,
   GRADE_TOOL_CALL_STOP,
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
@@ -6052,6 +6053,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return {
                 error: `Not recorded: round ${state.round} is waiting for the Reviewer's check and is shown here once checked, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
               };
+            // fosp 11-20 (2f644309): "再来5个" reached this conversation 4 s after the check sized
+            // the round at ten, so ten were shown. The checked round is sized again as it is shown.
+            const shownKeys = args.candidateKeys;
+            if (state?.status === "checked" && Array.isArray(shownKeys)) {
+              const size = await askedRoundSize(
+                deps.prisma,
+                thread.activeRecruitingRoleId,
+                state.round,
+                thread.id,
+              ).catch(() => shownKeys.length);
+              if (shownKeys.length > size)
+                args = { ...args, candidateKeys: shownKeys.slice(0, size) };
+            }
             // Staging 11-15: "just get me the next ten" waited behind the turn that showed round 2,
             // then ran as a new request and built round 3. Asked once per message.
             if (
