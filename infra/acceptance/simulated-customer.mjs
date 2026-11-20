@@ -433,7 +433,10 @@ async function simulate(journey, turns, view, cards, screen, tag, since) {
   // A reused account's pages still show earlier tests; only this session's messages count.
   const earlier =
     journey.account && screen
-      ? `\n\nAnything on your screen from before ${new Date(since).toISOString().slice(11, 16)} UTC is an earlier session, not yours: your goals count only from the conversation above.`
+      ? `\n\nAnything on your screen from before ${new Date(since).toISOString().slice(11, 16)} UTC is an earlier session, not yours: your goals count only from the conversation above.${
+          // The screen shows no times, so a similar earlier play there reads as this one's progress.
+          turns.length ? "" : " This is your first move, so none of your goals is met yet: start from the first."
+        }`
       : "";
   const signedUp = journey.account ? "" : `\nYou signed up for Kruit as ${ACCOUNT_NAME}; unless "What you know" gives you another name, that is your name.`;
   const prompt = `Who you are:\n${journey.persona}${signedUp}\n${journey.variation ?? ""}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS, tag)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
