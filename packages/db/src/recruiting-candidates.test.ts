@@ -7452,3 +7452,45 @@ describe("people-search page provenance on read", () => {
     ).rejects.toThrow(IsolationError);
   });
 });
+
+describe("calibration round view", () => {
+  it("shows each person's saved pass or hold beside the round's list", async () => {
+    const f = fixture();
+    const consideration = (operation: string) => ({
+      operation,
+      source: {
+        messageId: "message",
+        threadId: "thread",
+        seq: 1,
+        createdAt: new Date(0).toISOString(),
+        quote: "Not a fit",
+        actor: { userId: actor.userId, spaceId: actor.spaceId },
+      },
+    });
+    Object.assign(f.tx, {
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async () => ({
+          round: 1,
+          candidateKeys: ["a", "b", "c"],
+          createdAt: new Date(1),
+          approvedAt: null,
+        })),
+      },
+      recruitingCandidateOccurrence: { findMany: vi.fn(async () => []) },
+    });
+    Object.assign(f.tx.recruitingCandidate, {
+      findMany: vi.fn(async () => [
+        { candidateKey: "b", consideration: consideration("pass") },
+        { candidateKey: "c", consideration: consideration("resume") },
+      ]),
+    });
+    const view = await recruiting.readRecruitingCalibrationRound(f.prisma, actor, {
+      threadId: "thread",
+    });
+    expect(view.round?.candidates.map((candidate) => candidate.decision)).toEqual([
+      undefined,
+      "pass",
+      undefined,
+    ]);
+  });
+});

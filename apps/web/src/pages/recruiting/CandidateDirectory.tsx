@@ -310,18 +310,19 @@ const Fit = memo(function Fit({
 });
 
 const Status = memo(function Status({ row }: { row: RoleCandidate }) {
-  const activity =
-    row.crm?.stage ||
-    (row.autumn?.decision === "hold"
-      ? "on_hold"
+  const { t } = useLingui();
+  const activity = row.crm?.stage
+    ? statusText(row.crm.stage)
+    : row.autumn?.decision === "hold"
+      ? t`On hold`
       : row.autumn?.decision === "pass"
-        ? "passed"
-        : null);
+        ? t`Passed`
+        : null;
   return (
     <div className="flex flex-wrap gap-1">
       {activity ? (
         <Badge variant="outline" className="max-w-full whitespace-normal break-words">
-          {statusText(activity)}
+          {activity}
         </Badge>
       ) : null}
       {row.autumn?.shortlisted ? (

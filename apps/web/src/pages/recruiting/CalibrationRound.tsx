@@ -1,6 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCalibrationRound } from "@rakazo/contracts";
-import { Button, Input, Textarea, Toggle } from "@rakazo/ui-web";
+import { Badge, Button, Input, Textarea, Toggle } from "@rakazo/ui-web";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import { rpc } from "../../lib/rpc";
@@ -110,6 +110,11 @@ export function CalibrationRoundView({
                   )}
                   {detail ? <p className="truncate text-muted-foreground">{detail}</p> : null}
                 </div>
+                {candidate.decision ? (
+                  <Badge variant="outline" className="ml-auto shrink-0">
+                    {candidate.decision === "pass" ? <Trans>Passed</Trans> : <Trans>On hold</Trans>}
+                  </Badge>
+                ) : null}
                 {approved ? null : (
                   <div className="flex shrink-0 gap-1">
                     <Toggle
