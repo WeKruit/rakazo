@@ -10,6 +10,7 @@ import { Client } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
+import { STOPPED_TURN } from "./cancel-runs.js";
 import { appendEventInTransaction } from "./events.js";
 import { createThreadMessageInTransaction } from "./messages.js";
 import * as recruiting from "./recruiting.js";
@@ -7253,6 +7254,26 @@ describe("people search candidate save", () => {
     f.existing.push({ candidateKey: "linkedin:/in/example" });
     const result = (await f.save()) as { candidateRows: Array<Record<string, unknown>> };
     expect(result.candidateRows[0]).toMatchObject({ alreadyInPool: true });
+  });
+
+  it("keeps the people a paid search returned after the recruiter stopped the turn", async () => {
+    const f = peopleSearchFixture();
+    // Stop clears the lease; the provider still answers the search it already accepted.
+    Object.assign(f.run, {
+      status: "cancelled",
+      error: STOPPED_TURN,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+    await f.save();
+    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledOnce();
+  });
+
+  it("saves nothing after Stop everything or a cancel that is not a stopped turn", async () => {
+    const f = peopleSearchFixture();
+    Object.assign(f.run, { status: "cancelled", error: null, leaseOwner: null });
+    await expect(f.save()).rejects.toThrow(IsolationError);
+    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
   });
 
   it.each(["foreign-source", "receipt-hash", "stale-role"])("refuses %s", async (boundary) => {
