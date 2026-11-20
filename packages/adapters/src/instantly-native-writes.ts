@@ -1314,6 +1314,8 @@ type Person = StagedLead & {
   saved?: Record<typeof OWN_SUBJECT | typeof OWN_BODY, string>;
   /** The provider has emailed this lead (Lead.timestamp_last_contact). */
   contacted?: boolean;
+  /** When the provider last emailed this lead, as it said. */
+  contactedAt?: string;
   /** When this lead joined the campaign (Lead.timestamp_created). */
   queuedAt?: string;
 };
@@ -1350,6 +1352,9 @@ function asPerson(lead: Record<string, unknown>): Person[] {
         ? { saved: { [OWN_SUBJECT]: String(subject), [OWN_BODY]: String(body) } }
         : {}),
       ...(lead.timestamp_last_contact ? { contacted: true } : {}),
+      ...(typeof lead.timestamp_last_contact === "string"
+        ? { contactedAt: lead.timestamp_last_contact }
+        : {}),
       ...(typeof lead.timestamp_created === "string" ? { queuedAt: lead.timestamp_created } : {}),
     },
   ];
@@ -2922,6 +2927,10 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
   return {
     recipients: people.map((person) => person.email),
     emailed: people.filter((person) => person.contacted).map((person) => person.email),
+    // When each one went out, so "is it sent and when" is answered from the mail service.
+    emailedAt: Object.fromEntries(
+      people.flatMap((person) => (person.contactedAt ? [[person.email, person.contactedAt]] : [])),
+    ),
     queued,
     ...(isTemplated(campaign) ? { firstEmails: ownFirstEmails(people) } : {}),
     ...(window ? { queuedFirstEmail: window.now ? "now" : window.local } : {}),

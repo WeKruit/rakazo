@@ -5619,6 +5619,7 @@ describe("local native Instantly campaign and lead tools", () => {
           next: expect.stringContaining("send_now"),
         });
         expect(read.emailed).toHaveLength(f.state.campaignLeads.length - 1);
+        expect(Object.values(read.emailedAt as object)).toContain("2026-11-12T15:00:00Z");
         f.state.requests.length = 0;
         const out = f.result(await f.run("activate_campaign", { send_now: true }));
         expect(
