@@ -1079,7 +1079,7 @@ export async function ownedInstantly(
   return { campaigns: [...campaigns].sort(), mailboxes: [...mailboxes].sort() };
 }
 
-const CAMPAIGN_PATH = /^\/campaigns\/([0-9a-f-]{36})(?:\/(?:activate|pause))?$/i;
+const CAMPAIGN_PATH = /^\/campaigns\/([0-9a-f-]{36})(?:\/(?:activate|pause|sending-status))?$/i;
 
 /**
  * The shared account's REST boundary: only this connection's own campaigns (and one it creates in
@@ -2915,7 +2915,7 @@ async function sendCampaign(
  */
 /** A paused campaign emails nobody until it is activated again, which only activate_campaign does. */
 const PAUSED_NEXT =
-  "Paused: nobody still queued is emailed while it stays paused. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.";
+  "Paused: nobody still waiting is emailed while it stays paused. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.";
 async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
   const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });
   const people = (
@@ -2924,6 +2924,7 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
   const waiting = people.filter((person) => !person.contacted);
   const queued = waiting.map((person) => person.email);
   const window = campaign.status === ACTIVE && queued.length ? nextSendWindow(campaign) : null;
+  const held = window?.now ? await sendingHeld(rest, String(campaign.id)) : null;
   return {
     recipients: people.map((person) => person.email),
     emailed: people.filter((person) => person.contacted).map((person) => person.email),
@@ -2931,20 +2932,49 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
     emailedAt: Object.fromEntries(
       people.flatMap((person) => (person.contactedAt ? [[person.email, person.contactedAt]] : [])),
     ),
-    queued,
+    notEmailedYet: queued,
     ...(isTemplated(campaign) ? { firstEmails: ownFirstEmails(people) } : {}),
-    ...(window ? { queuedFirstEmail: window.now ? "now" : window.local } : {}),
-    ...(window && !window.now
+    ...(window ? { firstEmailGoesOut: window.now ? "now" : window.local } : {}),
+    ...(held ? { mailServiceSays: held } : {}),
+    ...(held
       ? {
-          next: `The queued people are waiting for the sending hours, not failed. Tell the recruiter who and that their first email goes out ${window.local}, and call activate_campaign with send_now so their card offers to send now.`,
+          next: `The people not emailed yet are not being sent right now: the mail service says "${held.message}"${held.since ? ` since ${held.since}` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}. Tell the recruiter who is not emailed yet and that reason in plain words, with what would get them out if it says; do not promise a time it has not given, and do not send them again.`,
         }
-      : window
+      : window && !window.now
         ? {
-            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still waiting to be emailed with that time, the same time each check, in plain words (never "queue"); do not send them again. Nobody queued has been emailed yet, so if the recruiter asks to stop or hold, pause_campaign holds every one of them.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten." : ""}`,
+            next: `The people not emailed yet are waiting for the sending hours, not failed. Tell the recruiter who and that their first email goes out ${window.local}, and call activate_campaign with send_now so their card offers to send now.`,
           }
-        : campaign.status === PAUSED && queued.length
-          ? { next: PAUSED_NEXT }
-          : {}),
+        : window
+          ? {
+              next: `The people not emailed yet are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still waiting to be emailed with that time, the same time each check, in plain words (never "queue"); do not send them again. None of them has been emailed yet, so if the recruiter asks to stop or hold, pause_campaign holds every one of them.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone waiting one a minute instead of one every ten." : ""}`,
+            }
+          : campaign.status === PAUSED && queued.length
+            ? { next: PAUSED_NEXT }
+            : {}),
+  };
+}
+
+/**
+ * Why the mail service is not sending an active campaign, from its own sending-status read, or
+ * null when it says it is sending or cannot say. Staging 11-20: three confirmed one-person sends
+ * sat unsent for over two hours while the reply promised an hour.
+ */
+async function sendingHeld(rest: InstantlyRest, campaignId: string) {
+  const read = await rest("GET", `/campaigns/${campaignId}/sending-status`).catch(() => null);
+  const summary = read?.summary as Record<string, unknown> | null | undefined;
+  const diagnostics = read?.diagnostics as Record<string, unknown> | null | undefined;
+  const status = typeof summary?.status === "string" ? summary.status : diagnostics?.status;
+  if (typeof status !== "string" || status === "healthy") return null;
+  return {
+    status,
+    message:
+      typeof summary?.status_message === "string"
+        ? summary.status_message
+        : status.replaceAll("_", " "),
+    ...(typeof summary?.issue_started_at === "string" ? { since: summary.issue_started_at } : {}),
+    ...(typeof diagnostics?.next_open_at === "string"
+      ? { nextOpenAt: diagnostics.next_open_at }
+      : {}),
   };
 }
 
