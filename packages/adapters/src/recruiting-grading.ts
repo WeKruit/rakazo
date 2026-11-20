@@ -1148,7 +1148,7 @@ async function roundReplacements(
  * before ("再来5个"), else ten. `messages` are the recruiter's messages' blocks, newest first.
  * fosp 11-20: "再来5个" was filled to 6; capping at the recorded size instead left "the next ten"
  * rounds short when the lead recorded fewer; and reading only the newest message ("那5个出来了吗？")
- * filled a round asked as 5 to 8.
+ * filled a round asked as 5 to 8; "你说的7个和23个到底哪个对，再来5个" read 23 and showed ten.
  */
 export function roundSize(messages: readonly unknown[]): number {
   for (const blocks of messages) {
@@ -1160,7 +1160,12 @@ export function roundSize(messages: readonly unknown[]): number {
           : [],
       )
       .join("\n");
-    const asked = requestedPeopleTarget(text);
+    // The last clause naming a number is the ask: in "你说的7个和23个到底哪个对，再来5个" it is 5.
+    const asked = text
+      .split(/[，,。！!？?；;\n]/)
+      .reverse()
+      .map(requestedPeopleTarget)
+      .find(Boolean);
     if (asked) return asked < 10 ? asked : 10;
   }
   return 10;

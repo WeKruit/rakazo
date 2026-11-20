@@ -1100,6 +1100,12 @@ describe("roundSize", () => {
         handIn("再来5个"),
       ]),
     ).toBe(5);
+    // fosp 11-20 (f69df234): "你说的7个和23个到底哪个对，再来5个" read 23 and showed ten.
+    expect(
+      roundSize([
+        handIn("下一批具体改了什么？另外你说的7个和23个到底哪个对，再来5个，别让1、5、6回来"),
+      ]),
+    ).toBe(5);
     expect(roundSize([])).toBe(10);
     expect(checkedRoundPeople(["a", "b", "c"], new Map(), [], 2)).toHaveLength(2);
   });
