@@ -1,3 +1,4 @@
+import { approvalEffectKey } from "@rakazo/core/node/approval-effect-key";
 import { describe, expect, it } from "vitest";
 import type { LanguageRow, LanguageSignal, TextJudge } from "./judge.js";
 import {
@@ -259,6 +260,16 @@ describe("roundByLanguage", () => {
       a: "Mandarin not confirmed; 8+ years overall experience",
       e: "Mandarin not confirmed",
     });
+  });
+
+  it("keys a round where everyone's language is confirmed as JSON", () => {
+    // fosp 11-20: with nothing unverified the round's arguments carried unverified: undefined,
+    // and every calibration_round with a required language was refused before it was recorded.
+    const round = roundByLanguage(["b", "d"], undefined, levels, "Mandarin");
+    expect(round).toEqual({ candidateKeys: ["b", "d"] });
+    expect(() =>
+      approvalEffectKey("run", "recruiting_research", { operation: "calibration_round", ...round }),
+    ).not.toThrow();
   });
 
   it("leaves a round alone when no language level is known", () => {

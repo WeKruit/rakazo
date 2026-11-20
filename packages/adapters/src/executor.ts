@@ -6146,12 +6146,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const note = given.get(savedCandidateKeyForm(key));
               if (note) notes[key] = note;
             }
-            const round = roundByLanguage(keys, notes, levels, languageRequirement);
-            args = {
-              ...args,
-              candidateKeys: round.candidateKeys,
-              unverified: round.unverified,
-            };
+            const { unverified: _notes, ...rest } = args;
+            args = { ...rest, ...roundByLanguage(keys, notes, levels, languageRequirement) };
           }
           // The server fills what it knows about the thread's role and names a person the recruiter
           // mentioned by their saved key, so feedback saves on the first call.
