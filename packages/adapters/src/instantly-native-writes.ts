@@ -2917,6 +2917,7 @@ async function sendCampaign(
 const PAUSED_NEXT =
   "Paused: nobody still waiting is emailed while it stays paused. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.";
 async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
+  const mailbox = Array.isArray(campaign.email_list) ? campaign.email_list.join(", ") : "";
   const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });
   const people = (
     Array.isArray(leads.items) ? (leads.items as Record<string, unknown>[]) : []
@@ -2924,7 +2925,8 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
   const waiting = people.filter((person) => !person.contacted);
   const queued = waiting.map((person) => person.email);
   const window = campaign.status === ACTIVE && queued.length ? nextSendWindow(campaign) : null;
-  const held = window?.now ? await sendingHeld(rest, String(campaign.id)) : null;
+  const status = window?.now ? await sendingHeld(rest, String(campaign.id)) : null;
+  const held = status ? { ...status, ...(mailbox ? { mailbox } : {}) } : null;
   return {
     recipients: people.map((person) => person.email),
     emailed: people.filter((person) => person.contacted).map((person) => person.email),
@@ -2938,7 +2940,7 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
     ...(held ? { mailServiceSays: held } : {}),
     ...(held
       ? {
-          next: `The people not emailed yet are not being sent right now: the mail service says "${held.message}"${held.since ? ` since ${held.since}` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}. Tell the recruiter who is not emailed yet and that reason in plain words, with what would get them out if it says; do not promise a time it has not given, and do not send them again.`,
+          next: `The people not emailed yet are not being sent right now: the mail service says "${held.message}"${held.mailbox ? ` (it sends from ${held.mailbox})` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}. Tell the recruiter who is not emailed yet and that reason in plain words, with what would get them out if it says; do not promise a time it has not given, and do not send them again.`,
         }
       : window && !window.now
         ? {
@@ -2982,7 +2984,6 @@ async function sendingHeld(rest: InstantlyRest, campaignId: string) {
       typeof accounts?.total_connected === "number"
         ? `${said} (${accounts.available ?? 0} of ${accounts.total_connected} sending mailboxes available${unavailable.length ? `; ${unavailable.join(", ")}` : ""})`
         : said,
-    ...(typeof summary?.issue_started_at === "string" ? { since: summary.issue_started_at } : {}),
     ...(typeof diagnostics?.next_open_at === "string"
       ? { nextOpenAt: diagnostics.next_open_at }
       : {}),
