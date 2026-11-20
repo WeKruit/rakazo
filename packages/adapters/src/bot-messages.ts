@@ -655,6 +655,57 @@ export async function returnBotMessageOutcome(
   return outcome.ok;
 }
 
+/** Model-facing: the round a role team returned is already on the recruiter's screen. */
+const ROUND_SHOWN =
+  "The role's new round is already posted above in this conversation, exactly as recorded and checked by Reviewer, and the recruiter already sees it. Do not list, count, retell or judge those people again. Reply only if the recruiter's last message asked something the round leaves open; otherwise say nothing.";
+
+/** Posts the returned round in the conversation that asked for it, once per request. */
+async function showRoundWhereAsked(
+  deps: Pick<ExecutorDeps, "prisma" | "events">,
+  run: { id: string; spaceId: string },
+  root: { returnThreadId: string; fromBotId: string },
+  requestId: string,
+  text: string,
+): Promise<boolean> {
+  const blocks: MessageBlock[] = [{ kind: "text", text: clampBotMessage(text) }];
+  const clientNonce = `delegated-round:${requestId}`;
+  const shown = await withTransactionRetry(() =>
+    deps.prisma.$transaction(async (tx) => {
+      const already = await tx.message.findUnique({
+        where: { threadId_clientNonce: { threadId: root.returnThreadId, clientNonce } },
+        select: { id: true },
+      });
+      if (already) return { seq: null };
+      const copy = await createThreadMessageInTransaction(tx, {
+        threadId: root.returnThreadId,
+        role: "bot",
+        blocks,
+        botId: root.fromBotId,
+        runId: run.id,
+        clientNonce,
+        markUnread: true,
+        allowCancelledRun: true,
+      });
+      const event = await appendEventInTransaction(tx, {
+        spaceId: run.spaceId,
+        threadId: root.returnThreadId,
+        botId: root.fromBotId,
+        type: "thread.message.created",
+        runId: run.id,
+        allowCancelledRun: true,
+        payload: { messageId: copy.id, role: "bot", blocks },
+      });
+      return { seq: event.seq };
+    }),
+  ).catch((error) => {
+    getLogger().warn("delegated round not shown", { runId: run.id, error: String(error) });
+    return undefined;
+  });
+  if (!shown) return false;
+  if (shown.seq !== null) await deps.events.notify(root.returnThreadId, shown.seq);
+  return true;
+}
+
 /**
  * A role team's conversation went quiet after work another conversation delegated to it: send
  * the team's latest reply back there, exactly once per delegated request. Waits while a teammate
@@ -766,6 +817,10 @@ export async function returnDelegatedTeamOutcome(
   // Gate 71a2cac2: beside the record, the team's "profiles show 6+ years" left Kruit squaring a
   // retelling with the record, and it contradicted itself. The record is the whole answer.
   if (saved) text = round ? `${round}\n\n${saved}` : saved;
+  // feedback-round x5 on 44c1ad44: Kruit retold the team's round, graded its people itself and
+  // listed eight more from the pool, so the recruiter got three versions of one round. The round
+  // is shown as recorded where they asked; Kruit learns only that it is there.
+  if (round && (await showRoundWhereAsked(deps, run, root, delegated.id, text))) text = ROUND_SHOWN;
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)
     text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
