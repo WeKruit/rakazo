@@ -131,6 +131,7 @@ import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-ke
 import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
 import { getLogger } from "@rakazo/logging";
 import { backgroundToolSourceTrigger } from "./background-tool.js";
+import { STOPPED_TURN } from "./cancel-runs.js";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import type { AnswerRunInput, PauseRunForInput } from "./events.js";
@@ -7882,7 +7883,10 @@ export async function saveRecruitingCandidatePeopleSearch(
     )
       throw new IsolationError();
     if (saving.status === "completed") return saving.result;
-    requireResearchLease(run, trusted);
+    // Stop clears the lease, but a search the provider already answered was paid for: keep its
+    // people. Stop everything and other cancels still save nothing.
+    if (!(run.status === "cancelled" && run.error === STOPPED_TURN))
+      requireResearchLease(run, trusted);
     if (saving.status !== "executing" || !thread.activeRecruitingRoleId) throw new IsolationError();
     const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
     if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)

@@ -23,7 +23,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
-import { peopleTargetFrom } from "./people-target.js";
+import { asksForPeople, peopleTargetFrom } from "./people-target.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 import { runningSearchFor } from "./work-estimate.js";
@@ -407,6 +407,21 @@ async function requireDeeperSearchBudget(
 export const PEOPLE_SEARCH_MAX_RESULTS = 10;
 
 /**
+ * The recruiter's own words in a message of a role's conversation: their text, or the words the
+ * main chat handed in for them, never the brief after them or a teammate's report. Staging 11-20
+ * (387caac4): a brief's "不联系候选人" hid "再找10个", and the role's first "先找10个" refused
+ * every search.
+ */
+function recruiterText(block: Record<string, unknown> | undefined): string {
+  const text = typeof block?.text === "string" ? block.text : "";
+  if (block?.kind !== "bot_message_received") return text;
+  return (
+    /^The recruiter wrote, word for word:\n"([\s\S]*?)"(?:\n\nKruit's brief:|$)/.exec(text)?.[1] ??
+    ""
+  );
+}
+
+/**
  * How many more people the recruiter's latest number allows this role, or undefined when no
  * recent message of theirs names one. Long-search-finishes 11-15: "找20个人，找完告诉我" saved 41,
  * because every search was capped but nothing held the request's total.
@@ -424,12 +439,12 @@ export async function peopleRoomForRequest(
   });
   for (const message of messages) {
     const text = (Array.isArray(message.blocks) ? message.blocks : [])
-      .map((block) => {
-        const value = record(block)?.text;
-        return typeof value === "string" ? value : "";
-      })
+      .map((block) => recruiterText(record(block)))
       .join(" ");
-    if (!peopleTargetFrom(text, 0)) continue;
+    if (!peopleTargetFrom(text, 0)) {
+      if (asksForPeople(text)) return undefined;
+      continue;
+    }
     // Staging 11-15: someone found again after the message is not new, so "继续找 10 位" on a
     // role of 24 read as a total of 10 while the approve result said 34.
     const [total, since, before] = await Promise.all([

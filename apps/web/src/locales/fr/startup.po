@@ -21,6 +21,10 @@ msgstr " (non lu)"
 msgid " and {more} more"
 msgstr ""
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid " and {moreEmailed} more"
+msgstr ""
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -201,10 +205,6 @@ msgstr ""
 #: src/lib/relative-time.ts
 msgid "{days}d ago"
 msgstr "il y a {days} j"
-
-#: src/pages/recruiting/SendQueue.tsx
-msgid "{emailed} emailed"
-msgstr ""
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
@@ -2051,6 +2051,10 @@ msgstr "Vérification de l’e-mail requise"
 msgid "Email: {0}"
 msgstr ""
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Emailed: {emailedNames}"
+msgstr ""
+
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Emails"
@@ -3358,6 +3362,10 @@ msgstr ""
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Not a fit: {name}"
+msgstr ""
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Not emailed yet: {waitingNames}"
 msgstr ""
 
 #: src/pages/recruiting/SequenceRuns.tsx
