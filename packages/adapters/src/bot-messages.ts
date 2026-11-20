@@ -733,6 +733,14 @@ export async function returnDelegatedTeamOutcome(
   const found = await openDelegation(deps.prisma, run.threadId);
   if (!found) return;
   const { delegated, root } = found;
+  if (
+    await recruiterInRoleChat(deps.prisma, {
+      roleThreadId: run.threadId,
+      returnThreadId: root.returnThreadId,
+      since: delegated.createdAt,
+    })
+  )
+    return;
   // Staging 11-13: the role's intake turn sat on its next-step card the whole time, so a check
   // Kruit delegated finished in the role's chat and never came back. Only a card asked since the
   // request holds the result.
@@ -893,6 +901,50 @@ async function savedForRequest(
   });
 }
 
+/**
+ * Whether the recruiter's newest own message since the request was written in the role's chat:
+ * they are there, so its card and result are already in front of them and need no copy in the chat
+ * that asked. Branch sends 11-20: with Kruit docked beside the role's chat, the send card and its
+ * result showed in both, read as "the same result posted twice". Workloop posts a child's card in
+ * the user's thread only because the user is not in the child's.
+ */
+async function recruiterInRoleChat(
+  prisma: PrismaClient,
+  input: { roleThreadId: string; returnThreadId: string; since: Date },
+): Promise<boolean> {
+  const recent = await prisma.message.findMany({
+    where: {
+      threadId: { in: [input.roleThreadId, input.returnThreadId] },
+      role: "user",
+      createdAt: { gt: input.since },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    select: {
+      threadId: true,
+      clientNonce: true,
+      botId: true,
+      externalTranscriptFor: { select: { id: true } },
+      blocks: true,
+    },
+  });
+  // The recruiter's own words: not a teammate's hand-in, a pushed-on turn, a role's opening copy of
+  // the request or a mail transcript.
+  const latest = recent.find(
+    (message) =>
+      message.botId === null &&
+      !message.externalTranscriptFor &&
+      !message.clientNonce?.startsWith("autocontinue:") &&
+      !message.clientNonce?.startsWith(ROLE_START_NONCE) &&
+      Array.isArray(message.blocks) &&
+      message.blocks.length > 0 &&
+      (message.blocks as MessageBlock[]).every((block) =>
+        ["text", "file", "image"].includes(block?.kind),
+      ),
+  );
+  return latest?.threadId === input.roleThreadId;
+}
+
 /** The latest request another conversation delegated to this role team, if it still answers back. */
 async function openDelegation(prisma: PrismaClient, threadId: string) {
   const since = new Date(Date.now() - DELEGATION_RETURN_WINDOW_MS);
@@ -1043,6 +1095,14 @@ export async function showDelegatedTeamCard(
     select: { id: true },
   });
   if (!card) return;
+  if (
+    await recruiterInRoleChat(deps.prisma, {
+      roleThreadId: run.threadId,
+      returnThreadId: found.root.returnThreadId,
+      since: found.delegated.createdAt,
+    })
+  )
+    return;
   const shown = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM threads WHERE id = ${found.root.returnThreadId} FOR UPDATE`;
