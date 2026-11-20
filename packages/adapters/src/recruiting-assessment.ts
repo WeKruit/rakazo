@@ -176,6 +176,28 @@ export function peopleToShow<T extends RecruiterListItem>(
   };
 }
 
+/** About 10k tokens: a whole account read stays one tool result the model can still answer from. */
+const ACCOUNT_PAGE_CHARS = 40_000;
+
+/**
+ * Ends a page of account roles at the last role that fits, paging on from it as the reader's own
+ * cursor does (roles after that id). Staging 11-20: 20 roles of sequences, each with its stored
+ * mail, did not fit the model's context and the turn failed with nothing said.
+ */
+function fitAccountPage(result: {
+  items: { roleId: string }[];
+  nextCursor: string | null;
+}): void {
+  let used = 0;
+  const kept = result.items.findIndex((item, index) => {
+    used += JSON.stringify(item).length;
+    return index > 0 && used > ACCOUNT_PAGE_CHARS;
+  });
+  if (kept < 0) return;
+  result.items = result.items.slice(0, kept);
+  result.nextCursor = result.items.at(-1)!.roleId;
+}
+
 export async function executeRecruitingCandidatesTool(
   deps: {
     prisma: PrismaClient;
@@ -334,6 +356,7 @@ export async function executeRecruitingCandidatesTool(
           limit: Math.min(input.limit ?? (operation === "interviews" ? 50 : 20), 50),
         },
       );
+      fitAccountPage(result);
       const unknownReplyDirections =
         operation === "replies"
           ? result.items.reduce(
