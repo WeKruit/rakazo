@@ -76,13 +76,19 @@ export async function retriedReplyInTransaction(
     select: { id: true, seq: true },
   });
   if (!earlier) return null;
-  // Anything said after it, by the person or a turn outside this chain, keeps both answers.
+  // Anything said after it, by the person or a turn outside this chain, keeps both answers. So
+  // does a card, even this turn's own: the answer to it belongs below it (branch sends 11-20: "the
+  // first email is confirmed and queued" sat above the send card it answered).
   const since = await tx.message.findFirst({
     where: {
       threadId: input.threadId,
       seq: { gt: earlier.seq },
       OR: [
         { role: "bot", NOT: { runId: { in: [input.runId, ...chain] } } },
+        ...CARD_KINDS.map((kind) => ({
+          role: "bot" as const,
+          blocks: { array_contains: [{ kind }] },
+        })),
         {
           role: "user",
           OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
