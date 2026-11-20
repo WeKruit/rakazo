@@ -650,11 +650,12 @@ describe("loadWorkingState", () => {
         },
       ],
     });
-    const working = (returnThreadId: string) =>
+    const working = (returnThreadId: string, rounds: Row[] = []) =>
       loadWorkingState(
         fakePrisma({
           groups,
           roles,
+          rounds,
           runs: [{ threadId: "t1", status: "running", updatedAt: new Date(now) }],
           messagesByThread: {
             t1: [
@@ -699,6 +700,18 @@ describe("loadWorkingState", () => {
     );
     expect(card).not.toContain("Older round report");
     // A hand-off from another conversation is not this one's job: the plain report stays.
+    // A round checked after the team's messages makes them stale: the round line is current.
+    const shown = await working("tg", [
+      {
+        roleId: "role-1",
+        round: 2,
+        status: "shown",
+        statusAt: new Date(now - 90_000),
+        approvedAt: null,
+      },
+    ]);
+    expect(shown).not.toContain("Picked Tomas Vale");
+    expect(shown).toContain("Team posted since the round line above: nothing.");
     const other = await working("t-other");
     expect(other).not.toContain("You handed this team work");
     expect(other).toContain("Team's last report");

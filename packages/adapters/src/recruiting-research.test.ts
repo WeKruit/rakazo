@@ -364,9 +364,8 @@ describe("people-search agent runs", () => {
       db.recruitingCandidate.count.mockResolvedValue(24);
       found(4, 24);
       await expect(limit()).resolves.toMatchObject({ numResults: 10 });
-      // Staging 11-20 (387caac4): "再找5个新的" names no number the cap reads, so the older
-      // "找20个" counted, and a role holding 20 refused every search as done. A newer ask for
-      // people without such a number is its own request, searched with the usual cap.
+      // Staging 11-20 (387caac4): "再找5个新的" was missed, so the older "找20个" counted and a
+      // role holding 20 refused every search as done. It is its own request: 5 more.
       vi.setSystemTime(new Date("2026-11-15T12:00:00Z"));
       db.message.findMany.mockResolvedValue([
         {
@@ -384,7 +383,9 @@ describe("people-search agent runs", () => {
       ]);
       db.recruitingCandidate.count.mockResolvedValue(20);
       savedAt(20, new Date("2026-11-15T10:40:00Z"));
-      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      const five = await limit();
+      expect(five).toMatchObject({ numResults: 5 });
+      settlePeopleSearch(five, "done");
       // The same run's other ask came handed in from the main chat with Kruit's brief after it
       // ("不联系候选人"); only the recruiter's quoted words are their request, so "再找10个" counts.
       db.message.findMany.mockResolvedValue([
@@ -422,7 +423,8 @@ describe("people-search agent runs", () => {
         },
         ask,
       ]);
-      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      // Staging 11-20 (2a781497): read as no number, it was uncapped and 26 were saved; it is 5.
+      await expect(limit()).resolves.toMatchObject({ numResults: 5 });
       db.message.findMany.mockResolvedValue([
         { createdAt: at("08:10:50"), blocks: [{ kind: "text", text: "好了没？" }] },
         ask,

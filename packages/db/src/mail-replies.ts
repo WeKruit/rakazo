@@ -319,18 +319,16 @@ export async function findWaitingCampaignSend(
   const lock = `campaign-send:${input.spaceId}:${input.campaignId}`;
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))::text AS "lock"`;
   // deny-then-change-and-send 11-16: the recruiter declined a card, then another agent's run
-  // asked again with the same email before the recruiter wrote anything. The same card the
-  // recruiter declined is not asked again until they write, in any conversation of the space.
+  // asked again with the same email before the recruiter wrote anything; on 2a781497 Kruit
+  // guessed a new subject after each denial and showed four cards. A campaign whose send the
+  // recruiter declined gets no new card until they write, in any conversation of the space.
   const declined = await tx.externalEffect.findFirst({
     where: {
       spaceId: input.spaceId,
       id: { not: input.effectId },
       kind: { endsWith: "activate_campaign" },
       status: "denied",
-      AND: [
-        { result: { path: ["instantlyActivationCampaign"], equals: input.campaignId } },
-        { result: { path: ["instantlyActivationCard"], equals: card } },
-      ],
+      result: { path: ["instantlyActivationCampaign"], equals: input.campaignId },
     },
     orderBy: { updatedAt: "desc" },
     select: { updatedAt: true },

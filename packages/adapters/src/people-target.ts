@@ -11,7 +11,14 @@ export function requestedPeopleTarget(text: string): number | undefined {
     // Long-search-finishes 11-15 (aceb80c9): "最多20个" named no verb and was missed.
     /(?:at most|up to|no more than|max(?:imum)?|最多|至多|不超过)\s*(\d{2,4})/i.exec(text);
   const target = match ? Number(match[1]) : Number.NaN;
-  return Number.isFinite(target) && target >= 10 ? target : undefined;
+  if (Number.isFinite(target) && target >= 10) return target;
+  // Staging 11-20 (2a781497): "再来5个" read as no number and 26 were saved. A small number of
+  // people asked for ("再来5个", "2 more people") is the request too; "这3个不要" is not.
+  const few =
+    /(?<!这|那|前|后|头|第|these |those |the |top |first |last )(?<!\d)([1-9])\s*(?:more\s+)?(?:people|candidates|profiles|个(?![月小年])|人|位|名)/i.exec(
+      text,
+    );
+  return few ? Number(few[1]) : undefined;
 }
 
 /**

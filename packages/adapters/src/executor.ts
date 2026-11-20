@@ -3953,7 +3953,12 @@ export function isProtectedComputerLifecycleCommand(command: string): boolean {
 }
 
 export function desktopProtectionGuardMessage(reason: string): string {
-  return `This command was not run: desktop-protection guard: ${reason}. Shell access is still available. Do not stop or restart browser or desktop processes.`;
+  // Staging 11-20: every refused heredoc cost the agent a round before it found the file form.
+  const instead =
+    reason === "heredoc"
+      ? " Write the script to a file with write_file and run that file (python3 path/to/script.py)."
+      : "";
+  return `This command was not run: desktop-protection guard: ${reason}. Shell access is still available.${instead} Do not stop or restart browser or desktop processes.`;
 }
 
 /** Cap the roster so a large Space cannot flood the prompt. */
@@ -11628,7 +11633,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (waitingSend && "declined" in waitingSend) {
                 const result = {
                   error:
-                    "Nothing was sent and no card was made: the recruiter already declined this exact send (the same people and the same email) and has not written since. Do not ask again with it; tell the recruiter in one line that it was not sent, and wait for what they want changed.",
+                    "Nothing was sent and no card was made: the recruiter declined this campaign's last send card and has not written since. Do not guess a change and ask again; tell the recruiter in one line that it was not sent and ask what they want changed.",
                   dispatched: false,
                 };
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))

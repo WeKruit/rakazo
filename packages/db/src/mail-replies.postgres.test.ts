@@ -456,7 +456,7 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
     expect(await waiting(third.effect.id)).toBeUndefined();
   });
 
-  it("does not ask again for a send the recruiter declined until they write", async () => {
+  it("does not ask again for a campaign send the recruiter declined until they write", async () => {
     const declined = await fixture();
     const retry = await fixture(true);
     await prisma.externalEffect.updateMany({
@@ -480,8 +480,11 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
     });
     // Another agent's run asking with the same email before the recruiter writes is refused.
     expect(await waiting(retry.effect.id)).toEqual({ declined: true });
-    // A changed email is a new send with its own card.
-    expect(await waiting(retry.effect.id, { ...card, firstEmail: "b" })).toBeUndefined();
+    // So is one Kruit changed on its own guess (deny-then-change-and-send on 2a781497: four cards
+    // with subjects nobody asked for); the recruiter says what to change first.
+    expect(await waiting(retry.effect.id, { ...card, firstEmail: "b" })).toEqual({
+      declined: true,
+    });
     // Once the recruiter writes, even the same email may be asked again.
     await createThreadMessage(prisma, {
       threadId: identity.threadId,

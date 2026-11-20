@@ -678,7 +678,13 @@ export async function loadWorkingState(
             `  Doing now: ${activity ? workActivityLabel(activity).toLowerCase() : "starting"}${steps.done.length ? ` (${steps.done.length} step${steps.done.length === 1 ? "" : "s"} done this run)` : ""}.`,
           );
         }
-        const posted = since
+        // Once the round is checked or shown, the round line above is current: a team message
+        // from before that ("the checked round comes in a minute or two") is stale (staging
+        // 2a781497 feedback-round: main relayed it while the round's ten were on the page).
+        const round = roleId ? roundOf.get(roleId) : undefined;
+        const settledAt = round && round.status !== "checking" ? round.statusAt : undefined;
+        const current = settledAt ? since.filter((m) => m.createdAt > settledAt) : since;
+        const posted = current
           .slice(0, SINCE_MESSAGES)
           .reverse()
           .flatMap((m) => {
@@ -690,7 +696,13 @@ export async function loadWorkingState(
               : [];
           });
         lines.push(
-          ...(posted.length ? posted : ["  Team posted since: nothing yet."]),
+          ...(posted.length
+            ? posted
+            : [
+                current.length < since.length
+                  ? "  Team posted since the round line above: nothing."
+                  : "  Team posted since: nothing yet.",
+              ]),
           "  Asked how this work is going, answer from these lines in this reply: never say you asked or will ask the team, and never name a person or count the team has not posted or the records above do not show.",
         );
         return;

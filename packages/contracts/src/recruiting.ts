@@ -1444,6 +1444,8 @@ export const RecruitingCandidateSchema = z.strictObject({
     })
     .optional(),
   decision: z.enum(["hold", "pass", "resume"]).nullable(),
+  /** The recruiter's latest good example or not a fit on this person for this role. */
+  recruiterVerdict: z.enum(["good_example", "not_fit"]).nullable().optional(),
   decisionReason: RecruitingCandidateConsiderationSchema.shape.source.shape.quote.nullable(),
   decisionAt: RecruitingCandidateConsiderationSchema.shape.source.shape.createdAt.nullable(),
   revision: z.number().int().nonnegative(),
