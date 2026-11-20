@@ -808,6 +808,12 @@ import {
 import { TASK_CATALOG_GUIDANCE, taskCatalogFromTool } from "./task-catalog.js";
 import { getActiveTeachingSession, parsePlaybook } from "./teaching-session.js";
 import { attachWorkspaceFileToThread, storeToolOutputArtifact } from "./thread-artifacts.js";
+import {
+  CODE_CALL_NEEDS_PERSON,
+  CODE_TOOLS_DIRECTORY,
+  prepareCodeToolCalls,
+  withoutCodeToolMarkers,
+} from "./code-tool-calls.js";
 import type { TicketChangeNotifier } from "./ticket-changes.js";
 import { loadAgentTicketContext } from "./ticket-context.js";
 import {
@@ -6130,6 +6136,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             context,
           );
         };
+        // The code-tools helper is written once per run, on the first shell command.
+        let codeToolsInstalled = false;
         const runComputer = lazyRunComputer(
           async () => {
             context.signal.throwIfAborted();
@@ -10379,6 +10387,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           let reviewReason: string | undefined;
           let gateDecision: "ask" | "allow" = plan === "ask" ? "ask" : "allow";
           const needsApprovalEarly = plan === "ask" || plan === "judge";
+          // Code on the computer cannot answer a card: anything consequential is the agent's own call.
+          if (observer?.fromCode && (needsApprovalEarly || requiresApprovalByDefault))
+            return { error: CODE_CALL_NEEDS_PERSON };
           // A resumed approval keeps its key even if "Always allow" changed the policy.
           const usesApprovalKey =
             nextApprovedTool ||
@@ -12657,6 +12668,40 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   command,
                 });
             workspaceCheckpoint.markDirty();
+            const codeTools = observer?.callTool
+              ? await prepareCodeToolCalls({
+                  install: async (path, content) => {
+                    if (codeToolsInstalled) return;
+                    await deps.sandbox.writeFile(
+                      await runComputer.get(),
+                      { path: resolveBotWorkspacePath(computerMode, bot.id, path), content },
+                      context,
+                    );
+                    codeToolsInstalled = true;
+                  },
+                  read: async (path) =>
+                    new TextDecoder().decode(
+                      await deps.sandbox.readFile(
+                        await runComputer.get(),
+                        resolveBotWorkspacePath(computerMode, bot.id, path),
+                        context,
+                        { maxBytes: ATTACHMENT_MAX_BYTES },
+                      ),
+                    ),
+                  write: async (path, text) =>
+                    deps.sandbox.writeFile(
+                      await runComputer.get(),
+                      {
+                        path: resolveBotWorkspacePath(computerMode, bot.id, path),
+                        content: new TextEncoder().encode(text),
+                      },
+                      context,
+                    ),
+                  callTool: observer.callTool,
+                  helperDir: resolveBotWorkspacePath(computerMode, bot.id, CODE_TOOLS_DIRECTORY),
+                  cwd,
+                })
+              : undefined;
             const commandEvent = {
               executionId,
               kind: "shell" as const,
@@ -12702,7 +12747,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const safe = redactShellStreams(snapshot, runSecrets, {
                   withholdPartial,
                 });
-                return `${safe.stdout}${safe.stderr}`;
+                return withoutCodeToolMarkers(`${safe.stdout}${safe.stderr}`);
               };
               const observed = await observeShellCommand(
                 deps.sandbox.execute(
@@ -12722,8 +12767,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ],
                     cwd,
                     env:
-                      Object.keys(commandEnvironment.env).length > 0
-                        ? commandEnvironment.env
+                      Object.keys(commandEnvironment.env).length > 0 || codeTools
+                        ? { ...commandEnvironment.env, ...codeTools?.env }
                         : undefined,
                     unsetEnv: commandEnvironment.unsetEnv,
                     timeoutMs: sandboxCommandTimeoutMs(),
@@ -12733,9 +12778,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 {
                   secrets: runSecrets,
                   onOutput: (snapshot) => {
+                    codeTools?.onOutput(`${snapshot.stdout}\n${snapshot.stderr}`);
                     const output = commandOutput(snapshot, true);
                     if (output) publishRunning(output);
                   },
+                  holdIdle: codeTools?.used,
                 },
               );
               if (observed.completion) {
@@ -12752,8 +12799,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 void completion.catch(() => undefined);
                 publishRunning(commandOutput(observed.result, true), true);
                 const returned = await finish({
-                  stdout: observed.result.stdout,
-                  stderr: observed.result.stderr,
+                  stdout: withoutCodeToolMarkers(observed.result.stdout),
+                  stderr: withoutCodeToolMarkers(observed.result.stderr),
                   code: null,
                   running: true,
                   notice: SHELL_STILL_RUNNING_NOTICE,
@@ -12762,7 +12809,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return returned;
               }
               clearPublishTimer();
-              const redacted = observed.result;
+              await codeTools?.settled();
+              const redacted = {
+                ...observed.result,
+                stdout: withoutCodeToolMarkers(observed.result.stdout),
+                stderr: withoutCodeToolMarkers(observed.result.stderr),
+              };
               await appendComputerCommand({
                 ...commandEvent,
                 status: "done",
