@@ -2800,8 +2800,13 @@ async function sendCampaign(
     };
   }
   // Inside sending hours a confirmed send is queued, not sent: say until when.
+  // A mailbox the mail service does not count holds every send; say so instead of a time.
+  const blocked = await mailboxBlocked(rest, campaignId);
   const paced = (count: number) => ({
-    next: `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter they are queued and that time, never that they were sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still queued, not failed, so never take the queued answer back.`,
+    next: blocked
+      ? `Nobody is emailed and nobody will be yet: the mail service says "${blocked.message}" for this campaign's sending mailbox (${(Array.isArray(campaign.email_list) ? campaign.email_list : []).join(", ")}). Tell the recruiter the email has not gone out because that sending mailbox cannot send right now, and give no time; it needs the mailbox fixed before anything leaves.`
+      : `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter they are queued and that time, never that they were sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still queued, not failed, so never take the queued answer back.`,
+    ...(blocked ? { mailServiceSays: blocked } : {}),
   });
   if (plan.send === "now") {
     if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
@@ -2993,6 +2998,18 @@ async function sendingHeld(rest: InstantlyRest, campaignId: string) {
       ? { nextOpenAt: diagnostics.next_open_at }
       : {}),
   };
+}
+
+/** Statuses that mean the campaign's mailbox cannot send, whatever the schedule says. */
+const MAILBOX_BLOCKED = new Set([
+  "no_accounts_available",
+  "all_accounts_unhealthy",
+  "campaign_accounts_unhealthy",
+  "campaign_account_suspended",
+]);
+async function mailboxBlocked(rest: InstantlyRest, campaignId: string) {
+  const held = await sendingHeld(rest, campaignId);
+  return held && MAILBOX_BLOCKED.has(held.status) ? held : null;
 }
 
 function draftDelivery(campaign: Record<string, unknown>) {

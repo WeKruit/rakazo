@@ -4679,6 +4679,8 @@ describe("local native Instantly campaign and lead tools", () => {
         body: { email_gap: 1, random_wait_max: 1 },
       },
       { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
+      // Whether the mail service counts the mailbox, before promising a time.
+      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}/sending-status` },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
     ]);
   });
@@ -5662,6 +5664,28 @@ describe("local native Instantly campaign and lead tools", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("says a send cannot leave when the mail service counts no sending mailbox", async () => {
+      // Staging 11-20: new sends from a mailbox the service did not count ("0 of 0") were still
+      // told "out within about 61 minutes".
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      await f.run("add_shortlist_leads", {
+        candidates: [{ candidate_key: "nick", email: "nick@x.test", first_name: "Nick" }],
+      });
+      f.state.sendingStatus = {
+        summary: {
+          status: "no_accounts_available",
+          status_message: "No sending accounts available",
+        },
+      };
+      const out = f.result(await f.run("activate_campaign", { recipients: ["nick@x.test"] }));
+      expect(out).toMatchObject({
+        mailServiceSays: { status: "no_accounts_available" },
+        next: expect.stringContaining("cannot send right now"),
+      });
+      expect(out.next).not.toMatch(/minutes/);
     });
 
     it("says why the mail service is holding a confirmed send instead of promising an hour", async () => {
