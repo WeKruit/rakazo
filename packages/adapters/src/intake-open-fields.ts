@@ -16,11 +16,12 @@ export function jobStatesYears(text: string): boolean {
 const WORK_MODE =
   /\b(on-?site|in[- ]office|hybrid|remote|days? (?:on site|in (?:the )?office))\b|现场|驻场|常驻|坐班|到岗|远程|混合办公|base\s*[一-鿿]/i;
 const LANGUAGE =
-  /\b(bilingual|mandarin|cantonese|chinese|japanese|korean|spanish|french|german|portuguese|vietnamese|arabic|hindi)\b|双语|普通话|粤语|中文|日语|韩语|英语|法语|德语|西班牙语/i;
+  /\b(bilingual|mandarin|cantonese|chinese|japanese|korean|spanish|french|german|portuguese|vietnamese|arabic|hindi)\b|双语|普通话|粤语|中文|中英|英文|日语|韩语|英语|法语|德语|西班牙语/i;
 
-// A requirement or preference word beside a named language settles how much it matters.
+// A requirement or preference word beside a named language settles how much it matters; a
+// working language is one the job is done in, so it is required.
 const LANGUAGE_WEIGHT =
-  /\b(must|required|requires?|fluent|fluency|native|proficien\w*|preferred|a plus|nice to have)\b|必须|要求|需要|流利|母语|优先|加分/i;
+  /\b(must|required|requires?|fluent|fluency|native|proficien\w*|preferred|a plus|nice to have|working languages?|business (?:english|chinese|mandarin))\b|必须|要求|需要|都要|流利|母语|优先|加分|工作语言|工作英语|商务英语/i;
 
 export type IntakeField = "location" | "years" | "language";
 export type IntakeFields = {
@@ -72,7 +73,7 @@ const ASKS: Record<IntakeField, RegExp> = {
   years:
     /\b(years?|yrs?|seniority range|experience range|upper (?:limit|range|bound))\b|年限|经验上限|经验范围|几年|年以上/i,
   language:
-    /\b(language|english|mandarin|bilingual|chinese|cantonese|japanese|korean|spanish)\b|语言|英语|普通话|双语|中文|粤语|日语|韩语/i,
+    /\b(language|english|mandarin|bilingual|chinese|cantonese|japanese|korean|spanish)\b|语言|英语|英文|普通话|双语|中文|中英|粤语|日语|韩语/i,
 };
 
 /** The settled intake fact a question asks about again, if any. */

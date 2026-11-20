@@ -38,6 +38,18 @@ describe("intakeFields", () => {
     ).toEqual([]);
   });
 
+  // Branch d78fdeb7 (feedback-on-some-people): "中文+英文工作语言" drew a card asking whether
+  // Chinese and English are required, before the first ten. A working language is required.
+  it("settles a language the JD names as a working language", () => {
+    for (const jd of [
+      "Senior Data Engineer，上海，混合办公每周3天，5年以上经验，中文+英文工作语言",
+      "Senior Data Engineer，上海，hybrid 每周3天到岗，5年以上经验，中文+工作英语",
+      "Senior Data Engineer，上海，混合办公每周3天，5年以上经验，中英文都要",
+      "Data Engineer, Shanghai, hybrid 3 days, 5+ years, Mandarin and English as working languages",
+    ])
+      expect(intakeFields(jd).openKeys).not.toContain("language");
+  });
+
   it("leaves the work mode, years and a named language open when the JD does not settle them", () => {
     const fields = intakeFields("R&D Engineer, Dallas TX. Mandarin speakers welcome. $80K–100K.");
     expect(fields.open).toHaveLength(3);
