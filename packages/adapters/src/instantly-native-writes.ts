@@ -2715,6 +2715,11 @@ async function sendCampaign(
     for (const email of senders)
       await requireSendingMailboxReady(prisma, rest, context, String(email));
   }
+  // The mail service holds a campaign with no mailbox as "no sending accounts available" forever.
+  if (!Array.isArray(campaign.email_list) || !campaign.email_list.length)
+    throw new Error(
+      "Nothing was sent: this campaign has no sending mailbox, so the mail service would hold it. Tell the recruiter the email has not gone out because no sending address is attached, and set one up before sending.",
+    );
   if (!firstEmail(campaign))
     throw new Error(
       "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
