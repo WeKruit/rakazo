@@ -306,26 +306,52 @@ async function records(rpc, since, before) {
     );
     // A role chat this play worked in also shows how many people it has saved, so a "found N"
     // claim is checked against what was stored, not only against sends.
-    const saved =
-      touched && !group.id.startsWith("recruiting-global-") ? await savedPeople(rpc, group) : null;
+    const results =
+      touched && !group.id.startsWith("recruiting-global-") ? await resultsPage(rpc, group) : null;
     if (record?.campaign && (touched || JSON.stringify(before.get(group.id)) !== JSON.stringify(record)))
-      roles.push(saved === null ? record : { ...record, saved });
-    else if (saved !== null) roles.push({ chat: group.name, saved });
+      roles.push(results === null ? record : { ...record, ...results });
+    else if (results !== null) roles.push({ chat: group.name, ...results });
   }
   return roles;
 }
-/** How many people a role chat has saved, as its Results page counts them; null when unreadable. */
-async function savedPeople(rpc, group) {
+/**
+ * A role chat's Results page as the recruiter sees it: how many people it holds and who it marks
+ * Passed or On hold, by the page's own rule; null when unreadable. fosp x5 11-20: Kruit said the
+ * turned-down people were marked and the judge, seeing only a count, could not check it.
+ */
+async function resultsPage(rpc, group) {
   const head = await rpc("threads/head", { groupId: group.id }).catch(() => null);
   const threadId = head?.threadId ?? group.threadId;
   if (!threadId) return null;
   const page = await rpc("recruiting/roleCandidates", { groupId: group.id, threadId, limit: 1 }).catch(
     () => null,
   );
-  return page ? page.total : null;
+  if (!page) return null;
+  const roleId = (await rpc("recruiting/getWorkspace", { threadId }).catch(() => null))?.role?.id;
+  if (!roleId) return { saved: page.total };
+  const marked = { passed: [], onHold: [] };
+  let cursor;
+  // The page's own read, 200 at a time; a play's role holds a few hundred people at most.
+  for (let read = 0; read < 5; read++) {
+    const list = await rpc("recruiting/listCandidates", {
+      roleId,
+      limit: 200,
+      ...(cursor ? { cursor } : {}),
+    }).catch(() => null);
+    if (!list) return { saved: page.total };
+    for (const person of list.items) {
+      const name = person.name ?? person.candidateKey;
+      if (person.decision === "hold") marked.onHold.push(name);
+      else if (person.decision === "pass" || (!person.decision && person.recruiterVerdict === "not_fit"))
+        marked.passed.push(name);
+    }
+    cursor = list.nextCursor;
+    if (!cursor) break;
+  }
+  return { saved: page.total, ...marked };
 }
 const CAMPAIGN_CODES =
-  "saved: people the role chat has stored (its Results count); otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
+  "saved: people the role chat has stored (its Results count); passed / onHold: the people its Results page marks Passed (不合适, not a fit) or On hold; otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
 
 // What the recruiter can read: messages with text, in chats they wrote in or were answered in.
 const visible = (chats) =>
