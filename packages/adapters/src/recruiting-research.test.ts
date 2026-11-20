@@ -424,11 +424,33 @@ describe("people-search agent runs", () => {
         ask,
       ]);
       // Staging 11-20 (2a781497): read as no number, it was uncapped and 26 were saved; it is 5.
-      await expect(limit()).resolves.toMatchObject({ numResults: 5 });
+      const fiveMore = await limit();
+      expect(fiveMore).toMatchObject({ numResults: 5 });
+      settlePeopleSearch(fiveMore, "done");
       db.message.findMany.mockResolvedValue([
         { createdAt: at("08:10:50"), blocks: [{ kind: "text", text: "好了没？" }] },
         ask,
       ]);
+      await expect(limit()).rejects.toThrow(/already holds/);
+      // Branch e57f71af: "3、5、6不合适…下一批按这个调" names no number, so it was uncapped and
+      // four searches saved 25 more. A new ask without a number is one round: ten more.
+      const feedback = {
+        createdAt: at("08:13:00"),
+        blocks: [{ kind: "text", text: "3、5、6不合适，下一批按这个调" }],
+      };
+      db.message.findMany.mockResolvedValue([feedback, ask]);
+      const round = await limit();
+      expect(round).toMatchObject({ numResults: 10 });
+      settlePeopleSearch(round, "done");
+      // Ten more saved at 08:14, after the feedback: that round is done.
+      db.recruitingCandidate.count.mockResolvedValue(20);
+      db.recruitingCandidateOccurrence.findMany.mockImplementation(async (query: unknown) => {
+        const { lt } = (query as { where: { page: { observedAt: { lt?: Date } } } }).where.page
+          .observedAt;
+        const first = keys(0, 10).map((row) => ({ ...row, observedAt: at("08:11:00") }));
+        const next = keys(10, 20).map((row) => ({ ...row, observedAt: at("08:14:00") }));
+        return [...first, ...next].filter((row) => !lt || row.observedAt < lt);
+      });
       await expect(limit()).rejects.toThrow(/already holds/);
     } finally {
       vi.useRealTimers();
