@@ -995,7 +995,7 @@ describe("Pi connector tool dispatch", () => {
           cwd ? { command, cwd } : { command },
           JSON.stringify(["pi-tool", "main", "call-1"]),
           undefined,
-          { onShellStillRunning: expect.any(Function), callTool: expect.any(Function) },
+          { onShellStillRunning: expect.any(Function) },
         ],
       ]);
     },
