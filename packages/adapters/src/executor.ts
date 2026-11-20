@@ -6403,6 +6403,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           orderBy: APPROVED_EFFECT_REPLAY_ORDER,
           select: {
             id: true,
+            idempotencyKey: true,
             kind: true,
             status: true,
             request: true,
@@ -9330,6 +9331,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // hit the already-approved effect instead of creating a second approval card.
           const nextApprovedTool = approvedEffectReplays.nextToolName();
           const nextApprovedRequest = approvedEffectReplays.nextRequest();
+          let approvedReplayKey: string | undefined;
           const liveRoute =
             connectorCall.route?.resourceId &&
             connectorCall.route.connectorId &&
@@ -9697,6 +9699,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
             approvedEffectReplays.take(nextApprovedTool);
+            // The confirmed row itself, not the first identical call's: per-run call counts start
+            // over on resume (gate 44c1ad44: a refused first try answered the confirmed second one).
+            approvedReplayKey = approvedEffects.find(
+              (effect) => effect.request === nextApprovedRequest,
+            )?.idempotencyKey;
           }
           if (name === "recruiting_request_approval") {
             if (nextApprovedTool !== name) {
@@ -10562,6 +10569,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : null;
           const effectKey =
             approvedReplyEffect?.idempotencyKey ??
+            approvedReplayKey ??
             (calendarReadEpoch
               ? toolEffectIdempotencyKey(
                   runId,

@@ -8,6 +8,7 @@ import type {
   ConnectorTool,
 } from "@rakazo/adapter-kit";
 import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import type * as CoreModule from "@rakazo/core";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { UNATTENDED_MEMORY_WRITE_REFUSAL } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
@@ -69,6 +70,11 @@ beforeEach(() => {
     result: { structuredContent: replyAnchor },
   }));
 });
+// The per-run outside-call window is module-wide; this file reuses one run id across many sends.
+vi.mock("@rakazo/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof CoreModule>()),
+  RUN_EGRESS_PER_MINUTE: Number.MAX_SAFE_INTEGER,
+}));
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
   prepareRecruitingApproval: recruitingApproval.prepare,
@@ -1853,6 +1859,35 @@ describe("native Instantly activation card", () => {
       }),
     ).toEqual(["recipients[0].name", "recipients[1].emailType"]);
     expect(changedPaths(undefined, shown)).toEqual(["card not recorded"]);
+  });
+
+  it("sends the card confirmed on a second identical call, not the first call's refusal", async () => {
+    // Gate 44c1ad44: the first activate_campaign was refused, the same call again made the card,
+    // and the confirmed replay found the first call's stored refusal, so nothing was sent.
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    const card = f.effects[0]!;
+    const firstKey = card.idempotencyKey;
+    Object.assign(card, { idempotencyKey: `${firstKey}:second`, status: "approved" });
+    f.effects.unshift({
+      ...card,
+      id: "refused",
+      idempotencyKey: firstKey,
+      status: "completed",
+      result: { error: "Nothing was sent and no card was shown: an earlier refusal." },
+    });
+    f.setCalls([]);
+    await f.run();
+    const sent = f.execute.mock.calls.filter(
+      (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+    );
+    expect(sent).toHaveLength(1);
   });
 
   it("closes a confirmed send that cannot start instead of failing the run", async () => {
