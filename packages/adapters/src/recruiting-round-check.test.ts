@@ -51,6 +51,25 @@ describe("checkRound", () => {
     expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
   });
 
+  it("never lists a turned-down reason as something to verify", () => {
+    // Staging 11-20 (44c1ad44): round 2 showed "未核实：…; not what the recruiter turned down:
+    // <name>没数仓建模" under four people. The reason still keeps look-alikes out; it is not a
+    // requirement the recruiter reads per person.
+    const turnedDown = {
+      id: "turned-down:fb-1",
+      statement: "not what the recruiter turned down: no DW modelling",
+      added: true,
+    };
+    const result = checkRound({
+      ...base,
+      criteria: [...criteria, turnedDown],
+      keys: ["a"],
+      checks: { a: { ...all("shown"), years: "unknown", "turned-down:fb-1": "unknown" } },
+      reviewed: true,
+    });
+    expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
+  });
+
   it("leaves missing and unknown verdicts to the Reviewer on a round it checks", () => {
     // Staging 11-15: a held round took one to three refusals before the Reviewer checked it anyway.
     const checks = { a: all("unknown"), b: all("fails") };

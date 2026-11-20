@@ -286,6 +286,13 @@ describe("people-search agent runs", () => {
             ? keys(0, before)
             : keys(0, n),
         );
+      // `n` people, all saved at one moment.
+      const savedAt = (n: number, observedAt: Date) =>
+        db.recruitingCandidateOccurrence.findMany.mockImplementation(async (query: unknown) => {
+          const { lt } = (query as { where: { page: { observedAt: { lt?: Date } } } }).where.page
+            .observedAt;
+          return (lt ? observedAt < lt : observedAt <= new Date()) ? keys(0, n) : [];
+        });
       const limit = () =>
         limitPeopleSearch(db as never, actor, server, "web_search_advanced_exa", {
           category: "people",
@@ -377,7 +384,7 @@ describe("people-search agent runs", () => {
         },
       ]);
       db.recruitingCandidate.count.mockResolvedValue(20);
-      found(20);
+      savedAt(20, new Date("2026-11-15T10:40:00Z"));
       await expect(limit()).resolves.toMatchObject({ numResults: 10 });
       // The same run's other ask came handed in from the main chat with Kruit's brief after it
       // ("不联系候选人"); only the recruiter's quoted words are their request, so "再找10个" counts.
@@ -398,6 +405,30 @@ describe("people-search agent runs", () => {
       ]);
       found(0, 20);
       await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      // Staging 11-20 (44c1ad44): "先找10个人" was met at 08:11, then "再来5个" (no number the
+      // cap reads) came after it and was refused as done, twice. Written once the 10 were in,
+      // it is a new request. A nudge while the 10 are still coming stays capped.
+      const at = (time: string) => new Date(`2026-11-20T${time}Z`);
+      vi.setSystemTime(at("08:15:00"));
+      const ask = {
+        createdAt: at("08:10:20"),
+        blocks: [{ kind: "text", text: "Senior Data Engineer，上海。先找10个人" }],
+      };
+      db.recruitingCandidate.count.mockResolvedValue(10);
+      savedAt(10, at("08:11:00"));
+      db.message.findMany.mockResolvedValue([
+        {
+          createdAt: at("08:14:47"),
+          blocks: [{ kind: "text", text: "再来5个，上海的，要明确做过Spark或Flink" }],
+        },
+        ask,
+      ]);
+      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      db.message.findMany.mockResolvedValue([
+        { createdAt: at("08:10:50"), blocks: [{ kind: "text", text: "好了没？" }] },
+        ask,
+      ]);
+      await expect(limit()).rejects.toThrow(/already holds/);
     } finally {
       vi.useRealTimers();
     }

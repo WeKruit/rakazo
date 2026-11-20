@@ -204,9 +204,10 @@ export function checkRound(input: {
       (criterion) => verdictOf(key, criterion.id) === "unknown",
     );
     // Something no pick's row shows is still unverified for each of them; the round list says
-    // it once when every note is the same.
-    if (unknown.length)
-      unverified[key] = unknown.map((criterion) => criterion.statement).join("; ");
+    // it once when every note is the same. A turned-down reason is not a requirement to list.
+    const listed = unknown.filter((criterion) => !criterion.id.startsWith("turned-down:"));
+    if (listed.length)
+      unverified[key] = listed.map((criterion) => criterion.statement).join("; ");
     const raised = unknown.filter((criterion) => criterion.added);
     if (raised.length && !input.relaxed && !input.reviewed && !input.asked.has(key))
       newlyUnknown.push(`${key} (${raised.map((criterion) => criterion.statement).join("; ")})`);
