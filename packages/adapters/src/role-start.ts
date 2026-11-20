@@ -118,6 +118,44 @@ export async function roleStartKey(
 }
 
 /**
+ * A role this conversation already opened under the same title, from an earlier recruiter
+ * message. Simulated 11-20 (feedback-on-some-people, 3 of 5 runs): "these three are not a fit,
+ * next batch like this" went to start_role, which opened a second and third "Senior Data
+ * Engineer" role; each started empty, so the turned-down people came back, the location in the
+ * JD was asked again, and Results showed no marks.
+ */
+export async function roleAlreadyOpenedHere(
+  prisma: Pick<PrismaClient, "message" | "chatGroup">,
+  input: { spaceId: string; userId: string; threadId: string; title: string },
+): Promise<{ groupId: string; title: string } | undefined> {
+  const asked = await prisma.message.findMany({
+    where: { threadId: input.threadId, role: "user", botId: null },
+    orderBy: { seq: "desc" },
+    take: 20,
+    select: { id: true },
+  });
+  const latest = await latestRecruiterMessage(prisma, input.threadId);
+  const core = titleCore(input.title);
+  const ids = asked
+    .filter((message) => message.id !== latest?.id)
+    .flatMap((message) => [roleGroupId(message.id), roleGroupId(`${message.id}:${core}`)]);
+  if (!core || !ids.length) return undefined;
+  const groups = await prisma.chatGroup.findMany({
+    where: { id: { in: ids }, spaceId: input.spaceId, userId: input.userId, archivedAt: null },
+    select: { id: true, name: true },
+  });
+  const same = groups.find((group) => {
+    const opened = titleCore(group.name);
+    return opened.includes(core) || core.includes(opened);
+  });
+  return same ? { groupId: same.id, title: same.name } : undefined;
+}
+
+/** Model-facing: start_role refused because this role is already open. */
+export const roleAlreadyOpenNote = (role: { groupId: string; title: string }) =>
+  `Not opened: "${role.title}" is already open (group_id "${role.groupId}"), with its people and the recruiter's earlier requirements. Pass this request to its team with delegate_to_role and that group_id, in the recruiter's own words. Only if the recruiter clearly wants a second, separate role with the same title, call start_role again.`;
+
+/**
  * Open (or find) the role conversation for one start_role call. The key is chosen under the
  * space's content lock, so roles asked for in parallel see each other. Staging 11-16: three
  * parallel calls for Java, Android and Data Engineer each found no role yet, all took the
