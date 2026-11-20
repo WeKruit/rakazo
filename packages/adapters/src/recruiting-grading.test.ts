@@ -17,12 +17,14 @@ const {
   gradingToolRefusal,
   checkedRoundPeople,
   gradingTools,
+  heldRoundSearchRefusal,
   nextRoundHeld,
   roundAwaitingReview,
   roundListHeld,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
+  ROUND_HELD_SEARCH_REFUSAL,
   scheduleRecruitingGrading,
   startRecruitingGrading,
 } = await import("./recruiting-grading.js");
@@ -1038,5 +1040,53 @@ describe("checkedRoundPeople", () => {
     expect(picked).toHaveLength(10);
     expect(picked.map((p) => p.key)).not.toContain("d");
     expect(picked[1]).toEqual({ key: "r0", name: "r0" });
+  });
+});
+
+describe("heldRoundSearchRefusal", () => {
+  const prismaWith = (round: Record<string, unknown> | null) =>
+    ({
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
+    }) as never;
+  const held = (status: string, ownerBotId = "lead") => ({
+    id: "r2",
+    round: 2,
+    candidateKeys: [],
+    approvedAt: null,
+    status,
+    statusAt: new Date(),
+    ownerBotId,
+    version: 1,
+  });
+
+  it("refuses a search in a later turn while an earlier turn's round waits for the check", async () => {
+    // Staging 11-16 (982a0ac9): "still waiting" started a new lead turn that searched again while
+    // round 2 was being checked, and the checked round was steered into that busy turn.
+    const refusal = await heldRoundSearchRefusal(prismaWith(held("checking")), {
+      roleId: "role",
+      botId: "lead",
+      recordedThisTurn: false,
+    });
+    expect(refusal).toContain("Not run");
+  });
+
+  it("lets a search run when the latest round is shown, and in the owner's turn showing it", async () => {
+    const shown = { roleId: "role", botId: "lead", recordedThisTurn: false };
+    expect(await heldRoundSearchRefusal(prismaWith(held("shown")), shown)).toBeNull();
+    expect(await heldRoundSearchRefusal(prismaWith(null), shown)).toBeNull();
+    expect(await heldRoundSearchRefusal(prismaWith(held("checked")), shown)).toBeNull();
+    expect(
+      await heldRoundSearchRefusal(prismaWith(held("checked", "other")), shown),
+    ).not.toBeNull();
+  });
+
+  it("refuses after this turn recorded the held round, whatever the stored state", async () => {
+    expect(
+      await heldRoundSearchRefusal(prismaWith(null), {
+        roleId: undefined,
+        botId: "lead",
+        recordedThisTurn: true,
+      }),
+    ).toBe(ROUND_HELD_SEARCH_REFUSAL);
   });
 });
