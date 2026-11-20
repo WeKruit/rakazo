@@ -747,6 +747,27 @@ describe("native saved candidate reads", () => {
     expect(result).toMatchObject({ status: "found", round });
   });
 
+  it("gives the link that opens the role's Results with the round", async () => {
+    // fosp x5 11-20: asked to open Results and see the marks, Kruit had no link to give and
+    // wrote an HTML file instead.
+    const f = fixture();
+    const findFirst = vi.fn(async () => ({ sourceThread: { groupId: "group-role" } }));
+    Object.assign(f.deps.prisma, { recruitingRole: { findFirst } });
+    db.round.mockResolvedValue({ roleId: "role-named", round: { round: 1, candidates: [] } });
+    const result = await executeRecruitingCandidatesTool(
+      { ...f.deps, webOrigin: "https://app.example.test" },
+      trusted,
+      { operation: "round", roleId: "role-named" },
+      context,
+    );
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "role-named" } }),
+    );
+    expect(result).toMatchObject({
+      resultsPage: "https://app.example.test/app/g/group-role?view=results",
+    });
+  });
+
   it("says with the round that it repeats no one and what the recruiter said about the last one", async () => {
     // Staging 11-15: global Kruit called two round-1 people repeats in round 2, and could not find
     // the feedback the recruiter gave in the role's chat.

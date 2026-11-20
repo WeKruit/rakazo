@@ -208,6 +208,8 @@ export async function executeRecruitingCandidatesTool(
     prisma: PrismaClient;
     artifacts: ArtifactStore;
     connector?: Pick<ConnectorProvider, "execute">;
+    /** Web app origin, for the link to the role's Results. */
+    webOrigin?: string;
   },
   trusted: RecruitingRunContext,
   untrusted: unknown,
@@ -584,8 +586,23 @@ export async function executeRecruitingCandidatesTool(
         createdAt: round.createdAt,
         candidates: round.candidates,
       }).catch(() => []);
+      // fosp x5 11-20: asked to open Results and see the marks, Kruit had no link to give and
+      // wrote an HTML file instead, then said it had attached a page.
+      const group =
+        deps.webOrigin && roundRoleId
+          ? await deps.prisma.recruitingRole
+              .findFirst({
+                where: { id: roundRoleId },
+                select: { sourceThread: { select: { groupId: true } } },
+              })
+              .catch(() => null)
+          : null;
+      const groupId = group?.sourceThread?.groupId;
       return {
         status: "found" as const,
+        ...(groupId && deps.webOrigin
+          ? { resultsPage: new URL(`/app/g/${groupId}?view=results`, deps.webOrigin).href }
+          : {}),
         round: {
           ...round,
           repeats: await roundRepeats(deps.prisma, {
