@@ -23,7 +23,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
-import { peopleTargetFrom } from "./people-target.js";
+import { asksForPeople, peopleTargetFrom } from "./people-target.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 import { runningSearchFor } from "./work-estimate.js";
@@ -429,7 +429,10 @@ export async function peopleRoomForRequest(
         return typeof value === "string" ? value : "";
       })
       .join(" ");
-    if (!peopleTargetFrom(text, 0)) continue;
+    if (!peopleTargetFrom(text, 0)) {
+      if (asksForPeople(text)) return undefined;
+      continue;
+    }
     // Staging 11-15: someone found again after the message is not new, so "继续找 10 位" on a
     // role of 24 read as a total of 10 while the approve result said 34.
     const [total, since, before] = await Promise.all([

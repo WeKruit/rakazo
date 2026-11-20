@@ -358,6 +358,27 @@ describe("people-search agent runs", () => {
       db.recruitingCandidate.count.mockResolvedValue(24);
       found(4, 24);
       await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      // Staging 11-20 (387caac4): "再找5个新的" names no number the cap reads, so the older
+      // "找20个" counted, and a role holding 20 refused every search as done. A newer ask for
+      // people without such a number is its own request, searched with the usual cap.
+      vi.setSystemTime(new Date("2026-11-15T12:00:00Z"));
+      db.message.findMany.mockResolvedValue([
+        {
+          createdAt: new Date("2026-11-15T11:55:00Z"),
+          blocks: [{ kind: "text", text: "搜索卡了就别卡了，直接再找5个新的，那三个别出现" }],
+        },
+        {
+          createdAt: new Date("2026-11-15T11:50:00Z"),
+          blocks: [{ kind: "text", text: "好了没？" }],
+        },
+        {
+          createdAt: new Date("2026-11-15T10:05:00Z"),
+          blocks: [{ kind: "text", text: "Senior SRE，Austin。找20个人，找完告诉我" }],
+        },
+      ]);
+      db.recruitingCandidate.count.mockResolvedValue(20);
+      found(20);
+      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
     } finally {
       vi.useRealTimers();
     }
