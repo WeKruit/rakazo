@@ -1137,10 +1137,15 @@ export async function recruitingFeedbackRole(
 ): Promise<string | undefined> {
   if (input.activeRoleId) return input.activeRoleId;
   if (typeof input.args.roleId !== "string" || !input.args.roleId.trim()) return undefined;
-  const role = await prisma.recruitingRole.findFirst({
-    where: { id: input.args.roleId, spaceId: input.spaceId, userId: input.userId },
-    select: { id: true },
-  });
+  // Filling is a convenience: when the role can't be read, the call goes on as written.
+  const role = await Promise.resolve()
+    .then(() =>
+      prisma.recruitingRole.findFirst({
+        where: { id: input.args.roleId as string, spaceId: input.spaceId, userId: input.userId },
+        select: { id: true },
+      }),
+    )
+    .catch(() => null);
   return role?.id;
 }
 
