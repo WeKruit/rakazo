@@ -2,9 +2,11 @@ import { boundDirectApprovalRequest } from "@rakazo/core";
 import { mailReplyState, type Prisma } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { OWN_EMAIL_STEP, ownEmailSequences } from "./campaign-own-emails.js";
+import { InstantlyEmulator } from "./instantly-emulator.js";
 import {
   describeCampaignActivation,
   describeReplyToEmail,
+  instantlyRest,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
   nextSendWindow,
@@ -919,5 +921,50 @@ describe("the send card's time", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("emulated outreach mail service", () => {
+  it("queues a confirmed send, emails one person per gap, and holds the rest once paused", async () => {
+    let now = new Date("2026-11-20T15:00:00Z");
+    const mail = new InstantlyEmulator([{ email: "me@mail.test" }], () => now);
+    const rest = instantlyRest(
+      (url, init) => mail.fetch(url, init),
+      "any-key",
+      new AbortController().signal,
+    );
+    const campaign = await rest("POST", "/campaigns", {
+      name: "Role",
+      email_gap: 1,
+      email_list: ["me@mail.test"],
+      sequences: [{ steps: [{ variants: [{ subject: "Hi {{first_name}}", body: "Hello" }] }] }],
+    });
+    const added = await rest("POST", "/leads/add", {
+      campaign_id: campaign.id,
+      leads: [
+        { email: "Ada@x.test", first_name: "Ada" },
+        { email: "ben@x.test", first_name: "Ben" },
+      ],
+    });
+    expect(added.created_leads).toHaveLength(2);
+    await rest("POST", `/campaigns/${campaign.id}/activate`);
+    const contacted = async () =>
+      (
+        (await rest("POST", "/leads/list", { campaign: campaign.id })).items as Record<
+          string,
+          unknown
+        >[]
+      )
+        .filter((lead) => lead.timestamp_last_contact)
+        .map((lead) => lead.email);
+    expect(await contacted()).toEqual([]);
+    now = new Date("2026-11-20T15:03:30Z");
+    expect(await contacted()).toEqual(["ada@x.test"]);
+    await rest("POST", `/campaigns/${campaign.id}/pause`);
+    now = new Date("2026-11-20T15:30:00Z");
+    expect(await contacted()).toEqual(["ada@x.test"]);
+    const sent = await rest("GET", `/emails?campaign_id=${campaign.id}`);
+    expect(sent.items).toMatchObject([{ subject: "Hi Ada", lead: "ada@x.test" }]);
+    await expect(rest("GET", "/accounts/other@mail.test")).rejects.toMatchObject({ status: 404 });
   });
 });
