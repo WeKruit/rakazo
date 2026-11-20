@@ -23,7 +23,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
-import { asksForPeople, peopleTargetFrom } from "./people-target.js";
+import { peopleTargetFrom } from "./people-target.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 import { runningSearchFor } from "./work-estimate.js";
@@ -437,12 +437,22 @@ export async function peopleRoomForRequest(
     take: 10,
     select: { createdAt: true, blocks: true },
   });
+  const heldBefore = async (at: Date) =>
+    (
+      await prisma.recruitingCandidateOccurrence.findMany({
+        where: { roleId, page: { observedAt: { lt: at } } },
+        distinct: ["candidateKey"],
+        select: { candidateKey: true },
+      })
+    ).map((row) => row.candidateKey);
+  let newerAsk: Date | undefined;
   for (const message of messages) {
     const text = (Array.isArray(message.blocks) ? message.blocks : [])
       .map((block) => recruiterText(record(block)))
       .join(" ");
+    if (!text.trim()) continue;
     if (!peopleTargetFrom(text, 0)) {
-      if (asksForPeople(text)) return undefined;
+      newerAsk ??= message.createdAt;
       continue;
     }
     // Staging 11-15: someone found again after the message is not new, so "继续找 10 位" on a
@@ -450,15 +460,15 @@ export async function peopleRoomForRequest(
     const [total, since, before] = await Promise.all([
       prisma.recruitingCandidate.count({ where: { roleId } }),
       listRecruitingPeopleFoundSince(prisma, { roleId, since: message.createdAt }),
-      prisma.recruitingCandidateOccurrence.findMany({
-        where: { roleId, page: { observedAt: { lt: message.createdAt } } },
-        distinct: ["candidateKey"],
-        select: { candidateKey: true },
-      }),
+      heldBefore(message.createdAt),
     ]);
-    const seen = new Set(before.map((row) => row.candidateKey));
+    const seen = new Set(before);
     const fresh = since.filter((key) => !seen.has(key)).length;
     const target = peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0;
+    // Staging 11-20 (44c1ad44): "先找10个人" was met, then "再来5个" (no number the cap reads)
+    // was refused as done, twice. A message written once the number was reached is a new
+    // request, whatever its wording, so the old number no longer caps it.
+    if (newerAsk && (await heldBefore(newerAsk)).length >= target) return undefined;
     return Math.max(0, target - total);
   }
   return undefined;
