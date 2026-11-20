@@ -436,12 +436,23 @@ export async function peopleRoomForRequest(
   roleId: string,
   threadId: string,
 ): Promise<number | undefined> {
-  const messages = await prisma.message.findMany({
-    where: { threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    take: 10,
-    select: { createdAt: true, blocks: true },
-  });
+  // A round shown for feedback is followed by another round, and the round itself shows the
+  // number asked. Its four overlapping searches are how the ten are picked: branch 80ab9951,
+  // the cap counted each in flight as ten, so three were refused and the round never came.
+  const [round, messages] = await Promise.all([
+    prisma.recruitingCalibrationRound.findFirst({
+      where: { roleId },
+      orderBy: { round: "desc" },
+      select: { approvedAt: true },
+    }),
+    prisma.message.findMany({
+      where: { threadId, role: "user" },
+      orderBy: { seq: "desc" },
+      take: 10,
+      select: { createdAt: true, blocks: true },
+    }),
+  ]);
+  if (round && !round.approvedAt) return undefined;
   const heldBefore = async (at: Date) =>
     (
       await prisma.recruitingCandidateOccurrence.findMany({
@@ -462,26 +473,14 @@ export async function peopleRoomForRequest(
     }
     // Staging 11-15: someone found again after the message is not new, so "继续找 10 位" on a
     // role of 24 read as a total of 10 while the approve result said 34.
-    const [total, since, before, round] = await Promise.all([
+    const [total, since, before] = await Promise.all([
       prisma.recruitingCandidate.count({ where: { roleId } }),
       listRecruitingPeopleFoundSince(prisma, { roleId, since: message.createdAt }),
       heldBefore(message.createdAt),
-      prisma.recruitingCalibrationRound.findFirst({
-        where: { roleId },
-        orderBy: { round: "desc" },
-        select: { createdAt: true, approvedAt: true },
-      }),
     ]);
     const seen = new Set(before);
     const fresh = since.filter((key) => !seen.has(key)).length;
-    // While rounds are shown for feedback, "more" counts from the last round the recruiter saw:
-    // branch 2899c47f, "下一批按这个改" started a round, then "再给我5个" mid-search was read as
-    // five on top of it and 11 were saved; the five they asked for replace the unshown batch.
-    const shownRound = round && !round.approvedAt && round.createdAt < message.createdAt;
-    const base = shownRound
-      ? (await heldBefore(new Date(round.createdAt.getTime() + 1))).length
-      : Math.max(0, total - fresh);
-    const target = peopleTargetFrom(text, base) ?? 0;
+    const target = peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0;
     // Staging 11-20 (44c1ad44): "先找10个人" was met, then a numberless ask was refused as
     // done, twice. A message written once the number was reached is a new request, whatever its
     // wording; with no number of its own it is one round (branch e57f71af: left uncapped,
