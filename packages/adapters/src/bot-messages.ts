@@ -665,8 +665,27 @@ async function showRoundWhereAsked(
   requestId: string,
   text: string,
 ): Promise<boolean> {
-  const blocks: MessageBlock[] = [{ kind: "text", text: clampBotMessage(text) }];
+  const posted = clampBotMessage(text);
+  const blocks: MessageBlock[] = [{ kind: "text", text: posted }];
   const clientNonce = `delegated-round:${requestId}`;
+  // fosp 11-20 (1ae3a9c3): "再来5个" and a correction a minute later were two requests the same
+  // round answered, so the recruiter got the round twice, 11 s apart.
+  const recent = await deps.prisma.message
+    .findMany({
+      where: { threadId: root.returnThreadId, role: "bot" },
+      orderBy: { seq: "desc" },
+      take: 10,
+      select: { blocks: true },
+    })
+    .catch(() => []);
+  const shownBefore = recent.some(
+    (message) =>
+      Array.isArray(message.blocks) &&
+      (message.blocks as { kind?: string; text?: unknown }[]).some(
+        (block) => block?.kind === "text" && block.text === posted,
+      ),
+  );
+  if (shownBefore) return true;
   const shown = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
       const already = await tx.message.findUnique({
