@@ -77,6 +77,11 @@ describe("people-search agent runs", () => {
       recruitingCandidateOccurrence: {
         findMany: vi.fn(async (_query?: unknown): Promise<Array<{ candidateKey: string }>> => []),
       },
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(
+          async (): Promise<{ createdAt: Date; approvedAt: Date | null } | null> => null,
+        ),
+      },
       // Searches still running at the provider, by their countdowns.
       externalEffect: {
         findMany: vi.fn(
@@ -477,6 +482,31 @@ describe("people-search agent runs", () => {
         const next = keys(10, 20).map((row) => ({ ...row, observedAt: at("08:14:00") }));
         return [...first, ...next].filter((row) => !lt || row.observedAt < lt);
       });
+      await expect(limit()).rejects.toThrow(/already holds/);
+      // Branch 2899c47f: round one (10) was shown at 08:11:30, feedback started the next batch and
+      // five were saved by 08:15:00, then "再给我5个" came mid-search. It asks for five after the
+      // round the recruiter saw, not five on top of the unshown batch (11 were saved).
+      vi.setSystemTime(at("08:16:00"));
+      db.recruitingCalibrationRound.findFirst.mockResolvedValue({
+        createdAt: at("08:11:30"),
+        approvedAt: null,
+      });
+      db.recruitingCandidate.count.mockResolvedValue(15);
+      db.recruitingCandidateOccurrence.findMany.mockImplementation(async (query: unknown) => {
+        const { lt } = (query as { where: { page: { observedAt: { lt?: Date } } } }).where.page
+          .observedAt;
+        const first = keys(0, 10).map((row) => ({ ...row, observedAt: at("08:11:00") }));
+        const next = keys(10, 15).map((row) => ({ ...row, observedAt: at("08:15:00") }));
+        return [...first, ...next].filter((row) => !lt || row.observedAt < lt);
+      });
+      db.message.findMany.mockResolvedValue([
+        {
+          createdAt: at("08:15:30"),
+          blocks: [{ kind: "text", text: "下一批改了什么？顺便再给我5个" }],
+        },
+        feedback,
+        ask,
+      ]);
       await expect(limit()).rejects.toThrow(/already holds/);
     } finally {
       vi.useRealTimers();

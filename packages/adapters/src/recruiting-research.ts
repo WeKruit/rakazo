@@ -426,7 +426,13 @@ function recruiterText(block: Record<string, unknown> | undefined): string {
  * because every search was capped but nothing held the request's total.
  */
 export async function peopleRoomForRequest(
-  prisma: Pick<PrismaClient, "message" | "recruitingCandidate" | "recruitingCandidateOccurrence">,
+  prisma: Pick<
+    PrismaClient,
+    | "message"
+    | "recruitingCandidate"
+    | "recruitingCandidateOccurrence"
+    | "recruitingCalibrationRound"
+  >,
   roleId: string,
   threadId: string,
 ): Promise<number | undefined> {
@@ -456,14 +462,26 @@ export async function peopleRoomForRequest(
     }
     // Staging 11-15: someone found again after the message is not new, so "继续找 10 位" on a
     // role of 24 read as a total of 10 while the approve result said 34.
-    const [total, since, before] = await Promise.all([
+    const [total, since, before, round] = await Promise.all([
       prisma.recruitingCandidate.count({ where: { roleId } }),
       listRecruitingPeopleFoundSince(prisma, { roleId, since: message.createdAt }),
       heldBefore(message.createdAt),
+      prisma.recruitingCalibrationRound.findFirst({
+        where: { roleId },
+        orderBy: { round: "desc" },
+        select: { createdAt: true, approvedAt: true },
+      }),
     ]);
     const seen = new Set(before);
     const fresh = since.filter((key) => !seen.has(key)).length;
-    const target = peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0;
+    // While rounds are shown for feedback, "more" counts from the last round the recruiter saw:
+    // branch 2899c47f, "下一批按这个改" started a round, then "再给我5个" mid-search was read as
+    // five on top of it and 11 were saved; the five they asked for replace the unshown batch.
+    const shownRound = round && !round.approvedAt && round.createdAt < message.createdAt;
+    const base = shownRound
+      ? (await heldBefore(new Date(round.createdAt.getTime() + 1))).length
+      : Math.max(0, total - fresh);
+    const target = peopleTargetFrom(text, base) ?? 0;
     // Staging 11-20 (44c1ad44): "先找10个人" was met, then a numberless ask was refused as
     // done, twice. A message written once the number was reached is a new request, whatever its
     // wording; with no number of its own it is one round (branch e57f71af: left uncapped,
@@ -479,7 +497,7 @@ export async function peopleRoomForRequest(
 
 /** Model-facing: a search refused because the role already holds the number asked for. */
 export const PEOPLE_TARGET_MET =
-  "Not searched: the role already holds the number of people the recruiter asked for, so their request is done. Do not search again: tell them in one short message, in their language, how many people this role holds and that the search is finished.";
+  "Not searched: the role already holds the number of people the recruiter asked for. Do not search again. If people saved since the last round have not been shown to the recruiter, show the ones that fit as this round (record them with calibration_round); otherwise tell them in one short message, in their language, how many people this role holds and that the search is finished.";
 
 /** The conversation and role a run works in. */
 async function runRole(
