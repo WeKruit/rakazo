@@ -1540,6 +1540,8 @@ export const STEERING_QUICK_REPLY_SENDING =
 export const steeringQuickReplySent = (line: string) =>
   `You already sent the recruiter this short reply to it: "${line}". Do not repeat it, acknowledge the message again or open with 收到, 好的 or Got it; say only what it changes.`;
 
+export const REVIEWER_TAKES_NO_HANDOFF =
+  "Not handed off: the Reviewer grades only the people the server sends it, never a request in chat. To show people, pick them yourself and record them with calibration_round: a round after feedback is checked by the Reviewer from full profiles and shown here once checked; people saved by a search are graded as they are saved.";
 export const INTAKE_ASK_FIRST =
   "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
 export const ASK_AFTER_HANDOFF =
@@ -15281,9 +15283,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
-            // Staging 11-15: the lead handed a held round to the Reviewer as a chat turn, which held
-            // the conversation while the check could not run, and the round was never shown.
-            // Staging 11-16: two handoffs named the Reviewer by confirm_name alone and got through.
+            // The Reviewer grades only the batches the server sends it. Staging 11-15: a held round
+            // handed to it as a chat turn was never shown. Branch dc97b5bc 11-20: in 7 of 11 roles
+            // the lead handed "assess who passes" to it instead of recording the round, the Reviewer
+            // answered in prose, and round 2 was never recorded. 11-16: confirm_name alone got through.
             if (
               (typeof args.bot_id === "string" || typeof args.confirm_name === "string") &&
               thread.activeRecruitingRoleId
@@ -15297,18 +15300,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       })
                       .catch(() => null)
                   : { name: String(args.confirm_name), spawnKey: null };
-              if (
-                target &&
-                recruitingBotKey(target) === "reviewer" &&
-                (await roundAwaitingReview(deps.prisma, {
-                  threadId: thread.id,
-                  roleId: thread.activeRecruitingRoleId,
-                }).catch(() => null)) !== null
-              )
-                return finish({
-                  error:
-                    "Not handed off: the Reviewer is already checking the held round from each person's full profile, and the checked round is shown here when that check ends. End the turn with one short line, in the recruiter's language, that it comes in a minute or two.",
-                });
+              if (target && recruitingBotKey(target) === "reviewer")
+                return finish({ error: REVIEWER_TAKES_NO_HANDOFF });
             }
             // A new role's first question is the coordinator's own: a handoff first costs the
             // recruiter a second agent's start-up before anything appears.
