@@ -3,6 +3,21 @@ export function requestedPeopleTarget(text: string): number | undefined {
   if (/e-?mail|contact|outreach|send|draft|邮件|联系|发/i.test(text)) return undefined;
   // Updating saved people ("work history for these 11 people") is not a search for more.
   if (/work history|experience|education|photo|经历|学历|头像/i.test(text)) return undefined;
+  // Branch a2d787f8: "再来5个…你说有14个候选人？首轮不是10个吗" read as 14. A number in a question
+  // is the recruiter quoting a count back, an ask only with the asking verb right before it
+  // ("能再找20个吗？").
+  const sentences = text.split(/(?<=[。！!？?\n])/);
+  const question = (sentence: string) => /[？?]\s*$|[吗呢]\s*[。！!]?\s*$/.test(sentence);
+  const said = sentences.filter((sentence) => !question(sentence)).join(" ");
+  const asked = sentences.filter(question).join(" ");
+  const verbed =
+    /(?:find|get|source|search(?:\s+for)?|找|搜|扩大到|来|给我)\s*(\d{1,4})\s*(?:more\s+)?(?:people|candidates|profiles|个(?![月小年])|人|位|名)?/i.exec(
+      asked,
+    );
+  return statedTarget(said) ?? (verbed ? Number(verbed[1]) || undefined : undefined);
+}
+
+function statedTarget(text: string): number | undefined {
   const match =
     /(?:find|get|source|search(?:\s+for)?|scale(?:\s+(?:up|out))?(?:\s+to)?|widen\s+to|找|搜|扩大到)\D{0,15}?(\d{2,4})/i.exec(
       text,
