@@ -78,9 +78,7 @@ describe("people-search agent runs", () => {
         findMany: vi.fn(async (_query?: unknown): Promise<Array<{ candidateKey: string }>> => []),
       },
       recruitingCalibrationRound: {
-        findFirst: vi.fn(
-          async (): Promise<{ createdAt: Date; approvedAt: Date | null } | null> => null,
-        ),
+        findFirst: vi.fn(async (): Promise<{ approvedAt: Date | null } | null> => null),
       },
       // Searches still running at the provider, by their countdowns.
       externalEffect: {
@@ -483,31 +481,27 @@ describe("people-search agent runs", () => {
         return [...first, ...next].filter((row) => !lt || row.observedAt < lt);
       });
       await expect(limit()).rejects.toThrow(/already holds/);
-      // Branch 2899c47f: round one (10) was shown at 08:11:30, feedback started the next batch and
-      // five were saved by 08:15:00, then "再给我5个" came mid-search. It asks for five after the
-      // round the recruiter saw, not five on top of the unshown batch (11 were saved).
-      vi.setSystemTime(at("08:16:00"));
-      db.recruitingCalibrationRound.findFirst.mockResolvedValue({
-        createdAt: at("08:11:30"),
-        approvedAt: null,
-      });
-      db.recruitingCandidate.count.mockResolvedValue(15);
-      db.recruitingCandidateOccurrence.findMany.mockImplementation(async (query: unknown) => {
-        const { lt } = (query as { where: { page: { observedAt: { lt?: Date } } } }).where.page
-          .observedAt;
-        const first = keys(0, 10).map((row) => ({ ...row, observedAt: at("08:11:00") }));
-        const next = keys(10, 15).map((row) => ({ ...row, observedAt: at("08:15:00") }));
-        return [...first, ...next].filter((row) => !lt || row.observedAt < lt);
-      });
+      // Branch 80ab9951: with round one shown and waiting on feedback, the next round's four
+      // searches each counted as ten in flight, so three were refused and no round came. The
+      // round shows the number asked; its searches are not capped by it.
+      db.recruitingCalibrationRound.findFirst.mockResolvedValue({ approvedAt: null });
       db.message.findMany.mockResolvedValue([
-        {
-          createdAt: at("08:15:30"),
-          blocks: [{ kind: "text", text: "下一批改了什么？顺便再给我5个" }],
-        },
+        { createdAt: at("08:15:30"), blocks: [{ kind: "text", text: "再给我5个" }] },
         feedback,
         ask,
       ]);
-      await expect(limit()).rejects.toThrow(/already holds/);
+      const searches = [await limit(), await limit(), await limit(), await limit()];
+      expect(searches.map((search) => search.numResults)).toEqual([10, 10, 10, 10]);
+      // Branch 72b51e70: "先找10个" with no round yet had two of three first searches refused as
+      // in flight. The first round shows the ten; its searches are not capped either.
+      db.recruitingCalibrationRound.findFirst.mockResolvedValue(null);
+      db.recruitingCandidate.count.mockResolvedValue(0);
+      found(0);
+      db.message.findMany.mockResolvedValue([
+        { createdAt: at("08:16:00"), blocks: [{ kind: "text", text: "先找10个人" }] },
+      ]);
+      const first = [await limit(), await limit(), await limit()];
+      expect(first.map((search) => search.numResults)).toEqual([10, 10, 10]);
     } finally {
       vi.useRealTimers();
     }
