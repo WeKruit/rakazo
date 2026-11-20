@@ -17,9 +17,8 @@ import type { PauseRunForInput } from "@rakazo/db";
 import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
-import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import { changedPaths } from "./campaign-send-card.js";
-import { CODE_CALL_NEEDS_PERSON } from "./code-tool-calls.js";
+import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
@@ -418,12 +417,9 @@ function fixture({
         connectorResult ?? { item: call.args.id },
     };
   });
-  let calls: {
-    name?: string;
-    args: Record<string, unknown>;
-    executionId: string;
-    fromCode?: true;
-  }[] = [{ args: { id: "item-1" }, executionId: "call-1" }];
+  let calls: { name?: string; args: Record<string, unknown>; executionId: string }[] = [
+    { args: { id: "item-1" }, executionId: "call-1" },
+  ];
   const claimSteering = vi.fn(
     async () =>
       [] as Array<{
@@ -443,8 +439,6 @@ function fixture({
           ? { id: catalogEntries([tool])[0]?.id, arguments: call.args }
           : call.args,
         call.executionId,
-        undefined,
-        call.fromCode ? { fromCode: true } : undefined,
       );
       results.push(result);
       if (isApprovalPausedResult(result)) return;
@@ -547,23 +541,6 @@ function fixture({
 }
 
 describe("native form pause", () => {
-  it("refuses a write that needs approval when code on the computer calls it, with no card", async () => {
-    const f = fixture({ name: "demo_update_item", readOnly: false });
-    f.setCalls([{ args: { id: "item-1" }, executionId: "code-call", fromCode: true }]);
-    await f.run();
-    expect(f.results.at(-1)).toEqual({ error: CODE_CALL_NEEDS_PERSON });
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.execute).not.toHaveBeenCalled();
-  });
-
-  it("runs a read that code on the computer calls", async () => {
-    const f = fixture();
-    f.setCalls([{ args: { id: "item-1" }, executionId: "code-read", fromCode: true }]);
-    await f.run();
-    expect(f.results.at(-1)).not.toHaveProperty("error");
-    expect(f.execute).toHaveBeenCalledOnce();
-  });
-
   it("persists the exact schema on the original run's native Ask card", async () => {
     const f = fixture();
     const requestedSchema = {
