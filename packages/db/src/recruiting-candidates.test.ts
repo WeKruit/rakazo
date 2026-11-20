@@ -88,6 +88,7 @@ function fixture() {
   const prisma = {
     $transaction: vi.fn(async (fn: (db: typeof tx) => Promise<unknown>) => fn(tx)),
     $executeRaw: backfill,
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   return { prisma, tx, role, candidate, backfill };
 }
@@ -1350,6 +1351,7 @@ function observationFixture(rows: readonly unknown[] | undefined) {
   const prisma = {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn) => fn(tx)),
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   const input = {
     runId: "run",
@@ -1755,6 +1757,7 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
   const prisma = {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn) => fn(tx)),
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   return {
     prisma,
@@ -2766,6 +2769,7 @@ async function replyFixture() {
   const prisma = {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn) => fn(tx)),
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   const input = {
     roleId: "role",
@@ -4954,6 +4958,7 @@ function nativeCandidateFixture() {
   const prisma = {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn) => fn(tx)),
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   const trusted = {
     runId: "run",
@@ -5480,6 +5485,7 @@ describe("native candidate source provenance", () => {
         ...base,
         prisma: {
           $executeRaw: vi.fn(async () => 0),
+          $queryRaw: vi.fn(async () => []),
           $transaction: vi.fn(async (fn: (tx: typeof base.tx) => Promise<unknown>) => {
             inTransaction = true;
             try {
@@ -5890,6 +5896,7 @@ describe("native candidate source provenance", () => {
       const prisma = {
         $executeRaw: vi.fn(async () => 0),
         $transaction: vi.fn(async (fn) => fn(tx)),
+        $queryRaw: vi.fn(async () => []),
       } as unknown as PrismaClient;
       const result =
         operation === "list"
@@ -5941,6 +5948,7 @@ describe("native candidate source provenance", () => {
     const prisma = {
       $executeRaw: vi.fn(async () => 0),
       $transaction: vi.fn(async (fn) => fn(tx)),
+      $queryRaw: vi.fn(async () => []),
     } as unknown as PrismaClient;
     expect(
       (await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" })).observations,
@@ -6047,6 +6055,7 @@ describe("native candidate source provenance", () => {
     const prisma = {
       $executeRaw: vi.fn(async () => 0),
       $transaction: vi.fn(async (fn) => fn(tx)),
+      $queryRaw: vi.fn(async () => []),
     } as unknown as PrismaClient;
     f.tx.thread.findFirst.mockClear();
     const result = await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" });
@@ -6086,6 +6095,7 @@ describe("native candidate source provenance", () => {
     const prisma = {
       $executeRaw: vi.fn(async () => 0),
       $transaction: vi.fn(async (fn) => fn(tx)),
+      $queryRaw: vi.fn(async () => []),
     } as unknown as PrismaClient;
     const result = await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" });
     expect(result).toEqual({
@@ -6360,6 +6370,7 @@ describe("native candidate source provenance", () => {
       const prisma = {
         $executeRaw: vi.fn(async () => 0),
         $transaction: vi.fn(async (fn) => fn(tx)),
+        $queryRaw: vi.fn(async () => []),
       } as unknown as PrismaClient;
       if (boundary === "artifact-hash") f.artifact.hash = "f".repeat(64);
       const result = recruiting.listRecruitingCandidates(
