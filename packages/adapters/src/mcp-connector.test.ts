@@ -5668,7 +5668,15 @@ describe("local native Instantly campaign and lead tools", () => {
       for (const lead of f.state.campaignLeads.slice(1))
         lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
       f.state.sendingStatus = {
-        diagnostics: { status: "account_daily_limit_met", next_open_at: null },
+        diagnostics: {
+          status: "account_daily_limit_met",
+          next_open_at: null,
+          accounts_summary: {
+            total_connected: 1,
+            available: 0,
+            unavailable: { daily_limit_hit: 1, disconnected: 0 },
+          },
+        },
         summary: {
           status: "account_daily_limit_met",
           status_message: "All sending accounts reached their daily limit",
@@ -5679,7 +5687,9 @@ describe("local native Instantly campaign and lead tools", () => {
       expect(read).toMatchObject({
         notEmailedYet: ["abe@x.test"],
         mailServiceSays: { status: "account_daily_limit_met" },
-        next: expect.stringContaining("All sending accounts reached their daily limit"),
+        next: expect.stringContaining(
+          "All sending accounts reached their daily limit (0 of 1 sending mailboxes available; 1 daily limit hit)",
+        ),
       });
       expect(read.next).not.toMatch(/within/);
       f.state.sendingStatus = { summary: { status: "healthy" } };

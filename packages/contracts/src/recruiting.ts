@@ -1894,6 +1894,8 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
   ),
   /** When people waiting in a sending campaign get their first email: "now" or e.g. "Fri 09:00 America/Chicago". */
   queuedFirstEmail: z.string().max(100).optional(),
+  /** Why the mail service is not sending people still waiting, in its own words. */
+  notSendingBecause: z.string().max(300).optional(),
 });
 export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema>;
 
