@@ -42,7 +42,7 @@ it("shows who waits for their first email, when it goes out, and offers to send 
     />,
   );
   expect(html).toContain("2 waiting for their first email · goes out Fri 09:00 America/Chicago");
-  expect(html).toContain("Nicholas, Weijie · 1 emailed · 1 bounced");
+  expect(html).toContain("Not emailed yet: Nicholas, Weijie · Emailed: Ada · 1 bounced");
   expect(html).toContain("Send now");
 });
 
