@@ -478,7 +478,7 @@ export async function loadWorkingState(
       : null;
     if (waiting && !waiting.approvedAt)
       lines.push(
-        `  Its round ${waiting.round} waits on the recruiter's answer, so work they ask for on it (turning people down, more like the rest, the next ten) reaches its team as their own words only and the team resolves the people itself: hand it with delegate_to_role as your first call, before reading or resolving anyone.`,
+        `  Its round ${waiting.round} waits on the recruiter's answer. A change to who is searched (turning people down, more like the rest, the next ten) reaches its team as their own words only and the team resolves the people itself: hand it with delegate_to_role as your first call, before reading or resolving anyone. A question about the people shown (any repeats, whether they fit what was asked, how many, which are checked) is a read you answer yourself in this reply from recruiting_candidates round or list with this roleId, never handed to the team.`,
       );
   }
 

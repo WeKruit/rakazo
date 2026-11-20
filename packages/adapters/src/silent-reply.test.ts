@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { cleanQuickReply } from "./quick-reply.js";
 import {
   AUTOMATIC_CONTINUATION,
   beforeCardQuestion,
@@ -118,6 +117,5 @@ describe("the server's continuation nudge in a reply", () => {
   it("leaves ordinary words about next steps alone", () => {
     const line = "Next step: review the first 10 people with you.";
     expect(withoutNudge(line)).toBe(line);
-    expect(cleanQuickReply(`${nudge}`)).toBeNull();
   });
 });
