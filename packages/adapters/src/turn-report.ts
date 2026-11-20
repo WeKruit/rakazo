@@ -1,6 +1,3 @@
-import { asksForOutreach } from "@rakazo/core";
-import type { Receipts } from "./claim-receipts.js";
-
 /**
  * Turn-end invariants every agent's human-facing turn keeps, enforced by the server from the
  * run's own tool records instead of prompt prose:
@@ -257,9 +254,6 @@ const MEMORY_SAVE_TOOLS = new Set([
   "save_group_memory",
 ]);
 
-/** Tools that hand work to a teammate or role; their answer is that teammate's own report. */
-const DELEGATION_TOOLS = new Set(["delegate_to_role", "handoff_to_bot", "start_role"]);
-
 export class TurnReportLedger {
   private readonly entries: Entry[] = [];
   private readonly settled = new Map<string, ToolSettlement>();
@@ -352,26 +346,6 @@ export class TurnReportLedger {
         entry.kind === "tool" && MEMORY_SAVE_TOOLS.has(entry.name),
     );
     return saves.length > 0 && saves.every((entry) => this.settled.get(entry.id)?.ok === false);
-  }
-
-  /** What this attempt's tools did and returned, for checking what a reply claims. */
-  receipts(): Receipts {
-    const work = new Set<TurnWork | "memory">();
-    const results: string[] = [];
-    let delegated = false;
-    let read = false;
-    for (const entry of this.entries) {
-      if (entry.kind !== "tool") continue;
-      const settled = this.settled.get(entry.id);
-      if (settled?.ok !== true) continue;
-      const done = this.workOf(entry);
-      if (done) work.add(done);
-      else read = true;
-      if (MEMORY_SAVE_TOOLS.has(entry.name)) work.add("memory");
-      if (DELEGATION_TOOLS.has(entry.name)) delegated = true;
-      results.push(JSON.stringify(settled.result ?? null).slice(0, 20_000));
-    }
-    return { work, delegated, read, results: results.join("\n") };
   }
 
   /** Any consequential work in this attempt. */
@@ -553,19 +527,3 @@ export function restatesUpdate(reply: string, update: string | undefined): boole
   if (a.size >= 5 && shared / a.size >= 0.9) return true;
   return shared / (a.size + b.size - shared) >= 0.55;
 }
-
-/** A question asked while the email the recruiter asked to be written is not shown yet. */
-export function draftAskedBeforeShown(recruiterText: string, shown: string): boolean {
-  return (
-    asksForOutreach(recruiterText) &&
-    /写(?:一?[封个份])?(?:邮件|信|模板)|起草|模板|\b(?:write|draft)\s+(?:(?:me|up)\s+)?(?:an?\s+|the\s+)?(?:e-?mail|message|note|outreach|template)|\btemplate\b/i.test(
-      recruiterText,
-    ) &&
-    !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(recruiterText) &&
-    !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
-  );
-}
-
-/** Model-facing: the email comes first; a question waits beside it. */
-export const DRAFT_BEFORE_ASKING =
-  "Not asked: the recruiter asked you to write an email, and they see the draft before any question. Write the full email now (Subject: and body) from their words and anything saved, for the person they name, with no saved role, profile or address needed and without inventing facts they did not give. Then ask, beside the draft, only the one fact a send still needs (such as the address).";

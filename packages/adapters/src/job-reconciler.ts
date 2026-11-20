@@ -19,7 +19,6 @@ import { returnBotMessageOutcome } from "./bot-messages.js";
 import { scheduleComputerControlExpiry } from "./computer-control.js";
 import { watchOpenStages } from "./group-handoff.js";
 import { rearmRecruitingAgentRunWaits } from "./recruiting-agent-run-wait.js";
-import { sweepIdleRecruitingRoles } from "./recruiting-idle-sweep.js";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
 import { reconcileStuckWork } from "./stuck-work.js";
 import { isLoopGuardStopText } from "./tool-loop.js";
@@ -29,7 +28,6 @@ const DEFAULT_INTERVAL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 100;
 const ROUTINE_LOOKAHEAD_MS = 60_000;
 const CONTROL_LOOKAHEAD_MS = 60_000;
-const IDLE_SWEEP_INTERVAL_MS = 5 * 60_000;
 const STAGE_WATCH_SCAN_MS = 60_000;
 /** Searches still running at the provider get their follow-up re-armed this often. */
 const SEARCH_WAIT_REARM_MS = 2 * 60_000;
@@ -166,7 +164,6 @@ export function createJobReconciler(
   let controlCursor: ControlCursor | undefined;
   let profileCursor: Cursor | undefined;
   let controlScanDeadline: Date | undefined;
-  let idleSweptAt = 0;
   let stagesWatchedAt = 0;
   let searchWaitsArmedAt = 0;
   // Set on stop: an in-flight pass ends at its next step instead of querying a closing pool.
@@ -226,20 +223,6 @@ export function createJobReconciler(
         getLogger().error("recruiting question reconciliation", error);
       }
       if (stopped) return;
-      if (deps.events && now.getTime() - idleSweptAt >= IDLE_SWEEP_INTERVAL_MS) {
-        idleSweptAt = now.getTime();
-        try {
-          await sweepIdleRecruitingRoles({
-            prisma: deps.prisma,
-            jobs: deps.jobs,
-            events: deps.events,
-            now,
-            batchSize,
-          });
-        } catch (error) {
-          getLogger().error("recruiting idle sweep", error);
-        }
-      }
       if (stopped) return;
       if (now.getTime() - searchWaitsArmedAt >= SEARCH_WAIT_REARM_MS) {
         searchWaitsArmedAt = now.getTime();

@@ -1200,42 +1200,6 @@ async function researchTeammate(
 export const ROUND_HELD_NEXT_STEP =
   "Recorded, not shown yet: after the recruiter's feedback the Reviewer first checks each of these people's full profile against it (about three minutes), and the checked round is shown in this chat then, with the next-step card. Save the brief as after any round (one recruiting_role update with brief.fields only), then end the turn with one short line in the recruiter's language saying the checked people come in a few minutes. Don't list anyone, ask nothing and show no card.";
 
-/** A people search after this turn recorded a held round: the check starts when the turn ends. */
-export const ROUND_HELD_SEARCH_REFUSAL =
-  "Not run: this turn recorded the round, and it is shown once the Reviewer has checked it, which starts when this turn ends. A request for the next ten is answered by that round. Save the brief if not saved yet, then end the turn with one short line saying the checked people come in a few minutes.";
-
-/** A people search while an earlier turn's round waits for the check: that round is the answer. */
-export const ROUND_AWAITING_SEARCH_REFUSAL =
-  "Not run: the round is recorded and the Reviewer is checking it now; the checked round is shown in this chat as soon as the check ends, with the next-step card. A request for the next ten is answered by that round. End the turn with one short line in the recruiter's language saying it comes in a minute or two.";
-
-/**
- * Why a people search must not run now, or null. Staging 11-16 (982a0ac9): the recruiter's "still
- * waiting" started a new lead turn that searched again while round 2 was being checked, and the
- * checked round was then steered into that busy turn and not shown before the recruiter gave up.
- * The owner's turn that shows a checked round may still search to fill its places.
- */
-export async function heldRoundSearchRefusal(
-  prisma: PrismaClient,
-  input: { roleId: string | null | undefined; botId: string; recordedThisTurn: boolean },
-): Promise<string | null> {
-  if (input.recordedThisTurn) return ROUND_HELD_SEARCH_REFUSAL;
-  if (!input.roleId) return null;
-  const state = await roundState(prisma, input.roleId);
-  if (!state || state.status === "shown") return null;
-  if (state.status === "checked" && state.ownerBotId === input.botId) return null;
-  return ROUND_AWAITING_SEARCH_REFUSAL;
-}
-
-/** Whether a reply lists people: two or more distinct LinkedIn profiles. */
-export function listsPeople(text: string): boolean {
-  const profiles = new Set(
-    [...text.matchAll(/linkedin\.com\/in\/([^\s/)?#\]]+)/gi)].map((match) =>
-      (match[1] ?? "").toLowerCase(),
-    ),
-  );
-  return profiles.size >= 2;
-}
-
 /** The people of the round waiting for the Reviewer's check, or null when no round waits. */
 export async function heldRoundPeople(
   prisma: PrismaClient,
@@ -1253,21 +1217,4 @@ export async function heldRoundPeople(
     distinct: ["candidateKey"],
     select: { name: true, linkedinUrl: true },
   });
-}
-
-/**
- * Whether a reply talks about two or more of these people, by name or profile. Staging 11-15: a
- * turn's summary of a held round's grades named its people without links, before the round showed.
- */
-export function mentionsPeople(
-  text: string,
-  people: ReadonlyArray<{ name: string | null; linkedinUrl: string | null }>,
-): boolean {
-  const lower = text.toLowerCase();
-  const named = people.filter((person) => {
-    const name = person.name?.trim().toLowerCase();
-    const slug = person.linkedinUrl?.match(/\/in\/([^/?#]+)/i)?.[1]?.toLowerCase();
-    return (name && name.length >= 4 && lower.includes(name)) || (slug && lower.includes(slug));
-  });
-  return named.length >= 2;
 }

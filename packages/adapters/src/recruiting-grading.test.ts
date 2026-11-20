@@ -17,16 +17,12 @@ const {
   gradingToolRefusal,
   checkedRoundPeople,
   gradingTools,
-  heldRoundSearchRefusal,
-  listsPeople,
-  mentionsPeople,
   nextRoundHeld,
   roundAwaitingReview,
   roundListHeld,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
-  ROUND_HELD_SEARCH_REFUSAL,
   scheduleRecruitingGrading,
   startRecruitingGrading,
 } = await import("./recruiting-grading.js");
@@ -1017,84 +1013,6 @@ describe("gradingTools", () => {
       "connectors_search_tools",
       "connectors_execute_tool",
     ]);
-  });
-});
-
-describe("listsPeople", () => {
-  it("finds a reply that lists people, not one that names a single profile", () => {
-    // Staging 11-15: a turn before the check wrote round 2 out as a numbered list of profiles.
-    expect(
-      listsPeople(
-        "1. [A](https://www.linkedin.com/in/a-1) 2. [B](https://www.linkedin.com/in/b-2)",
-      ),
-    ).toBe(true);
-    expect(listsPeople("https://www.linkedin.com/in/a-1 and again linkedin.com/in/A-1/ here")).toBe(
-      false,
-    );
-    expect(listsPeople("The checked round comes in a minute or two.")).toBe(false);
-  });
-});
-
-describe("mentionsPeople", () => {
-  const held = [
-    { name: "Karthik Tirunagari", linkedinUrl: "https://www.linkedin.com/in/karrthikt" },
-    { name: "Fal Tur", linkedinUrl: "https://www.linkedin.com/in/fal-tur-data" },
-    { name: "Akhil K", linkedinUrl: null },
-  ];
-  it("finds a summary that names a held round's people without links", () => {
-    // Staging 11-15: "Round 2's nine profiles have been graded and saved. Strong: …" by name.
-    expect(mentionsPeople("Strong: Karthik Tirunagari. Promising: fal tur.", held)).toBe(true);
-    expect(mentionsPeople("Only karrthikt and Akhil K fit.", held)).toBe(true);
-    expect(mentionsPeople("Karthik Tirunagari looks strong.", held)).toBe(false);
-    expect(mentionsPeople("The checked round comes in a minute or two.", held)).toBe(false);
-  });
-});
-
-describe("heldRoundSearchRefusal", () => {
-  const prismaWith = (round: Record<string, unknown> | null) =>
-    ({
-      recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
-    }) as never;
-  const held = (status: string, ownerBotId = "lead") => ({
-    id: "r2",
-    round: 2,
-    candidateKeys: [],
-    approvedAt: null,
-    status,
-    statusAt: new Date(),
-    ownerBotId,
-    version: 1,
-  });
-
-  it("refuses a search in a later turn while an earlier turn's round waits for the check", async () => {
-    // Staging 11-16 (982a0ac9): "still waiting" started a new lead turn that searched again while
-    // round 2 was being checked, and the checked round was steered into that busy turn.
-    const refusal = await heldRoundSearchRefusal(prismaWith(held("checking")), {
-      roleId: "role",
-      botId: "lead",
-      recordedThisTurn: false,
-    });
-    expect(refusal).toContain("Not run");
-  });
-
-  it("lets a search run when the latest round is shown, and in the owner's turn showing it", async () => {
-    const shown = { roleId: "role", botId: "lead", recordedThisTurn: false };
-    expect(await heldRoundSearchRefusal(prismaWith(held("shown")), shown)).toBeNull();
-    expect(await heldRoundSearchRefusal(prismaWith(null), shown)).toBeNull();
-    expect(await heldRoundSearchRefusal(prismaWith(held("checked")), shown)).toBeNull();
-    expect(
-      await heldRoundSearchRefusal(prismaWith(held("checked", "other")), shown),
-    ).not.toBeNull();
-  });
-
-  it("refuses after this turn recorded the held round, whatever the stored state", async () => {
-    expect(
-      await heldRoundSearchRefusal(prismaWith(null), {
-        roleId: undefined,
-        botId: "lead",
-        recordedThisTurn: true,
-      }),
-    ).toBe(ROUND_HELD_SEARCH_REFUSAL);
   });
 });
 

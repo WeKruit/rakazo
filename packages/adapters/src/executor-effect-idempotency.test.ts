@@ -54,11 +54,9 @@ import {
 } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
-  ASK_AFTER_HANDOFF,
   continuedCandidateKey,
   createRunExecutor,
   globalAskBeforeRole,
-  INTAKE_ASK_FIRST,
   jobLinkIn,
   namedCandidateKey,
   nearCandidateKey,
@@ -1017,10 +1015,6 @@ describe("model outage on a recruiting turn", () => {
     expect(f.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: "failed", error: outage }),
     );
-    // The person still gets an answer: the reply check runs once the conversation is quiet.
-    expect(f.executorDeps.jobs.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "thread.reply_check" }),
-    );
   });
 });
 
@@ -1377,137 +1371,6 @@ describe("one request handed to a role", () => {
     await f.run();
     expect(messageBot).toHaveBeenCalledTimes(1);
     expect(f.results[1]).toMatchObject({ ok: true, note: expect.stringContaining("Already") });
-  });
-});
-
-describe("stage report of a finished request", () => {
-  // Gate 91a438c4: the teammate posted the template and reported back, and Main sent it the same
-  // brief twice more, so one request got three answers.
-  it("does not hand the same brief back to the teammate that just finished it", async () => {
-    const f = fixture("report-same-brief");
-    const report = {
-      id: "stage-report",
-      seq: 3,
-      role: "bot",
-      botId: "bot-2",
-      runId: "teammate-run",
-      createdAt: new Date(1),
-      blocks: [
-        {
-          kind: "handoff",
-          fromBotId: "bot-2",
-          toBotId: "bot-1",
-          text: "Finished the stage you handed me.",
-          hop: 1,
-          report: "completed",
-        },
-      ],
-    };
-    const brief =
-      "Goal: 帮我写一封面试后跟进邮件的模板. Write one general follow-up email template.";
-    Object.assign(f.thread, { groupId: "group-1" });
-    Object.assign(f.prisma, {
-      chatGroup: {
-        findUnique: vi.fn(async () => ({ id: "group-1", name: "Team", members: [] })),
-      },
-      chatGroupMember: { findMany: vi.fn(async () => []) },
-    });
-    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: report.id });
-    f.prisma.message.findMany.mockResolvedValue([report]);
-    const findFirst = vi.mocked(f.prisma.message.findFirst);
-    findFirst.mockImplementation((async (query?: { where?: { blocks?: unknown } }) =>
-      query?.where?.blocks
-        ? {
-            blocks: [
-              { kind: "handoff", fromBotId: "bot-1", toBotId: "bot-2", text: brief, hop: 0 },
-            ],
-          }
-        : null) as unknown as typeof findFirst);
-    f.setCalls([
-      {
-        name: "handoff_to_bot",
-        args: {
-          bot_id: "bot-2",
-          message:
-            "Goal: 帮我写一封面试后跟进邮件的模板. Write a general follow-up email template.",
-        },
-        executionId: "h",
-      },
-    ]);
-    await f.run();
-    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("just finished") });
-    expect(handoffToGroupBot).not.toHaveBeenCalled();
-  });
-
-  // Gate 48d5887e, change-mind: the teammate posted the revised email and reported, and Main
-  // handed it the same request again in new words (no message from the recruiter in between),
-  // so a second version came 22 s later.
-  it.each([
-    ["reworded with nothing new from the recruiter", 3, 1],
-    ["after the recruiter wrote again", 8, 0],
-  ] as const)("refuses a re-handoff %s only once", async (_, personSeq, refused) => {
-    const f = fixture(`report-reworded-${personSeq}`);
-    const report = {
-      id: "stage-report",
-      seq: 7,
-      role: "bot",
-      botId: "bot-2",
-      runId: "teammate-run",
-      createdAt: new Date(1),
-      blocks: [
-        {
-          kind: "handoff",
-          fromBotId: "bot-2",
-          toBotId: "bot-1",
-          text: "Finished the stage you handed me.",
-          hop: 1,
-          report: "completed",
-        },
-      ],
-    };
-    Object.assign(f.thread, { groupId: "group-1" });
-    Object.assign(f.prisma, {
-      chatGroup: {
-        findUnique: vi.fn(async () => ({ id: "group-1", name: "Team", members: [] })),
-      },
-      chatGroupMember: { findMany: vi.fn(async () => []) },
-    });
-    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: report.id });
-    f.prisma.message.findMany.mockResolvedValue([report]);
-    const findFirst = vi.mocked(f.prisma.message.findFirst);
-    findFirst.mockImplementation((async (query?: {
-      where?: { blocks?: unknown; role?: string };
-    }) =>
-      query?.where?.blocks
-        ? {
-            seq: 6,
-            blocks: [
-              {
-                kind: "handoff",
-                fromBotId: "bot-1",
-                toBotId: "bot-2",
-                text: "Goal: 写封首次outreach邮件模板，并按最新更正改成 base 70-90万、每周五remote。",
-                hop: 0,
-              },
-            ],
-          }
-        : query?.where?.role === "user"
-          ? { seq: personSeq, blocks: [{ kind: "text", text: "等下，base改70-90万" }] }
-          : null) as unknown as typeof findFirst);
-    const again = {
-      name: "handoff_to_bot",
-      args: {
-        bot_id: "bot-2",
-        message: "Goal: 完成首次 outreach 邮件模板，用最新信息：base 70-90万。",
-      },
-    };
-    f.setCalls([
-      { ...again, executionId: "h1" },
-      { ...again, executionId: "h2" },
-    ]);
-    await f.run();
-    const refusals = f.results.filter((result) => JSON.stringify(result).includes("just finished"));
-    expect(refusals).toHaveLength(refused);
   });
 });
 
@@ -6203,8 +6066,6 @@ describe("native recruiting assessment effect delivery", () => {
         executionId: "handoff-1",
       },
     ]);
-    // The first question comes from the coordinator itself, not after a teammate starts up.
-    expect(f.results[0]).toEqual({ error: INTAKE_ASK_FIRST });
     expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
       title: "Agent engineer",
@@ -6213,34 +6074,6 @@ describe("native recruiting assessment effect delivery", () => {
     });
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role in this turn");
   });
-
-  // Staging 11-10: Main handed two people to Reviewer, then ran the next round's searches itself;
-  // its question and final reply were dropped as if the teammate owned the work, so it went silent.
-  it.each([
-    ["only hands off", [], true],
-    [
-      "keeps working after the handoff",
-      [{ name: "write_file", args: { path: "n.txt", content: "x" }, executionId: "w" }],
-      false,
-    ],
-  ] as const)(
-    "a turn that %s asks the recruiter only when it still owns the work",
-    async (_label, after, blocked) => {
-      vi.mocked(handoffToGroupBot).mockResolvedValueOnce({ ok: true } as never);
-      const f = await roleTeamFirstTurn(`handoff-then-${blocked}`, "你好", [
-        {
-          name: "handoff_to_bot",
-          args: { confirm_name: "Reviewer", message: "Check these two people" },
-          executionId: "handoff-1",
-        },
-        ...after,
-      ]);
-      const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-      const answer = await request.beforeAsk?.("要放宽中文要求吗？", undefined);
-      if (blocked) expect(answer).toEqual({ instead: ASK_AFTER_HANDOFF });
-      else expect(answer).not.toEqual({ instead: ASK_AFTER_HANDOFF });
-    },
-  );
 
   // Gate 493e9f2e, change-mind-mid-run: the recruiter changed the ask after Main handed off; its
   // second handoff in the same run reported success but reused the first one's delivery.
@@ -6309,116 +6142,6 @@ describe("native recruiting assessment effect delivery", () => {
     });
     await f.run();
     expect(JSON.stringify(f.finalizeRun.mock.calls)).toContain("每周五远程");
-  });
-
-  // Gate 386f6a46, change-mind-mid-run: the change came while Main ran, its brief took it, and
-  // the report's turn handed the same change over again, so two versions came out.
-  // Gate df83586a, change-mind#2: the stage was handed before the change, and this bot answered
-  // the change itself (the Chinese template); the report turn handed it over again (English).
-  it.each([
-    [
-      "a stage handed after it",
-      {
-        kind: "handoff",
-        fromBotId: "bot-1",
-        toBotId: "bot-2",
-        text: "Goal: write the first-touch template for Staff Frontend Engineer, Beijing.",
-      },
-    ],
-    [
-      "this bot's own answer",
-      {
-        kind: "text",
-        text: "主题：Staff Frontend Engineer｜北京｜React\n\n你好 {{firstName}}，\n\n我想和你分享一个 Staff Frontend Engineer 的机会，工作地点在北京，主要使用 React。薪资范围是每年 70–90 万元，且每周五可远程办公。\n\n祝好，\nAlex Morgan",
-      },
-    ],
-  ])("does not hand over again a message already met by %s", async (_name, after) => {
-    vi.mocked(handoffToGroupBot).mockClear();
-    const f = fixture("rehand-after-report");
-    const bot = await f.prisma.bot.findUniqueOrThrow();
-    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
-      ...bot,
-      spawnKey: "recruiting:user-1:main",
-    } as typeof bot);
-    Object.assign(f.thread, { groupId: "group-1" });
-    Object.assign(f.prisma, {
-      chatGroup: { findUnique: vi.fn(async () => null) },
-      chatGroupMember: { findMany: vi.fn(async () => []) },
-    });
-    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: "report-1" });
-    const change = "等等，base改成70-90万，邮件里加一句每周五remote";
-    const rows = [
-      {
-        id: "change-1",
-        seq: 5,
-        role: "user",
-        botId: null,
-        clientNonce: null,
-        runId: null,
-        blocks: [{ kind: "text", text: change }],
-        createdAt: new Date(),
-      },
-      {
-        id: "brief-1",
-        seq: 6,
-        role: "bot",
-        botId: "bot-1",
-        clientNonce: null,
-        runId: "run-0",
-        blocks: [after],
-        createdAt: new Date(),
-      },
-      {
-        id: "report-1",
-        seq: 7,
-        role: "bot",
-        botId: "bot-2",
-        clientNonce: null,
-        runId: "run-2",
-        blocks: [
-          {
-            kind: "handoff",
-            fromBotId: "bot-2",
-            toBotId: "bot-1",
-            report: "completed",
-            text: "Finished the stage you handed me.",
-          },
-        ],
-        createdAt: new Date(),
-      },
-    ];
-    vi.mocked(f.prisma.message.findMany).mockImplementation((async (query: {
-      where?: { seq?: { gt?: number } };
-    }) => rows.filter((row) => row.seq > (query?.where?.seq?.gt ?? 0))) as never);
-    vi.mocked(f.prisma.message.findFirst).mockImplementation((async (query: {
-      where?: { role?: string; blocks?: unknown };
-    }) =>
-      query?.where?.role === "user"
-        ? rows[0]
-        : query?.where?.blocks
-          ? {
-              blocks: [
-                {
-                  kind: "handoff",
-                  fromBotId: "bot-1",
-                  toBotId: "bot-2",
-                  text: "Goal: write the first-touch template for Staff Frontend Engineer, Beijing.",
-                },
-              ],
-            }
-          : null) as never);
-    let answer: unknown;
-    f.runtimeRun.mockImplementation(async function* (request) {
-      answer = await request.executeTool!(
-        "handoff_to_bot",
-        { confirm_name: "Writer", message: `Goal: the recruiter says “${change}”.` },
-        "h1",
-      );
-      yield { type: "done" as const, text: "NO_RESPONSE" };
-    });
-    await f.run();
-    expect(JSON.stringify(answer)).toContain("Not handed off");
-    expect(handoffToGroupBot).not.toHaveBeenCalled();
   });
 
   // Gate ab68f06d, change-mind: after handing the change to the writer, the coordinator posted
@@ -7587,105 +7310,5 @@ describe("approval cards on a new user message", () => {
     expect(prompt).not.toContain("still waiting for the user");
     expect(history).toContain("Approval card closed unanswered");
     expect(history).not.toContain("Approval card waiting for the user");
-  });
-});
-
-describe("people searches before the first round", () => {
-  it.each([
-    ["agent_run", 3, "3 people-search agent runs already returned"],
-    ["web_search_advanced_exa", 12, "12 people searches already returned"],
-  ] as const)(
-    "asks the recruiter after too many %s calls even before any picks are shown",
-    async (toolName, allowed, refusal) => {
-      const f = fixture(`run-first-round-${toolName}`);
-      f.thread.activeRecruitingRoleId = "role-1";
-      Object.assign(f.prisma, {
-        recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
-      });
-      Object.assign(f.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
-      const tool = (name: string) =>
-        ({
-          name: `mcp__people-search__${name}`,
-          description: name,
-          inputSchema: { type: "object", properties: {} },
-          readOnly: true,
-          route: { connectorId: "people-search", toolName: name },
-        }) as never;
-      f.connector.discoverTools.mockResolvedValue([
-        tool("web_search_advanced_exa"),
-        tool("agent_run"),
-      ]);
-      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-        {
-          effect: "always_allow",
-          matchKind: "tool",
-          matchValue: `mcp__people-search__${toolName}`,
-        },
-      ]);
-      f.connector.execute.mockImplementation(async function* () {
-        yield { type: "result", data: { content: [{ type: "text", text: '{"people":[]}' }] } };
-      });
-      f.setCalls(
-        Array.from({ length: allowed + 1 }, (_, n) => ({
-          name: `mcp__people-search__${toolName}`,
-          args: { query: `Korean-speaking quality engineers near Commerce, GA, set ${n}` },
-          executionId: `search-${n}`,
-        })),
-      );
-
-      await f.run();
-
-      expect(f.results.slice(0, allowed)).not.toContainEqual(
-        expect.objectContaining({ error: expect.stringContaining("already returned") }),
-      );
-      expect(f.results[allowed]).toEqual({ error: expect.stringContaining(refusal) });
-    },
-  );
-
-  // 11-13: the deeper search cost about $1 a time, so a short round is recorded first and the
-  // deeper search runs only when the recruiter asks for it on the next-step card.
-  it("runs no deeper agent run before a short round is recorded", async () => {
-    const f = fixture("run-first-round-deeper");
-    f.thread.activeRecruitingRoleId = "role-1";
-    Object.assign(f.prisma, {
-      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
-    });
-    Object.assign(f.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
-    const tool = (name: string) =>
-      ({
-        name: `mcp__people-search__${name}`,
-        description: name,
-        inputSchema: { type: "object", properties: {} },
-        readOnly: true,
-        route: { connectorId: "people-search", toolName: name },
-      }) as never;
-    f.connector.discoverTools.mockResolvedValue([
-      tool("web_search_advanced_exa"),
-      tool("agent_run"),
-    ]);
-    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-      { effect: "always_allow", matchKind: "tool", matchValue: "mcp__people-search__agent_run" },
-    ]);
-    f.connector.execute.mockImplementation(async function* () {
-      yield { type: "result", data: { content: [{ type: "text", text: '{"people":[]}' }] } };
-    });
-    f.setCalls(
-      // The recruiter's rule: at most three tries for a short round.
-      ["low", "low", "low", "auto"].map((effort, n) => ({
-        name: "mcp__people-search__agent_run",
-        args: { effort, query: `Find 6 more Korean-speaking quality engineers, set ${n}` },
-        executionId: `search-${n}`,
-      })),
-    );
-
-    await f.run();
-
-    expect(f.results.slice(0, 3)).not.toContainEqual(
-      expect.objectContaining({ error: expect.stringContaining("already returned") }),
-    );
-    for (const result of f.results.slice(3))
-      expect(result).toEqual({
-        error: expect.stringContaining("with everyone who fits, even fewer than ten"),
-      });
   });
 });

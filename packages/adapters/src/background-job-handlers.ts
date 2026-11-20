@@ -31,7 +31,6 @@ import { startRecruitingGrading } from "./recruiting-grading.js";
 import { projectRecruitingCandidateProfiles } from "./recruiting-profiles.js";
 import { projectRecruitingInboxJob } from "./recruiting-reads.js";
 import { pollRecruitingResearch } from "./recruiting-research-poll.js";
-import { checkThreadReplied } from "./reply-check.js";
 import {
   pauseRoutineAfterRepeatedFailures,
   skipRoutineWithoutNewActivity,
@@ -207,12 +206,8 @@ export function createBackgroundJobHandlers(deps: {
         payload,
       );
     },
-    "thread.reply_check": async (payload) => {
-      await checkThreadReplied(
-        { prisma: deps.prisma, events: deps.events, jobs: deps.jobs },
-        payload,
-      );
-    },
+    // Retired: checks already queued before the upgrade finish without pushing the agent.
+    "thread.reply_check": async () => {},
     "recruiting_checkin.start": async (payload) => {
       await startRecruitingCheckin(
         { prisma: deps.prisma, jobs: deps.jobs, connector: deps.connector },

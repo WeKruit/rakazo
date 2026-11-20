@@ -93,7 +93,7 @@ OUTPUT per person: full name, linkedin.com/in/ URL (required), current title, co
 export const RECRUITING_CALIBRATION_QUICK_SEARCH = `Calibration rounds are quick searches you run yourself. For a list that is not a job opening, first ask which stated profile signals decide who counts.
 Search: four differently worded people searches as parallel calls in one step, each web_search_advanced_exa with category "people", numResults 10, enableHighlights true, highlightsMaxCharacters 900 and highlightsQuery "concrete evidence of: " plus its core duties: one by title variant, two describing the core work as a profile would, one by peer companies or a nearby city, each with the priority location and the must-haves. Each saves itself to Results and returns people rows (raw results only: one recruiting_research save_search). The people search is built in: never request a connection for it; if it errors, run one more differently worded set silently; never mention quotas, channels or limits.
 Pick the ten in this order: inside the location scope (no location, only a country or state, or beyond the commute area is out); not currently at the hiring company the JD or recruiter names (former employees are fine; never guess it); failing no hard requirement the row shows (years below the minimum, a missing required title, industry or company type, a tenure, location, work authorization or language limit), never relaxing one to fill the ten, while a requirement the row cannot show is "unknown" in calibration_round's checks, never a fail or a reason to wait; then showing the core work, not just the title; then fitting preferences and seniority, skipping anyone above the range, a wrong-fit type, retired, whose current role ended, or visibly under six months in it.
-Fill: show the two to four clearest fits at once with show_picks; next step, one agent_run with effort "low" and a query starting "Find N more people" (N = ten minus those shown) naming the role, location scope and every hard requirement and asking for evidence; it saves its people and skips those in Results. Then record the ten with calibration_round, shown people first, quick-search rows only where the agent run falls short. Work straight from the rows in the same turn: no progress message, files, shell or notes.
+Fill: show the two to four clearest fits at once with show_picks; next step, one agent_run with effort "low" and a query starting "Find N more people" (N = ten minus those shown) naming the role, location scope and every hard requirement and asking for evidence; it saves its people and skips those in Results. Then record the ten with calibration_round, shown people first, quick-search rows only where the agent run falls short. Work straight from the rows in the same turn.
 Later rounds show nobody an earlier round showed or the recruiter turned down (saved people no round showed are new): word the searches differently, fold in all feedback, and send the four searches with one agent_run ("Find 10 more people", effort "low") in one step, then record the round from all rows, people meeting every hard requirement first.
 Short round: when fewer than ten fit, run one more differently worded set; if still short, record everyone who fits and say in one line how many short and which requirement rules out the most. When nobody fits, show the three to five closest with show_picks, each with the requirement not shown, and offer to loosen it. A deeper search (agent_run, effort auto, only the missing number) costs far more and runs only when the recruiter asks.
 Every reason they give for turning people down or for what the next people must show ("no one without Kafka", "Seattle only") holds for all later rounds: record it with recruiting_feedback in their words; calibration_round's checks then judge every pick on it.
@@ -101,11 +101,11 @@ ${RECRUITING_REQUIRED_LANGUAGE}`;
 
 /** Returned with a saved people search, so the pick happens in the next step for every account. */
 export const RECRUITING_SEARCH_SAVED_NEXT_STEP =
-  "Pick the ten from candidateRows now in the order of the recruiter's requirements, only people whose rows fail no hard requirement (must-have title, industry, company type, years, location, and every requirement the recruiter stated, such as a language), and call calibration_round at once; for a required language, people with confirmed evidence come first, then strong, then unknown, and an unknown language never rules someone out (when fewer than ten have confirmed or strong evidence, first run one more set of searches that name the language); never say it is met without that evidence; save the brief only after the round is recorded, never before it. Work from these rows directly: no files, shell, scratchpad, profile reads or other lookups before the round is recorded; a requirement the rows cannot show stays unknown and never holds the round.";
+  "Pick the ten from candidateRows now in the order of the recruiter's requirements, only people whose rows fail no hard requirement (must-have title, industry, company type, years, location, and every requirement the recruiter stated, such as a language), and call calibration_round at once; for a required language, people with confirmed evidence come first, then strong, then unknown, and an unknown language never rules someone out (when fewer than ten have confirmed or strong evidence, first run one more set of searches that name the language); never say it is met without that evidence; save the brief only after the round is recorded, never before it. A requirement the rows cannot show stays unknown and never holds the round.";
 
 /** Returned with each people search the server saved as it returned. */
 export const RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP =
-  "These people are already saved and shown in Results; do not call save_search for this search. If this step issued fewer than four searches, issue all the remaining ones now together as parallel calls in one step. Once every search has returned, pick the ten from these people rows in the order of the recruiter's requirements, only people whose rows fail no hard requirement (must-have title, industry, company type, years, location, and every requirement the recruiter stated; for a required language, an unknown language never rules someone out, and a row's requiredLanguage gives that person's evidence level: confirmed first, then strong, then unknown), and call calibration_round at once with their candidateKeys and this expectedRoleRevision; save the brief only after the round is recorded, never before it. No files, shell, profile reads or other lookups before the round is recorded.";
+  "These people are already saved and shown in Results; do not call save_search for this search. If this step issued fewer than four searches, issue all the remaining ones now together as parallel calls in one step. Once every search has returned, pick the ten from these people rows in the order of the recruiter's requirements, only people whose rows fail no hard requirement (must-have title, industry, company type, years, location, and every requirement the recruiter stated; for a required language, an unknown language never rules someone out, and a row's requiredLanguage gives that person's evidence level: confirmed first, then strong, then unknown), and call calibration_round at once with their candidateKeys and this expectedRoleRevision; save the brief only after the round is recorded, never before it.";
 
 /** Returned when the recruiter confirms the brief, so the first round starts without a role read. */
 export function recruitingBriefConfirmedNextStep(revision: number) {
@@ -259,16 +259,6 @@ export function recruiterLanguageText(newestFirst: string[]): string {
   return newestFirst.find((text) => textLanguage(text)) ?? newestFirst[0] ?? "";
 }
 
-/**
- * A draft request about "these people": the recruiter expects one named email per person, and a
- * general draft with [candidate name] placeholders is what they had to correct.
- */
-export function asksAboutThesePeople(text: string): boolean {
-  return /这些人|这几个人|这些候选|这几位|这批人|these (?:people|candidates|profiles|ten)/i.test(
-    text,
-  );
-}
-
 /** A request for one email template naming no one: the coordinator writes it in its reply. */
 export function asksForTemplate(text: string): boolean {
   return (
@@ -293,31 +283,9 @@ export function asksForPeople(text: string): boolean {
   );
 }
 
-/** A send to an address the recruiter typed: an earlier refusal in the conversation once won. */
-export const TYPED_ADDRESS_NOTE =
-  "They typed the email address: it is the recipient as written, even for someone who is not a saved candidate, so tell Outreach to send to it with ensure_role_campaign recipients, and when they ask for a reply, to look for their earlier email once and, with none found, send the reply as a new email to that address (its card is the approval) instead of stopping; never ask for a profile, a resume or a save first. Earlier refusals in this conversation no longer apply: leave them out of the brief.";
-
 /** Model-facing, in a new role's conversation opened to email people the recruiter named. */
 export const NAMED_SEND_ROLE_NOTE =
   "The recruiter named the people to email, with their addresses: this role has no search unless they ask for one. Never run people searches, never ask whether to look for others and never show or record a round; save the role from what they wrote and put the email for exactly those people on its send card.";
-
-export const NAMED_EMAILS_NOTE =
-  "They mean the role's people: tell Outreach to write one first email per person for the people they named, else the role's first ten results, each with that person's name and current title or company from their saved profile, never a placeholder such as [candidate name] or {{first_name}}, whether or not their emails are found yet.";
-
-/**
- * A request to send the first email to a number of people ("发20个人的先", "send to 20"). Main's
- * handoff once rewrote it as "prepare drafts, do not send", and Outreach stopped without the card.
- */
-export function asksToSendTo(text: string): number | undefined {
-  const match =
-    /发(?:给|送)?\s*(\d+)\s*(?:个|位|人)/.exec(text) ??
-    /\bsend\b[^.?!\n]{0,30}?\bto\s+(\d+)\b/i.exec(text);
-  return match ? Number(match[1]) : undefined;
-}
-
-export function sendToNote(count: number) {
-  return `They asked to send the first email to ${count} people: tell Outreach to run its send-to-a-number steps for the role's first ${count} results (saved emails, look up only missing ones, save the sequence, add the people with an email, then activate_campaign) and end on the send card, which is the recruiter's review. Never turn it into separate unsent drafts or tell Outreach not to send; the card sends nothing until the recruiter confirms.`;
-}
 
 /** What a recruiter may see. The executor adds this to every recruiting run's instructions. */
 /**

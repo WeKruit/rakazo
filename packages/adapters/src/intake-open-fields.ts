@@ -87,20 +87,6 @@ export function openFactAsked(question: string, recruiterText: string): IntakeFi
   return openKeys.find((key) => ASKS[key].test(question));
 }
 
-const JOB_TITLE =
-  /\b(engineer|developer|architect|scientist|analyst|manager|director|lead|head of|designer|sales|account executive|recruiter|marketer|marketing|operations|consultant|specialist|vp|cto|cfo|ceo)\b|工程师|开发|架构师|科学家|分析师|经理|总监|主管|设计师|销售|运营|产品|顾问|专员|招聘|后端|前端|全栈|算法|运维|测试|\b(?:back-?end|front-?end|full-?stack|devops|sre)\b/i;
-
-/** A recruiter who names no title, place or years has not said what role it is. */
-export const describesRole = (recruiterText: string) =>
-  JOB_TITLE.test(recruiterText) || intakeFields(recruiterText).openKeys.length < 2;
-
-/**
- * The recruiter chose to see the first ten before any question (staging 11-15, card tap
- * 「先出前十个，再问」): a described role is searched as written.
- */
-export const SEARCH_BEFORE_ASKING =
-  "Not asked: the recruiter sees the first ten before any question. Issue the calibration people searches now from the JD and their words as written, leaving whatever they did not state open, then record the ten with calibration_round. The one question allowed comes after the ten, on the card beside them, and only for a fact still open that changes who is searched for.";
-
 export const settledFactNote = (field: IntakeField) =>
   `Not asked: the recruiter's own words already settle the ${field === "years" ? "years of experience" : field === "location" ? "location and work mode" : "language requirement"}. Never ask about it, ask to confirm it${field === "years" ? ", or ask for a cap on stated years (propose one in the brief as a preference)" : ""}. Ask only about a fact still open that changes who is searched for; if none is, issue the calibration searches now with no question.`;
 

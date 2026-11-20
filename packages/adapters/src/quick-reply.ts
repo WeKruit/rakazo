@@ -36,14 +36,6 @@ export function withoutLeadingAck(text: string): string {
   return /^[a-z]/.test(rest) ? rest[0]!.toUpperCase() + rest.slice(1) : rest;
 }
 
-/**
- * A one-line progress note in another language than the person's message: simulated 11-14, a
- * Chinese edit request got "I'll revise the template to show…". It is dropped; the answer follows.
- */
-export function progressInOtherLanguage(line: string, language: ReplyLanguage): boolean {
-  return oneLineNote(line) && inOtherLanguage(line.trim(), language);
-}
-
 /** One short line, as a note about the next step is: not an answer, a list or a draft. */
 export function oneLineNote(line: string): boolean {
   const text = line.trim();
