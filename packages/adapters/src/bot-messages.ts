@@ -507,7 +507,7 @@ export async function teamProgress(
         select: { activeRecruitingRoleId: true },
       })
     )?.activeRecruitingRoleId;
-  const [peopleFound, recorded, saved] = roleId
+  const [peopleFound, recorded] = roleId
     ? await Promise.all([
         countRecruitingPeopleFoundSince(prisma, { roleId, since }),
         // Staging 11-15: the team kept working after recording round 2, and Kruit said the new
@@ -521,13 +521,8 @@ export async function teamProgress(
             }),
           )
           .catch(() => null),
-        // Staging 11-16: "found 39 so far" read as false beside Results' 52 saved people, since
-        // the two count different things; the reply names both.
-        Promise.resolve()
-          .then(() => prisma.recruitingCandidate.count({ where: { roleId } }))
-          .catch(() => null),
       ])
-    : [0, null, null];
+    : [0, null];
   // Staging 11-15: listed in the role's chat 23 s before its record was written, the new round
   // read as "not ready" in between.
   const listed =
@@ -546,7 +541,8 @@ export async function teamProgress(
       : false;
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
-  const found = `${peopleFound} ${peopleFound === 1 ? "person" : "people"} on this request${typeof saved === "number" && saved > peopleFound ? `, ${saved} saved in Results in all` : ""}`;
+  // fr/fosp 11-20: "found 35 so far, with 43 saved overall" was stale a minute later and read as
+  // people the recruiter would get ("我只要20个"), so the note gives only time.
   return {
     name: working.bot.name,
     minutes,
@@ -556,10 +552,10 @@ export async function teamProgress(
     note: listed
       ? `The next round is being posted right now. Read it with recruiting_candidates round and roleId ${roleId} in a moment and show its people here; never say it is not ready, never mention records, and never send the recruiter to another chat.`
       : recorded && held
-        ? `Round ${recorded.round} is picked and being checked by the Reviewer; it is shown here once, already checked (${started} on this request, ${found} found). Never list, name or count its people before it comes, never send the recruiter to another chat, and say in one line that the checked round is on its way.`
+        ? `Round ${recorded.round} is picked and being checked by the Reviewer; it is shown here once, already checked (${started} on this request). Never list, name or count its people before it comes, never send the recruiter to another chat, and say in one line that the checked round is on its way.`
         : recorded
-          ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}, ${found} found). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
-          : `${working.bot.name} has been working on the recruiter's request for ${started}${peopleFound ? ` and has found ${found} so far` : " and is searching now"}; the next round comes back here when it is picked. Give the recruiter these numbers once; never say it has not started.`,
+          ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
+          : `${working.bot.name} has been working on the recruiter's request for ${started}; the next round comes back here when it is picked. Say in one line that it is being searched and how long it has run; never say it has not started, and give no count of people found or saved: the recruiter counts the people a round shows them.`,
   };
 }
 
