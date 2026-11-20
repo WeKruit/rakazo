@@ -15,7 +15,6 @@ import {
   prepareAgentRun,
   projectRecruitingCandidateReport,
   recordAgentRunCost,
-  releasePeopleSavedBy,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   requireRoleForPeopleSearch,
@@ -454,8 +453,11 @@ describe("people-search agent runs", () => {
     });
   });
 
-  it("counts the plain web search's people until save_search saves them", async () => {
+  it("counts the plain web search's people like the people search's", async () => {
     // Staging acd31504: five plain web searches of ten for "最多20个", then save_search kept 30.
+    // Staging 83c32eba: its share was then held until a save_search that never came, so the
+    // role's next searches were all refused as busy and the 2 people shown were never saved.
+    // Its people are saved as it returns now, so a finished one gives its share back.
     const db = fixture("role-plain");
     db.message.findMany.mockResolvedValue([
       { createdAt: new Date(), blocks: [{ kind: "text", text: "Senior SRE，Austin。最多20个" }] },
@@ -468,10 +470,8 @@ describe("people-search agent runs", () => {
       });
     const first = [await plain(), await plain()];
     expect(first.map((args) => args.numResults)).toEqual([10, 10]);
-    // Finished, but its people are not in Results until save_search runs.
-    for (const args of first) settlePeopleSearch(args, "done");
     await expect(plain()).rejects.toThrow(/already running/);
-    releasePeopleSavedBy(actor.runId);
+    for (const args of first) settlePeopleSearch(args, "done");
     db.recruitingCandidate.count.mockResolvedValue(13);
     await expect(plain()).resolves.toMatchObject({ numResults: 7 });
   });
