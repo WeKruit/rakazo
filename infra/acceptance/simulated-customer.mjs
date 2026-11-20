@@ -379,7 +379,7 @@ async function replyAfter(journey, rpc, since, quick = false) {
 }
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone), but make each message mean what your goal means: if a stranger could read it as a different question, reword it. Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
-{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send and deny_send only press the card's button and send no text, so say what you want changed in your next move>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
+{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button; for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
 Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
 // With --ui the recruiter works in the browser and can also open pages and press buttons.
 const UI_RULES = `${SIMULATOR_RULES}
@@ -676,6 +676,14 @@ async function play(journey, label, owner, mailbox, out) {
             turns.push(turn);
             continue;
           }
+        // A recruiter who denies says what to change right under the card, in the same move.
+        if (move.action === "deny_send" && move.text?.trim()) {
+          log(`${label}: recruiter: ${move.text}`);
+          const typed = ui ? await ui.say(move.text) : false;
+          if (ui && !typed)
+            problems.push(`could not send "${move.text.slice(0, 40)}" from the chat composer`);
+          if (!typed) await send(rpc, card.groupId, move.text);
+        }
       } else {
         turn.invalid = `no card ${move.card} to ${move.action}`;
         turns.push(turn);
