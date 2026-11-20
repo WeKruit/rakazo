@@ -1335,9 +1335,6 @@ describe("userTurnInstructions", () => {
       taughtSkillsLine: "Taught skills",
     }).filter(Boolean);
 
-    expect(instructions.join("\n")).toContain(
-      "Internal routing identifiers belong only in tool arguments",
-    );
     expect(instructions).toEqual([
       "Bot instructions",
       RECRUITING_PRESENTATION_INSTRUCTION,

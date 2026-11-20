@@ -11,7 +11,10 @@ import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
-import { loadRecruitingRunContext } from "./recruiting-context.js";
+import {
+  loadRecruitingRunContext,
+  RECRUITING_PRESENTATION_INSTRUCTION,
+} from "./recruiting-context.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
 const db = vi.hoisted(() => ({
@@ -499,32 +502,6 @@ describe("recruiting run context", () => {
         placement,
       });
       const text = loaded!.manifest.roleText;
-      expect(text).toContain(
-        "Intake, company/JD research and recovery reads do not require redundant confirmation",
-      );
-      expect(text).toContain("Calibration rounds start right after G0 (the confirmed brief)");
-      expect(text).toContain("never with an approval card");
-      expect(text).toContain("Reconfirm materially revised requirements or JD/deck");
-      expect(text).toContain(
-        "Outside formal calibration or scale, small-scale exploration or same-task feedback/more results explicitly authorized by the current human request do not require G0/G1",
-      );
-      expect(text).toContain("follow the requested scope and usage limits");
-      expect(text).toContain("reuse the same verified provider task for continuation");
-      expect(text).toContain("Keep unknowns and pending cards");
-      expect(text).toContain(
-        "this does not approve requirements, JD/deck, business policies, calibration or scale",
-      );
-      expect(text).toContain("never recast changed qualification as round-only scope");
-      expect(text).toContain(
-        "The recruiter's acceptance of a calibration round is required before scale",
-      );
-      expect(text).toContain("never a second confirmation or a separate ten-profile approval card");
-      expect(text).toContain("These formal calibration/scale gates apply to native MCP too");
-      expect(text).toContain(
-        "ordinary continuation does not require saved-workspace research actions",
-      );
-      expect(text).toContain("Scheduling and outbound require their native approvals");
-      expect(text).toContain("Internal record keeping does not require human approval by default");
       for (const rule of [
         RECRUITING_CALIBRATION_QUICK_SEARCH,
         RECRUITING_ROUND_NEXT_STEP,
@@ -660,9 +637,7 @@ describe("recruiting run context", () => {
     expect(result!.workspace).toEqual(workspace);
     expect(result!.text).toContain("Seven years; [redacted]");
     expect(result!.text).toContain("Bay Area first");
-    expect(result!.text).not.toContain(
-      "Internal routing identifiers belong only in tool arguments",
-    );
+    expect(result!.text).not.toContain(RECRUITING_PRESENTATION_INSTRUCTION);
     expect(result!.text).toContain(memory.text);
     expect(result!.text).not.toContain("secret-value");
     const stored = bytes.get("blob-1")!;

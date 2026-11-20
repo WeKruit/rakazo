@@ -79,6 +79,7 @@ vi.mock("./pi-openai-compatible-provider.js", () => ({
 }));
 
 import { PiAgentRuntime } from "./pi-runtime.js";
+import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
 import type { createRuntimeContextPolicy } from "./runtime-context.js";
 
 it("uses the image planner in a nested subagent's screenshot context", async () => {
@@ -105,9 +106,7 @@ it("uses the image planner in a nested subagent's screenshot context", async () 
   )) {
   }
   expect(captured.policies).toHaveLength(2);
-  expect(captured.prompts[1]).toContain(
-    "Internal routing identifiers belong only in tool arguments",
-  );
+  expect(captured.prompts[1]).toContain(RECRUITING_PRESENTATION_INSTRUCTION);
   expect(captured.prompts[1]).not.toContain("Keep the answer brief.");
   const policy = captured.policies[1] as ReturnType<typeof createRuntimeContextPolicy>;
   const pixels = Buffer.alloc(1024 * 1024);

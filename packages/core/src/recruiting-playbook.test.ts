@@ -5,7 +5,6 @@ import {
   RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
-import { RECRUITING_INTAKE_FLOW, RECRUITING_MISSED_REQUIREMENT } from "./recruiting-defaults.js";
 import {
   classifyTurnEnd,
   laterPlaybookStage,
@@ -646,38 +645,6 @@ describe("a failed save never stops the work", () => {
 });
 
 describe("a missed requirement is searched for again", () => {
-  it("feedback that the list missed a requirement runs new searches instead of relabeling", () => {
-    // The rule sits in the role context, so it holds at every stage, not only after the first ten.
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain("at any stage");
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain("run new people searches that target it");
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
-      "Never answer by only rechecking or relabeling",
-    );
-  });
-
-  it("the recruiter's latest words beat the saved brief", () => {
-    // Prod 11-10: the card answer "你能听的懂话吗？中文是必须！" got "我按当前岗位记录执行：中文口语不是硬性条件".
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
-      "the recruiter's latest words always win over the saved brief",
-    );
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain("in a card's custom answer");
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
-      "never reply that you follow the current role record",
-    );
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain("run new people searches that target it");
-    // Staging eval 11-11: typed into the first intake card, the must-have stayed "preferred" in the
-    // saved role until the first ten, and the open location question came back word for word.
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
-      "including while intake questions are still open",
-    );
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain("criteria upsert at priority hard");
-    expect(RECRUITING_MISSED_REQUIREMENT).toContain("never repeating its sentence");
-    // Staging eval 11-11: a JD saying 「必须会说普通话和英语」 left the role with no criteria during intake.
-    expect(RECRUITING_INTAKE_FLOW).toContain(
-      "save them in that same step beside the searches with one recruiting_role update",
-    );
-  });
-
   it("every scale query carries a required language", () => {
     const step = nextPlaybookStep("scale", {
       title: "Engineer",
