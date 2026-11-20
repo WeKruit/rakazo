@@ -958,10 +958,10 @@ describe("emulated outreach mail service", () => {
         .filter((lead) => lead.timestamp_last_contact)
         .map((lead) => lead.email);
     expect(await contacted()).toEqual([]);
-    now = new Date("2026-11-20T15:03:30Z");
+    now = new Date("2026-11-20T15:45:30Z");
     expect(await contacted()).toEqual(["ada@x.test"]);
     await rest("POST", `/campaigns/${campaign.id}/pause`);
-    now = new Date("2026-11-20T15:30:00Z");
+    now = new Date("2026-11-20T16:30:00Z");
     expect(await contacted()).toEqual(["ada@x.test"]);
     const sent = await rest("GET", `/emails?campaign_id=${campaign.id}`);
     expect(sent.items).toMatchObject([{ subject: "Hi Ada", lead: "ada@x.test" }]);
