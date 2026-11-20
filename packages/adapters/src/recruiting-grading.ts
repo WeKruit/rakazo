@@ -485,7 +485,8 @@ export async function startRecruitingGrading(
       });
       // Once per recruiter message, so the corrected round is never corrected again on its own.
       const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
-      const open = misfits.length + Math.max(0, 10 - review.round.candidateKeys.length);
+      // Only the misfits' places: a round recorded short ("再来5个") stays that size.
+      const open = misfits.length;
       const runId = await startLeadRun(
         deps,
         thread,
@@ -1081,7 +1082,8 @@ const REPLACEMENT_TIERS = [FIT_TIER, "Promising"];
 /**
  * The checked round to show, in order: the round's people who fit, then the Strong people from
  * Results in the misfits' places, then the round's Promising people, then Promising people from
- * Results, then the round's Uncertain people (never Partial) in any place still open, up to ten. Staging 11-16 (982a0ac9): told to "keep the round's
+ * Results, then the round's Uncertain people (never Partial) in any place still open, up to the
+ * round's own size: fosp 11-20 asked for 5 more and the filled round showed 6. Staging 11-16 (982a0ac9): told to "keep the round's
  * other people" without being given them, the lead asked the recruiter which three to keep.
  */
 export function checkedRoundPeople(
@@ -1115,7 +1117,7 @@ export function checkedRoundPeople(
     ...fromResults(false),
     ...(uncertain ?? []),
   ];
-  return people.slice(0, Math.max(10, kept.length));
+  return people.slice(0, candidateKeys.length);
 }
 
 export function roundReviewPrompt(round: number, people: readonly { key: string; name: string }[]) {

@@ -1020,7 +1020,7 @@ describe("gradingTools", () => {
 
 describe("checkedRoundPeople", () => {
   const grade = (name: string, tier: string) => ({ name, tier });
-  it("keeps who fits in order, then Strong replacements, then the closest misfits, up to ten", () => {
+  it("keeps who fits in order, then Strong replacements, then the closest misfits, up to the round's size", () => {
     const keys = ["a", "b", "c", "d"];
     const grades = new Map([
       ["a", grade("A", "Uncertain")],
@@ -1034,10 +1034,10 @@ describe("checkedRoundPeople", () => {
       "D",
       "A",
     ]);
-    // Ten places at most: Strong replacements go before any misfit.
+    // The round's own size at most: Strong replacements go before any misfit.
     const many = Array.from({ length: 12 }, (_, i) => ({ key: `r${i}`, name: null }));
     const picked = checkedRoundPeople(keys, grades, many);
-    expect(picked).toHaveLength(10);
+    expect(picked).toHaveLength(4);
     expect(picked.map((p) => p.key)).not.toContain("d");
     expect(picked[1]).toEqual({ key: "r0", name: "r0" });
   });
