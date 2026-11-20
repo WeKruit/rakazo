@@ -48,7 +48,8 @@ ORIGIN = "http://127.0.0.1:5180"  # the harness's web origin, which sign-in chec
 # The emulated outreach mail service's mailboxes (added in the harness's serve mode) and the inbox the
 # send plays write to; neither reaches real mail.
 MAILBOX = "sender{n}@branch-mail.example.test"
-RECIPIENT = "inbox@branch-mail.example.test"
+# Not "inbox+…": Kruit read "Ethan Park inbox+noah…@" as the word inbox and dropped it (11-20).
+RECIPIENT = "noah-sim@branch-mail.example.test"
 PLAYS = ",".join([
     "change-mind-mid-run", "did-you-really-send", "progress-and-where", "one-off-email",
     "korean-recruiter-template", "template-sign-with-my-name", "two-asks-one-message",
@@ -211,8 +212,12 @@ def main(argv):
             env.update({f"RAKAZO_MAILBOX_EMAIL{suffix}": sender, f"RAKAZO_MAILBOX_PASSWORD{suffix}": sender_password})
         started = time.time()
         code = subprocess.call(["node", str(ROOT / "infra/acceptance/simulated-customer.mjs"), *plays], env=env, cwd=ROOT)
-        print(f"plays finished in {round((time.time() - started) / 60)} min, exit {code}; backend log {log_path}",
-              flush=True)
+        # The test database too (fake accounts only), to read what a play's tools returned.
+        dump_path = log_path.with_suffix(".dump")
+        dump = sandbox.exec("bash", "-c", f"pg_dump -Fc {DATABASE_URL}", text=False)
+        dump_path.write_bytes(dump.stdout.read())
+        print(f"plays finished in {round((time.time() - started) / 60)} min, exit {code}; backend log {log_path},"
+              f" database {dump_path} (pg_restore it to inspect)", flush=True)
         return code
     finally:
         sandbox.terminate()

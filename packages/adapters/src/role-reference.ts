@@ -30,6 +30,9 @@ export function titleWithRef(title: string, request: string): string {
   return !title || !ref || roleRef(title) === ref.toLowerCase() ? title : `${title} (Ref ${ref})`;
 }
 const NEW_ROLE = /新(?:的)?\s*(?:岗位|职位|role)|\bnew (?:role|position|job|req)\b/i;
+// A role's terms beside a ref also open it without the word "new": work mode, years, pay.
+const REQUIREMENTS =
+  /\b(?:hybrid|remote|onsite|on-site|base|salary)\b|\d+\+?\s*(?:years|yrs)\b|\d+\s*[-–~]\s*\d+\s*k\b|\d+\s*年|薪/i;
 // A role number written bare beside the opening (「新岗位 … 西雅图 07151」): 4–6 digits on their own,
 // not a year, an amount ("180-220k") or part of an address.
 const BARE_REF = /(?<![\p{L}\p{N}.,+@-])(\d{4,6})(?![\p{L}\p{N}.,%@-])/gu;
@@ -40,7 +43,7 @@ const BARE_REF = /(?<![\p{L}\p{N}.,+@-])(\d{4,6})(?![\p{L}\p{N}.,%@-])/gu;
  * words: the same title in a new role is still a new role (staging 11-16, 「新岗位 … 07151」).
  */
 export function newRoleOpening(text: string): { ref?: string } | undefined {
-  if (!NEW_ROLE.test(text)) return undefined;
+  if (!NEW_ROLE.test(text) && !(REF.test(text) && REQUIREMENTS.test(text))) return undefined;
   const ref =
     roleRef(text) ??
     [...text.matchAll(BARE_REF)]

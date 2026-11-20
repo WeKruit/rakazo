@@ -2931,7 +2931,7 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
         }
       : window
         ? {
-            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still queued with that time, the same time each check; do not send them again.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten." : ""}`,
+            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still queued with that time, the same time each check; do not send them again. Nobody queued has been emailed yet, so if the recruiter asks to stop or hold, pause_campaign holds every one of them.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten." : ""}`,
           }
         : campaign.status === PAUSED && queued.length
           ? { next: PAUSED_NEXT }
