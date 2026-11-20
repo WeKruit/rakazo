@@ -463,9 +463,9 @@ export async function recruiterWordsSinceFirstRound(
   });
   return messages.reverse().flatMap((message) =>
     (Array.isArray(message.blocks) ? message.blocks : []).flatMap((block) => {
-      const { kind } = (block ?? {}) as { kind?: unknown };
-      const [text] = saidText([block]);
-      const words = kind === "text" ? text : text?.match(QUOTED)?.[1];
+      const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
+      if (typeof text !== "string") return [];
+      const words = kind === "text" ? text : text.match(QUOTED)?.[1];
       return words?.trim() ? [words.trim().slice(0, 400)] : [];
     }),
   );
