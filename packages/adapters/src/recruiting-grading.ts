@@ -478,12 +478,27 @@ export async function startRecruitingGrading(
     // A round held for the Reviewer is shown once it is checked, swapped or not: the check's end is
     // stored, so its owner's turn that shows it is the only one that may record it.
     if (review.held) {
+      const before = await deps.prisma.recruitingCalibrationRound.findFirst({
+        where: { roleId: role.id, round: { lt: review.round.round } },
+        orderBy: { round: "desc" },
+        select: { createdAt: true },
+      });
+      const asked = await deps.prisma.message.findMany({
+        where: {
+          threadId: thread.id,
+          role: "user",
+          ...(before ? { createdAt: { gt: before.createdAt } } : {}),
+        },
+        orderBy: { seq: "desc" },
+        take: 10,
+        select: { blocks: true },
+      });
       const latest = await deps.prisma.message.findFirst({
         where: { threadId: thread.id, role: "user" },
         orderBy: { seq: "desc" },
-        select: { id: true, blocks: true },
+        select: { id: true },
       });
-      const size = roundSize(latest?.blocks);
+      const size = roundSize(asked.map((message) => message.blocks));
       const open = Math.max(0, size - (review.round.candidateKeys.length - misfits.length));
       const shownPeople = checkedRoundPeople(
         review.round.candidateKeys,
@@ -1129,21 +1144,26 @@ async function roundReplacements(
 }
 
 /**
- * How many people a checked round shows: the few the recruiter's latest words ask for ("再来5个"),
- * else ten. fosp 11-20: "再来5个" was filled to 6; capping at the recorded size instead left
- * "the next ten" rounds short when the lead recorded fewer.
+ * How many people a checked round shows: the few the recruiter last asked for since the round
+ * before ("再来5个"), else ten. `messages` are the recruiter's messages' blocks, newest first.
+ * fosp 11-20: "再来5个" was filled to 6; capping at the recorded size instead left "the next ten"
+ * rounds short when the lead recorded fewer; and reading only the newest message ("那5个出来了吗？")
+ * filled a round asked as 5 to 8.
  */
-export function roundSize(blocks: unknown): number {
-  const text = (Array.isArray(blocks) ? (blocks as { kind?: string; text?: unknown }[]) : [])
-    .flatMap((block) =>
-      (block.kind === "text" || block.kind === "bot_message_received") &&
-      typeof block.text === "string"
-        ? [handedInRecruiterWords(block.text) ?? block.text]
-        : [],
-    )
-    .join("\n");
-  const asked = requestedPeopleTarget(text);
-  return asked && asked < 10 ? asked : 10;
+export function roundSize(messages: readonly unknown[]): number {
+  for (const blocks of messages) {
+    const text = (Array.isArray(blocks) ? (blocks as { kind?: string; text?: unknown }[]) : [])
+      .flatMap((block) =>
+        (block.kind === "text" || block.kind === "bot_message_received") &&
+        typeof block.text === "string"
+          ? [handedInRecruiterWords(block.text) ?? block.text]
+          : [],
+      )
+      .join("\n");
+    const asked = requestedPeopleTarget(text);
+    if (asked) return asked < 10 ? asked : 10;
+  }
+  return 10;
 }
 
 /** How close a misfit the Reviewer checked is: kept in a place no Strong person can fill. */
