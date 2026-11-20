@@ -448,7 +448,12 @@ export async function startRecruitingGrading(
     deps.prisma.recruitingCandidateOccurrence.findMany({
       where: { roleId: role.id, linkedinUrl: { not: null } },
       orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
-      select: { candidateKey: true, name: true, linkedinUrl: true },
+      select: {
+        candidateKey: true,
+        name: true,
+        linkedinUrl: true,
+        page: { select: { observedAt: true } },
+      },
     }),
   ]);
   // The round the recruiter is reviewing is graded first, against what they said since the last one.
@@ -564,13 +569,31 @@ export async function startRecruitingGrading(
   // Staging 11-16 (9e15e896): after feedback on a shown round, a batch of other saved people
   // started while the lead was still picking the next round, and that round's check then waited
   // 2.5 minutes behind it. While the lead works on the next round, the pool waits for it, and so
-  // do the shown round's own people: the recruiter has already answered that round.
-  if (
+  // do the shown round's own people: the recruiter has already answered that round. People the
+  // lead's searches save after the feedback are the next round's, so they are checked as they
+  // arrive: fosp 11-20 (b0334cad) sat 1.5 minutes with nothing checked while the lead searched,
+  // then held the round 1.3 minutes more for the check.
+  const coming =
     grader.tool === "self" &&
     review &&
     !review.held &&
-    (await nextRoundComing(deps.prisma, thread.id, review.round.createdAt, grader.botId))
-  ) {
+    (await nextRoundComing(deps.prisma, thread.id, review.round.createdAt, grader.botId));
+  if (coming) {
+    const feedback = await deps.prisma.message.findFirst({
+      where: { threadId: thread.id, role: "user", createdAt: { gt: review.round.createdAt } },
+      orderBy: { seq: "asc" },
+      select: { createdAt: true },
+    });
+    const checked = new Set(graded.map((row) => row.candidateKey));
+    people.clear();
+    for (const row of found) {
+      if (people.size >= batchSize) break;
+      if (!feedback?.createdAt || !(row.page?.observedAt > feedback.createdAt)) continue;
+      if (!row.linkedinUrl || checked.has(row.candidateKey) || sent.has(row.linkedinUrl)) continue;
+      people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
+    }
+  }
+  if (coming && !people.size) {
     if (attempt + 1 < MAX_ATTEMPTS)
       await deps.jobs.enqueue(
         laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + BUSY_RETRY_MS),
