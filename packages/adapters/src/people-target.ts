@@ -15,6 +15,15 @@ export function requestedPeopleTarget(text: string): number | undefined {
 }
 
 /**
+ * A message that asks for people, with or without a number the cap reads ("再找5个新的", "find
+ * more like the rest"). Such a newer ask is its own request; an older number never caps it.
+ */
+export function asksForPeople(text: string): boolean {
+  if (/e-?mail|contact|outreach|send|draft|邮件|联系/i.test(text)) return false;
+  return /\b(?:find|get|source|search|more)\b|找|搜/i.test(text);
+}
+
+/**
  * "find 50" when Results already hold 50 or more means 50 more; it is a total only when the
  * recruiter says so ("50 total", "一共50") or the role holds fewer than that.
  */
