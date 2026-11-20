@@ -220,6 +220,7 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
     personWroteSince: boolean,
     suffix = "decline",
     handedOff?: "global" | "role",
+    cardBeforeAnswer = false,
   ) {
     const fixture = await runSteeredByMessage("running");
     // A finished turn's reply carries its tool steps beside the text.
@@ -311,6 +312,21 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
         },
       });
     }
+    // Branch sends 11-20: the teammate's send card, answered before its turn ended.
+    if (cardBeforeAnswer)
+      await createThreadMessage(prisma, {
+        threadId,
+        role: "bot",
+        botId,
+        runId: answering.id,
+        blocks: [
+          {
+            kind: "ask",
+            text: "Confirm sending the first email",
+            actions: [{ id: "allow", label: "Send" }],
+          },
+        ] as never,
+      });
     const attempt = await prisma.attempt.create({
       data: { runId: answering.id, fence: 1, status: "running" },
     });
@@ -336,7 +352,10 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
         threadId,
         role: "bot",
         runId: { in: [fixture.run.id, retry.id, answering.id] },
-        NOT: { blocks: { array_contains: [{ kind: "handoff" }] } },
+        NOT: [
+          { blocks: { array_contains: [{ kind: "handoff" }] } },
+          { blocks: { array_contains: [{ kind: "ask" }] } },
+        ],
       },
       select: { id: true, blocks: true },
     });
@@ -361,6 +380,11 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
     // In a role chat a teammate's work (drafts after a round) stays beside the lead's reply.
     const role = await retryOfAnsweredTurn(false, "decline", "role");
     expect(role.replies).toHaveLength(2);
+  });
+
+  it("posts a teammate's answer after its own card below that card, not in the reply above it", async () => {
+    const { replies } = await retryOfAnsweredTurn(false, "decline", "global", true);
+    expect(replies).toHaveLength(2);
   });
 
   it("puts a promised turn's push in place of the reply it pushed on from", async () => {
