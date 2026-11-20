@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTOMATIC_CONTINUATION,
-  beforeCardQuestion,
   isAgentBrief,
   NEXT_STEP_LEAD,
   personWrote,
   withoutAgentBrief,
   withoutNudge,
 } from "./silent-reply.js";
-import { continuationText } from "./turn-end-guard.js";
 
 // Staging eval 11-11: Kruit posted its handoff brief to the recruiter, twice.
 const BRIEF = `Goal: Draft and send an email to Alex Chen asking whether he is available next week.
@@ -46,19 +44,6 @@ describe("agent brief in a reply", () => {
 });
 
 // Staging eval 11-11 (vague-en): the same question in text and then on its card.
-describe("beforeCardQuestion", () => {
-  it("keeps what leads up to the question the card asks", () => {
-    expect(
-      beforeCardQuestion(
-        "I'm ready to move quickly, but I don't have a role yet. What role should I find people for? A JD is fastest.",
-      ),
-    ).toBe("I'm ready to move quickly, but I don't have a role yet.");
-    expect(beforeCardQuestion("我还没有岗位信息。你要找什么岗位的人？")).toBe("我还没有岗位信息。");
-    expect(beforeCardQuestion("Which city?")).toBe("");
-    expect(beforeCardQuestion("I opened the role.")).toBe("I opened the role.");
-  });
-});
-
 // Staging eval 11-11 (mixed-language-ask): the brief came as one line, labels after each sentence.
 describe("isAgentBrief on one line", () => {
   it("finds labels that follow a sentence end", () => {
@@ -73,14 +58,6 @@ describe("isAgentBrief on one line", () => {
 });
 
 describe("one question at a time beside a teammate's card", () => {
-  it("keeps only what comes before a second question", () => {
-    expect(
-      beforeCardQuestion(
-        "请告诉我这场面试按哪个时区安排（例如北京时间或美东时间）？目前无法确认可用时段。",
-      ),
-    ).toBe("");
-  });
-
   it("does not count a teammate's relayed brief as the person's answer", () => {
     expect(personWrote([{ kind: "bot_message_received", text: "Goal: apply the update" }])).toBe(
       false,
@@ -110,7 +87,7 @@ describe("the server's continuation nudge in a reply", () => {
   });
 
   it("drops a reply that is only the nudge, in every form the server writes", () => {
-    for (const text of [nudge, continuationText({ promise: "我马上找人。" }), continuationText({})])
+    for (const text of [nudge])
       expect(withoutAgentBrief(text, [{ kind: "text", text }]).blocks).toEqual([]);
   });
 

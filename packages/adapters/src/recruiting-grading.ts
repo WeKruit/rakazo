@@ -1226,16 +1226,6 @@ export async function heldRoundSearchRefusal(
   return ROUND_AWAITING_SEARCH_REFUSAL;
 }
 
-/** Whether a reply lists people: two or more distinct LinkedIn profiles. */
-export function listsPeople(text: string): boolean {
-  const profiles = new Set(
-    [...text.matchAll(/linkedin\.com\/in\/([^\s/)?#\]]+)/gi)].map((match) =>
-      (match[1] ?? "").toLowerCase(),
-    ),
-  );
-  return profiles.size >= 2;
-}
-
 /** The people of the round waiting for the Reviewer's check, or null when no round waits. */
 export async function heldRoundPeople(
   prisma: PrismaClient,
@@ -1253,21 +1243,4 @@ export async function heldRoundPeople(
     distinct: ["candidateKey"],
     select: { name: true, linkedinUrl: true },
   });
-}
-
-/**
- * Whether a reply talks about two or more of these people, by name or profile. Staging 11-15: a
- * turn's summary of a held round's grades named its people without links, before the round showed.
- */
-export function mentionsPeople(
-  text: string,
-  people: ReadonlyArray<{ name: string | null; linkedinUrl: string | null }>,
-): boolean {
-  const lower = text.toLowerCase();
-  const named = people.filter((person) => {
-    const name = person.name?.trim().toLowerCase();
-    const slug = person.linkedinUrl?.match(/\/in\/([^/?#]+)/i)?.[1]?.toLowerCase();
-    return (name && name.length >= 4 && lower.includes(name)) || (slug && lower.includes(slug));
-  });
-  return named.length >= 2;
 }

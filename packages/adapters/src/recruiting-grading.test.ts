@@ -18,8 +18,6 @@ const {
   checkedRoundPeople,
   gradingTools,
   heldRoundSearchRefusal,
-  listsPeople,
-  mentionsPeople,
   nextRoundHeld,
   roundAwaitingReview,
   roundListHeld,
@@ -1020,33 +1018,28 @@ describe("gradingTools", () => {
   });
 });
 
-describe("listsPeople", () => {
-  it("finds a reply that lists people, not one that names a single profile", () => {
-    // Staging 11-15: a turn before the check wrote round 2 out as a numbered list of profiles.
-    expect(
-      listsPeople(
-        "1. [A](https://www.linkedin.com/in/a-1) 2. [B](https://www.linkedin.com/in/b-2)",
-      ),
-    ).toBe(true);
-    expect(listsPeople("https://www.linkedin.com/in/a-1 and again linkedin.com/in/A-1/ here")).toBe(
-      false,
-    );
-    expect(listsPeople("The checked round comes in a minute or two.")).toBe(false);
-  });
-});
-
-describe("mentionsPeople", () => {
-  const held = [
-    { name: "Karthik Tirunagari", linkedinUrl: "https://www.linkedin.com/in/karrthikt" },
-    { name: "Fal Tur", linkedinUrl: "https://www.linkedin.com/in/fal-tur-data" },
-    { name: "Akhil K", linkedinUrl: null },
-  ];
-  it("finds a summary that names a held round's people without links", () => {
-    // Staging 11-15: "Round 2's nine profiles have been graded and saved. Strong: …" by name.
-    expect(mentionsPeople("Strong: Karthik Tirunagari. Promising: fal tur.", held)).toBe(true);
-    expect(mentionsPeople("Only karrthikt and Akhil K fit.", held)).toBe(true);
-    expect(mentionsPeople("Karthik Tirunagari looks strong.", held)).toBe(false);
-    expect(mentionsPeople("The checked round comes in a minute or two.", held)).toBe(false);
+describe("checkedRoundPeople", () => {
+  const grade = (name: string, tier: string) => ({ name, tier });
+  it("keeps who fits in order, then Strong replacements, then the closest misfits, up to ten", () => {
+    const keys = ["a", "b", "c", "d"];
+    const grades = new Map([
+      ["a", grade("A", "Uncertain")],
+      ["b", grade("B", "Strong")],
+      ["c", grade("C", "Partial")],
+      ["d", grade("D", "Promising")],
+    ]);
+    expect(checkedRoundPeople(keys, grades, [{ key: "e", name: "E" }]).map((p) => p.name)).toEqual([
+      "B",
+      "E",
+      "D",
+      "A",
+    ]);
+    // Ten places at most: Strong replacements go before any misfit.
+    const many = Array.from({ length: 12 }, (_, i) => ({ key: `r${i}`, name: null }));
+    const picked = checkedRoundPeople(keys, grades, many);
+    expect(picked).toHaveLength(10);
+    expect(picked.map((p) => p.key)).not.toContain("d");
+    expect(picked[1]).toEqual({ key: "r0", name: "r0" });
   });
 });
 
@@ -1095,30 +1088,5 @@ describe("heldRoundSearchRefusal", () => {
         recordedThisTurn: true,
       }),
     ).toBe(ROUND_HELD_SEARCH_REFUSAL);
-  });
-});
-
-describe("checkedRoundPeople", () => {
-  const grade = (name: string, tier: string) => ({ name, tier });
-  it("keeps who fits in order, then Strong replacements, then the closest misfits, up to ten", () => {
-    const keys = ["a", "b", "c", "d"];
-    const grades = new Map([
-      ["a", grade("A", "Uncertain")],
-      ["b", grade("B", "Strong")],
-      ["c", grade("C", "Partial")],
-      ["d", grade("D", "Promising")],
-    ]);
-    expect(checkedRoundPeople(keys, grades, [{ key: "e", name: "E" }]).map((p) => p.name)).toEqual([
-      "B",
-      "E",
-      "D",
-      "A",
-    ]);
-    // Ten places at most: Strong replacements go before any misfit.
-    const many = Array.from({ length: 12 }, (_, i) => ({ key: `r${i}`, name: null }));
-    const picked = checkedRoundPeople(keys, grades, many);
-    expect(picked).toHaveLength(10);
-    expect(picked.map((p) => p.key)).not.toContain("d");
-    expect(picked[1]).toEqual({ key: "r0", name: "r0" });
   });
 });

@@ -192,10 +192,7 @@ const ACCOUNT_PAGE_CHARS = 40_000;
  * cursor does (roles after that id). Staging 11-20: 20 roles of sequences, each with its stored
  * mail, did not fit the model's context and the turn failed with nothing said.
  */
-function fitAccountPage(result: {
-  items: { roleId: string }[];
-  nextCursor: string | null;
-}): void {
+function fitAccountPage(result: { items: { roleId: string }[]; nextCursor: string | null }): void {
   let used = 0;
   const kept = result.items.findIndex((item, index) => {
     used += JSON.stringify(item).length;

@@ -1,18 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFixedAck, progressInOtherLanguage, withoutLeadingAck } from "./quick-reply.js";
-
-describe("progressInOtherLanguage", () => {
-  it("drops a one-line progress note that left the person's language (simulated 2026-11-14)", () => {
-    expect(
-      progressInOtherLanguage(
-        "I’ll revise the template to show a RMB 700,000–900,000 base and that Fridays are remote.",
-        "zh",
-      ),
-    ).toBe(true);
-    expect(progressInOtherLanguage("我先改模板里的薪资和远程安排。", "zh")).toBe(false);
-    expect(progressInOtherLanguage("Hi {{firstName}},\n\nI'm reaching out…", "zh")).toBe(false);
-  });
-});
+import { isFixedAck, withoutLeadingAck } from "./quick-reply.js";
 
 // Gate 51d043cc, one-off-email: 「好，这就处理。」 stayed above the connect card that took its place.
 describe("isFixedAck", () => {

@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  draftAskedBeforeShown,
-  questionStatesWork,
-  REPORT_BEFORE_ASK,
   lastOwnUpdate,
-  restatesUpdate,
+  questionStatesWork,
+  quotesMessage,
+  REPORT_BEFORE_ASK,
   readsOnly,
+  restatesUpdate,
   TurnReportLedger,
   turnReportText,
   turnWork,
-  quotesMessage,
 } from "./turn-report.js";
 
 describe("turnWork", () => {
@@ -316,20 +315,3 @@ describe("quotesMessage", () => {
     expect(quotesMessage("Goal: 好的，继续", "好")).toBe(false);
   });
 });
-
-describe("draftAskedBeforeShown", () => {
-  it("holds a question until the email asked for is written", () => {
-    // Gates 808f4f31, df83586a, aceb80c9: questions about the role came before any draft.
-    const ask = "帮我给 Wei Zhang 写封邮件，fintech 那个职位";
-    expect(draftAskedBeforeShown(ask, "我先为 Wei Zhang 起草邮件。")).toBe(true);
-    expect(draftAskedBeforeShown(ask, "**Subject:** Backend Go\n\nHi Wei,")).toBe(false);
-    expect(draftAskedBeforeShown("帮我回复 Wei Zhang 的邮件", "")).toBe(false);
-    expect(draftAskedBeforeShown("给前 10 个人发邮件", "")).toBe(false);
-    expect(draftAskedBeforeShown("Draft an email to Wei Zhang", "")).toBe(true);
-    expect(draftAskedBeforeShown("草稿还在吗", "")).toBe(false);
-    expect(draftAskedBeforeShown("is the draft still there?", "")).toBe(false);
-  });
-});
-
-// Gate e7805c70, change-mind: asked for one line on what changed, the reply pasted the same
-// email again under its lead, and the recruiter had to ask a second time.

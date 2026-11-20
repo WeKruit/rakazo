@@ -90,11 +90,8 @@ import {
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
-  asksAboutThesePeople,
   asksForPeople,
-  asksForTemplate,
   asksForOutreach,
-  asksToSendTo,
   assertTransition,
   attachmentExtensionForMimeType,
   BACKGROUND_RUN_TRIGGERS,
@@ -129,7 +126,6 @@ import {
   hideVendorNames,
   humanizeToolName,
   inferAttachmentMimeType,
-  inOtherLanguage,
   internalMcpWriteEndpoint,
   isApprovalAskBlock,
   isAutomationRunTrigger,
@@ -147,7 +143,6 @@ import {
   messagingChannelPrivacyBlock,
   messagingDmSurfaceNote,
   missingSkillRequirement,
-  NAMED_EMAILS_NOTE,
   NAMED_SEND_ROLE_NOTE,
   namesPeopleToEmail,
   nextFence,
@@ -196,11 +191,9 @@ import {
   screenLanguage,
   sendBodyText,
   sendRecipients,
-  sendToNote,
   shortQuestion,
   skillAvailabilityFromTools,
   skillRequirements,
-  TYPED_ADDRESS_NOTE,
   textLanguage,
   toolReadsExternalText,
   toolRequiresApproval,
@@ -318,7 +311,6 @@ import {
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { parse as parseShellCommand } from "shell-quote";
 import {
   connectAgent,
   messageConnectedAgent,
@@ -329,6 +321,10 @@ import {
   formatAgentEnvironmentInstruction,
   redactShellStreams,
 } from "./agent-environment.js";
+import {
+  desktopProtectionGuardMessage,
+  protectedComputerLifecycleRefusal,
+} from "./computer-lifecycle-guard.js";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 import {
   approvalPausedToolResult,
@@ -519,10 +515,8 @@ import {
   steppedHistoryWindow,
 } from "./history-compaction.js";
 import {
-  describesRole,
   intakeFieldsNote,
   openFactAsked,
-  SEARCH_BEFORE_ASKING,
   settledFactAsked,
   settledFactNote,
 } from "./intake-open-fields.js";
@@ -614,13 +608,7 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
-import {
-  fixedAck,
-  isFixedAck,
-  oneLineNote,
-  progressInOtherLanguage,
-  withoutLeadingAck,
-} from "./quick-reply.js";
+import { fixedAck, isFixedAck, oneLineNote, withoutLeadingAck } from "./quick-reply.js";
 import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import type { RecruiterListItem } from "./recruiting-assessment.js";
@@ -650,15 +638,13 @@ import {
   gradingTools,
   heldRoundPeople,
   heldRoundSearchRefusal,
-  listsPeople,
-  mentionsPeople,
   nextRoundHeld,
   ROUND_HELD_NEXT_STEP,
-  ROUND_HELD_SEARCH_REFUSAL,
   roundAwaitingReview,
   roundListHeld,
   roundState,
   scheduleRecruitingGrading,
+  ROUND_HELD_SEARCH_REFUSAL,
 } from "./recruiting-grading.js";
 import {
   languageFilters,
@@ -722,7 +708,6 @@ import {
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
-import { scheduleReplyCheck } from "./reply-check.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
@@ -782,7 +767,6 @@ import {
   SILENT_RUN_STOP_TEXT,
 } from "./silence-watch.js";
 import {
-  beforeCardQuestion,
   isAgentBrief,
   isExactNoResponse,
   NO_RESPONSE,
@@ -825,15 +809,10 @@ import { textContentArg } from "./tool-text.js";
 import {
   answeredAsk,
   answerSearchFilters,
-  guardRecruitingRoleCreate,
-  guardRecruitingTurnEnd,
   intakeAnswers,
-  planDeclineRetry,
   recruitingRoundListText,
   recruitingRoundPeople,
-  sendDeclineRetry,
 } from "./turn-end-guard.js";
-import { unbackedClaim } from "./claim-receipts.js";
 import {
   newRoleNote,
   otherRoleNote,
@@ -846,12 +825,9 @@ import type { SavedRole } from "./role-reference.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
 import {
-  DRAFT_BEFORE_ASKING,
-  draftAskedBeforeShown,
   questionStatesWork,
   readsOnly,
   lastOwnUpdate,
-  quotesMessage,
   restatesUpdate,
   sameWords,
   TurnReportLedger,
@@ -1447,10 +1423,6 @@ export const globalAskBeforeRole = (latest: string) =>
 export const RESEARCH_SAVE_REFUSED =
   "Not saved: the server refused this save just now. The JD, its file and the people your searches found are still available, so never ask the recruiter for them again. When this conversation's role is not saved yet, save it first with recruiting_role create (title and the JD's requirements), then call this operation once more; otherwise call it once more. If it fails again, say in one line that the people found could not be saved yet, never that the JD or file is unreadable.";
 
-/** Model-facing: a one-email template naming no one is written in the coordinator's own reply. */
-const TEMPLATE_WRITE_YOURSELF =
-  "Not handed off: an email template that names no one is yours to write. Write it in this reply now, from the recruiter to the candidate: Subject: and the full body, {{firstName}} for the name, the real role details from the conversation including any change the recruiter just made, and signed with the recruiter's name. Show only the latest version.";
-
 const ROLE_NOT_SAVED_NOTE =
   "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then issue the four calibration people searches from what they wrote (the recruiter sees the first ten before any question; ask first only when they named no title, place or requirement at all). Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
 
@@ -1536,18 +1508,6 @@ export const STEERING_QUICK_REPLY_SENDING =
 export const steeringQuickReplySent = (line: string) =>
   `You already sent the recruiter this short reply to it: "${line}". Do not repeat it, acknowledge the message again or open with 收到, 好的 or Got it; say only what it changes.`;
 
-export const INTAKE_ASK_FIRST =
-  "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
-export const ASK_AFTER_HANDOFF =
-  "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
-const ASK_IN_RECRUITER_LANGUAGE =
-  "Not asked: questions and options to the recruiter are written in the language of their own latest message, not the JD's. Ask the same question again in that language, with the same options and plannedSearches.";
-
-const PLANNED_SEARCHES_EMPTY =
-  "Not asked yet: plannedSearches: [] means the recruiter said not to look for people outside their own list. If they did not, ask the same question again with four plannedSearches; when the question is about the location, use the JD's location, since the answer only narrows or widens it. If they did say so, ask again with [] unchanged.";
-const PLANNED_SEARCHES_MISSING =
-  "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches, or with plannedSearches: [] when the recruiter said not to look for people outside their own list.";
-
 // The first line waits this long for the records card, then goes without it.
 const QUICK_REPLY_RECORDS_WAIT_MS = 1_000;
 // A finished answer waits this long for a first line still being written; a later one is dropped.
@@ -1556,16 +1516,12 @@ const QUICK_REPLY_FINISH_WAIT_MS = 3_000;
 const PLANNED_SEARCH_WAIT_MS = 6_000;
 /** After the first planned search returns, the others get at least this long: profile reads make them finish close together. */
 const PLANNED_SEARCH_GRACE_MS = 3_000;
-/** With this many new people from the planned searches, the first ten come from them. */
-/** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
-const MAX_AGENT_RUNS_BEFORE_ROUND = 3;
 /**
  * When fewer than ten fit, the recruiter is told the quick search came up short and one deeper
  * search runs; the round then holds everyone who fits, even fewer than ten.
  */
 const SHORT_OF_TEN = `fill the places left in at most three tries in all, counting the people-search agent runs this turn already ran for the round: each try is one agent_run with effort "low" and a query that starts "Find N more people" (N the places left, never more than 20) with the role, the location scope, every hard requirement and the round feedback; it leaves out everyone already in Results. Each try relaxes the bar: after the first, a requirement a row says nothing about is unknown, not failed, even one the recruiter just raised, and the person is recorded with it marked "unknown" in checks; the third also leaves preferences that are not hard requirements out of its query. Only a row that contradicts a hard requirement ("fails") never fills a place. Then record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line, in the recruiter's language, how many short of ten it is and which requirement rules out the most. Run no deeper search before the round: the next-step card offers one, and it runs only when the recruiter asks (then one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement, its people recorded as the next round)`;
-/** Quick people searches a turn may run for one round, beside the planned ones, before it asks. */
-const MAX_QUICK_SEARCHES_BEFORE_ROUND = 12;
+/** With this many new people from the planned searches, the first ten come from them. */
 const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
 
@@ -1735,2226 +1691,6 @@ export function createRunWorkspaceCheckpoint(checkpoint: () => Promise<unknown>)
       }
     },
   };
-}
-
-const SHELL_INTERPRETER_NAMES = /^(?:bash|sh|dash|zsh|ksh|fish)$/;
-const STATIC_SHELL_EXPANSIONS: Readonly<Record<string, string>> = {
-  HOME: "/home/rakazo",
-  LOGNAME: "rakazo",
-  PATH: "/home/rakazo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-  PWD: "/home/rakazo",
-  TMPDIR: "/tmp",
-  USER: "rakazo",
-  WORKSPACE: "/home/rakazo/workspace",
-  XDG_CONFIG_HOME: "/home/rakazo/.config",
-};
-const SAFE_SHELL_CONTROL_OPS = new Set([
-  "&&",
-  "||",
-  ";",
-  "|",
-  "&",
-  ">",
-  "<",
-  ">>",
-  ">&",
-  "<&",
-  "&>",
-]);
-/** Commands whose stdin heredoc is code, not data. Versioned names are matched separately. */
-const HEREDOC_INTERPRETERS = new Set([
-  "ash",
-  "bash",
-  "bun",
-  "csh",
-  "dash",
-  "deno",
-  "elixir",
-  "fish",
-  "julia",
-  "ksh",
-  "lua",
-  "node",
-  "nodejs",
-  "perl",
-  "php",
-  "powershell",
-  "pwsh",
-  "pypy",
-  "pypy3",
-  "python",
-  "python2",
-  "python3",
-  "ruby",
-  "sh",
-  "tcsh",
-  "zsh",
-]);
-/** Stdin sinks. Any other heredoc consumer can run the body. */
-const HEREDOC_DATA_SINKS = new Set(["cat", "tee"]);
-const COMMAND_WRAPPERS = new Set([
-  "builtin",
-  "command",
-  "env",
-  "exec",
-  "nice",
-  "nohup",
-  "stdbuf",
-  "time",
-]);
-const LITERAL_KEY_PREFIX = "RKZLIT";
-
-type ShellSeparator = "pipe" | "and" | "or" | "seq" | "background";
-type PreparedDesktopCommand =
-  | { command: string; literals: Readonly<Record<string, string>> }
-  | { reason: string };
-type AssignmentEntry = { name: string; value: string | null };
-type PendingHeredoc = {
-  delimiter: string;
-  quoted: boolean;
-  stripTabs: boolean;
-  names?: string[];
-};
-
-function isHeredocInterpreter(name: string): boolean {
-  if (HEREDOC_INTERPRETERS.has(name)) return true;
-  return /^(?:python|ruby|perl|php|node)[\d.]+$/.test(name);
-}
-
-function isLiteralActivatePath(text: string): boolean {
-  return /(?:^|\/)bin\/activate$/.test(text);
-}
-
-/**
- * Collapse repeated slashes and `.` / `..` without reading the filesystem.
- * A relative `..` that escapes the visible prefix stays in the result.
- * Undefined only when the path contains a null byte.
- */
-function lexicalPath(path: string): string | undefined {
-  if (path.includes("\0")) return undefined;
-  const absolute = path.startsWith("/");
-  const stack: string[] = [];
-  for (const part of path.split("/")) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") {
-      if (absolute && stack.length === 0) continue;
-      if (stack.length === 0 || stack.at(-1) === "..") stack.push("..");
-      else stack.pop();
-      continue;
-    }
-    stack.push(part);
-  }
-  if (absolute) return `/${stack.join("/")}`;
-  return stack.join("/");
-}
-
-/** A write can plant `bin/activate`, or the path contains a null byte. */
-function isActivateWritePath(path: string): boolean {
-  const normalized = lexicalPath(path);
-  if (normalized === undefined) return true;
-  return isLiteralActivatePath(normalized);
-}
-
-/** Refuse planting a script that `source …/bin/activate` would later run unchecked. */
-export function protectedActivateScriptWriteRefusal(path: string): string | undefined {
-  return isActivateWritePath(path) ? "activate script" : undefined;
-}
-
-function unresolvedVariableReason(name: string): string {
-  const trimmed = name.replaceAll(/[\r\n]/g, "").slice(0, 48);
-  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) return `unresolved variable $${trimmed}`;
-  return `unresolved variable \${${trimmed}}`;
-}
-
-/** Quote-removed literal, or undefined when the word expands, globs, or runs a command. */
-function literalCommandToken(raw: string): string | undefined {
-  let text = "";
-  let quote: "'" | '"' | undefined;
-  for (let index = 0; index < raw.length; index += 1) {
-    const character = raw[index];
-    if (quote === "'") {
-      if (character === "'") quote = undefined;
-      else text += character;
-      continue;
-    }
-    if (character === "\\") {
-      const next = raw[index + 1];
-      if (next === undefined || next === "$" || next === "`") return undefined;
-      text += next;
-      index += 1;
-      continue;
-    }
-    if (quote === '"') {
-      if (character === '"') quote = undefined;
-      else if (character === "$" || character === "`") return undefined;
-      else text += character;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      continue;
-    }
-    if (character === "$" || character === "`" || character === "*" || character === "?") {
-      return undefined;
-    }
-    text += character;
-  }
-  if (quote) return undefined;
-  return text;
-}
-
-function literalAssignmentValue(raw: string): string | undefined {
-  let value = "";
-  let quote: "'" | '"' | undefined;
-  for (let index = 0; index < raw.length; index += 1) {
-    const character = raw[index];
-    if (quote === "'") {
-      if (character === "'") quote = undefined;
-      else value += character;
-      continue;
-    }
-    if (character === "\\") {
-      const next = raw[index + 1];
-      if (next === undefined) return undefined;
-      const quotedLiteralEscape =
-        quote === '"' &&
-        next !== '"' &&
-        next !== "\\" &&
-        next !== "$" &&
-        next !== "`" &&
-        next !== "\n";
-      value += quotedLiteralEscape ? `\\${next}` : next;
-      index += 1;
-      continue;
-    }
-    if (quote === '"') {
-      if (character === '"') quote = undefined;
-      else if (character === "$" || character === "`") return undefined;
-      else value += character;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      continue;
-    }
-    if (character === "$" || character === "`") return undefined;
-    value += character;
-  }
-  if (quote) return undefined;
-  return value;
-}
-
-function parseAssignment(raw: string): AssignmentEntry | undefined {
-  if (raw.startsWith("'") || raw.startsWith('"')) return undefined;
-  const append = /^([A-Za-z_][A-Za-z0-9_]*)\+=/.exec(raw);
-  if (append?.[1]) return { name: append[1], value: null };
-  const match = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(raw);
-  if (!match?.[1]) return undefined;
-  const value = literalAssignmentValue(raw.slice(match[0].length));
-  return { name: match[1], value: value ?? null };
-}
-
-function assignmentEntries(words: readonly string[]): AssignmentEntry[] | undefined {
-  if (words.length === 0) return undefined;
-  let index = 0;
-  if (literalCommandToken(words[0] ?? "") === "export") index = 1;
-  if (index >= words.length) return undefined;
-  const entries: AssignmentEntry[] = [];
-  for (; index < words.length; index += 1) {
-    const parsed = parseAssignment(words[index] ?? "");
-    if (!parsed) return undefined;
-    entries.push(parsed);
-  }
-  return entries;
-}
-
-function isRawAssignment(raw: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*(?:\+?=)/.test(raw);
-}
-
-function primaryCommandIndex(words: readonly string[]): number | undefined {
-  let index = 0;
-  while (index < words.length) {
-    const raw = words[index] ?? "";
-    if (isRawAssignment(raw)) {
-      index += 1;
-      continue;
-    }
-    const text = literalCommandToken(raw);
-    if (text === undefined) return undefined;
-    if (text === "!") {
-      index += 1;
-      continue;
-    }
-    const base = text.split("/").at(-1) ?? text;
-    if (COMMAND_WRAPPERS.has(base)) {
-      index += 1;
-      while (
-        index < words.length &&
-        (literalCommandToken(words[index] ?? "") ?? "").startsWith("-")
-      ) {
-        index += 1;
-      }
-      continue;
-    }
-    return index;
-  }
-  return undefined;
-}
-
-function commandBasename(words: readonly string[]): string | undefined {
-  if (words.length === 0 || assignmentEntries(words)) return undefined;
-  const commandIndex = primaryCommandIndex(words);
-  if (commandIndex === undefined) return "";
-  const text = literalCommandToken(words[commandIndex] ?? "");
-  if (!text) return "";
-  return (text.split("/").at(-1) ?? "").toLowerCase();
-}
-
-function isUnsafeSource(words: readonly string[]): boolean {
-  const commandIndex = primaryCommandIndex(words);
-  if (commandIndex === undefined) return false;
-  const primary = literalCommandToken(words[commandIndex] ?? "");
-  // Only the exact builtins. A variable path can hide an arbitrary script.
-  if (primary !== "source" && primary !== ".") return false;
-  const argument = words[commandIndex + 1];
-  if (argument === undefined) return true;
-  const text = literalCommandToken(argument);
-  if (text === undefined) return true;
-  return !isLiteralActivatePath(text);
-}
-
-const EXTERNAL_ASSIGNMENT_COMMANDS = new Set([
-  "declare",
-  "getopts",
-  "local",
-  "mapfile",
-  "read",
-  "readarray",
-  "readonly",
-  "typeset",
-]);
-const ACTIVATE_DESTINATION_COMMANDS = new Set(["cp", "install", "ln", "mv"]);
-
-function commandBaseAt(words: readonly string[], index: number): string | undefined {
-  const text = literalCommandToken(words[index] ?? "");
-  if (!text) return undefined;
-  return (text.split("/").at(-1) ?? text).toLowerCase();
-}
-
-function identifierFromToken(token: string | undefined): string | undefined {
-  if (token && /^[A-Za-z_][A-Za-z0-9_]*$/.test(token)) return token;
-  return undefined;
-}
-
-/** A redirect or writer operand, resolved when it is one tracked literal. */
-function activateOperand(
-  raw: string,
-  words: readonly string[],
-  env: ReadonlyMap<string, string>,
-): string | undefined {
-  const literal = literalCommandToken(raw);
-  if (literal !== undefined) return literal;
-  const bare = raw.replaceAll(/['"]/g, "");
-  if (isLiteralActivatePath(bare)) return bare;
-  const match = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$|^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(bare);
-  const name = match?.[1] ?? match?.[2];
-  if (!name) return undefined;
-  for (const word of words) {
-    const parsed = parseAssignment(word);
-    if (!parsed) break;
-    if (parsed.name === name && parsed.value !== null) return parsed.value;
-  }
-  return env.get(name);
-}
-
-function isActivateWriteTarget(
-  op: string,
-  raw: string,
-  words: readonly string[],
-  env: ReadonlyMap<string, string>,
-): boolean {
-  if (op !== ">" && op !== ">>" && op !== "&>" && op !== ">&") return false;
-  const text = activateOperand(raw, words, env);
-  if (text === undefined) return false;
-  if (op === ">&" && /^\d+$/.test(text)) return false;
-  return isActivateWritePath(text);
-}
-
-function commandWritesActivateScript(
-  words: readonly string[],
-  env: ReadonlyMap<string, string>,
-): boolean {
-  const index = primaryCommandIndex(words);
-  if (index === undefined) return false;
-  const base = commandBaseAt(words, index);
-  if (!base) return false;
-  const args = words.slice(index + 1);
-  if (base === "dd") {
-    return args.some((raw) => {
-      const token = literalCommandToken(raw);
-      return Boolean(token?.startsWith("of=") && isActivateWritePath(token.slice("of=".length)));
-    });
-  }
-  if (base === "tee") {
-    return args.some((raw) => {
-      const token = literalCommandToken(raw);
-      if (token === "--" || (token?.startsWith("-") && token !== "-")) return false;
-      const value = activateOperand(raw, words, env);
-      return value !== undefined && isActivateWritePath(value);
-    });
-  }
-  if (!ACTIVATE_DESTINATION_COMMANDS.has(base)) return false;
-  return copyCommandWritesActivate(base, args, words, env);
-}
-
-const COPY_ARGUMENT_LETTERS: Record<string, string> = {
-  cp: "tS",
-  install: "gmotS",
-  ln: "tS",
-  mv: "tS",
-};
-
-const COPY_LONG_ARGUMENTS = new Set([
-  "--group",
-  "--mode",
-  "--owner",
-  "--strip-program",
-  "--suffix",
-  "--target-directory",
-]);
-
-/** `cp -t dir file` writes `dir/file`, not `file`. The same `-t` form applies to install, ln, and mv. */
-function copyCommandWritesActivate(
-  base: string,
-  args: readonly string[],
-  words: readonly string[],
-  env: ReadonlyMap<string, string>,
-): boolean {
-  const letters = COPY_ARGUMENT_LETTERS[base] ?? "t";
-  let targetDir: string | undefined;
-  const sources: string[] = [];
-  let hiddenSource = false;
-  let recursive = false;
-  let options = true;
-  for (let index = 0; index < args.length; index += 1) {
-    const raw = args[index] ?? "";
-    const token = literalCommandToken(raw);
-    if (options && token === "--") {
-      options = false;
-      continue;
-    }
-    if (options && token?.startsWith("--")) {
-      const eq = token.indexOf("=");
-      const name = eq === -1 ? token : token.slice(0, eq);
-      let value = eq === -1 ? undefined : token.slice(eq + 1);
-      if (COPY_LONG_ARGUMENTS.has(name) && eq === -1) {
-        index += 1;
-        value = index < args.length ? activateOperand(args[index] ?? "", words, env) : undefined;
-      }
-      if (name === "--recursive" || name === "--archive") recursive = true;
-      if (name === "--target-directory") {
-        if (value === undefined) return true;
-        targetDir = value;
-      }
-      continue;
-    }
-    if (options && token?.startsWith("-") && token !== "-") {
-      for (let cursor = 1; cursor < token.length; cursor += 1) {
-        const letter = token[cursor] ?? "";
-        if (base === "cp" && (letter === "a" || letter === "r" || letter === "R")) recursive = true;
-        if (!letters.includes(letter)) continue;
-        const rest = token.slice(cursor + 1);
-        let value: string | undefined;
-        if (rest.length > 0) value = rest;
-        else if (index + 1 < args.length) {
-          index += 1;
-          value = activateOperand(args[index] ?? "", words, env);
-        }
-        if (letter === "t") {
-          if (value === undefined) return true;
-          targetDir = value;
-        }
-        break;
-      }
-      continue;
-    }
-    const value = token === undefined ? activateOperand(raw, words, env) : token;
-    if (value === undefined) {
-      hiddenSource = true;
-      continue;
-    }
-    sources.push(value);
-  }
-  if (targetDir !== undefined) {
-    if (hiddenSource) return true;
-    const directory = targetDir;
-    if (transfersBinDirectory(base, recursive, true, directory, sources)) return true;
-    return sources.some((source) => copiedIntoActivates(directory, source));
-  }
-  const destination = sources.at(-1);
-  if (
-    destination !== undefined &&
-    transfersBinDirectory(
-      base,
-      recursive,
-      isDirectoryDestination(destination),
-      destination,
-      sources.slice(0, -1),
-    )
-  ) {
-    return true;
-  }
-  return destination !== undefined && isActivateWritePath(destination);
-}
-
-function lastPathComponent(path: string): string {
-  const stripped = path.replace(/\/+$/, "");
-  const collapsed = lexicalPath(stripped) ?? stripped;
-  const slash = collapsed.lastIndexOf("/");
-  return slash === -1 ? collapsed : collapsed.slice(slash + 1);
-}
-
-function isDirectoryDestination(path: string): boolean {
-  return path.endsWith("/") || lastPathComponent(path) === "." || lastPathComponent(path) === "..";
-}
-
-/**
- * Placing a directory named bin onto another bin, or into a directory, can
- * plant bin/activate. A destination that merely ends in bin is a file rename.
- */
-function transfersBinDirectory(
-  base: string,
-  recursive: boolean,
-  destIsDirectory: boolean,
-  destination: string,
-  sources: readonly string[],
-): boolean {
-  if (base !== "mv" && base !== "ln" && !(base === "cp" && recursive)) return false;
-  if (!sources.some((source) => lastPathComponent(source) === "bin")) return false;
-  if (lastPathComponent(destination) === "bin") return true;
-  return destIsDirectory;
-}
-
-function copiedIntoActivates(directory: string, source: string): boolean {
-  const stripped = source.replace(/\/+$/, "");
-  const slash = stripped.lastIndexOf("/");
-  const name = slash === -1 ? stripped : stripped.slice(slash + 1);
-  if (name === "" || name === "." || name === "..") return isActivateWritePath(directory);
-  const prefix = directory.endsWith("/") ? directory : `${directory}/`;
-  return isActivateWritePath(`${prefix}${name}`);
-}
-
-function printfAssignedName(args: readonly string[]): string | null | undefined {
-  for (let index = 0; index < args.length; index += 1) {
-    const token = literalCommandToken(args[index] ?? "");
-    if (token === undefined) return null;
-    if (token === "--") return undefined;
-    if (token === "-v") {
-      return identifierFromToken(literalCommandToken(args[index + 1] ?? "")) ?? null;
-    }
-    if (token.startsWith("-v")) return identifierFromToken(token.slice(2)) ?? null;
-    if (token.startsWith("-")) continue;
-    return undefined;
-  }
-  return undefined;
-}
-
-/**
- * Variables a command may assign outside a plain assignment list.
- * `clear` drops every tracked literal: the target was not a fixed name, a
- * nameref can retarget one, or a sourced script can assign anything.
- * Undefined means this command cannot.
- */
-function externalAssignments(
-  words: readonly string[],
-): { clear: boolean; names: readonly string[] } | undefined {
-  const index = primaryCommandIndex(words);
-  if (index === undefined) return undefined;
-  const base = commandBaseAt(words, index);
-  if (!base) return { clear: true, names: [] };
-  const args = words.slice(index + 1);
-  if (base === "source" || base === ".") return { clear: true, names: [] };
-  if (base === "for") {
-    const name = identifierFromToken(literalCommandToken(args[0] ?? ""));
-    if (!name) return { clear: true, names: [] };
-    return { clear: false, names: [name] };
-  }
-  if (base === "printf") {
-    const target = printfAssignedName(args);
-    if (target === undefined) return undefined;
-    if (target === null) return { clear: true, names: [] };
-    return { clear: false, names: [target] };
-  }
-  if (!EXTERNAL_ASSIGNMENT_COMMANDS.has(base)) return undefined;
-  const names: string[] = [];
-  if (base === "read") names.push("REPLY");
-  if (base === "mapfile" || base === "readarray") names.push("MAPFILE");
-  if (base === "getopts") names.push("OPTARG", "OPTIND");
-  const namerefCommand =
-    base === "declare" || base === "local" || base === "readonly" || base === "typeset";
-  let options = true;
-  let nameref = false;
-  for (const raw of args) {
-    const token = literalCommandToken(raw);
-    if (token === undefined) return { clear: true, names };
-    if (options && token === "--") {
-      options = false;
-      continue;
-    }
-    if (options && token.startsWith("-")) {
-      // `-n` retargets a later assignment. Drop every literal instead of following it.
-      if (namerefCommand && !token.startsWith("--") && token.slice(1).includes("n")) nameref = true;
-      continue;
-    }
-    const parsed = parseAssignment(raw);
-    if (parsed) {
-      names.push(parsed.name);
-      continue;
-    }
-    const name = identifierFromToken(token);
-    if (name) names.push(name);
-  }
-  if (nameref) return { clear: true, names: [] };
-  return { clear: false, names };
-}
-
-function readHeredocDelimiter(
-  source: string,
-  start: number,
-): { end: number; delimiter: string; quoted: boolean } | undefined {
-  let index = start;
-  while (source[index] === " " || source[index] === "\t") index += 1;
-  const first = source[index];
-  if (first === undefined || first === "\n" || first === "#") return undefined;
-  let delimiter = "";
-  let quoted = false;
-  let quote: "'" | '"' | undefined;
-  while (index < source.length) {
-    const character = source[index];
-    if (quote) {
-      if (character === quote) quote = undefined;
-      else delimiter += character;
-      index += 1;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quoted = true;
-      quote = character;
-      index += 1;
-      continue;
-    }
-    if (character === "\\") {
-      const next = source[index + 1];
-      if (next === undefined || next === "\n") return undefined;
-      quoted = true;
-      delimiter += next;
-      index += 2;
-      continue;
-    }
-    if (character !== undefined && /[\s|&;<>()]/.test(character)) break;
-    delimiter += character ?? "";
-    index += 1;
-  }
-  if (quote || delimiter.length === 0) return undefined;
-  return { end: index, delimiter, quoted };
-}
-
-function readHeredocBody(
-  source: string,
-  start: number,
-  delimiter: string,
-  stripTabs: boolean,
-): { end: number; content: string } | undefined {
-  let index = start;
-  while (index <= source.length) {
-    const lineEnd = source.indexOf("\n", index);
-    const end = lineEnd === -1 ? source.length : lineEnd;
-    const compared = stripTabs
-      ? source.slice(index, end).replace(/^\t+/, "")
-      : source.slice(index, end);
-    if (compared === delimiter) {
-      return {
-        end: lineEnd === -1 ? source.length : lineEnd + 1,
-        content: source.slice(start, index),
-      };
-    }
-    if (lineEnd === -1) return undefined;
-    index = lineEnd + 1;
-  }
-  return undefined;
-}
-
-/** Unquoted heredoc bodies expand even inside quote characters. */
-function heredocBodyHazard(body: string): string | undefined {
-  for (let index = 0; index < body.length; index += 1) {
-    const character = body[index];
-    if (character === "\\") {
-      const next = body[index + 1];
-      if (next === "$" || next === "`" || next === "\\" || next === "\n") {
-        index += 1;
-        continue;
-      }
-    }
-    if (character === "`") return "backtick";
-    if (character === "$" && body[index + 1] === "(") {
-      return body[index + 2] === "(" ? "arithmetic expansion" : "command substitution";
-    }
-  }
-  return undefined;
-}
-
-function matchingBrace(body: string, openIndex: number): number | undefined {
-  let depth = 1;
-  let index = openIndex + 1;
-  while (index < body.length) {
-    const character = body[index];
-    if (character === "'") {
-      const end = body.indexOf("'", index + 1);
-      if (end === -1) return undefined;
-      index = end + 1;
-      continue;
-    }
-    if (character === '"') {
-      index += 1;
-      while (index < body.length && body[index] !== '"') {
-        if (body[index] === "\\" && index + 1 < body.length) index += 2;
-        else index += 1;
-      }
-      if (index >= body.length) return undefined;
-      index += 1;
-      continue;
-    }
-    if (character === "\\") {
-      index += 2;
-      continue;
-    }
-    if (character === "{") depth += 1;
-    else if (character === "}") {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-    index += 1;
-  }
-  return undefined;
-}
-
-function matchingParen(body: string, openIndex: number): number | undefined {
-  let depth = 1;
-  let index = openIndex + 1;
-  while (index < body.length) {
-    const character = body[index];
-    if (character === "'") {
-      const end = body.indexOf("'", index + 1);
-      if (end === -1) return undefined;
-      index = end + 1;
-      continue;
-    }
-    if (character === '"') {
-      index += 1;
-      while (index < body.length && body[index] !== '"') {
-        if (body[index] === "\\" && index + 1 < body.length) index += 2;
-        else index += 1;
-      }
-      if (index >= body.length) return undefined;
-      index += 1;
-      continue;
-    }
-    if (character === "\\") {
-      index += 2;
-      continue;
-    }
-    if (character === "(") depth += 1;
-    else if (character === ")") {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-    index += 1;
-  }
-  return undefined;
-}
-
-/** Literal text of a double-quoted span, plus command-substitution interiors. */
-function readDoubleQuoted(
-  body: string,
-  start: number,
-): { end: number; literal: string; dynamic: boolean; interiors: string[] } | undefined {
-  let literal = "";
-  let dynamic = false;
-  const interiors: string[] = [];
-  let index = start;
-  while (index < body.length) {
-    const character = body[index];
-    if (character === '"') {
-      if (dynamic && literal.length > 0) return undefined;
-      return {
-        end: index + 1,
-        literal: dynamic ? "" : literal,
-        dynamic,
-        interiors,
-      };
-    }
-    if (character === "\\") {
-      const next = body[index + 1];
-      if (next === undefined) return undefined;
-      literal += next;
-      index += 2;
-      continue;
-    }
-    if (character === "`") return undefined;
-    if (character === "$" && body[index + 1] === "(") {
-      if (body[index + 2] === "(") return undefined;
-      const close = matchingParen(body, index + 1);
-      if (close === undefined) return undefined;
-      interiors.push(body.slice(index + 2, close));
-      dynamic = true;
-      index = close + 1;
-      continue;
-    }
-    if (character === "$") {
-      dynamic = true;
-      if (body[index + 1] === "{") {
-        const close = body.indexOf("}", index + 2);
-        if (close === -1) return undefined;
-        index = close + 1;
-        continue;
-      }
-      if (/[A-Za-z_]/.test(body[index + 1] ?? "")) {
-        index += 2;
-        while (index < body.length && /[A-Za-z0-9_]/.test(body[index] ?? "")) index += 1;
-        continue;
-      }
-      index += 1;
-      continue;
-    }
-    literal += character ?? "";
-    index += 1;
-  }
-  return undefined;
-}
-
-/**
- * Shell words of a quoted heredoc body. Adjacent quotes concatenate, so
- * `pk''ill` is `pkill`. Undefined when a word's text cannot be known.
- */
-function quotedHeredocWords(body: string): string[] | undefined {
-  const words: string[] = [];
-  let word = "";
-  let active = false;
-  const commit = () => {
-    if (!active) return;
-    words.push(word);
-    word = "";
-    active = false;
-  };
-  let index = 0;
-  while (index < body.length) {
-    const character = body[index] ?? "";
-    if (!active && character === "#") {
-      const newline = body.indexOf("\n", index);
-      index = newline === -1 ? body.length : newline + 1;
-      continue;
-    }
-    if (character === "'") {
-      const end = body.indexOf("'", index + 1);
-      if (end === -1) return undefined;
-      word += body.slice(index + 1, end);
-      active = true;
-      index = end + 1;
-      continue;
-    }
-    if (character === '"') {
-      const quoted = readDoubleQuoted(body, index + 1);
-      if (!quoted) return undefined;
-      if (quoted.dynamic && quoted.literal.length > 0) return undefined;
-      if (quoted.dynamic) {
-        for (const interior of quoted.interiors) {
-          const inner = quotedHeredocWords(interior);
-          if (!inner) return undefined;
-          words.push(...inner);
-        }
-        index = quoted.end;
-        continue;
-      }
-      word += quoted.literal;
-      active = true;
-      index = quoted.end;
-      continue;
-    }
-    if (character === "\\") {
-      const next = body[index + 1];
-      if (next === undefined) return undefined;
-      if (next !== "\n") {
-        word += next;
-        active = true;
-      }
-      index += 2;
-      continue;
-    }
-    if (character === "`") return undefined;
-    if (character === "$" && (body[index + 1] === "'" || body[index + 1] === '"')) {
-      return undefined;
-    }
-    if (character === "$" && body[index + 1] === "(") {
-      if (body[index + 2] === "(" || active) return undefined;
-      const close = matchingParen(body, index + 1);
-      if (close === undefined) return undefined;
-      const inner = quotedHeredocWords(body.slice(index + 2, close));
-      if (!inner) return undefined;
-      words.push(...inner);
-      index = close + 1;
-      continue;
-    }
-    if (character === "$") {
-      // A parameter glued to literals (`pk$ill`, `$a'pkill'`) hides the word.
-      if (active) return undefined;
-      const end = skipPlainParameter(body, index);
-      if (end === undefined) return undefined;
-      const next = body[end] ?? "";
-      if (next !== "" && !" \t\n;&|<>(){}".includes(next)) return undefined;
-      index = end;
-      continue;
-    }
-    if (" \t\n;&|<>(){}".includes(character)) {
-      if (character === "<" && body[index + 1] === "(") return undefined;
-      // `{pk,ill}` is brace expansion. A brace group is `{` then a separator.
-      if (
-        character === "{" &&
-        body[index + 1] !== undefined &&
-        !" \t\n;&|<>(){}".includes(body[index + 1] ?? "")
-      ) {
-        return undefined;
-      }
-      commit();
-      index += 1;
-      continue;
-    }
-    word += character;
-    active = true;
-    index += 1;
-  }
-  commit();
-  return words;
-}
-
-function wordsHaveLifecycleHazard(words: readonly string[]): boolean {
-  let sawService = false;
-  let sawServiceAction = false;
-  for (const word of words) {
-    const folded = word.toLowerCase();
-    if (/(?:\.browser-profiles|--user-data-dir)/.test(folded)) return true;
-    if (/(?:\/tmp\/\.x11-unix|\/tmp\/\.x\d+-lock)/.test(folded)) return true;
-    const base = folded.split("/").at(-1) ?? "";
-    if (/^(?:kill|pkill|killall|xkill)$/.test(base)) return true;
-    if (base === "systemctl" || base === "service") sawService = true;
-    if (/^(?:stop|restart|kill)$/.test(base)) sawServiceAction = true;
-  }
-  return sawService && sawServiceAction;
-}
-
-/** Drop quotes, backslashes, and `$`, and skip a `#` comment that starts a word. */
-function normalizedHeredocWords(body: string): string[] {
-  let text = "";
-  let quote: "'" | '"' | undefined;
-  let atWordStart = true;
-  for (let index = 0; index < body.length; index += 1) {
-    const character = body[index] ?? "";
-    if (quote) {
-      if (character === quote) quote = undefined;
-      else if (character !== "\\" && character !== "$") {
-        text += character;
-        atWordStart = false;
-      }
-      continue;
-    }
-    if (atWordStart && character === "#") {
-      const newline = body.indexOf("\n", index);
-      index = newline === -1 ? body.length : newline;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      continue;
-    }
-    if (character === "\\" || character === "$") continue;
-    if (character === " " || character === "\t" || character === "\n") atWordStart = true;
-    else atWordStart = false;
-    text += character;
-  }
-  return text.split(/[\s;&|<>(){}]+/).filter((word) => word.length > 0);
-}
-
-/**
- * A quoted body is data. Refuse when a lifecycle word is visible, including one
- * assembled across a command substitution (`p$(printf k)ill`). A later shell
- * call would run that file without seeing this body.
- */
-function quotedHeredocLifecycleHazard(body: string): boolean {
-  const words = quotedHeredocWords(body);
-  if (words && wordsHaveLifecycleHazard(words)) return true;
-  if (wordsHaveLifecycleHazard(normalizedHeredocWords(body))) return true;
-  return splicedLifecycleHazard(body);
-}
-
-type SplicePiece = { segments: string[]; holes: string[][] };
-
-const SPLICE_SOLO_COMMANDS = ["kill", "pkill", "killall", "xkill"];
-const SPLICE_SERVICE_COMMANDS = ["systemctl", "service"];
-const SPLICE_PATHS = [".browser-profiles", "--user-data-dir", "/tmp/.x11-unix"];
-
-function affixMatches(first: string, last: string, value: string): boolean {
-  return (
-    value.length > first.length + last.length && value.startsWith(first) && value.endsWith(last)
-  );
-}
-
-/** `p$(…)ill` still names `pkill` when the hole's output is not a visible literal. */
-function spliceAffixKind(piece: SplicePiece): "solo" | "service" | undefined {
-  if (piece.holes.length === 0) return undefined;
-  const first = (piece.segments[0] ?? "").toLowerCase();
-  const last = (piece.segments[piece.segments.length - 1] ?? "").toLowerCase();
-  if (first.length === 0 || last.length === 0) return undefined;
-  if (SPLICE_SOLO_COMMANDS.some((name) => affixMatches(first, last, name))) return "solo";
-  if (SPLICE_PATHS.some((path) => affixMatches(first, last, path))) return "solo";
-  if (first === "/tmp/.x" && last === "-lock") return "solo";
-  if (SPLICE_SERVICE_COMMANDS.some((name) => affixMatches(first, last, name))) return "service";
-  return undefined;
-}
-
-function pieceCandidates(piece: SplicePiece): {
-  words: string[];
-  overflow: boolean;
-} {
-  if (piece.holes.length === 0) {
-    const word = piece.segments[0] ?? "";
-    return { words: word.length > 0 ? [word] : [], overflow: false };
-  }
-  const limit = 48;
-  let current = [piece.segments[0] ?? ""];
-  let overflow = false;
-  for (let hole = 0; hole < piece.holes.length; hole += 1) {
-    const inserts = piece.holes[hole] ?? [""];
-    const tail = piece.segments[hole + 1] ?? "";
-    const next: string[] = [];
-    for (const prefix of current) {
-      for (const insert of inserts) {
-        if (next.length >= limit) {
-          overflow = true;
-          break;
-        }
-        next.push(`${prefix}${insert}${tail}`);
-      }
-      if (overflow) break;
-    }
-    current = next;
-    if (overflow) break;
-  }
-  return { words: current.filter((word) => word.length > 0), overflow };
-}
-
-function substitutionInserts(interior: string, depth: number): string[] {
-  if (depth > 6) return [""];
-  const inserts = new Set<string>([""]);
-  const parsed = quotedHeredocWords(interior);
-  for (const word of parsed ?? normalizedHeredocWords(interior)) inserts.add(word);
-  const nested = splicePieces(interior, depth + 1);
-  if (!nested) return [...inserts];
-  for (const piece of nested) {
-    for (const word of pieceCandidates(piece).words) inserts.add(word);
-  }
-  return [...inserts];
-}
-
-/** Shell words of a quoted body, with command-substitution holes kept in place. */
-function splicePieces(body: string, depth = 0): SplicePiece[] | undefined {
-  if (depth > 6) return undefined;
-  const pieces: SplicePiece[] = [];
-  let segments = [""];
-  let holes: string[][] = [];
-  let active = false;
-  const commit = () => {
-    if (active || holes.length > 0) pieces.push({ segments, holes });
-    segments = [""];
-    holes = [];
-    active = false;
-  };
-  const append = (text: string) => {
-    if (text.length === 0) return;
-    segments[segments.length - 1] = `${segments[segments.length - 1] ?? ""}${text}`;
-    active = true;
-  };
-  const addHole = (inserts: readonly string[]) => {
-    holes.push([...inserts]);
-    segments.push("");
-    active = true;
-  };
-  const expansionAt = (
-    start: number,
-  ): { end: number; inserts: string[] } | "literal" | undefined => {
-    const next = body[start + 1];
-    if (next !== "(") return "literal";
-    const close = matchingParen(body, start + 1);
-    if (close === undefined) return undefined;
-    const interior = body.slice(start + 2, close);
-    if (next === "(" && body[start + 2] === "(") {
-      return {
-        end: close + 1,
-        inserts: ["", ...normalizedHeredocWords(interior)],
-      };
-    }
-    return {
-      end: close + 1,
-      inserts: substitutionInserts(interior, depth + 1),
-    };
-  };
-  const backtickAt = (start: number): { end: number; inserts: string[] } | undefined => {
-    let cursor = start + 1;
-    let interior = "";
-    while (cursor < body.length) {
-      const character = body[cursor] ?? "";
-      if (character === "\\" && cursor + 1 < body.length) {
-        interior += body[cursor + 1] ?? "";
-        cursor += 2;
-        continue;
-      }
-      if (character === "`") {
-        return {
-          end: cursor + 1,
-          inserts: substitutionInserts(interior, depth + 1),
-        };
-      }
-      interior += character;
-      cursor += 1;
-    }
-    return undefined;
-  };
-  const parameterAt = (start: number): { end: number } | undefined => {
-    const next = body[start + 1];
-    if (next === "{") {
-      const match = /^\{[A-Za-z_][A-Za-z0-9_]*\}/.exec(body.slice(start + 1));
-      if (match) return { end: start + 1 + match[0].length };
-      const close = matchingBrace(body, start + 1);
-      if (close === undefined) return undefined;
-      return { end: close + 1 };
-    }
-    if (next && /[A-Za-z_]/.test(next)) {
-      let cursor = start + 2;
-      while (cursor < body.length && /[A-Za-z0-9_]/.test(body[cursor] ?? "")) cursor += 1;
-      return { end: cursor };
-    }
-    if (next && /[0-9*@#?$!-]/.test(next)) return { end: start + 2 };
-    return undefined;
-  };
-
-  const finish = (): SplicePiece[] => {
-    commit();
-    return pieces;
-  };
-  let index = 0;
-  let quote: "'" | '"' | undefined;
-  while (index < body.length) {
-    const character = body[index] ?? "";
-    if (quote === "'") {
-      if (character === "'") quote = undefined;
-      else append(character);
-      index += 1;
-      continue;
-    }
-    if (character === "\\") {
-      const next = body[index + 1];
-      if (next === undefined) return finish();
-      if (next !== "\n") append(next);
-      index += 2;
-      continue;
-    }
-    if (quote === '"') {
-      if (character === '"') {
-        quote = undefined;
-        index += 1;
-        continue;
-      }
-      if (character === "`") {
-        const tick = backtickAt(index);
-        if (!tick) return finish();
-        addHole(tick.inserts);
-        index = tick.end;
-        continue;
-      }
-      if (character === "$" && body[index + 1] === "(") {
-        const expansion = expansionAt(index);
-        if (expansion === undefined || expansion === "literal") return finish();
-        addHole(expansion.inserts);
-        index = expansion.end;
-        continue;
-      }
-      if (character === "$") {
-        const parameter = parameterAt(index);
-        if (!parameter) return finish();
-        addHole([""]);
-        index = parameter.end;
-        continue;
-      }
-      append(character);
-      index += 1;
-      continue;
-    }
-    if (!active && holes.length === 0 && (segments[0] ?? "") === "" && character === "#") {
-      const newline = body.indexOf("\n", index);
-      index = newline === -1 ? body.length : newline + 1;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      active = true;
-      index += 1;
-      continue;
-    }
-    if (character === "`") {
-      const tick = backtickAt(index);
-      if (!tick) return finish();
-      addHole(tick.inserts);
-      index = tick.end;
-      continue;
-    }
-    if (character === "$" && body[index + 1] === "(") {
-      const expansion = expansionAt(index);
-      if (expansion === undefined || expansion === "literal") return finish();
-      addHole(expansion.inserts);
-      index = expansion.end;
-      continue;
-    }
-    if (character === "$") {
-      const parameter = parameterAt(index);
-      if (!parameter) {
-        append("$");
-        index += 1;
-        continue;
-      }
-      addHole([""]);
-      index = parameter.end;
-      continue;
-    }
-    if (" \t\n;&|<>(){}".includes(character)) {
-      commit();
-      index += 1;
-      continue;
-    }
-    append(character);
-    index += 1;
-  }
-  return finish();
-}
-
-function kmpFailure(target: string): number[] {
-  const failure = Array<number>(target.length).fill(0);
-  let matched = 0;
-  for (let index = 1; index < target.length; index += 1) {
-    while (matched > 0 && target[index] !== target[matched]) matched = failure[matched - 1] ?? 0;
-    if (target[index] === target[matched]) {
-      matched += 1;
-      failure[index] = matched;
-    }
-  }
-  return failure;
-}
-
-function kmpStep(
-  state: number,
-  character: string,
-  target: string,
-  failure: readonly number[],
-): number {
-  let next = state;
-  while (next > 0 && (next === target.length || target[next] !== character)) {
-    next = failure[next - 1] ?? 0;
-  }
-  if (target[next] === character) next += 1;
-  return next;
-}
-
-function foldedSplice(piece: SplicePiece): {
-  segments: string[];
-  holes: string[][];
-} {
-  return {
-    segments: piece.segments.map((segment) => segment.toLowerCase()),
-    holes: piece.holes.map((inserts) => inserts.map((insert) => insert.toLowerCase())),
-  };
-}
-
-/** Some combination of the visible hole texts is exactly `target`. */
-function spliceEquals(
-  segments: readonly string[],
-  holes: readonly (readonly string[])[],
-  target: string,
-): boolean {
-  let positions = new Set<number>();
-  const first = segments[0] ?? "";
-  if (target.startsWith(first)) positions.add(first.length);
-  for (let hole = 0; hole < holes.length; hole += 1) {
-    const segment = segments[hole + 1] ?? "";
-    const next = new Set<number>();
-    for (const position of positions) {
-      for (const insert of holes[hole] ?? [""]) {
-        if (!target.startsWith(insert, position)) continue;
-        const after = position + insert.length;
-        if (target.startsWith(segment, after)) next.add(after + segment.length);
-      }
-    }
-    positions = next;
-    if (positions.size === 0) return false;
-  }
-  return positions.has(target.length);
-}
-
-/**
- * Walks every combination without building it. `contains` is a hit anywhere;
- * `ends` means some combination ends with `target`.
- */
-function scanSpliceTarget(
-  segments: readonly string[],
-  holes: readonly (readonly string[])[],
-  target: string,
-): { contains: boolean; ends: boolean } {
-  const failure = kmpFailure(target);
-  let states = new Set<number>([0]);
-  let contains = false;
-  const apply = (text: string) => {
-    for (const character of text) {
-      const next = new Set<number>();
-      for (const state of states) {
-        const stepped = kmpStep(state, character, target, failure);
-        if (stepped === target.length) contains = true;
-        next.add(stepped);
-      }
-      states = next;
-    }
-  };
-  apply(segments[0] ?? "");
-  for (let index = 0; index < holes.length; index += 1) {
-    const start = states;
-    const merged = new Set<number>();
-    for (const insert of holes[index] ?? [""]) {
-      states = new Set(start);
-      apply(insert);
-      for (const state of states) merged.add(state);
-    }
-    states = merged;
-    apply(segments[index + 1] ?? "");
-  }
-  return { contains, ends: states.has(target.length) };
-}
-
-const X_LOCK_PREFIX = "/tmp/.x";
-const X_LOCK_SUFFIX = "-lock";
-
-function consumeXLock(states: Set<string>, text: string): boolean {
-  for (const character of text) {
-    const next = new Set<string>();
-    for (const key of states) {
-      const parts = key.split(",");
-      const pre = Number(parts[0] ?? 0);
-      const digit = Number(parts[1] ?? 0);
-      const lock = Number(parts[2] ?? 0);
-      const add = (prefix: number, seenDigit: number, lockPos: number) => {
-        next.add(`${prefix},${seenDigit},${lockPos}`);
-      };
-      const expected = X_LOCK_SUFFIX[lock];
-      if (lock > 0) {
-        if (expected !== undefined && character === expected) add(pre, digit, lock + 1);
-      } else if (pre === X_LOCK_PREFIX.length) {
-        if (/\d/.test(character)) add(pre, 1, 0);
-        else if (digit === 1 && character === "-") add(pre, 1, 1);
-      } else if (character === X_LOCK_PREFIX[pre]) {
-        add(pre + 1, 0, 0);
-      }
-      if (character === "/") add(1, 0, 0);
-      else add(0, 0, 0);
-    }
-    if ([...next].some((key) => key.endsWith(`,${X_LOCK_SUFFIX.length}`))) return true;
-    states.clear();
-    for (const key of next) states.add(key);
-  }
-  return false;
-}
-
-/** `/tmp/.x<digits>-lock` assembled from the visible pieces. */
-function spliceContainsXLock(
-  segments: readonly string[],
-  holes: readonly (readonly string[])[],
-): boolean {
-  let states = new Set<string>(["0,0,0"]);
-  if (consumeXLock(states, segments[0] ?? "")) return true;
-  for (let index = 0; index < holes.length; index += 1) {
-    const start = new Set(states);
-    const merged = new Set<string>();
-    for (const insert of holes[index] ?? [""]) {
-      const clone = new Set(start);
-      if (consumeXLock(clone, insert)) return true;
-      for (const state of clone) merged.add(state);
-    }
-    states = merged;
-    if (consumeXLock(states, segments[index + 1] ?? "")) return true;
-  }
-  return false;
-}
-
-function basenamePossible(
-  segments: readonly string[],
-  holes: readonly (readonly string[])[],
-  name: string,
-): boolean {
-  return spliceEquals(segments, holes, name) || scanSpliceTarget(segments, holes, `/${name}`).ends;
-}
-
-/**
- * The candidate list is capped. A dropped combination still counts when the
- * visible pieces can form a lifecycle word; a dash-joined command substitution
- * cannot, so ordinary script text stays allowed.
- */
-function overflowLifecycle(piece: SplicePiece): {
-  hazard: boolean;
-  service: boolean;
-  action: boolean;
-} {
-  const { segments, holes } = foldedSplice(piece);
-  const none = { hazard: false, service: false, action: false };
-  if (holes.length === 0) return none;
-  for (const name of ["kill", "pkill", "killall", "xkill"]) {
-    if (basenamePossible(segments, holes, name))
-      return { hazard: true, service: false, action: false };
-  }
-  for (const snippet of [".browser-profiles", "--user-data-dir", "/tmp/.x11-unix"]) {
-    if (scanSpliceTarget(segments, holes, snippet).contains) {
-      return { hazard: true, service: false, action: false };
-    }
-  }
-  if (spliceContainsXLock(segments, holes)) return { hazard: true, service: false, action: false };
-  return {
-    hazard: false,
-    service: ["systemctl", "service"].some((name) => basenamePossible(segments, holes, name)),
-    action: ["stop", "restart", "kill"].some((name) => basenamePossible(segments, holes, name)),
-  };
-}
-
-function splicedLifecycleHazard(body: string): boolean {
-  const pieces = splicePieces(body);
-  if (!pieces) return false;
-  const words: string[] = [];
-  let serviceAffix = false;
-  let overflowService = false;
-  let overflowAction = false;
-  for (const piece of pieces) {
-    const produced = pieceCandidates(piece);
-    words.push(...produced.words);
-    if (produced.overflow) {
-      const extra = overflowLifecycle(piece);
-      if (extra.hazard) return true;
-      if (extra.service) overflowService = true;
-      if (extra.action) overflowAction = true;
-    }
-    const kind = spliceAffixKind(piece);
-    if (kind === "solo") return true;
-    if (kind === "service") serviceAffix = true;
-  }
-  if (wordsHaveLifecycleHazard(words)) return true;
-  const sawAction =
-    overflowAction ||
-    words.some((word) =>
-      /^(?:stop|restart|kill)$/.test((word.split("/").at(-1) ?? "").toLowerCase()),
-    );
-  return (serviceAffix || overflowService) && sawAction;
-}
-
-function quotedHeredocBodyIsDynamic(body: string): boolean {
-  if (body.includes("`")) return true;
-  for (let index = 0; index < body.length - 1; index += 1) {
-    if (body[index] !== "$") continue;
-    const next = body[index + 1] ?? "";
-    if (next === "(" || next === "{" || /[A-Za-z0-9_*@#?$!-]/.test(next)) return true;
-  }
-  return false;
-}
-
-/** `$name` or `${name}` only. Anything else can hide the word that runs. */
-function skipPlainParameter(body: string, index: number): number | undefined {
-  const next = body[index + 1];
-  if (next === undefined) return undefined;
-  if (next === "{") {
-    const match = /^\{[A-Za-z_][A-Za-z0-9_]*\}/.exec(body.slice(index + 1));
-    if (!match) return undefined;
-    return index + 1 + match[0].length;
-  }
-  if (/[A-Za-z_]/.test(next)) {
-    let cursor = index + 2;
-    while (cursor < body.length && /[A-Za-z0-9_]/.test(body[cursor] ?? "")) cursor += 1;
-    return cursor;
-  }
-  if (/[0-9*@#?$!-]/.test(next)) return index + 2;
-  return undefined;
-}
-
-function normalizeWrittenPath(path: string): string {
-  const collapsed = path.replaceAll(/\/+/g, "/");
-  const stripped = collapsed.startsWith("./") ? collapsed.slice(2) : collapsed;
-  return stripped.length > 1 && stripped.endsWith("/") ? stripped.slice(0, -1) : stripped;
-}
-
-function isFileWriteRedirect(op: string, target: string): boolean {
-  if (op === ">" || op === ">>" || op === "&>") return true;
-  return op === ">&" && !/^\d+$/.test(target);
-}
-
-function teeDestinationPaths(words: readonly string[]): string[] {
-  const index = primaryCommandIndex(words);
-  if (index === undefined) return [];
-  if (commandBaseAt(words, index) !== "tee") return [];
-  const paths: string[] = [];
-  for (const raw of words.slice(index + 1)) {
-    const token = literalCommandToken(raw);
-    if (!token || token === "--" || (token.startsWith("-") && token !== "-")) continue;
-    paths.push(normalizeWrittenPath(token));
-  }
-  return paths;
-}
-
-function pathTail(path: string): string | undefined {
-  const base = normalizeWrittenPath(path)
-    .split("/")
-    .filter((part) => part.length > 0)
-    .at(-1);
-  if (base === undefined || base === "." || base === "..") return undefined;
-  return base;
-}
-
-function resolveExecutionPath(cwd: string | undefined, command: string): string | undefined {
-  const joined =
-    command.startsWith("/") || cwd === undefined || cwd === ""
-      ? command
-      : `${cwd.replace(/\/$/, "")}/${command}`;
-  const collapsed = lexicalPath(joined);
-  if (collapsed === undefined) return undefined;
-  return normalizeWrittenPath(collapsed);
-}
-
-function nextHeredocCwd(cwd: string | undefined, args: readonly string[]): string | undefined {
-  let options = true;
-  let target: string | undefined;
-  let sawTarget = false;
-  for (const raw of args) {
-    const token = literalCommandToken(raw);
-    if (token === undefined) return undefined;
-    if (options && token === "--") {
-      options = false;
-      continue;
-    }
-    if (options && token.startsWith("-") && token !== "-") continue;
-    target = token;
-    sawTarget = true;
-    break;
-  }
-  if (!sawTarget || target === undefined || target === "-" || target.startsWith("~"))
-    return undefined;
-  if (target.startsWith("/")) return lexicalPath(target) ?? undefined;
-  if (cwd === undefined) return undefined;
-  return resolveExecutionPath(cwd, target);
-}
-
-function executesWrittenHeredoc(
-  words: readonly string[],
-  outputs: ReadonlySet<string>,
-  bodyDynamic: boolean,
-  dir: { cwd: string | undefined },
-): boolean {
-  if (outputs.size === 0 || words.length === 0) return false;
-  const index = primaryCommandIndex(words);
-  if (index === undefined) return bodyDynamic;
-  const command = literalCommandToken(words[index] ?? "");
-  if (!command) return bodyDynamic;
-  const base = (command.split("/").at(-1) ?? command).toLowerCase();
-  if (base === "cd") return false;
-  const matchesWritten = (raw: string) => {
-    const token = literalCommandToken(raw);
-    if (token === undefined) return false;
-    const resolved = resolveExecutionPath(dir.cwd, token);
-    if (resolved !== undefined && outputs.has(resolved)) return true;
-    // A relative write has no known absolute directory. An absolute path matches
-    // only a recorded path, not a shared basename or suffix.
-    if (token.startsWith("/")) return false;
-    // `cd -` leaves the directory unknown, so a later relative name can still be the file.
-    if (dir.cwd !== undefined) return false;
-    const name = pathTail(token);
-    if (name === undefined) return false;
-    for (const output of outputs) {
-      if (pathTail(output) === name) return true;
-    }
-    return false;
-  };
-  if (base === "chmod") return words.slice(index + 1).some((raw) => matchesWritten(raw));
-  return matchesWritten(words[index] ?? "");
-}
-
-function braceExpansionHazard(raw: string): string | undefined {
-  if (raw.includes("`")) return "backtick";
-  for (let index = 0; index < raw.length - 1; index += 1) {
-    if (raw[index] !== "$" || raw[index + 1] !== "(") continue;
-    return raw[index + 2] === "(" ? "arithmetic expansion" : "command substitution";
-  }
-  return undefined;
-}
-
-function readExpansion(
-  source: string,
-  start: number,
-): { end: number; name: string; raw: string; simple: boolean } | undefined {
-  if (source[start] !== "$") return undefined;
-  const next = source[start + 1];
-  if (next === undefined || next === "(") return undefined;
-  if (next === "{") {
-    let depth = 1;
-    let cursor = start + 2;
-    while (cursor < source.length && depth > 0) {
-      if (source[cursor] === "{" && source[cursor - 1] === "$") depth += 1;
-      else if (source[cursor] === "}") depth -= 1;
-      if (depth > 0) cursor += 1;
-    }
-    if (depth !== 0) return undefined;
-    const inner = source.slice(start + 2, cursor);
-    return {
-      end: cursor + 1,
-      name: inner,
-      raw: source.slice(start, cursor + 1),
-      simple: /^[A-Za-z_][A-Za-z0-9_]*$/.test(inner),
-    };
-  }
-  if (/[A-Za-z_]/.test(next)) {
-    let cursor = start + 2;
-    while (cursor < source.length && /[A-Za-z0-9_]/.test(source[cursor] ?? "")) cursor += 1;
-    const name = source.slice(start + 1, cursor);
-    return {
-      end: cursor,
-      name,
-      raw: source.slice(start, cursor),
-      simple: true,
-    };
-  }
-  if (/[0-9*@#?$!-]/.test(next)) {
-    return {
-      end: start + 2,
-      name: next,
-      raw: source.slice(start, start + 2),
-      simple: false,
-    };
-  }
-  return undefined;
-}
-
-function freshLiteralKey(source: string, used: Set<string>): string {
-  let serial = used.size;
-  let key = `${LITERAL_KEY_PREFIX}${serial}`;
-  while (source.includes(key) || used.has(key)) {
-    serial += 1;
-    key = `${LITERAL_KEY_PREFIX}${serial}`;
-  }
-  used.add(key);
-  return key;
-}
-
-function isHeredocDataSinkPipeline(names: readonly string[]): boolean {
-  return names.length > 0 && names.every((name) => HEREDOC_DATA_SINKS.has(name));
-}
-
-/** Shell, source, or a wrapper that can hide them. Used after a heredoc was consumed. */
-function isShellOrSourceCommand(words: readonly string[]): boolean {
-  const base = commandBasename(words);
-  if (!base) return false;
-  return (
-    base === "source" ||
-    base === "." ||
-    base === "sudo" ||
-    base === "busybox" ||
-    isHeredocInterpreter(base)
-  );
-}
-
-/**
- * Drop comments and quoted heredoc bodies, and substitute literal assignments.
- * Returns a short refusal when the command is dynamic in a way the later
- * tokenizer cannot see (quotes hiding a substitution, a heredoc that is not
- * data for cat or tee, a quoted body that names a lifecycle command, a shell,
- * source, sudo, or busybox after that heredoc, a later command that runs a
- * path that heredoc wrote, source of anything but a
- * literal activate path, or a write that can plant that activate script).
- */
-function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
-  const env = new Map<string, string>();
-  const literals: Record<string, string> = {};
-  const usedKeys = new Set<string>();
-  const pending: PendingHeredoc[] = [];
-  let heredocConsumed = false;
-  let heredocDynamic = false;
-  const heredocDir: { cwd: string | undefined } = { cwd: "" };
-  const heredocOutputs = new Set<string>();
-  const pipelineWrites: string[] = [];
-  let pipelineHasHeredoc = false;
-  const simpleWrites: string[] = [];
-  let pipelineNames: string[] = [];
-  let commandWords: string[] = [];
-  let out = "";
-  let rawWord = "";
-  let quote: "'" | '"' | undefined;
-  let wordQuoted = false;
-  let atWordStart = true;
-  let redirectNext = false;
-  let redirectOp = "";
-  let activateWrite = false;
-  // IFS changes how unquoted expansions split. Refuse instead of guessing the fields.
-  let substituteLiterals = true;
-  let guaranteed = true;
-  let inPipeline = false;
-  let index = 0;
-
-  const finishWord = () => {
-    if (rawWord.length === 0 && !wordQuoted) return;
-    const raw = rawWord;
-    rawWord = "";
-    wordQuoted = false;
-    atWordStart = true;
-    if (redirectNext) {
-      redirectNext = false;
-      if (isActivateWriteTarget(redirectOp, raw, commandWords, env)) activateWrite = true;
-      const target = literalCommandToken(raw);
-      if (target && isFileWriteRedirect(redirectOp, target)) {
-        simpleWrites.push(normalizeWrittenPath(target));
-      }
-      redirectOp = "";
-      return;
-    }
-    commandWords.push(raw);
-  };
-
-  const forgetExternalAssignments = (words: readonly string[]) => {
-    const assigned = externalAssignments(words);
-    if (!assigned) return;
-    if (assigned.clear) {
-      substituteLiterals = false;
-      env.clear();
-      return;
-    }
-    for (const name of assigned.names) {
-      env.delete(name);
-      if (name === "IFS") substituteLiterals = false;
-    }
-  };
-
-  const endSimple = (kind: ShellSeparator): string | undefined => {
-    finishWord();
-    const words = commandWords;
-    commandWords = [];
-    // Only sinks in this pipeline survive, so their redirects are the heredoc's output.
-    // Resolve them in the directory this command runs in, before a later cd moves.
-    if (pipelineHasHeredoc) {
-      const placed = (path: string) => resolveExecutionPath(heredocDir.cwd, path);
-      for (const path of simpleWrites) {
-        const resolved = placed(path);
-        if (resolved !== undefined) pipelineWrites.push(resolved);
-      }
-      for (const path of teeDestinationPaths(words)) {
-        const resolved = placed(path);
-        if (resolved !== undefined) pipelineWrites.push(resolved);
-      }
-    }
-    simpleWrites.length = 0;
-    // A pipeline or background cd runs in a subshell, so the parent directory stays.
-    const commandIndex = primaryCommandIndex(words);
-    if (
-      kind !== "pipe" &&
-      kind !== "background" &&
-      !inPipeline &&
-      commandIndex !== undefined &&
-      commandBaseAt(words, commandIndex) === "cd"
-    ) {
-      heredocDir.cwd = nextHeredocCwd(heredocDir.cwd, words.slice(commandIndex + 1));
-    }
-    // Remember the write across a pending heredoc so a dangerous body can still
-    // refuse as heredoc. A harmless body is refused once that body is consumed.
-    if (activateWrite || commandWritesActivateScript(words, env)) activateWrite = true;
-    if (activateWrite && pending.length === 0) return "activate script";
-    if (
-      heredocConsumed &&
-      (isShellOrSourceCommand(words) ||
-        executesWrittenHeredoc(words, heredocOutputs, heredocDynamic, heredocDir))
-    ) {
-      return "heredoc";
-    }
-    const guaranteedBefore = guaranteed;
-    if (isUnsafeSource(words)) return "source";
-    const base = commandBasename(words);
-    if (base !== undefined) pipelineNames.push(base);
-    const entries = assignmentEntries(words);
-    if (entries?.some((entry) => entry.name === "IFS")) substituteLiterals = false;
-    // A builtin, loop, or sourced script can replace a literal this command still trusts.
-    forgetExternalAssignments(words);
-    const pipeMember = inPipeline || kind === "pipe";
-    if (!pipeMember && kind !== "background") {
-      if (entries) {
-        for (const entry of entries) {
-          // A non-guaranteed write must not replace a value this command might still use.
-          if (!guaranteedBefore || entry.value === null) env.delete(entry.name);
-          else env.set(entry.name, entry.value);
-        }
-      }
-    } else if (kind === "background") {
-      for (const entry of entries ?? []) env.delete(entry.name);
-    }
-    if (kind === "pipe") {
-      inPipeline = true;
-      guaranteed = false;
-      return undefined;
-    }
-    for (const heredoc of pending) {
-      if (!heredoc.names) heredoc.names = [...pipelineNames];
-    }
-    pipelineNames = [];
-    inPipeline = false;
-    if (kind === "and") {
-      const stable = assignmentEntries(words)?.every((entry) => entry.value !== null) ?? false;
-      guaranteed = guaranteedBefore && stable && !pipeMember;
-    } else if (kind === "or" || kind === "background") guaranteed = false;
-    else guaranteed = true;
-    if (pending.length === 0) {
-      pipelineWrites.length = 0;
-      pipelineHasHeredoc = false;
-    }
-    return undefined;
-  };
-
-  const appendExpansion = (): string | undefined => {
-    const next = source[index + 1];
-    if (next === "(") {
-      return source[index + 2] === "(" ? "arithmetic expansion" : "command substitution";
-    }
-    const expansion = readExpansion(source, index);
-    if (!expansion) {
-      out += "$";
-      rawWord += "$";
-      index += 1;
-      atWordStart = false;
-      return undefined;
-    }
-    rawWord += expansion.raw;
-    if (!expansion.simple) {
-      const hazard = braceExpansionHazard(expansion.raw);
-      if (hazard) return hazard;
-      out += expansion.raw;
-    } else {
-      const value = env.get(expansion.name);
-      if (value === undefined || !substituteLiterals) out += expansion.raw;
-      else {
-        const key = freshLiteralKey(source, usedKeys);
-        literals[key] = value;
-        out += `$${key}`;
-      }
-    }
-    index = expansion.end;
-    atWordStart = false;
-    return undefined;
-  };
-
-  while (index < source.length) {
-    const character = source[index];
-    if (quote === "'") {
-      out += character ?? "";
-      rawWord += character ?? "";
-      if (character === "'") quote = undefined;
-      index += 1;
-      continue;
-    }
-    if (quote === '"') {
-      if (character === "\\") {
-        const next = source[index + 1];
-        out += character ?? "";
-        rawWord += character ?? "";
-        if (next !== undefined) {
-          out += next;
-          rawWord += next;
-          index += 2;
-          continue;
-        }
-      } else if (character === '"') {
-        quote = undefined;
-        out += character;
-        rawWord += character;
-      } else if (character === "`") return { reason: "backtick" };
-      else if (character === "$") {
-        const reason = appendExpansion();
-        if (reason) return { reason };
-        continue;
-      } else {
-        out += character ?? "";
-        rawWord += character ?? "";
-      }
-      index += 1;
-      continue;
-    }
-    if (character === "\\") {
-      const next = source[index + 1];
-      if (next === "\n") {
-        index += 2;
-        continue;
-      }
-      out += "\\";
-      rawWord += "\\";
-      atWordStart = false;
-      if (next !== undefined) {
-        out += next;
-        rawWord += next;
-        index += 2;
-        continue;
-      }
-      index += 1;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      wordQuoted = true;
-      atWordStart = false;
-      out += character;
-      rawWord += character;
-      index += 1;
-      continue;
-    }
-    if (character === "#" && atWordStart) {
-      while (index < source.length && source[index] !== "\n") index += 1;
-      continue;
-    }
-    if (character === "#") {
-      // shell-quote treats a mid-word # as a comment and drops the rest of the string.
-      out += "\\#";
-      rawWord += "#";
-      atWordStart = false;
-      index += 1;
-      continue;
-    }
-    if (character === " " || character === "\t") {
-      finishWord();
-      out += character;
-      atWordStart = true;
-      index += 1;
-      continue;
-    }
-    if (character === "\n") {
-      const separated = endSimple("seq");
-      if (separated) return { reason: separated };
-      if (pending.length === 0) {
-        out += "\n";
-        atWordStart = true;
-        index += 1;
-        continue;
-      }
-      if (pending.some((heredoc) => !isHeredocDataSinkPipeline(heredoc.names ?? []))) {
-        return { reason: "heredoc" };
-      }
-      let cursor = index + 1;
-      for (const heredoc of pending) {
-        const body = readHeredocBody(source, cursor, heredoc.delimiter, heredoc.stripTabs);
-        if (!body) return { reason: "heredoc" };
-        if (heredoc.quoted) {
-          if (quotedHeredocLifecycleHazard(body.content)) return { reason: "heredoc" };
-          if (quotedHeredocBodyIsDynamic(body.content)) heredocDynamic = true;
-        } else {
-          const hazard = heredocBodyHazard(body.content);
-          if (hazard) return { reason: hazard };
-          out += body.content;
-        }
-        cursor = body.end;
-      }
-      for (const path of pipelineWrites) heredocOutputs.add(path);
-      pipelineWrites.length = 0;
-      pipelineHasHeredoc = false;
-      pending.length = 0;
-      heredocConsumed = true;
-      out += "\n";
-      atWordStart = true;
-      index = cursor;
-      continue;
-    }
-    if (character === "<" && source.startsWith("<<<", index)) return { reason: "herestring" };
-    if (character === "<" && source[index + 1] === "<") {
-      finishWord();
-      let cursor = index + 2;
-      const stripTabs = source[cursor] === "-";
-      if (stripTabs) cursor += 1;
-      const delimiter = readHeredocDelimiter(source, cursor);
-      if (!delimiter) return { reason: "heredoc" };
-      // Quoted delimiters suppress expansion. Unquoted bodies still expand, so they are scanned below.
-      pending.push({
-        delimiter: delimiter.delimiter,
-        quoted: delimiter.quoted,
-        stripTabs,
-      });
-      pipelineHasHeredoc = true;
-      index = delimiter.end;
-      atWordStart = true;
-      continue;
-    }
-    if ((character === "<" || character === ">") && source[index + 1] === "(") {
-      return { reason: "subshell" };
-    }
-    if (character === "`") return { reason: "backtick" };
-    if (character === "$") {
-      const reason = appendExpansion();
-      if (reason) return { reason };
-      continue;
-    }
-    if (character === "(" || character === ")") return { reason: "subshell" };
-    const multi = ["&&", "||", ";;", "|&", ">>", ">&", "<&", "&>"].find((op) =>
-      source.startsWith(op, index),
-    );
-    if (
-      multi ||
-      character === ";" ||
-      character === "|" ||
-      character === "&" ||
-      character === ">" ||
-      character === "<"
-    ) {
-      const op = multi ?? character ?? "";
-      const redirect =
-        op === ">" || op === "<" || op === ">>" || op === ">&" || op === "<&" || op === "&>";
-      if (redirect && !wordQuoted && /^\d+$/.test(rawWord)) {
-        rawWord = "";
-        atWordStart = true;
-      }
-      if (redirect) {
-        finishWord();
-        out += op;
-        atWordStart = true;
-        redirectOp = op;
-        redirectNext = true;
-        index += op.length;
-        continue;
-      }
-      // The redirect target is still the current word. Consume it before this
-      // separator clears the redirect, or `> path;` is inspected as an argument.
-      if (redirectNext) finishWord();
-      out += op;
-      atWordStart = true;
-      redirectNext = false;
-      index += op.length;
-      const kind: ShellSeparator =
-        op === "|" || op === "|&"
-          ? "pipe"
-          : op === "&&"
-            ? "and"
-            : op === "||"
-              ? "or"
-              : op === "&"
-                ? "background"
-                : "seq";
-      const separated = endSimple(kind);
-      if (separated) return { reason: separated };
-      continue;
-    }
-    out += character ?? "";
-    rawWord += character ?? "";
-    atWordStart = false;
-    index += 1;
-  }
-
-  const separated = endSimple("seq");
-  if (separated) return { reason: separated };
-  if (quote || pending.length > 0)
-    return { reason: quote ? "uninspectable shell syntax" : "heredoc" };
-  return { command: out, literals };
-}
-
-function shellCFlagProgram(words: readonly string[], interpreterIndex: number): string | undefined {
-  for (let index = interpreterIndex + 1; index < words.length; index += 1) {
-    const word = words[index] ?? "";
-    if (word.startsWith("--command=")) return word.slice("--command=".length);
-    // bash -c / -lc / -ce and fish --command: the next argument is the program string.
-    if (word === "--command" || /^-[^-]*c/.test(word)) return words[index + 1];
-  }
-  return undefined;
-}
-
-function preserveShellCommandBoundaries(command: string): string {
-  let quote: "'" | '"' | undefined;
-  let result = "";
-  for (let index = 0; index < command.length; index += 1) {
-    const character = command[index];
-    const next = command[index + 1];
-    if (character === "\\" && quote !== "'") {
-      if (next === "\n") {
-        index += 1;
-        continue;
-      }
-      // Keep escaped characters intact; an escaped quote is not a boundary.
-      result += character;
-      if (next !== undefined) {
-        result += next;
-        index += 1;
-      }
-      continue;
-    }
-    if (character === quote) quote = undefined;
-    else if (!quote && (character === "'" || character === '"')) quote = character;
-    result += character === "\n" && !quote ? "\n;" : character;
-  }
-  return result;
-}
-
-function shellTokenReason(entry: object): string | undefined {
-  if ("comment" in entry) return "comment";
-  if ("expansion" in entry && typeof entry.expansion === "string") {
-    const hazard = braceExpansionHazard(entry.expansion);
-    // The value is chosen by the shell after this guard, so it cannot be checked.
-    return hazard ?? unresolvedVariableReason(entry.expansion);
-  }
-  if (!("op" in entry) || typeof entry.op !== "string") return "uninspectable shell syntax";
-  if (entry.op === "glob") return undefined;
-  if (entry.op === "(" || entry.op === ")" || entry.op === "<(") return "subshell";
-  if (entry.op === "<<<") return "herestring";
-  if (SAFE_SHELL_CONTROL_OPS.has(entry.op)) return undefined;
-  return "unsupported shell syntax";
-}
-
-function tokenizeProtectedShellCommand(
-  command: string,
-  literals: Readonly<Record<string, string>>,
-): { words: string[] } | { reason: string } {
-  try {
-    // shell-quote treats newlines as whitespace. Preserve command boundaries for
-    // the dot builtin, after folding shell line continuations.
-    const separated = preserveShellCommandBoundaries(command);
-    const parsed = parseShellCommand<{ expansion: string }>(
-      separated,
-      (name) => literals[name] ?? STATIC_SHELL_EXPANSIONS[name] ?? { expansion: name },
-      { splitUnquoted: true },
-    );
-    const words: string[] = [];
-    let commandPosition = true;
-    let redirectTarget = false;
-    for (const [index, entry] of parsed.entries()) {
-      if (typeof entry === "string") {
-        // Backtick fragments are not fully tokenized; treat them as dynamic.
-        if (entry.includes("`")) return { reason: "backtick" };
-        const folded = entry.toLowerCase();
-        // `find .`, `git add .`, and `git -C .` use a path, not the
-        // executable `. script` builtin. Keep the path out of the builtin scan.
-        words.push(entry === "." && (!commandPosition || redirectTarget) ? "./" : entry);
-        if (redirectTarget) {
-          redirectTarget = false;
-          continue;
-        }
-        const next = parsed[index + 1];
-        if (
-          commandPosition &&
-          /^\d+$/.test(folded) &&
-          typeof next === "object" &&
-          next !== null &&
-          "op" in next &&
-          /^[<>]/.test(next.op)
-        ) {
-          // A leading file descriptor belongs to a redirect, not the command.
-        } else if (commandPosition && /^(?:then|do|else)$/.test(folded)) {
-          commandPosition = true;
-        } else if (commandPosition && (folded === "coproc" || folded === "function")) {
-          return { reason: folded };
-        } else if (
-          commandPosition &&
-          (/^(?:command|builtin|exec|time|if|elif|while|until|!|\{)$/.test(folded) ||
-            folded.startsWith("-") ||
-            /^[a-z_][a-z0-9_]*=/.test(folded))
-        ) {
-          // Shell prefixes and assignments leave the command word pending.
-        } else commandPosition = false;
-        continue;
-      }
-      if (typeof entry !== "object" || entry === null)
-        return { reason: "uninspectable shell syntax" };
-      if (
-        "op" in entry &&
-        entry.op === "glob" &&
-        "pattern" in entry &&
-        typeof entry.pattern === "string"
-      ) {
-        words.push(entry.pattern);
-        continue;
-      }
-      const reason = shellTokenReason(entry);
-      if (reason) return { reason };
-      if ("op" in entry && typeof entry.op === "string" && SAFE_SHELL_CONTROL_OPS.has(entry.op)) {
-        if (["&&", "||", ";", "|", "&"].includes(entry.op)) {
-          commandPosition = true;
-          redirectTarget = false;
-        } else redirectTarget = true;
-      }
-    }
-    return { words };
-  } catch {
-    return { reason: "uninspectable shell syntax" };
-  }
-}
-
-function protectedWordRefusal(words: readonly string[]): string | undefined {
-  for (const word of words) {
-    const base = (word.split("/").at(-1) ?? "").toLowerCase();
-    if (/^(?:kill|pkill|killall|xkill)$/.test(base)) return `protected command ${base}`;
-  }
-  for (let index = 0; index < words.length; index += 1) {
-    const word = words[index] ?? "";
-    const base = (word.split("/").at(-1) ?? "").toLowerCase();
-    if (base !== "eval" && base !== "source" && word !== ".") continue;
-    const next = words[index + 1];
-    // Virtualenv activation is the one source form that does not run an arbitrary script.
-    if ((word === "source" || word === ".") && next && isLiteralActivatePath(next)) continue;
-    return base === "eval" ? "eval" : "source";
-  }
-  const service = words
-    .map((word) => (word.split("/").at(-1) ?? "").toLowerCase())
-    .find((word) => word === "systemctl" || word === "service");
-  if (service) {
-    const action = words.find((word) => /^(?:stop|restart|kill)$/.test(word.toLowerCase()));
-    if (action) return `${service} ${action.toLowerCase()}`;
-  }
-  for (const word of words) {
-    const folded = word.toLowerCase();
-    if (/(?:\.browser-profiles|--user-data-dir)/.test(folded)) return "browser profile path";
-    if (/(?:\/tmp\/\.x11-unix|\/tmp\/\.x\d+-lock)/.test(folded)) return "X11 path";
-  }
-  for (let index = 0; index < words.length; index += 1) {
-    const name = (words[index]?.split("/").at(-1) ?? "").toLowerCase();
-    if (!SHELL_INTERPRETER_NAMES.test(name)) continue;
-    const program = shellCFlagProgram(words, index);
-    if (!program) continue;
-    const nested = protectedComputerLifecycleRefusal(program);
-    if (nested) return nested;
-  }
-  return undefined;
-}
-
-/** Short reason the desktop-protection guard refuses `command`, when it does. */
-export function protectedComputerLifecycleRefusal(command: string): string | undefined {
-  const prepared = prepareDesktopGuardCommand(command);
-  if ("reason" in prepared) return prepared.reason;
-  const tokenized = tokenizeProtectedShellCommand(prepared.command, prepared.literals);
-  if ("reason" in tokenized) return tokenized.reason;
-  return protectedWordRefusal(tokenized.words);
-}
-
-export function isProtectedComputerLifecycleCommand(command: string): boolean {
-  return protectedComputerLifecycleRefusal(command) !== undefined;
-}
-
-export function desktopProtectionGuardMessage(reason: string): string {
-  // Staging 11-20: every refused heredoc cost the agent a round before it found the file form.
-  const instead =
-    reason === "heredoc"
-      ? " Write the script to a file with write_file and run that file (python3 path/to/script.py)."
-      : "";
-  return `This command was not run: desktop-protection guard: ${reason}. Shell access is still available.${instead} Do not stop or restart browser or desktop processes.`;
 }
 
 /** Cap the roster so a large Space cannot flood the prompt. */
@@ -6577,10 +4313,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let steeredText: string | undefined;
         // The person wrote into this run and nothing has been said to them since.
         let steeredUnanswered = false;
-        // The request went to a role team this turn: that team owns it now.
-        let delegatedToRole = false;
-        let intakeHandoffRefused = false;
-        let templateHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
         const newProgressRedactor = () => {
@@ -6721,29 +4453,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           quickReplyMessageId = undefined;
         };
-        const publishMidTurnNarration = async (nextTool?: string) => {
+        const publishMidTurnNarration = async () => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
           // The server's continuation nudge echoed back is never for the recruiter.
           const nudgeless = withoutNudge(visible(redactSecrets(extracted.text, runSecrets))).trim();
           const written = fixedAckSent ? withoutLeadingAck(nudgeless) : nudgeless;
-          // The question card that follows asks the question; the text keeps only what leads up to it.
-          // A line saying the mailbox is connected, just before the card asking to connect it.
-          const narration =
-            hideVendors &&
-            (progressInOtherLanguage(written, turnLanguage) ||
-              // Simulated 11-14: after the first line, "我现在为…起草…" before each step. The first
-              // line already said what is happening; the next words are the answer.
-              // A connect card carries only the service's name, so the line before it is the
-              // answer (gate 960ca37a: 「草稿还在吗」 got 「收到，马上处理。」 and a card, three times).
-              (nextTool !== undefined &&
-                nextTool !== "request_connection" &&
-                quickReplySaid !== undefined &&
-                oneLineNote(written)) ||
-              unbackedClaim(written, turnReport.receipts()) !== undefined)
-              ? ""
-              : hideVendors && nextTool === "ask_user"
-                ? beforeCardQuestion(written)
-                : written;
+          // What the model wrote is shown as written (11-16: wording checks cut correct answers).
+          const narration = written;
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration || (hideVendors && handedOff) || (await teammateAnsweredHandoff())) {
@@ -7013,15 +4729,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let peopleSearchesRun = 0;
         // New people-search agent runs this turn started before its round was recorded.
         let agentRunsBeforeRound = 0;
-        // Quick people searches this turn ran itself (not the planned ones) before its round.
-        let quickSearchesBeforeRound = 0;
         // Full profile pages the first round's searches may still read for a required language.
         const fullProfileReads = { left: FULL_PROFILE_READS };
         const profilePages = new Map<string, string>();
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
-        let contactLookupOwed: { target: number; remaining: number } | undefined;
         // A question bounced once as already answered may be asked again: the reply may have been about something else.
         const knownAskBounced = new Set<string>();
         // Bounced up to three times a run: on staging the model asked the same settled fact again
@@ -7047,18 +4760,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ),
             ),
           ].join("\n");
-        let searchFirstBounces = 0;
-        let draftFirstBounces = 0;
-        // A recruiter question written in Chinese without the recruiter asking for it goes back once.
-        let askLanguageBounced = false;
-        let emptySearchesBounced = false;
         // New people the searches planned with the last answer returned. Once the first picks come
         // from them and there are this many, the ten come from them instead of another search.
         let plannedNewPeople = 0;
         const plannedFresh = new Set<string>();
         // Rows of planned searches that returned after the pick started, not yet shown to the model.
         const lateSearchRows: string[] = [];
-        let plannedEarlyRefusalAt: number | undefined;
         let gradingToolCalls = 0;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
@@ -7618,75 +5325,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
          * already handed it the new brief. The finished report is for the old one: the new stage
          * answers.
          */
-        /**
-         * The recruiter's newest message is in this brief, and a teammate was already handed it or
-         * this bot already answered it.
-         */
-        let sameStageRefusals = 0;
-        /** Whether the person has written nothing since this thread message. */
-        const nothingNewSince = async (seq: number | undefined) => {
-          if (seq === undefined) return false;
-          const latest = await deps.prisma.message
-            .findFirst({
-              where: {
-                threadId: thread.id,
-                role: "user",
-                botId: null,
-                OR: [
-                  { clientNonce: null },
-                  { NOT: { clientNonce: { startsWith: "autocontinue:" } } },
-                ],
-              },
-              orderBy: { seq: "desc" },
-              select: { seq: true },
-            })
-            .catch(() => null);
-          return latest !== null && latest.seq < seq;
-        };
-        const messageAlreadyHanded = async (brief: string) => {
-          try {
-            const latest = await deps.prisma.message.findFirst({
-              where: {
-                threadId: thread.id,
-                role: "user",
-                botId: null,
-                OR: [
-                  { clientNonce: null },
-                  { NOT: { clientNonce: { startsWith: "autocontinue:" } } },
-                ],
-              },
-              orderBy: { seq: "desc" },
-              select: { seq: true, blocks: true },
-            });
-            const words = (Array.isArray(latest?.blocks) ? (latest.blocks as MessageBlock[]) : [])
-              .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-              .join("\n");
-            if (!latest || !quotesMessage(brief, words)) return false;
-            const handed = await deps.prisma.message.findMany({
-              where: { threadId: thread.id, botId: bot.id, seq: { gt: latest.seq } },
-              orderBy: { seq: "desc" },
-              take: 12,
-              select: { blocks: true },
-            });
-            // Gate 386f6a46: the message came while this bot ran, and the brief it handed next
-            // took it in other words; the stage handed after the message is the one reporting now.
-            // Gate df83586a: this bot answered the message itself (a full template), so handing it
-            // over again only makes a second version.
-            return handed.some((message) =>
-              (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : []).some(
-                (block) =>
-                  (block.kind === "text" && block.text.trim().length >= 80) ||
-                  (block.kind === "handoff" &&
-                    !block.report &&
-                    block.fromBotId === bot.id &&
-                    (block.toBotId === handback?.fromBotId ||
-                      quotesMessage(block.text ?? "", words))),
-              ),
-            );
-          } catch {
-            return false;
-          }
-        };
         const handbackSuperseded = async () => {
           if (!handback || !run.sourceMessageId) return false;
           try {
@@ -8142,75 +5780,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: newerRequestElsewhere(moved) };
             }
           }
-          // Before the first picks, one step's extra searches are refused once: the model picks
-          // from the planned rows first, and may search again only if the answer changed the role.
-          const refusedEarly = () => {
-            const now = Date.now();
-            plannedEarlyRefusalAt ??= now;
-            return now - plannedEarlyRefusalAt < 3_000;
-          };
-          // A people-search agent run takes minutes, so it too waits until the first picks
-          // from the planned rows are on screen; after them it is the way to fill the ten.
-          const quickSearch = name.endsWith("web_search_advanced_exa") || name === "web_search";
-          if (
-            (quickSearch || (name.endsWith("agent_run") && !firstPicksShown)) &&
-            plannedNewPeople >= PLANNED_POOL_ENOUGH &&
-            !executionId.startsWith(`${runId}:planned-search:`) &&
-            !(await deps.prisma.externalEffect.findFirst({
-              where: {
-                runId,
-                spaceId: run.spaceId,
-                kind: "recruiting_research",
-                status: "completed",
-                request: { path: ["operation"], equals: "calibration_round" },
-              },
-              select: { id: true },
-            })) &&
-            (firstPicksShown || refusedEarly())
-          ) {
-            const late = lateSearchRows.splice(0);
-            const lateText = late.length
-              ? `\n\nThe planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`
-              : "";
-            if (!firstPicksShown)
-              return {
-                error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people. First show the two to four clearest fits from those rows with show_picks, then record the ten with calibration_round. Search again only if the recruiter's answer changes who you are looking for.${lateText}`,
-              };
-            // Counts as the second set: when fewer than ten fit, the recruiter is asked instead.
-            peopleSearchesRun = Math.max(peopleSearchesRun, 8);
-            return {
-              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people; do not run more quick searches. Fill the rest of the ten with one people-search agent run (agent_run, effort "low", a query that starts "Find N more people" with the role, the location scope and every hard requirement), then record the ten with calibration_round, starting with the people already shown, then the agent run's people who fit, topping up from those rows only where it leaves places short; a must-have a row says nothing about is unknown, not failed, except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}.${lateText}`,
-            };
-          }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
-          // Each agent run takes most of a minute: after three that still leave the ten short, the
-          // recruiter decides whether to relax a requirement or search deeper, instead of the turn
-          // running one after another while they wait. Reading a started run's result is free.
-          // Quick searches are capped the same way. The first round counts from the start, before
-          // any picks are on screen: a role whose people are hard to find otherwise searches on
-          // for many minutes and shows nobody.
-          const newAgentRun = name.endsWith("agent_run") && !rawArgs.runId;
-          const ownQuickSearch =
-            name.endsWith("web_search_advanced_exa") &&
-            !executionId.startsWith(`${runId}:planned-search:`);
-          if (
-            (newAgentRun || ownQuickSearch) &&
-            (firstPicksShown || firstRoundPending) &&
-            run.trigger !== "recruiting_grade" &&
-            !(await roundRecordedThisRun())
-          ) {
-            const searched = newAgentRun
-              ? agentRunsBeforeRound >= MAX_AGENT_RUNS_BEFORE_ROUND &&
-                `${agentRunsBeforeRound} people-search agent runs`
-              : quickSearchesBeforeRound >= MAX_QUICK_SEARCHES_BEFORE_ROUND &&
-                `${quickSearchesBeforeRound} people searches`;
-            if (searched)
-              return {
-                error: `Not run: ${searched} already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise show the ones who fit with show_picks, then ${SHORT_OF_TEN}.`,
-              };
-            if (newAgentRun) agentRunsBeforeRound++;
-            else quickSearchesBeforeRound++;
-          }
+          if (name.endsWith("agent_run") && !rawArgs.runId && !(await roundRecordedThisRun()))
+            agentRunsBeforeRound++;
           // Tools that use the role from a job wait for its save; the first question and progress
           // lines do not, so the save never holds them up. The turn still ends after the save.
           if (
@@ -8260,9 +5832,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               target,
               await lookedUpContacts(deps.prisma, actor),
             );
-            contactLookupOwed = batch.remaining
-              ? { target, remaining: batch.remaining }
-              : undefined;
             // A big lookup shows the recruiter a countdown while this turn works through it.
             if (batch.remaining) {
               const started = await startWorkEstimate(deps.prisma, run, {
@@ -12456,14 +10025,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? `attachments/${original.row.id}${attachmentExtensionForMimeType(original.row.mimeType)}`
                   : "notes/result.txt"),
             );
-            if (graphical) {
-              const activateRefusal = protectedActivateScriptWriteRefusal(filePath);
-              if (activateRefusal) {
-                return finish({
-                  error: desktopProtectionGuardMessage(activateRefusal),
-                });
-              }
-            }
             const content =
               original?.bytes ?? new TextEncoder().encode(textContentArg(args.content, ""));
             workspaceCheckpoint.markDirty();
@@ -14902,7 +12463,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               rolesDelegatedInTurn.delete(target.threadId);
               return finish({ error: sent.error });
             }
-            delegatedToRole = true;
             await publishMessage(deps, run, "bot", [
               {
                 kind: "role_link",
@@ -15246,65 +12806,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
-            // A new role's first question is the coordinator's own: a handoff first costs the
-            // recruiter a second agent's start-up before anything appears.
-            if (
-              (linkRole || roleCreatedInTurn) &&
-              !intakeHandoffRefused &&
-              recruitingBotKey(bot) === "main"
-            ) {
-              intakeHandoffRefused = true;
-              return finish({ error: INTAKE_ASK_FIRST });
-            }
-            // Gate 9fd9c2ff, change-mind-mid-run: a one-email template went to the writer, and
-            // only "I'll write a version first" showed before the recruiter changed the pay.
-            if (
-              !templateHandoffRefused &&
-              recruitingBotKey(bot) === "main" &&
-              recruiterTexts.slice(0, 3).some(asksForTemplate)
-            ) {
-              templateHandoffRefused = true;
-              return finish({ error: TEMPLATE_WRITE_YOURSELF });
-            }
-            // Gate 91a438c4: the teammate posted the template and reported back, and the same
-            // brief went to it twice more, so one request got three answers.
-            if (handback) {
-              const asked = await deps.prisma.message.findFirst({
-                where: {
-                  threadId: thread.id,
-                  botId: bot.id,
-                  blocks: { array_contains: [{ kind: "handoff", toBotId: handback.fromBotId }] },
-                },
-                orderBy: { seq: "desc" },
-                select: { seq: true, blocks: true },
-              });
-              const brief = ((asked?.blocks ?? []) as MessageBlock[]).find(
-                (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
-                  block.kind === "handoff" && block.toBotId === handback.fromBotId,
-              )?.text;
-              // Gate 95185659: the brief worded differently, but it carried the same recruiter
-              // message a teammate was already handed, and the second answer contradicted the first.
-              // Gate 48d5887e, change-mind: reworded again with nothing new from the recruiter since
-              // the brief it finished; refused once, so a concrete undone part can still be handed.
-              if (
-                restatesUpdate(String(args.message ?? ""), brief) ||
-                (await messageAlreadyHanded(String(args.message ?? ""))) ||
-                (sameStageRefusals === 0 &&
-                  (args.bot_id
-                    ? String(args.bot_id) === handback.fromBotId
-                    : !args.confirm_name ||
-                      (
-                        await deps.prisma.bot
-                          .findUnique({ where: { id: handback.fromBotId }, select: { name: true } })
-                          .catch(() => null)
-                      )?.name === String(args.confirm_name)) &&
-                  (await nothingNewSince(asked?.seq)) &&
-                  sameStageRefusals++ === 0)
-              )
-                return finish({
-                  error: `Not handed off: this is the request it just finished, and its result is shown above. Reply exactly ${NO_RESPONSE}, or hand it only the concrete part that is still undone.`,
-                });
-            }
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               turnKey: steeredMessageId ?? nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
@@ -16448,39 +13949,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 `The recruiter's attached file (${file.name}) is already read for this turn with artifact_read, and that read is your file read; never read it again.${read.hasMore === true ? " Only its first part is below; read on from offset 16000 only if your next step needs the rest." : ""} Its text:\n\n${String(read.text)}`,
             )
             .join("\n\n") || undefined;
-        // Contacts, drafts and sends belong to Outreach: any other recruiting teammate dispatches
-        // them instead of answering (or declining) them itself.
-        const currentTurnText =
-          currentTurnMessage?.blocks
-            .map((block) => (block.kind === "text" ? block.text : ""))
-            .join(" ") ?? "";
-        const outreachAsk =
-          thread.groupId &&
-          run.trigger === "user" &&
-          hideVendors &&
-          recruitingBotKey(bot) !== "outreach" &&
-          currentTurnMessage?.role === "user" &&
-          asksForOutreach(currentTurnText)
-            ? await deps.prisma.chatGroupMember
-                .findFirst({
-                  where: {
-                    groupId: thread.groupId,
-                    bot: {
-                      archivedAt: null,
-                      OR: [
-                        { spawnKey: { endsWith: ":outreach" } },
-                        { spawnKey: null, name: "Outreach" },
-                      ],
-                    },
-                  },
-                  select: { botId: true },
-                })
-                .catch(() => null)
-            : null;
-        const sendCount = asksToSendTo(currentTurnText);
-        const dispatchNote = outreachAsk
-          ? `The recruiter asked for contacts, an email draft or a send: that is Outreach's work. Hand it to Outreach now with handoff_to_bot (bot_id ${outreachAsk.botId}) as your only step, quoting the recruiter's exact words; never decline it, never ask which people and never call the saved results unready. Tell Outreach to show what is already done for these people first (contacts already found, a saved draft) and do only what is missing.${asksAboutThesePeople(currentTurnText) ? ` ${NAMED_EMAILS_NOTE}` : ""}${/[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(currentTurnText) ? ` ${TYPED_ADDRESS_NOTE}` : ""}${sendCount ? ` ${sendToNote(sendCount)}` : ""}`
-          : undefined;
         // A recruiter writing Chinese pulls replies into Chinese despite the system rule; the note
         // sits next to their message, where it holds.
         // History is newest first, so the first user row is the recruiter's latest message (a
@@ -16539,9 +14007,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         turnLanguage = recruiterTexts.some((text) => textLanguage(text))
           ? recruiterLanguage(recruiterTexts)
           : // A role conversation opened by a handoff holds only Kruit's brief, or a copy of the
-            // recruiter's message: their language comes from their messages anywhere in the
-            // account, else from that copy.
-            ((await workingState)?.language ?? recruiterLanguage(roleStartTexts));
+            // recruiter's message: that copy is their language, else their messages anywhere in
+            // the account. Gate 3a58e286 (memory-after-role): an English JD's round came in
+            // Chinese because the account's newest message, asked after it, was Chinese.
+            roleStartTexts.some((text) => textLanguage(text))
+            ? recruiterLanguage(roleStartTexts)
+            : ((await workingState)?.language ?? recruiterLanguage(roleStartTexts));
         // The account's saved roles, read once a turn picks a role, for what the recruiter names.
         let savedRoleList: Promise<SavedRole[]> | undefined;
         const savedRoles = () =>
@@ -16633,7 +14104,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           intakeSkillNote,
           linkRole?.note,
           fileNote,
-          dispatchNote,
           awayNote,
           languageNote,
           creditsNote,
@@ -17530,8 +15000,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     streamRoundPicks(call);
                     streamQuestion(call);
                   },
-                  beforeAsk: async (question, plannedSearches) => {
-                    if (handedOff) return { instead: ASK_AFTER_HANDOFF };
+                  beforeAsk: async (question) => {
                     if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
                     if (globalAskNeedsRoleCheck()) {
                       globalAskChecked = true;
@@ -17628,68 +15097,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     if (settled && bounces < 3) {
                       settledAskBounces.set(settled, bounces + 1);
                       return { instead: settledFactNote(settled) };
-                    }
-                    // Gates 808f4f31, df83586a (one-off-email): "给 Wei Zhang 写封邮件" drew cards for the
-                    // email's purpose, the role title and a profile link before any draft. Draft first.
-                    if (
-                      draftFirstBounces < 2 &&
-                      draftAskedBeforeShown(
-                        lastRecruiterText,
-                        [
-                          assembled,
-                          JSON.stringify(
-                            await deps.prisma.message
-                              .findMany({
-                                where: { threadId: thread.id, role: "bot" },
-                                orderBy: { seq: "desc" },
-                                take: 12,
-                                select: { blocks: true },
-                              })
-                              .catch(() => []),
-                          ),
-                        ].join("\n"),
-                      )
-                    ) {
-                      draftFirstBounces++;
-                      return { instead: DRAFT_BEFORE_ASKING };
-                    }
-                    // Search first, then ask (11-15 card tap): a role the recruiter described is
-                    // searched as written before any question.
-                    if (
-                      firstRoundPending &&
-                      !firstPicksShown &&
-                      searchFirstBounces < 3 &&
-                      describesRole(await recruiterWordsText())
-                    ) {
-                      searchFirstBounces++;
-                      return { instead: SEARCH_BEFORE_ASKING };
-                    }
-                    // Questions follow the recruiter's own language, never the JD's.
-                    if (
-                      hideVendors &&
-                      !askLanguageBounced &&
-                      inOtherLanguage(question, turnLanguage)
-                    ) {
-                      askLanguageBounced = true;
-                      return { instead: ASK_IN_RECRUITER_LANGUAGE };
-                    }
-                    // Any intake answer may be the last one, and the first people come from the searches
-                    // planned with it; without four of them the answer turn waits on its own searches.
-                    // An explicit [] is the recruiter's own-list-only instruction.
-                    if (
-                      (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn) &&
-                      (plannedSearches === undefined ||
-                        (plannedSearches.length > 0 && plannedSearches.length < 4))
-                    )
-                      return { instead: PLANNED_SEARCHES_MISSING };
-                    // An empty plan once skipped the planned searches for a role with no own-list rule.
-                    if (
-                      (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn) &&
-                      plannedSearches?.length === 0 &&
-                      !emptySearchesBounced
-                    ) {
-                      emptySearchesBounced = true;
-                      return { instead: PLANNED_SEARCHES_EMPTY };
                     }
                     return undefined;
                   },
@@ -18255,7 +15662,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // Promote streamed narration into a durable, replyable chat message before
               // tools continue, so long turns do not look stalled and stay replyable.
               if (event.name !== "message_user") {
-                await publishMidTurnNarration(event.name);
+                await publishMidTurnNarration();
               }
               const toolStartedAt = new Date().toISOString();
               const toolActivity = workActivityForTool(event.name, event.args);
@@ -18537,25 +15944,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 redactBlocks(completionBlocks, runSecrets, hideVendors),
                 publishedMidTurnUserMessage || quietRun,
               );
-          // Staging 11-15: after holding round 2, the reply described its people and their grades
-          // before the check, so the recruiter read the round twice. It says only that it comes.
-          const heldPeople = roundHeldRecorded || handedOff ? null : await roundAwaitingCheck();
-          const replyText = blocksText(blocks);
-          if (
-            !handedOff &&
-            (roundHeldRecorded ||
-              (heldPeople !== null &&
-                (listsPeople(replyText) || mentionsPeople(replyText, heldPeople))))
-          )
-            blocks = [
-              {
-                kind: "text",
-                text:
-                  turnLanguage === "zh"
-                    ? "这一轮检查完后马上发给你，大约一两分钟。"
-                    : "The checked round comes in a minute or two.",
-              },
-            ];
           let text = handedOff
             ? ""
             : visible(
@@ -18564,33 +15952,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runSecrets,
                 ),
               );
-          // Only what the records say is unfinished goes round again; the reply's wording is
-          // never judged (11-16: wording checks rewrote correct answers).
-          const declineRetried =
-            turnReport.enabled &&
-            !handedOff &&
-            !delegatedToRole &&
-            !messagingChannelRun &&
-            (run.trigger === "user" || run.trigger === "follow_up")
-              ? await planDeclineRetry(deps, {
-                  run: { threadId: thread.id },
-                  blocks,
-                  memorySaveFailed: turnReport.memorySaveFailed(),
-                  ...(contactLookupOwed
-                    ? {
-                        owedWork: `Continue the contact lookup: ${contactLookupOwed.remaining} of the first ${contactLookupOwed.target} people are still to look up. Call find_emails with next_from_role ${contactLookupOwed.target} again now and keep calling until none are left, then report how many have an email. Do not stop, decline or ask before that.`,
-                      }
-                    : {}),
-                }).catch((error) => {
-                  getLogger().error("run.decline guard", error);
-                  return undefined;
-                })
-              : undefined;
-          if (declineRetried) {
-            const work = turnReport.owedWithoutFinalReply();
-            text = work.length ? await turnReportFor(work) : "";
-            blocks = text ? [{ kind: "text", text }] : [];
-          }
           if (containsSecret(text, runSecrets)) {
             throw new Error("refusing to persist a secret in the thread");
           }
@@ -18736,83 +16097,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 reason: String(error),
               }),
             );
-          // Every message a person writes gets a reply: once the conversation goes quiet, check
-          // that its newest message was answered.
-          await scheduleReplyCheck(deps.jobs, thread.id).catch((error) =>
-            getLogger().error("reply check enqueue", error),
-          );
-          let recruitingContinued = false;
-          let retryRunId: string | null = null;
           if (completed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
-          } else if (
-            declineRetried &&
-            // A teammate's handoff run of this bot is already doing the ask; a second run of the
-            // same bot would work the same request twice.
-            !(await deps.prisma.run.findFirst({
-              where: {
-                threadId: thread.id,
-                botId: bot.id,
-                id: { not: run.id },
-                status: { in: [...ACTIVE_RUN_STATUSES] },
-              },
-              select: { id: true },
-            }))
-          ) {
-            retryRunId = await sendDeclineRetry(
-              deps,
-              { ...run, threadId: thread.id, userId: run.userId },
-              declineRetried,
-            ).catch((error) => {
-              getLogger().error("run.decline retry", error);
-              return null;
-            });
-            recruitingContinued = true;
-          } else if (
-            !messagingChannelRun &&
-            (thread.activeRecruitingRoleId || isRecruitingSpawnKey(bot.spawnKey))
-          ) {
-            // Turn-end guard: a recruiting turn must end with a deliverable, a question, a card
-            // or a handoff; otherwise push the next playbook step instead of going quiet. A role
-            // created during this turn counts, so read the binding as it is now.
-            const roleId = (
-              await deps.prisma.thread
-                .findUniqueOrThrow({
-                  where: { id: thread.id },
-                  select: { activeRecruitingRoleId: true },
-                })
-                .catch(() => thread)
-            ).activeRecruitingRoleId;
-            const guarded = { ...run, threadId: thread.id, userId: run.userId };
-            const guard = await (roleId
-              ? guardRecruitingTurnEnd(deps, {
-                  run: guarded,
-                  roleId,
-                  blocks: finalBlocks.length ? finalBlocks : blocks,
-                  handedOff,
-                  pendingApproval: approvalPausePending,
-                  returnsToRequester:
-                    Boolean(peerMessage) &&
-                    ["request", "question"].includes(peerMessage?.intent ?? "request"),
-                  postAssistant: (text) =>
-                    publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
-                })
-              : thread.groupId?.startsWith("recruiting-global-")
-                ? // Kruit's account-wide conversation never holds a role.
-                  Promise.resolve(undefined)
-                : guardRecruitingRoleCreate(deps, {
-                    run: guarded,
-                    blocks: finalBlocks.length ? finalBlocks : blocks,
-                    handedOff,
-                    pendingApproval: approvalPausePending,
-                  })
-            ).catch((error) => getLogger().error("run.autocontinue guard", error));
-            recruitingContinued = guard?.action === "continued";
           }
-          // A declined turn's retry carries its stage on; that retry reports it.
-          if (thread.groupId && !handedOff && !retryRunId) {
+          if (thread.groupId && !handedOff) {
             await reportGroupStageOutcome(deps, run, thread.groupId, {
               status: "completed",
             }).catch((error) => getLogger().error("group handoff report", error));
@@ -18829,7 +16119,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.text,
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
-          } else if (thread.groupId && !retryRunId) {
+          } else if (thread.groupId) {
             // A teammate's turn may be the last one of work delegated from another conversation.
             // Send-at-night 11-16: a reply held for a retry (it claimed a record no tool read) went
             // back as the result, and the retry's real answer never followed. The retry returns it.
@@ -18840,10 +16130,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           const notifyBody = completionNotificationPreview(text);
           if (
-            runSendsFinishNotification(
-              run.trigger,
-              Boolean(completed.continuationRunId) || recruitingContinued,
-            ) &&
+            runSendsFinishNotification(run.trigger, Boolean(completed.continuationRunId)) &&
             notifyBody
           ) {
             await notifyRun(deps, run, {
@@ -18860,7 +16147,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             {
               text,
               groupId: thread.groupId,
-              continuing: handedOff || Boolean(completed.continuationRunId) || recruitingContinued,
+              continuing: handedOff || Boolean(completed.continuationRunId),
             },
           );
           // Last, and never fatal: the run is already finalized, so a failure here must not reach
@@ -18979,10 +16266,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             error: message,
           });
           if (!failed) return;
-          // A failed turn still owes the person an answer: the reply check asks once more.
-          await scheduleReplyCheck(deps.jobs, thread.id).catch((error) =>
-            getLogger().error("reply check enqueue", error),
-          );
           if (failed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(failed.continuationRunId))

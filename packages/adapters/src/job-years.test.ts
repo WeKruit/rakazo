@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  describesRole,
   intakeFields,
   intakeFieldsNote,
   jobStatesYears,
@@ -94,11 +93,5 @@ describe("search first, then ask", () => {
     const words = "Backend engineer in Austin, TX, Go, 5+ years";
     expect(openFactAsked("Is this role onsite, hybrid or remote?", words)).toBe("location");
     expect(openFactAsked("What years range should I target?", words)).toBeUndefined();
-  });
-
-  it("asks first only when the recruiter has not said what role it is", () => {
-    expect(describesRole("find me some people")).toBe(false);
-    expect(describesRole("Senior SRE, Austin TX onsite, 6+ years")).toBe(true);
-    expect(describesRole("那我第一步该干嘛，想找个后端的")).toBe(true);
   });
 });

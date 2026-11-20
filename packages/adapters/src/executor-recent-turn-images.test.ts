@@ -15,7 +15,6 @@ import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
 import type * as RequestConnectionModule from "./request-connection.js";
-import type * as TurnEndGuardModule from "./turn-end-guard.js";
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
@@ -45,11 +44,6 @@ vi.mock("./request-connection.js", async (importOriginal) => ({
     },
   ),
 }));
-
-vi.mock("./turn-end-guard.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof TurnEndGuardModule>();
-  return { ...actual, planDeclineRetry: vi.fn(actual.planDeclineRetry) };
-});
 
 beforeEach(() => {
   vi.mocked(loadRecruitingRunContext).mockClear();
