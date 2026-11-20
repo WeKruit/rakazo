@@ -492,6 +492,16 @@ describe("people-search agent runs", () => {
       ]);
       const searches = [await limit(), await limit(), await limit(), await limit()];
       expect(searches.map((search) => search.numResults)).toEqual([10, 10, 10, 10]);
+      // Branch 72b51e70: "先找10个" with no round yet had two of three first searches refused as
+      // in flight. The first round shows the ten; its searches are not capped either.
+      db.recruitingCalibrationRound.findFirst.mockResolvedValue(null);
+      db.recruitingCandidate.count.mockResolvedValue(0);
+      found(0);
+      db.message.findMany.mockResolvedValue([
+        { createdAt: at("08:16:00"), blocks: [{ kind: "text", text: "先找10个人" }] },
+      ]);
+      const first = [await limit(), await limit(), await limit()];
+      expect(first.map((search) => search.numResults)).toEqual([10, 10, 10]);
     } finally {
       vi.useRealTimers();
     }

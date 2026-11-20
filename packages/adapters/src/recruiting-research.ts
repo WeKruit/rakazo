@@ -436,7 +436,7 @@ export async function peopleRoomForRequest(
   roleId: string,
   threadId: string,
 ): Promise<number | undefined> {
-  // A round shown for feedback is followed by another round, and the round itself shows the
+  // A round shown for feedback is followed by another round, and a round itself shows the
   // number asked. Its four overlapping searches are how the ten are picked: branch 80ab9951,
   // the cap counted each in flight as ten, so three were refused and the round never came.
   const [round, messages] = await Promise.all([
@@ -467,7 +467,8 @@ export async function peopleRoomForRequest(
       .map((block) => recruiterText(record(block)))
       .join(" ");
     if (!text.trim()) continue;
-    if (!peopleTargetFrom(text, 0)) {
+    const asked = peopleTargetFrom(text, 0);
+    if (!asked) {
       newerAsk ??= message.createdAt;
       continue;
     }
@@ -480,6 +481,11 @@ export async function peopleRoomForRequest(
     ]);
     const seen = new Set(before);
     const fresh = since.filter((key) => !seen.has(key)).length;
+    // The first ten on a new role are the round the recruiter sees, picked from overlapping
+    // searches: branch 72b51e70, "先找10个" had two of its three first searches refused as in
+    // flight. Until the role holds them, those searches are not capped by the ten.
+    const firstRound = !round && total === fresh && asked <= RECRUITING_CALIBRATION_ROUND_SIZE;
+    if (firstRound && total < asked) return undefined;
     const target = peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0;
     // Staging 11-20 (44c1ad44): "先找10个人" was met, then a numberless ask was refused as
     // done, twice. A message written once the number was reached is a new request, whatever its
