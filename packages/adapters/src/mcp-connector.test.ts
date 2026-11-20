@@ -4160,6 +4160,7 @@ describe("local native Instantly campaign and lead tools", () => {
         id: CAMPAIGN,
         status: 0,
         stop_on_reply: true,
+        email_list: ["sender@x.test"],
         sequences: [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }],
       } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
@@ -4668,6 +4669,9 @@ describe("local native Instantly campaign and lead tools", () => {
         path: "/api/v2/leads/list",
         body: { campaign: CAMPAIGN, limit: 100 },
       },
+      // How much of today's sending the campaign's mailbox has left.
+      { method: "GET", path: "/api/v2/accounts?limit=100" },
+      { method: "GET", path: expect.stringMatching(/^\/api\/v2\/accounts\/analytics\/daily\?/) },
       // A send to a few people goes out a minute apart, not ten.
       {
         method: "PATCH",
@@ -4677,6 +4681,16 @@ describe("local native Instantly campaign and lead tools", () => {
       { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
     ]);
+  });
+
+  it("never activates a campaign with no sending mailbox", async () => {
+    // Staging 11-20: three confirmed sends were held for hours as "no sending accounts
+    // available" (0 of 0 mailboxes) while the reply said they were on their way.
+    const f = fixture();
+    f.state.campaign.email_list = [];
+    const events = await f.run("activate_campaign", { campaign_id: CAMPAIGN });
+    expect((events[0] as { message: string }).message).toMatch(/no sending mailbox/);
+    expect(f.state.requests.some((r) => r.path.endsWith("/activate"))).toBe(false);
   });
 
   it("refuses to enroll leads into an active campaign", async () => {
