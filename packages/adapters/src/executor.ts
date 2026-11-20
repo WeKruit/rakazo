@@ -15234,35 +15234,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
-            // Staging 11-15: the lead handed a held round to the Reviewer as a chat turn, which held
-            // the conversation while the check could not run, and the round was never shown.
-            // Staging 11-16: two handoffs named the Reviewer by confirm_name alone and got through.
-            if (
-              (typeof args.bot_id === "string" || typeof args.confirm_name === "string") &&
-              thread.activeRecruitingRoleId
-            ) {
-              const target =
-                typeof args.bot_id === "string"
-                  ? await deps.prisma.bot
-                      .findUnique({
-                        where: { id: args.bot_id },
-                        select: { name: true, spawnKey: true },
-                      })
-                      .catch(() => null)
-                  : { name: String(args.confirm_name), spawnKey: null };
-              if (
-                target &&
-                recruitingBotKey(target) === "reviewer" &&
-                (await roundAwaitingReview(deps.prisma, {
-                  threadId: thread.id,
-                  roleId: thread.activeRecruitingRoleId,
-                }).catch(() => null)) !== null
-              )
-                return finish({
-                  error:
-                    "Not handed off: the Reviewer is already checking the held round from each person's full profile, and the checked round is shown here when that check ends. End the turn with one short line, in the recruiter's language, that it comes in a minute or two.",
-                });
-            }
             // A new role's first question is the coordinator's own: a handoff first costs the
             // recruiter a second agent's start-up before anything appears.
             if (

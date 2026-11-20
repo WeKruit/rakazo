@@ -7,6 +7,7 @@ import {
   isQuietStageReport,
   NO_ROLE_HANDOFF,
   namesRole,
+  REVIEWER_TAKES_NO_HANDOFF,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
   reportStalledGroupStage,
@@ -310,6 +311,22 @@ describe("handoff target", () => {
     await expect(
       handoffToGroupBot(named.deps as never, run, "group-1", { bot_id: "BOT-C", message: "Find" }),
     ).resolves.toMatchObject({ ok: true, botId: "bot-c" });
+  });
+
+  it("hands nothing to the Reviewer, however it is named (branch 2026-11-20)", async () => {
+    // Branch dc97b5bc: in 7 of 11 roles the lead handed "assess who passes" to the Reviewer, which
+    // answered in prose, and round 2 was never recorded.
+    const crew = {
+      spawnKeys: { "bot-c": "recruiting:user-1:reviewer" },
+      activeRecruitingRoleId: "role-1",
+    };
+    for (const target of [{ bot_id: "bot-c" }, { bot_id: "BOT-C" }, { confirm_name: "bot-c" }]) {
+      const { deps, runCreate } = harness([{ kind: "text", text: "check them" }], undefined, crew);
+      await expect(
+        handoffToGroupBot(deps as never, run, "role-1", { ...target, message: "Check" }),
+      ).resolves.toEqual({ error: REVIEWER_TAKES_NO_HANDOFF });
+      expect(runCreate).not.toHaveBeenCalled();
+    }
   });
 
   it("still refuses a target outside the group", async () => {
