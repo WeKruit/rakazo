@@ -350,6 +350,23 @@ describe("startRecruitingGrading", () => {
     const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
     waiting.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now);
+    // fosp 11-20 (eeaf5035): when people checked since the feedback already fill the round, it
+    // shows without waiting for its unchecked person.
+    const filled = fixture({
+      ...options,
+      roundGrades: options.roundGrades.slice(1),
+      said: [{ blocks: [{ kind: "text", text: "再来2个" }] }],
+    });
+    filled.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    filled.prisma.externalEffect.findMany.mockResolvedValue([] as never);
+    await startRecruitingGrading(filled.deps, { threadId: "thread" }, now);
+    expect(filled.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        clientNonce: expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX),
+      }),
+    });
+    expect(promptOf(filled)).toContain("linkedin:/in/spare");
+    expect(promptOf(filled)).not.toContain("linkedin:/in/fits");
     // A round already shown is never swapped afterwards: the recruiter sees each round once.
     const shown = fixture(options);
     await startRecruitingGrading(shown.deps, { threadId: "thread" }, now);

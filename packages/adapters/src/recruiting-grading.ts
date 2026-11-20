@@ -475,8 +475,27 @@ export async function startRecruitingGrading(
       unreviewed.has(row.candidateKey) && row.linkedinUrl ? [row.linkedinUrl] : [],
     ),
   );
-  if (review && ![...roundUrls].some((url) => waiting.has(url) || !sent.has(url))) {
-    const misfits = review.round.candidateKeys.flatMap((key) => {
+  // fosp 11-20 (eeaf5035): people were checked while the lead searched, but not always the ones it
+  // then picked, so the round still waited a minute or more for its own check. When the round's
+  // checked people and people checked since the feedback already fill it, it shows now.
+  const gradedKeys = review?.round.candidateKeys.filter((key) => review.grades.has(key)) ?? [];
+  const early =
+    review?.held === true &&
+    grader?.tool === "self" &&
+    gradedKeys.length < review.round.candidateKeys.length &&
+    (await (async () => {
+      const size = await askedRoundSize(deps.prisma, role.id, review.round.round, thread.id);
+      const people = checkedRoundPeople(
+        gradedKeys,
+        review.grades,
+        await roundReplacements(deps.prisma, role.id, size, review.since),
+        size,
+      );
+      return people.length >= size;
+    })());
+  if (review && (early || ![...roundUrls].some((url) => waiting.has(url) || !sent.has(url)))) {
+    const roundKeys = early ? gradedKeys : review.round.candidateKeys;
+    const misfits = roundKeys.flatMap((key) => {
       const grade = review.grades.get(key);
       return grade && grade.tier !== FIT_TIER ? [{ key, ...grade }] : [];
     });
@@ -489,9 +508,9 @@ export async function startRecruitingGrading(
         select: { id: true },
       });
       const size = await askedRoundSize(deps.prisma, role.id, review.round.round, thread.id);
-      const open = Math.max(0, size - (review.round.candidateKeys.length - misfits.length));
+      const open = Math.max(0, size - (roundKeys.length - misfits.length));
       const shownPeople = checkedRoundPeople(
-        review.round.candidateKeys,
+        roundKeys,
         review.grades,
         await roundReplacements(deps.prisma, role.id, open, review.since),
         size,
