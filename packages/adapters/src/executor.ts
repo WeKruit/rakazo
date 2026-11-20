@@ -12053,8 +12053,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               run.trigger === "recruiting_grade" ||
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
-              // Only the people search fills Results; a plain web search finds pages, not people.
-              (route.toolName !== "web_search_advanced_exa" && route.toolName !== "agent_run") ||
+              // A plain web search counts toward the recruiter's number, so its people are saved
+              // here too; staging 83c32eba showed two in chat that never reached Results. Pages
+              // hold no profile rows, so they save nothing.
+              (route.toolName !== "web_search_exa" &&
+                route.toolName !== "web_search_advanced_exa" &&
+                route.toolName !== "agent_run") ||
               // A search by one person's profile link is a profile lookup, not new people.
               linkedinPersonKey(connectorCall.args?.query) ||
               (returned !== null && typeof returned === "object" && "error" in returned)
