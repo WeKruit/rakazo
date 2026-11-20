@@ -1013,6 +1013,7 @@ export async function hasRoundReviewer(prisma: PrismaClient, threadId: string): 
 /** The lead's turn that shows a held round once the Reviewer has checked it, swapping misfits first. */
 type Replacement = {
   key: string;
+  tier: string;
   name: string | null;
   title: string | null;
   company: string | null;
@@ -1020,9 +1021,10 @@ type Replacement = {
 };
 
 /**
- * Saved people no round has shown whom the Reviewer graded Strong, for the lead to fill a checked
- * round's open places. Only checked people: staging 11-16 swapped seven checked Promising people
- * for unchecked ones in a 2–3 minute turn. Listing them spares the lead paging through Results.
+ * Saved people no round has shown whom the Reviewer graded Strong, then Promising, for the lead to
+ * fill a checked round's open places. Only checked people: staging 11-16 swapped seven checked
+ * Promising people for unchecked ones in a 2–3 minute turn. Promising too: Strong is rare (1–5 of
+ * up to 84 saved on a branch run 2026-11-20), and with Strong only, round 2 came back with 5.
  */
 async function roundReplacements(
   prisma: PrismaClient,
@@ -1062,27 +1064,30 @@ async function roundReplacements(
     if (!tiers.has(row.candidateKey))
       tiers.set(row.candidateKey, (row.matchFields as { match_tier?: unknown } | null)?.match_tier);
   const people = new Map<string, Replacement>();
-  for (const row of rows) {
-    if (shown.has(row.candidateKey) || people.has(row.candidateKey)) continue;
-    if (tiers.get(row.candidateKey) !== FIT_TIER) continue;
-    people.set(row.candidateKey, { key: row.candidateKey, ...row });
-  }
+  for (const tier of REPLACEMENT_TIERS)
+    for (const row of rows) {
+      if (shown.has(row.candidateKey) || people.has(row.candidateKey)) continue;
+      if (tiers.get(row.candidateKey) !== tier) continue;
+      people.set(row.candidateKey, { ...row, key: row.candidateKey, tier });
+    }
   return [...people.values()].slice(0, open + 5);
 }
 
 /** How close a misfit the Reviewer checked is: kept in a place no Strong person can fill. */
 const KEPT_MISFIT_TIERS = ["Promising", "Uncertain"];
+/** Checked people from Results who may fill a round's open places, best first. */
+const REPLACEMENT_TIERS = [FIT_TIER, "Promising"];
 
 /**
  * The checked round to show, in order: the round's people who fit, then the Strong people from
- * Results in the misfits' places, then the closest misfits (Promising before Uncertain, never
- * Partial) in any place still open, up to ten. Staging 11-16 (982a0ac9): told to "keep the round's
+ * Results in the misfits' places, then the round's Promising people, then Promising people from
+ * Results, then the round's Uncertain people (never Partial) in any place still open, up to ten. Staging 11-16 (982a0ac9): told to "keep the round's
  * other people" without being given them, the lead asked the recruiter which three to keep.
  */
 export function checkedRoundPeople(
   candidateKeys: readonly string[],
   grades: ReadonlyMap<string, Pick<RoundGrade, "name" | "tier">>,
-  replacements: readonly Pick<Replacement, "key" | "name">[] = [],
+  replacements: readonly (Pick<Replacement, "key" | "name"> & { tier?: string })[] = [],
 ): { key: string; name: string }[] {
   const misfit = (key: string) => {
     const tier = grades.get(key)?.tier;
@@ -1090,15 +1095,25 @@ export function checkedRoundPeople(
   };
   const named = (key: string, name?: string | null) => ({ key, name: name || key });
   const kept = candidateKeys.filter((key) => !misfit(key));
-  const closest = KEPT_MISFIT_TIERS.flatMap((tier) =>
-    candidateKeys.filter((key) => misfit(key) && grades.get(key)?.tier === tier),
-  );
+  const closest = (tier: string) =>
+    candidateKeys
+      .filter((key) => misfit(key) && grades.get(key)?.tier === tier)
+      .map((key) => named(key, grades.get(key)?.name));
+  const fromResults = (strong: boolean) =>
+    replacements
+      .filter(
+        (person) =>
+          !candidateKeys.includes(person.key) &&
+          ((person.tier ?? FIT_TIER) === FIT_TIER) === strong,
+      )
+      .map((person) => named(person.key, person.name));
+  const [promising, uncertain] = KEPT_MISFIT_TIERS.map(closest);
   const people = [
     ...kept.map((key) => named(key, grades.get(key)?.name)),
-    ...replacements
-      .filter((person) => !candidateKeys.includes(person.key))
-      .map((person) => named(person.key, person.name)),
-    ...closest.map((key) => named(key, grades.get(key)?.name)),
+    ...fromResults(true),
+    ...(promising ?? []),
+    ...fromResults(false),
+    ...(uncertain ?? []),
   ];
   return people.slice(0, Math.max(10, kept.length));
 }

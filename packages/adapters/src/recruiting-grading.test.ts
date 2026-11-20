@@ -1041,6 +1041,33 @@ describe("checkedRoundPeople", () => {
     expect(picked.map((p) => p.key)).not.toContain("d");
     expect(picked[1]).toEqual({ key: "r0", name: "r0" });
   });
+
+  it("fills a mostly turned-down round with checked Promising people from Results, never Partial", () => {
+    // Branch 2026-11-20 (feedback-round x5): the Reviewer graded 1–5 of up to 84 saved people
+    // Strong, so round 2 kept its 5 Promising, dropped its 5 Partial, found no Strong replacement
+    // and came back with 5 while 16 checked Promising people sat in Results.
+    const keys = ["p1", "p2", "p3", "p4", "p5", "x1", "x2", "x3", "x4", "x5"];
+    const grades = new Map([
+      ...keys.slice(0, 5).map((key) => [key, grade(key, "Promising")] as const),
+      ...keys.slice(5).map((key) => [key, grade(key, "Partial")] as const),
+    ]);
+    const replacements = [
+      { key: "s1", name: "S1", tier: "Strong" },
+      ...Array.from({ length: 6 }, (_, i) => ({ key: `q${i}`, name: `Q${i}`, tier: "Promising" })),
+    ];
+    expect(checkedRoundPeople(keys, grades, replacements).map((p) => p.key)).toEqual([
+      "s1",
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+      "p5",
+      "q0",
+      "q1",
+      "q2",
+      "q3",
+    ]);
+  });
 });
 
 describe("heldRoundSearchRefusal", () => {
