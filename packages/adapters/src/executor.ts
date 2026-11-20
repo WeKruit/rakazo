@@ -681,6 +681,7 @@ import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
   linkedinPersonKey,
+  peopleFromSearch,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
@@ -12053,8 +12054,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               run.trigger === "recruiting_grade" ||
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
-              // Only the people search fills Results; a plain web search finds pages, not people.
-              (route.toolName !== "web_search_advanced_exa" && route.toolName !== "agent_run") ||
+              // Staging 83c32eba: a plain web search for people found two, held its share of the
+              // recruiter's number until a save that never came, and none reached Results. Its
+              // profiles are saved as it returns like the people search's; pages save no one.
+              !["web_search_advanced_exa", "web_search_exa", "agent_run"].includes(
+                route.toolName,
+              ) ||
               // A search by one person's profile link is a profile lookup, not new people.
               linkedinPersonKey(connectorCall.args?.query) ||
               (returned !== null && typeof returned === "object" && "error" in returned)
@@ -12076,7 +12081,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }),
               ]);
               const roleId = current?.activeRecruitingRoleId;
-              if (!server?.endpoint || !isPeopleSearchEndpoint(server.endpoint) || !roleId)
+              if (
+                !server?.endpoint ||
+                !isPeopleSearchEndpoint(server.endpoint) ||
+                !roleId ||
+                (route.toolName === "web_search_exa" &&
+                  !peopleFromSearch(returned, server.endpoint).length)
+              )
                 return null;
               // A brief saved in the same step moves the revision; one retry reads the new one.
               for (const attempt of ["", ":2"]) {
