@@ -379,6 +379,25 @@ describe("people-search agent runs", () => {
       db.recruitingCandidate.count.mockResolvedValue(20);
       found(20);
       await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      // The same run's other ask came handed in from the main chat with Kruit's brief after it
+      // ("不联系候选人"); only the recruiter's quoted words are their request, so "再找10个" counts.
+      db.message.findMany.mockResolvedValue([
+        {
+          createdAt: new Date("2026-11-15T11:55:00Z"),
+          blocks: [
+            {
+              kind: "bot_message_received",
+              text: "The recruiter wrote, word for word:\n\"然后再找10个，那三个别再出现\"\n\nKruit's brief:\nDon't: 不联系候选人",
+            },
+          ],
+        },
+        {
+          createdAt: new Date("2026-11-15T10:05:00Z"),
+          blocks: [{ kind: "text", text: "Senior SRE，Austin。找20个人，找完告诉我" }],
+        },
+      ]);
+      found(0, 20);
+      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
     } finally {
       vi.useRealTimers();
     }
