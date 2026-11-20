@@ -426,16 +426,18 @@ const GENERIC_COMPANY_WORD =
   /^(?:data|tech\w*|people|group|global|systems?|solutions?|software|digital|services?|consult\w*|labs?|health\w*|senior|engineer\w*|cloud|inc|corp\w*|company|international|united|american|national|first|new)$/;
 
 /** The text of a message, including a teammate's hand-in of the recruiter's turn. */
+// The quote ends at its closing mark; Kruit's brief or note may follow it.
+const QUOTED = /^The recruiter wrote, word for word:\n"([\s\S]*?)"(?:\n\nKruit's [\s\S]*)?$/;
+
+/** What the recruiter said in a message: a handed-in quote is their words, never Kruit's note. */
 function saidText(blocks: unknown): string[] {
   return (Array.isArray(blocks) ? blocks : []).flatMap((block) => {
     const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
-    return (kind === "text" || kind === "bot_message_received") && typeof text === "string"
-      ? [text]
-      : [];
+    if (typeof text !== "string") return [];
+    if (kind === "text") return [text];
+    return kind === "bot_message_received" ? [text.match(QUOTED)?.[1] ?? text] : [];
   });
 }
-
-const QUOTED = /^The recruiter wrote, word for word:\n"([\s\S]*)"$/;
 
 /**
  * What the recruiter wrote in the role's conversation since its first round, oldest first: their
@@ -461,9 +463,9 @@ export async function recruiterWordsSinceFirstRound(
   });
   return messages.reverse().flatMap((message) =>
     (Array.isArray(message.blocks) ? message.blocks : []).flatMap((block) => {
-      const { kind } = (block ?? {}) as { kind?: unknown };
-      const [text] = saidText([block]);
-      const words = kind === "text" ? text : text?.match(QUOTED)?.[1];
+      const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
+      if (typeof text !== "string") return [];
+      const words = kind === "text" ? text : text.match(QUOTED)?.[1];
       return words?.trim() ? [words.trim().slice(0, 400)] : [];
     }),
   );

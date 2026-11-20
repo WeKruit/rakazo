@@ -13417,7 +13417,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : null;
               // Staging 11-15: one second after the team recorded round 2, Kruit read it here and
               // listed its unchecked ten; the checked round came later with other people.
-              const found = result as { status?: unknown; round?: { round?: unknown } } | null;
+              const found = result as {
+                status?: unknown;
+                round?: { round?: unknown; repeats?: unknown; feedbackBeforeThisRound?: unknown };
+              } | null;
               const held =
                 !shown &&
                 args.operation === "round" &&
@@ -13426,11 +13429,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 thread.groupId?.startsWith("recruiting-global-")
                   ? await globalRoundAwaitingReview(args.roleId)
                   : null;
+              // feedback-round x5 on 94b302cd: asked "any repeats? did it use my feedback?" while
+              // round 2 was being checked, Kruit said it had asked for a check, 4 runs in 5.
               if (held && found?.round?.round === held)
                 return finish({
                   status: "held",
+                  round: held,
+                  repeats: found.round.repeats,
+                  ...(found.round.feedbackBeforeThisRound
+                    ? { feedbackBeforeThisRound: found.round.feedbackBeforeThisRound }
+                    : {}),
                   teamWorking:
-                    `${progress?.note ?? ""} Round ${held} is being checked and is shown here once, already checked: never list, name or count its people before it comes. Asked to see them now, say in one line that the checked round arrives here in a minute or two.`.trim(),
+                    `${progress?.note ?? ""} Round ${held} is being checked and is shown here once, already checked: never list, name or count its people before it comes. Asked to see them now, say in one line that the checked round arrives here in a minute or two. Whether it repeats anyone (repeats) and which of their feedback it was searched with (feedbackBeforeThisRound) are answered now from this result, never by asking the team.`.trim(),
                 });
               return finish(
                 redactConnectorPayload(

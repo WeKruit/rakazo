@@ -334,6 +334,29 @@ describe("roundPeopleNamed", () => {
     });
   });
 
+  it("reads only the recruiter's quoted words, never the person Kruit's note names", async () => {
+    const prisma = prismaFor("");
+    (prisma.message.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      blocks: [
+        {
+          kind: "bot_message_received",
+          text: 'The recruiter wrote, word for word:\n"kwang is LA based"\n\nKruit\'s note, only on who and what this refers to:\nVinay Thanikonda at Amazon',
+        },
+      ],
+    });
+    (
+      prisma.recruitingCandidateOccurrence.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce([
+      { candidateKey: "a", name: "Kwang Hyun Jang", company: "Apple" },
+      { candidateKey: "b", name: "Vinay Thanikonda", company: "Amazon" },
+    ]);
+    await expect(roundPeopleNamed(prisma, input)).resolves.toEqual({
+      round: 1,
+      named: ["Kwang Hyun Jang"],
+      keys: ["a"],
+    });
+  });
+
   it("finds nobody in a plain request for more, or once the round is approved", async () => {
     await expect(
       roundPeopleNamed(prismaFor("these look right, find 20 more"), input),

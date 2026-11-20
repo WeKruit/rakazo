@@ -79,7 +79,18 @@ describe("roleRequestMessage", () => {
       brief: "Goal: find the next 20 people",
     });
     expect(message).toContain(`"${words}"`);
-    expect(message).not.toContain("next 20");
+    expect(message).toMatch(/never a number of people or a scale-out/);
+  });
+
+  it("keeps who the recruiter means while a round waits on them (team-has-no-email 11-16)", async () => {
+    // Kruit's brief named Bhargav; only 「没存的话现在怎么办？」 reached the team, which took
+    // "him" to be the person its own conversation last talked about.
+    const message = await roleRequestMessage(rounds({ approvedAt: null }) as never, {
+      roleId: "role-1",
+      recruiterWords: "没存的话现在怎么办？",
+      brief: "Candidate Bhargav P: is his email saved?",
+    });
+    expect(message.indexOf("没存的话")).toBeLessThan(message.indexOf("Bhargav P"));
   });
 
   it("puts the recruiter's words before Kruit's brief once no round waits on them", async () => {
