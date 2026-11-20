@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 
 /**
@@ -187,6 +188,9 @@ export function serveCodeToolCalls(io: {
 
 /** The part of a Pi tool a call from code needs. */
 type CallableTool = {
+  name: string;
+  description: string;
+  parameters: unknown;
   prepareArguments?: (args: unknown) => unknown;
   execute: (
     toolCallId: string,
@@ -210,7 +214,19 @@ export async function callToolFromCode(
   const id = `code-${randomUUID()}`;
   codeCallIds.add(id);
   try {
-    const params = tool!.prepareArguments ? tool!.prepareArguments(args) : args;
+    const prepared = tool!.prepareArguments ? tool!.prepareArguments(args) : args;
+    // The same schema check the model's own calls pass; a mistyped argument names itself.
+    let params: unknown;
+    try {
+      params = validateToolArguments(tool as never, {
+        type: "toolCall",
+        id,
+        name,
+        arguments: prepared as never,
+      });
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
     const result = await tool!.execute(id, params as never);
     if (result.details !== undefined) return result.details;
     return result.content

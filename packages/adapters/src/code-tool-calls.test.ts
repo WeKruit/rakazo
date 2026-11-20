@@ -46,6 +46,8 @@ async function runWithBridge(
   return { code, stdout: withoutCodeToolMarkers(stdout), stderr, used: bridge.used() };
 }
 
+const OPEN = { type: "object", properties: {} };
+
 describe("calls to the run's tools from code on the computer", () => {
   it("answers each call with the tool's full result and keeps markers out of the output", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "code-tools-"));
@@ -92,11 +94,8 @@ describe("calls to the run's tools from code on the computer", () => {
 
   it("refuses tools that wait for the person or start other agents", async () => {
     const execute = vi.fn();
-    const tools = new Map([
-      ["ask_user", { execute }],
-      ["delegate_to_role", { execute }],
-      ["shell", { execute }],
-    ]);
+    const tool = (name: string) => ({ name, description: "", parameters: OPEN, execute });
+    const tools = new Map(["ask_user", "delegate_to_role", "shell"].map((n) => [n, tool(n)]));
     for (const name of ["ask_user", "delegate_to_role", "shell", "missing"])
       expect(await callToolFromCode(tools, new Set(), name, {})).toMatchObject({
         error: expect.any(String),
@@ -111,6 +110,9 @@ describe("calls to the run's tools from code on the computer", () => {
       [
         "recruiting_candidates",
         {
+          name: "recruiting_candidates",
+          description: "",
+          parameters: OPEN,
           execute: async (id: string) => {
             seen = ids.has(id);
             return { content: [{ type: "text", text: "clipped" }], details: { total: 40 } };
@@ -123,6 +125,29 @@ describe("calls to the run's tools from code on the computer", () => {
     });
     expect(seen).toBe(true);
     expect(ids.size).toBe(0);
+  });
+
+  it("checks arguments against the tool's schema before running it", async () => {
+    const execute = vi.fn();
+    const tools = new Map([
+      [
+        "recruiting_candidates",
+        {
+          name: "recruiting_candidates",
+          description: "",
+          parameters: {
+            type: "object",
+            properties: { operation: { type: "string" } },
+            required: ["operation"],
+          },
+          execute,
+        },
+      ],
+    ]);
+    expect(await callToolFromCode(tools, new Set(), "recruiting_candidates", {})).toMatchObject({
+      error: expect.stringContaining("operation"),
+    });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("finds the helper from the command's folder", () => {
