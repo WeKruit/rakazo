@@ -334,15 +334,22 @@ it("shows the same people in a board grouped only by their recorded states", asy
   const two = row("two");
   one.autumn!.shortlisted = true;
   two.autumn!.decision = "hold";
+  // Fosp 11-20 (2a781497): people the recruiter turned down in chat showed unmarked.
+  const three = row("three");
+  three.autumn!.recruiterVerdict = "not_fit";
   const onOpen = vi.fn();
-  const { view } = await mount(<CandidateDirectory rows={[one, two]} onOpen={onOpen} board />);
+  const { view } = await mount(
+    <CandidateDirectory rows={[one, two, three]} onOpen={onOpen} board />,
+  );
   await act(async () => button(view, "Board").click());
   expect(view.querySelector('[aria-label="Shortlisted"]')?.textContent).toContain("Candidate one");
   expect(view.querySelector('[aria-label="On hold"]')?.textContent).toContain("Candidate two");
+  expect(view.querySelector('[aria-label="Passed"]')?.textContent).toContain("Candidate three");
   expect(view.textContent).not.toContain("Hired");
-  expect(view.querySelectorAll("[data-candidate-name]")).toHaveLength(2);
+  expect(view.querySelectorAll("[data-candidate-name]")).toHaveLength(3);
   await act(async () => view.querySelector<HTMLButtonElement>("[data-candidate-name]")!.click());
   expect(onOpen.mock.calls[0]?.[0]).toBe(one);
   await act(async () => button(view, "Table").click());
-  expect(view.querySelectorAll("[data-candidate-name]")).toHaveLength(2);
+  expect(view.querySelectorAll("[data-candidate-name]")).toHaveLength(3);
+  expect(view.textContent).toContain("Passed");
 });
