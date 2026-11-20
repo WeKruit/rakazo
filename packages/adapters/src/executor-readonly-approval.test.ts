@@ -16,6 +16,7 @@ import type { PauseRunForInput } from "@rakazo/db";
 import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
+import { changedPaths } from "./campaign-send-card.js";
 import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
@@ -1833,6 +1834,25 @@ describe("native Instantly activation card", () => {
       spaceId: "space-1",
     } as never);
     expect(await listed()).toBe(true);
+  });
+
+  it("names which parts of a send card changed, without their values", () => {
+    const shown = {
+      sendNow: false,
+      recipients: [{ email: "a@x.test", name: "Ada" }, { email: "e@x.test" }],
+      firstEmail: null,
+    };
+    expect(changedPaths(shown, shown)).toEqual([]);
+    expect(
+      changedPaths(shown, {
+        ...shown,
+        recipients: [
+          { email: "a@x.test", name: "Ada Chen" },
+          { email: "e@x.test", emailType: "work" },
+        ],
+      }),
+    ).toEqual(["recipients[0].name", "recipients[1].emailType"]);
+    expect(changedPaths(undefined, shown)).toEqual(["card not recorded"]);
   });
 
   it("closes a confirmed send that cannot start instead of failing the run", async () => {
