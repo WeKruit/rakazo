@@ -153,7 +153,15 @@ export type ToolOutputStore = (text: string) => Promise<StoredToolOutput | undef
 
 /** Pointer the model sees after a clipped result; the full text stays readable on demand. */
 export function fullToolOutputPointer(stored: StoredToolOutput): string {
-  return `\n[Output clipped. The complete ${stored.length}-character result is saved; read it with artifact_read artifactId "${stored.artifactId}" using offset and limit.]`;
+  return `\n[Output clipped. The complete ${stored.length}-character result is saved; read it with artifact_read artifactId "${stored.artifactId}" using offset and limit. ${codeOverSavedResult(stored.artifactId)}]`;
+}
+
+/**
+ * Claude Code and Pi keep an oversized result as a file the agent works on with code. Ours is
+ * an account-scoped artifact; write_file copies it onto the bot's computer for the same work.
+ */
+function codeOverSavedResult(artifactId: string): string {
+  return `To count, filter, sort or join it, copy it to your computer with write_file artifactId "${artifactId}" and work on that file with code in shell (python3), printing only what you need.`;
 }
 
 /**
@@ -240,7 +248,7 @@ export async function spillRequiredResult<T extends { content: unknown[] }>(
     totalChars: stored.length,
     totalLines: head.totalLines,
     nextOffset,
-    note: `Showing lines 1-${head.outputLines} of ${head.totalLines} (${formatSize(head.maxBytes)} limit) of the complete ${formatSize(head.totalBytes)} result. Read the rest with artifact_read artifactId "${stored.artifactId}" from offset ${nextOffset}, continuing with nextOffset until hasMore is false.`,
+    note: `Showing lines 1-${head.outputLines} of ${head.totalLines} (${formatSize(head.maxBytes)} limit) of the complete ${formatSize(head.totalBytes)} result. Read the rest with artifact_read artifactId "${stored.artifactId}" from offset ${nextOffset}, continuing with nextOffset until hasMore is false. ${codeOverSavedResult(stored.artifactId)}`,
     preview: head.content,
   };
   return { ...result, content: [{ type: "text", text: JSON.stringify(preview) }] };

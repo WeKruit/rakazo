@@ -6,6 +6,8 @@ environment's Secret, can reach only the model host, and stops itself after --mi
 
   pnpm sim:branch [--minutes 60] [--env RAKAZO_NAME=value ...] [-- <simulated-customer args>]
 
+--env RAKAZO_SIM_SANDBOX=desktop runs the agent's shell commands inside this Sandbox (default: fake).
+
 Without simulated-customer args it plays the free journeys that need no mailbox, copied account or
 paid search. Results land where the simulated customer writes them (--out, else simulated-<time>/).
 Needs MODAL_TOKEN_ID/MODAL_TOKEN_SECRET and the simulated customer's own model access.
@@ -45,7 +47,10 @@ def inside():
     env = {k: v for k, v in os.environ.items() if k in keep or k.startswith("RAKAZO_")}
     env.update(INTEGRATION_DATABASE_URL=DATABASE_URL, API_PORT=str(PORT), HARNESS_HOST="0.0.0.0")
     os.chdir("/app")
-    os.execvpe("pnpm", ["pnpm", "exec", "tsx", "packages/testkit/src/cli/harness.ts", "--serve", "--runtime=pi"], env)
+    # --sandbox desktop: the agent's shell commands run in this Sandbox instead of the fake one.
+    sandbox = os.environ.get("RAKAZO_SIM_SANDBOX", "fake")
+    os.execvpe("pnpm", ["pnpm", "exec", "tsx", "packages/testkit/src/cli/harness.ts", "--serve",
+                        "--runtime=pi", f"--sandbox={sandbox}"], env)
 
 
 def image():

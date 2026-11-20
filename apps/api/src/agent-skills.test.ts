@@ -11,7 +11,11 @@ const actor: Actor = {
   email: "user@rakazo.test",
   isDeploymentOwner: true,
 };
-const productBuiltins = [...RECRUITING_DEFAULT_SKILLS, MEMORY_TIDY_SKILL].map(({ name }) =>
+const productBuiltins = [
+  ...RECRUITING_DEFAULT_SKILLS,
+  MEMORY_TIDY_SKILL,
+  { name: "Work with data using code" },
+].map(({ name }) =>
   expect.objectContaining({ id: `builtin:${name}`, source: "builtin", readOnly: true }),
 );
 
