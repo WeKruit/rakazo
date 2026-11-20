@@ -149,7 +149,8 @@ describe("recruiting brief checklist", () => {
 describe("recruiting tool budget", () => {
   // Every Kruit call carries these definitions: 40 tools, about 7.7 times its instructions on 11-16.
   // Workloop pins its prompt the same way (TestPrompt_FitsTheBudget). Lower it, never raise it:
-  // move procedure into skills and rarely used tools behind tool search instead.
+  // move procedure into skills and rarely used tools behind tool search instead. Raised once on
+  // 11-20 by the user's decision to give the base agent back skills, sub-agents and the scratchpad.
   it("keeps the built-in tools a recruiter turn always carries within budget", () => {
     const tools = selectBuiltinToolsForRun({
       graphicalToolsAllowed: false,
@@ -170,6 +171,6 @@ describe("recruiting tool budget", () => {
         JSON.stringify(normalizeOpenAiToolParameters(tool.inputSchema)).length,
       0,
     );
-    expect(chars).toBeLessThanOrEqual(92_500);
+    expect(chars).toBeLessThanOrEqual(96_500);
   });
 });
