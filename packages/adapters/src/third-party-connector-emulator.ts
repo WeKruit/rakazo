@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { InstantlyEmulator } from "./instantly-emulator.js";
 import type { ResolveHostname } from "./remote-mcp.js";
 
 type EmulatorRecord =
@@ -25,6 +26,8 @@ const PIPEDREAM_APPS = [
 /** Deterministic HTTP/MCP boundary emulator used by integration and browser journeys. */
 export class ThirdPartyConnectorEmulator {
   readonly records: EmulatorRecord[] = [];
+  /** The outreach mail service; a test backend adds the mailboxes its accounts send from. */
+  readonly instantly = new InstantlyEmulator();
   readonly resolveHostname: ResolveHostname = async () => [{ address: "203.0.113.10", family: 4 }];
 
   private readonly connectedApps = new Map<string, Set<string>>();
@@ -43,6 +46,7 @@ export class ThirdPartyConnectorEmulator {
     if (url.hostname === "api.example.test") return this.openapi(url, init);
     if (url.hostname === "graphql.example.test") return this.graphql(url, init);
     if (url.hostname === "catalog.example.test") return this.catalog(url);
+    if (this.instantly.handles(url.hostname)) return this.instantly.fetch(url, init);
     throw new Error(`Third-party connector emulator received unexpected URL ${url}`);
   };
 

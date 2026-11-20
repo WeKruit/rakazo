@@ -93,6 +93,8 @@ async function main() {
     // A served backend may be reachable from outside, so it keeps the caller's signup allowlist.
     process.env.SIGNUP_ALLOWLIST = serveMode ? (process.env.SIGNUP_ALLOWLIST ?? "") : "";
     process.env.CI = "1";
+    // A served backend plays send journeys on the emulated outreach mail service, which takes any key.
+    if (serveMode) process.env.INSTANTLY_API_KEY = "emulated-outreach-mail";
 
     execSync("pnpm --filter @rakazo/db generate", { stdio: "inherit", env: process.env });
     execSync("pnpm --filter @rakazo/db exec prisma migrate deploy", {
@@ -187,6 +189,10 @@ async function main() {
     ] = await Promise.all([import("@rakazo/adapters"), import("../../../../apps/api/src/app.ts")]);
     const { serve } = await import("@hono/node-server");
     const thirdParties = new ThirdPartyConnectorEmulator();
+    // The mailboxes a branch backend assigns to its sending accounts (infra/modal/branch_backend.py).
+    if (serveMode)
+      for (const n of [1, 2, 3])
+        thirdParties.instantly.addMailbox({ email: `sender${n}@branch-mail.example.test` });
     const journey = e2eSpec?.includes("recruiting-global-journey")
       ? new (
           await import("../recruiting-global-journey-fixture.js")
