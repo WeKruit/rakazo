@@ -138,6 +138,8 @@ function mailReplyHistoryText(reply: MailReply): string {
   ].join("\n");
 }
 
+const ASK_HISTORY_DETAIL_CHARS = 2_000;
+
 export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
   return blocks
     .map((block) => {
@@ -175,9 +177,12 @@ export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
       // Without the answer a later turn sees the question as still open and asks it again.
       if (block.kind === "ask") {
         // A reply card's title alone ("Confirm reply") cannot tell one draft from another.
+        // Nor can its title alone say what a send card showed: "not this subject" needs the subject.
         const text = block.mailReply
           ? `${block.text}\n${mailReplyHistoryText(block.mailReply)}`
-          : block.text;
+          : block.detail
+            ? `${block.text}\n${block.detail.length > ASK_HISTORY_DETAIL_CHARS ? `${block.detail.slice(0, ASK_HISTORY_DETAIL_CHARS)}…` : block.detail}`
+            : block.text;
         // An approval card that reads like a request must not read like a granted one.
         if (block.approvalEffectId && block.status !== "answered")
           return `${text}\n(${block.status === "expired" ? "Approval card closed unanswered" : "Approval card waiting for the user; not answered"})`;
