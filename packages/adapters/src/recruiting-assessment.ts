@@ -149,9 +149,13 @@ async function requireRecruitingRun(
 export function resultsMark(person: {
   decision?: "hold" | "pass";
   recruiterVerdict?: "good_example" | "not_fit";
-}): "on hold" | "passed" | undefined {
+}): "on hold" | "not a fit" | undefined {
+  // Results labels these "Passed" in English and 不合适 in Chinese. Branch d29d7154: relayed as
+  // "passed", Kruit told a Chinese recruiter they were 已通过 (approved).
   if (person.decision === "hold") return "on hold";
-  return person.decision === "pass" || person.recruiterVerdict === "not_fit" ? "passed" : undefined;
+  return person.decision === "pass" || person.recruiterVerdict === "not_fit"
+    ? "not a fit"
+    : undefined;
 }
 
 /** People per numbered page of a candidate list read. */

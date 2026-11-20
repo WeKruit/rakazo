@@ -785,7 +785,7 @@ describe("native saved candidate reads", () => {
       context,
     )) as { round: { candidates: Array<{ onResults?: string }> } };
     expect(result.round.candidates.map((person) => person.onResults)).toEqual([
-      "passed",
+      "not a fit",
       "on hold",
       undefined,
     ]);
