@@ -21,6 +21,10 @@ msgstr " (unread)"
 msgid " and {more} more"
 msgstr " and {more} more"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid " and {moreEmailed} more"
+msgstr " and {moreEmailed} more"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -201,10 +205,6 @@ msgstr "{count} years"
 #: src/lib/relative-time.ts
 msgid "{days}d ago"
 msgstr "{days}d ago"
-
-#: src/pages/recruiting/SendQueue.tsx
-msgid "{emailed} emailed"
-msgstr "{emailed} emailed"
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
@@ -2051,6 +2051,10 @@ msgstr "Email verification required"
 msgid "Email: {0}"
 msgstr "Email: {0}"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Emailed: {emailedNames}"
+msgstr "Emailed: {emailedNames}"
+
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Emails"
@@ -3359,6 +3363,10 @@ msgstr "Not a fit"
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Not a fit: {name}"
 msgstr "Not a fit: {name}"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Not emailed yet: {waitingNames}"
+msgstr "Not emailed yet: {waitingNames}"
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Not interested"
