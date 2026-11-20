@@ -496,6 +496,7 @@ import {
 } from "./email-attachments.js";
 import {
   globalRoleWriteRefusal,
+  otherRoleWriteRefusal,
   PEOPLE_SEARCH_TOOLS,
   roleRequestMessage,
 } from "./global-role-writes.js";
@@ -10014,6 +10015,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args: connectorCall.args,
             });
             if (roleWrite) return { error: roleWrite };
+          } else if (connectorCall.route?.connectorId === "mcp" && thread.activeRecruitingRoleId) {
+            const otherRole = await otherRoleWriteRefusal(
+              deps.prisma,
+              run,
+              thread.activeRecruitingRoleId,
+              { toolName: connectorCall.route.toolName, args: connectorCall.args },
+            );
+            if (otherRole) return { error: otherRole };
           }
           const nativeCrmRoute = connectorCall.route;
           const ordinaryCrmWrite = Boolean(
