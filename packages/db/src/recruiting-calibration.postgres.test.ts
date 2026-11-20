@@ -443,6 +443,17 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     expect(seen.people.get("spare-0")).toMatchObject({ verdict: "not_fit" });
     expect(seen.people.get("spare-0")?.round).toBeUndefined();
 
+    // Results' own marks for the whole role, whichever round is read.
+    const marks = await recruiting.readRecruitingResultsMarks(prisma, actor, { roleId });
+    expect(
+      Object.fromEntries(marks.map((person) => [person.candidateKey, [person.round, person.mark]])),
+    ).toEqual({
+      "first-0": [1, "not a fit"],
+      "first-1": [1, "not a fit"],
+      "second-0": [2, "not a fit"],
+      "spare-0": [undefined, "not a fit"],
+    });
+
     // What the praised and turned-down people share, from saved profiles or their search rows.
     await prisma.recruitingSavedProfile.create({
       data: {
