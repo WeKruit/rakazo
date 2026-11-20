@@ -547,6 +547,7 @@ export async function executeRecruitingCandidatesTool(
         {
           threadId: trusted.threadId,
           roleId: input.roleId,
+          ...(input.round ? { round: input.round } : {}),
         },
       );
       itemCount = round?.candidates.length ?? 0;
