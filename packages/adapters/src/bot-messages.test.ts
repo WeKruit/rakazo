@@ -834,10 +834,8 @@ describe("delegating to a role team in another conversation", () => {
       later: [said("Recording the feedback."), said(round), said("Round 2 is posted.")],
     });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    expect(returnedTo(harness)[0]).toEqual({
-      kind: "text",
-      text: `Round 2 is posted.\n\n${round}`,
-    });
+    // The round itself is posted; the team's closing line stays in its own chat.
+    expect(returnedTo(harness)[0]).toEqual({ kind: "text", text: round });
   });
 
   it("lists everyone the request saved from the record, beside the round, each once", async () => {
@@ -864,12 +862,14 @@ describe("delegating to a role team in another conversation", () => {
     prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
     prisma.externalEffect = { findMany: vi.fn(async () => []) };
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    const [returned] = returnedTo(harness) as Array<{ text: string }>;
-    expect(returned?.text).toContain(round);
+    const [posted, note] = returnedTo(harness) as Array<{ text: string }>;
+    // Branch dc97b5bc 11-20: the posted copy carried Kruit's "Reply with one line…" note.
+    expect(posted?.text).toBe(round);
+    const returned = note;
+    expect(returned?.text).not.toContain("Amy A");
     expect(returned?.text).toContain("3 people in all");
     expect(returned?.text).toContain("2. **[Bo B](https://www.linkedin.com/in/bo)** · SRE · Visa");
     expect(returned?.text).toContain("3. **[Cy C](https://www.linkedin.com/in/cy)**");
-    expect(returned?.text.split("Amy A")).toHaveLength(2);
     // Gate 71a2cac2: Kruit squared the team's "profiles show 6+ years" with the record and
     // contradicted it. The record is the whole answer; the team's retelling stays in its chat.
     expect(returned?.text).not.toContain("Saved 20; 4 more");
@@ -903,8 +903,8 @@ describe("delegating to a role team in another conversation", () => {
     prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
     prisma.externalEffect = { findMany: vi.fn(async () => []) };
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    const [returned] = returnedTo(harness) as Array<{ text: string }>;
-    expect(returned?.text).toContain(round);
+    const [posted, returned] = returnedTo(harness) as Array<{ text: string }>;
+    expect(posted?.text).toBe(round);
     expect(returned?.text).toContain("2 more");
     expect(returned?.text).not.toContain("Bo B");
     expect(returned?.text).not.toContain("Cy C");
