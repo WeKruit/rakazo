@@ -1805,12 +1805,21 @@ export async function resolveRecruitingContactAcrossRoles(
   const crm: { roleId: string; crm: "read" | "not_bound" | "unavailable" }[] =
     [];
   for (const role of roles) {
+    // One role whose conversation or agent was removed must not fail the lookup in every other
+    // role (simulated 2026-11-16, team-has-no-email).
     const result = await resolveRecruitingContact(
       deps,
       actor,
       { roleId: role.id, nameOrEmail },
       context,
-    );
+    ).catch((error: unknown) => {
+      if (!(error instanceof IsolationError)) throw error;
+      getLogger().warn("recruiting.role_read.skipped", {
+        "recruiting.role_id": role.id,
+      });
+      return undefined;
+    });
+    if (!result) continue;
     crm.push({ roleId: role.id, crm: result.crm });
     matches.push(
       ...result.matches.map((match) => ({
