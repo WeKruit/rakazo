@@ -43,7 +43,7 @@ export const JOURNEYS = [
   {
     name: "send-at-night",
     // Roles earlier plays of this journey left on the reused account; archived before a play.
-    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
     mechanisms: ["state-claims", "reference"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
@@ -63,7 +63,7 @@ export const JOURNEYS = [
         recipients,
         tag,
       )
-        .map((address, index) => `- ${["Noah Liu", "Ada Chen"][index]} <${address}>`)
+        .map((address, index) => `- ${["Ethan Park", "Ada Chen"][index]} <${address}>`)
         .join("\n")}`,
     goals: [
       "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both.",
@@ -75,7 +75,7 @@ export const JOURNEYS = [
   },
   {
     name: "send-through-blip",
-    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
     mechanisms: ["state-claims", "reference"],
     title: "网络刚断过一下，马上要发邮件：发送卡照样要出来",
     area: "reliability",
@@ -92,7 +92,7 @@ export const JOURNEYS = [
         recipients,
         tag,
       )
-        .map((address, index) => `- ${["Noah Liu", "Ada Chen"][index]} <${address}>`)
+        .map((address, index) => `- ${["Ethan Park", "Ada Chen"][index]} <${address}>`)
         .join("\n")}\nDeny the send card when it comes: this check is only about the card appearing.`,
     goals: [
       "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both.",
@@ -366,7 +366,7 @@ export const JOURNEYS = [
   {
     name: "schedule-interview",
     // Roles earlier plays of this journey left on the reused account; archived before a play.
-    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
     mechanisms: ["state-claims", "reference"],
     title: "候选人同意面试：约时间、发邀请、改期、在 Interview 页看",
     area: "sending",
@@ -378,12 +378,12 @@ export const JOURNEYS = [
     maxTurns: 9,
     persona: `${AGENCY_RECRUITER} A candidate just said yes to a first call with your client and you want it on the calendar today.`,
     facts: (recipients, tag) =>
-      `The candidate: Noah Liu <${twoInboxes(recipients, tag)[0]}>, for the Senior Data Engineer role (Seattle, ref ${tag}). He is free Tuesday or Wednesday 2–4 pm Central. The call is 30 minutes with the hiring manager. Halfway through, Noah asks to move it to Thursday same time.`,
+      `The candidate: Ethan Park <${twoInboxes(recipients, tag)[0]}>, for the Senior Data Engineer role (Seattle, ref ${tag}). He is free Tuesday or Wednesday 2–4 pm Central. The call is 30 minutes with the hiring manager. Halfway through, Ethan asks to move it to Thursday same time.`,
     goals: [
-      "Tell Kruit Noah agreed to a 30-minute call and give his free times; ask it to set it up.",
-      "If a card asks to confirm the invitation, check it names Noah, the time and the content before approving.",
-      "Tell Kruit Noah wants Thursday instead, and get it moved without retyping everything.",
-      "Open the Interview page and check it shows Noah's call at the right time and status.",
+      "Tell Kruit Ethan agreed to a 30-minute call and give his free times; ask it to set it up.",
+      "If a card asks to confirm the invitation, check it names Ethan, the time and the content before approving.",
+      "Tell Kruit Ethan wants Thursday instead, and get it moved without retyping everything.",
+      "Open the Interview page and check it shows Ethan's call at the right time and status.",
     ],
   },
   {
@@ -469,7 +469,7 @@ export const JOURNEYS = [
   },
   {
     name: "stop-after-approve",
-    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
     mechanisms: ["state-claims", "guard-dead-end"],
     title: "刚批准发送马上说别发了：要真停下，并说清谁已发、谁没发",
     area: "sending",
@@ -479,24 +479,24 @@ export const JOURNEYS = [
     sends: true,
     chinese: true,
     maxTurns: 7,
-    persona: `${AGENCY_RECRUITER} Right after approving, you remember the client asked you to hold all outreach until Monday.`,
+    persona: `${AGENCY_RECRUITER} Right after approving, you remember the client asked you to hold this role's outreach until Monday.`,
     facts: (recipients, tag) =>
       `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days, 6+ years, Spark and Kafka, base $180k–$220k.\nTwo candidates you found yourself:\n${twoInboxes(
         recipients,
         tag,
       )
-        .map((address, index) => `- ${["Noah Liu", "Ada Chen"][index]} <${address}>`)
+        .map((address, index) => `- ${["Ethan Park", "Ada Chen"][index]} <${address}>`)
         .join("\n")}`,
     goals: [
       "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both.",
       "When the send confirmation card names both, approve it.",
-      "Right after, tell Kruit to stop: nothing more should go out until Monday.",
+      "Right after, tell Kruit to stop: nothing more for this role should go out until Monday.",
       "Met only when Kruit says, matching the records, who was already emailed and who was held back, and that the rest will not go out until you say so.",
     ],
   },
   {
     name: "deny-then-change-and-send",
-    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
     mechanisms: ["email-content", "reference", "guard-dead-end"],
     title: "先拒绝发送卡，改一句再发：不用重说一遍，新卡要带改动",
     area: "sending",
@@ -508,11 +508,11 @@ export const JOURNEYS = [
     maxTurns: 7,
     persona: `${AGENCY_RECRUITER} You read the email on the card and do not like the subject line.`,
     facts: (recipients, tag) =>
-      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days, 6+ years, Spark and Kafka, base $180k–$220k.\nOne candidate you found yourself: Noah Liu <${twoInboxes(recipients, tag)[0]}>.\nThe subject you want: "Seattle data role, Spark/Kafka, $180–220k".`,
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days, 6+ years, Spark and Kafka, base $180k–$220k.\nOne candidate you found yourself: Ethan Park <${twoInboxes(recipients, tag)[0]}>.\nThe subject you want: "Seattle data role, Spark/Kafka, $180–220k".`,
     goals: [
-      "Give Kruit the role and Noah with his email, and ask it to write and send him the first email.",
+      "Give Kruit the role and Ethan with his email, and ask it to write and send him the first email.",
       "When the send confirmation card appears, deny it and say the subject should be your subject instead.",
-      "Met only when a new card shows the email with your subject and Noah as the only recipient, without you retyping the role or the address; approve it.",
+      "Met only when a new card shows the email with your subject and Ethan as the only recipient, without you retyping the role or the address; approve it.",
       "Ask whether it went out or is queued, and check the answer matches the records.",
     ],
   },
