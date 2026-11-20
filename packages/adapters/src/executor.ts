@@ -790,6 +790,7 @@ import {
 import { TASK_CATALOG_GUIDANCE, taskCatalogFromTool } from "./task-catalog.js";
 import { getActiveTeachingSession, parsePlaybook } from "./teaching-session.js";
 import { attachWorkspaceFileToThread, storeToolOutputArtifact } from "./thread-artifacts.js";
+import { linkSavedThreadRole } from "./thread-role-link.js";
 import type { TicketChangeNotifier } from "./ticket-changes.js";
 import { loadAgentTicketContext } from "./ticket-context.js";
 import {
@@ -5521,6 +5522,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          await linkSavedThreadRole(deps.prisma, thread, name);
           const addMcpServer = async (
             toolArgs: Record<string, unknown>,
           ): Promise<Record<string, unknown>> => {
