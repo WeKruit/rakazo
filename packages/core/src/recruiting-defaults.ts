@@ -15,7 +15,8 @@ export const RECRUITING_DISABLED_BUILTIN_TOOLS = [
 ] as const;
 
 /**
- * General platform tools a recruiting agent never needs. They are left out of recruiting runs in
+ * General platform tools a recruiting agent never needs (11-20: skills, sub-agents and the
+ * scratchpad are back; they make the base agent stronger and are the harness's own). They are left out of recruiting runs in
  * code, so every crew (new or old) gets the shorter tool list without a data migration: each
  * offered tool costs prompt on every model call, and a long list makes the model pick worse.
  */
@@ -33,15 +34,6 @@ export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
   "cloud_agent_reply",
   "cloud_agent_cancel",
   "task_catalog",
-  "scratchpad_list",
-  "scratchpad_add",
-  "scratchpad_update",
-  "scratchpad_complete",
-  "scratchpad_remove",
-  "skill_create",
-  "skill_update",
-  "skill_delete",
-  "run_subagent",
   "create_space",
   "spawn_bot",
   "update_bot",
