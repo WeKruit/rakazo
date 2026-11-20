@@ -19,6 +19,7 @@ describe("requested people target", () => {
     // Branch a2d787f8: a count quoted back in a question is not the ask (it read 14).
     ["再来5个，刚才那三个别再出现。另外你说有14个候选人？首轮不是10个吗", 5],
     ["能再找20个吗？", 20],
+    ["另外你说的7个和23个到底哪个对，再来5个，别让1、5、6回来", 5],
   ])("%s → %s", (text, target) => {
     expect(requestedPeopleTarget(text)).toBe(target);
   });
