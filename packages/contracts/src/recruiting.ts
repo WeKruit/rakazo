@@ -1624,6 +1624,8 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     limit: z.number().int().min(1).max(100).optional(),
     /** A numbered page of `limit` people (default 10), for jumping back and forth. */
     page: z.number().int().min(1).max(600).optional(),
+    /** In Kruit's conversation: post this page to the recruiter in the round's list lines. */
+    show: z.boolean().optional(),
     // A role conversation always reads its own role; elsewhere the agent names one.
     roleId: RecruitingId.optional(),
   }),

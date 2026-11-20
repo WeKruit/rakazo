@@ -424,7 +424,7 @@ export async function executeRecruitingCandidatesTool(
         : paged;
     }
     if (input.operation === "list") {
-      const { operation: _operation, roleId: namedRoleId, page, ...query } = input;
+      const { operation: _operation, roleId: namedRoleId, page, show: _show, ...query } = input;
       const listRoleId = roleId ?? namedRoleId;
       if (page !== undefined && query.cursor === undefined) {
         query.limit ??= PAGE_SIZE;

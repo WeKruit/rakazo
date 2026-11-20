@@ -16,6 +16,10 @@ describe("requested people target", () => {
     ["再来5个，上海的，别带那三个", 5],
     ["再来2个，别带那三个", 2],
     ["find 3 more people like the first two", 3],
+    // Branch a2d787f8: a count quoted back in a question is not the ask (it read 14).
+    ["再来5个，刚才那三个别再出现。另外你说有14个候选人？首轮不是10个吗", 5],
+    ["能再找20个吗？", 20],
+    ["另外你说的7个和23个到底哪个对，再来5个，别让1、5、6回来", 5],
   ])("%s → %s", (text, target) => {
     expect(requestedPeopleTarget(text)).toBe(target);
   });
@@ -30,6 +34,7 @@ describe("requested people target", () => {
     "这3个不要，前3个不错",
     "drop these 3 people",
     "每周3天到岗，5年以上批流pipeline",
+    "你说有14个候选人？首轮不是10个吗",
   ])("%s has no search target", (text) => {
     expect(requestedPeopleTarget(text)).toBeUndefined();
   });
