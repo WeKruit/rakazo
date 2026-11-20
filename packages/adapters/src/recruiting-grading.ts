@@ -301,7 +301,7 @@ export async function startRecruitingGrading(
     // The recruiter waits on a held round, so its check starts within seconds of the turn ending,
     // and the next batch starts within seconds of the batch before it (staging 11-15: half of a
     // search's 20 people were still unscored when the recruiter looked, with 30 s between batches).
-    const held = (await roundUnderReview(deps.prisma, role.id, thread.id, true, now))?.held;
+    const held = (await roundUnderReview(deps.prisma, role.id, true, now))?.held;
     const retry = held
       ? HELD_RETRY_MS
       : busy.trigger === ("recruiting_grade" satisfies RunTrigger)
@@ -452,13 +452,7 @@ export async function startRecruitingGrading(
     }),
   ]);
   // The round the recruiter is reviewing is graded first, against what they said since the last one.
-  const review = await roundUnderReview(
-    deps.prisma,
-    role.id,
-    thread.id,
-    grader?.tool === "self",
-    now,
-  );
+  const review = await roundUnderReview(deps.prisma, role.id, grader?.tool === "self", now);
   const unreviewed = new Set(
     review?.round.candidateKeys.filter((key) => !review.grades.has(key)) ?? [],
   );
@@ -863,14 +857,11 @@ type RoundGrade = {
 
 /**
  * The latest calibration round while the recruiter has not approved it, with each of its people's
- * newest grade saved after the recruiter's feedback on the previous round, i.e. made with it.
- * fr 11-20 (e9551761): the pool kept being graded between round 1 and the feedback, so an Amazon
- * engineer graded a second before "#4 is at Amazon with no Kafka. out" counted as checked.
+ * newest grade saved after the previous round was recorded, i.e. made with their feedback.
  */
 async function roundUnderReview(
   prisma: PrismaClient,
   roleId: string,
-  threadId: string,
   reviewer: boolean,
   now = Date.now(),
 ): Promise<{
@@ -880,7 +871,7 @@ async function roundUnderReview(
   held: boolean;
   /** The Reviewer's grades are all in and the owner has not shown it yet. */
   checked: boolean;
-  /** The recruiter's feedback on the round before: grades made since then had it. */
+  /** When the round before was recorded: grades made since then had the recruiter's feedback. */
   since: Date | undefined;
 } | null> {
   const [round, previous] = await prisma.recruitingCalibrationRound.findMany({
@@ -900,21 +891,13 @@ async function roundUnderReview(
   });
   if (!round || round.approvedAt) return null;
   const status = calibrationRoundStatus(round, now);
-  const feedback = previous
-    ? await prisma.message.findFirst({
-        where: { threadId, role: "user", createdAt: { gt: previous.createdAt } },
-        orderBy: { seq: "asc" },
-        select: { createdAt: true },
-      })
-    : null;
-  const since = feedback?.createdAt ?? previous?.createdAt;
   const held = reviewer && status !== "shown";
   const rows = await prisma.recruitingCandidateOccurrence.findMany({
     where: {
       roleId,
       candidateKey: { in: round.candidateKeys },
       page: {
-        ...(since ? { observedAt: { gt: since } } : {}),
+        ...(previous ? { observedAt: { gt: previous.createdAt } } : {}),
         effect: {
           OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
             request: { path: ["operation"], equals: operation },
@@ -940,7 +923,7 @@ async function roundUnderReview(
         company: row.company,
         tier: (row.matchFields as { match_tier?: unknown } | null)?.match_tier,
       });
-  return { round, grades, held, checked: held && status === "checked", since };
+  return { round, grades, held, checked: held && status === "checked", since: previous?.createdAt };
 }
 
 /** The recruiter wrote since the shown round and a teammate's turn is working on it. */
