@@ -1121,6 +1121,30 @@ function feedbackFit(value: unknown): "good_example" | "not_fit" | undefined {
 }
 
 /**
+ * The role a recruiting_feedback call is about: the conversation's own role, or in Kruit's
+ * conversation the recruiter's role it names. Branch fd5e4705 (st4): from the main chat, three
+ * turned-down people ("这三个别再给了") were refused six times for a missing role revision and
+ * summary, because only a role's own conversation had them filled, so Results showed no marks.
+ */
+export async function recruitingFeedbackRole(
+  prisma: { recruitingRole: Pick<PrismaClient["recruitingRole"], "findFirst"> },
+  input: {
+    activeRoleId: string | null | undefined;
+    spaceId: string;
+    userId: string;
+    args: Record<string, unknown>;
+  },
+): Promise<string | undefined> {
+  if (input.activeRoleId) return input.activeRoleId;
+  if (typeof input.args.roleId !== "string" || !input.args.roleId.trim()) return undefined;
+  const role = await prisma.recruitingRole.findFirst({
+    where: { id: input.args.roleId, spaceId: input.spaceId, userId: input.userId },
+    select: { id: true },
+  });
+  return role?.id;
+}
+
+/**
  * Fills the recruiting_feedback fields the server knows for the conversation's role (role,
  * revision, an empty source list, a summary from the quote), reads a round's "review" as its
  * direction and resolves the people named by key, link or name. When a named person is not saved
@@ -6127,16 +6151,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The server fills what it knows about the thread's role and names a person the recruiter
           // mentioned by their saved key, so feedback saves on the first call.
           let feedbackArgsError: string | undefined;
-          if (
-            name === "recruiting_feedback" &&
-            args.target !== "preference" &&
-            thread.activeRecruitingRoleId
-          ) {
-            const filled = await filledRecruitingFeedbackArgs(
-              deps.prisma,
-              thread.activeRecruitingRoleId,
-              args,
-            );
+          const feedbackRoleId =
+            name === "recruiting_feedback" && args.target !== "preference"
+              ? await recruitingFeedbackRole(deps.prisma, {
+                  activeRoleId: thread.activeRecruitingRoleId,
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  args,
+                })
+              : undefined;
+          if (feedbackRoleId) {
+            const filled = await filledRecruitingFeedbackArgs(deps.prisma, feedbackRoleId, args);
             args = filled.args;
             feedbackArgsError = filled.error;
           }
@@ -10437,7 +10462,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // and the scale-out that followed showed the recruiter nobody.
               return finish({
                 error:
-                  "Not recorded yet: accepting the round ends calibration and starts finding people in bulk for Results, without showing them here. Call approve again only if the recruiter's words accept this round (these people look right, go find more like them). A request to see another batch or round of people they have not seen is the next round: run it instead.",
+                  "Not recorded yet: accepting the round ends calibration and starts finding people in bulk for Results, without showing them here. Call approve again only if the recruiter's words accept this round (these people look right, go find more like them). A request to see another batch or round of people they have not seen is the next round: run it instead. People those words turn down, by name or by number in the round, are saved first with target candidate and fit not_fit.",
               });
             }
             if (applied && !claimedEffect) {
