@@ -45,16 +45,47 @@ type Save = { createdAt: Date; idempotencyKey: string; result: unknown };
 
 const updateMany = vi.fn(async (..._args: unknown[]) => ({ count: 1 }));
 
-function deps(previousSave: Date | null, autoSaves: Save[] = []) {
+function deps(
+  previousSave: Date | null,
+  autoSaves: Save[] = [],
+  role?: { asked: string; held: string[] },
+) {
   const saves: Save[] = [
     ...(previousSave ? [{ createdAt: previousSave, idempotencyKey: "explicit", result: {} }] : []),
     ...autoSaves,
   ];
+  const held = role?.held.map((name) => `linkedin:/in/${name}`) ?? [];
   return {
     prisma: {
       externalEffect: {
         findMany: vi.fn(async () => saves),
         updateMany,
+      },
+      run: {
+        findFirst: vi.fn(async () =>
+          role ? { threadId: "thread-1", thread: { activeRecruitingRoleId: "role-1" } } : null,
+        ),
+      },
+      message: {
+        findMany: vi.fn(async () => [
+          { createdAt: new Date(2026, 9, 26, 3, 0), blocks: [{ kind: "text", text: role?.asked }] },
+        ]),
+      },
+      recruitingCandidate: {
+        count: vi.fn(async () => held.length),
+        findMany: vi.fn(async ({ where }: { where: { candidateKey: { in: string[] } } }) =>
+          where.candidateKey.in
+            .filter((key) => held.includes(key))
+            .map((candidateKey) => ({
+              candidateKey,
+            })),
+        ),
+      },
+      // Everyone held was saved after the ask, by this search.
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async ({ where }: { where: { page: { observedAt: { lt?: Date } } } }) =>
+          where.page.observedAt.lt ? [] : held.map((candidateKey) => ({ candidateKey })),
+        ),
       },
     },
     artifacts: { put: vi.fn(async () => ({ id: "artifact-1" })) },
@@ -92,6 +123,24 @@ describe("saveRecruitingPeopleSearch", () => {
       context,
     );
     expect(saved()).toEqual(["second"]);
+  });
+
+  it("saves no more new people than the recruiter's number leaves room for", async () => {
+    // Long-search-finishes 11-20 (dc97b5bc): "最多20个" saved 25. With 19 held, one more fits;
+    // someone already held is saved again whatever the number.
+    db.listRunToolResults.mockResolvedValue([
+      call("search-3", 7, "third"),
+      call("search-2", 5, "second"),
+      call("search-1", 1, "first"),
+    ]);
+    const held = ["first", ...Array.from({ length: 18 }, (_, i) => `held-${i}`)];
+    await saveRecruitingPeopleSearch(
+      deps(null, [], { asked: "Senior SRE in Austin, at most 20", held }),
+      trusted,
+      {} as never,
+      context,
+    );
+    expect(saved()).toEqual(["first", "second"]);
   });
 
   it("saves just the one search that returned when the server saves it as it returns", async () => {

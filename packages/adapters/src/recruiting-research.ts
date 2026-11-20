@@ -491,6 +491,21 @@ async function runRole(
     : null;
 }
 
+/**
+ * The role a run saves people to and how many more the recruiter's number lets it take, or
+ * undefined when no number caps it. The save holds the cap, since every search path ends there.
+ */
+export async function peopleRoomForRun(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+): Promise<{ roleId: string; room: number } | undefined> {
+  const run = await runRole(prisma, actor);
+  const roleId = run?.thread.activeRecruitingRoleId;
+  if (!run || !roleId) return undefined;
+  const room = await peopleRoomForRequest(prisma, roleId, run.threadId);
+  return room === undefined ? undefined : { roleId, room };
+}
+
 /** Model-facing: a people search in the main chat, whose people would have nowhere to go. */
 export const PEOPLE_SEARCH_NEEDS_ROLE =
   "Not searched: people found here would have no role to be saved, checked and kept in, so the search for a role runs in that role's conversation. For a saved role, pass the recruiter's request to it with delegate_to_role in their own words; for a new one, open it with start_role.";
