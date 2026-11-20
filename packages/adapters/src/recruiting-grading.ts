@@ -478,17 +478,30 @@ export async function startRecruitingGrading(
   // fosp 11-20 (eeaf5035): people were checked while the lead searched, but not always the ones it
   // then picked, so the round still waited a minute or more for its own check. When the round's
   // checked people and people checked since the feedback already fill it, it shows now.
+  // Only people checked after the recruiter's words fill it: fr 11-20 (3696a182) filled "Spark and
+  // Kafka in prod" rounds with people checked a minute before that was said.
   const gradedKeys = review?.round.candidateKeys.filter((key) => review.grades.has(key)) ?? [];
+  const feedbackAt =
+    review?.held && review.since
+      ? (
+          await deps.prisma.message.findFirst({
+            where: { threadId: thread.id, role: "user", createdAt: { gt: review.since } },
+            orderBy: { seq: "asc" },
+            select: { createdAt: true },
+          })
+        )?.createdAt
+      : undefined;
   const early =
     review?.held === true &&
     grader?.tool === "self" &&
+    feedbackAt !== undefined &&
     gradedKeys.length < review.round.candidateKeys.length &&
     (await (async () => {
       const size = await askedRoundSize(deps.prisma, role.id, review.round.round, thread.id);
       const people = checkedRoundPeople(
         gradedKeys,
         review.grades,
-        await roundReplacements(deps.prisma, role.id, size, review.since),
+        await roundReplacements(deps.prisma, role.id, size, feedbackAt),
         size,
       );
       return people.length >= size;
@@ -512,7 +525,7 @@ export async function startRecruitingGrading(
       const shownPeople = checkedRoundPeople(
         roundKeys,
         review.grades,
-        await roundReplacements(deps.prisma, role.id, open, review.since),
+        await roundReplacements(deps.prisma, role.id, open, early ? feedbackAt : review.since),
         size,
       );
       // fosp 11-20 (4eb42c98): "再来5个" came back with 2 while ten saved people no round had shown

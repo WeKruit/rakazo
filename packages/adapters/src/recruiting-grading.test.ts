@@ -359,6 +359,10 @@ describe("startRecruitingGrading", () => {
     });
     filled.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     filled.prisma.externalEffect.findMany.mockResolvedValue([] as never);
+    filled.prisma.message.findFirst.mockResolvedValue({
+      id: "said-last",
+      createdAt: new Date(0),
+    } as never);
     await startRecruitingGrading(filled.deps, { threadId: "thread" }, now);
     expect(filled.runCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
