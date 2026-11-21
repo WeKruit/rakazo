@@ -221,7 +221,9 @@ export const JOURNEYS = [
     goals: [
       "Ask how your work is going (进度).",
       "Ask where you would see candidates and replies.",
-      "Ask what you should do first to get candidates for a role.",
+      // 11-21: the judge swung between "should have searched on the title alone" and "a choice
+      // card instead of the answer"; with no JD yet, the plain answer is the expected one.
+      "Ask what you should do first to get candidates for a role. You have no JD at hand: met when Kruit tells you plainly, in its reply, to send the JD or a few lines on the role (a search on a bare job title is not expected); a card that asks you to choose how to start instead of saying it is not an answer.",
     ],
   },
   {
