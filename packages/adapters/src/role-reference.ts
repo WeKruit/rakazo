@@ -26,8 +26,12 @@ export const roleRef = (text: string) => REF.exec(text)?.[1]?.toLowerCase();
  * as "a new role (ref 21271)" and a second role was opened.
  */
 export function titleWithRef(title: string, request: string): string {
-  const ref = REF.exec(request)?.[1];
-  return !title || !ref || roleRef(title) === ref.toLowerCase() ? title : `${title} (Ref ${ref})`;
+  // A bare number beside the opening counts too (branch fosp 11-21, 417ffeea: 「新岗位 「… · 14131」」
+  // was titled without 14131, every handoff was refused as a new role, and three roles opened).
+  const ref = REF.exec(request)?.[1] ?? newRoleOpening(request)?.ref;
+  return !title || !ref || roleRef(title) === ref.toLowerCase() || title.includes(ref)
+    ? title
+    : `${title} (Ref ${ref})`;
 }
 const NEW_ROLE = /新(?:的)?\s*(?:岗位|职位|role)|\bnew (?:role|position|job|req)\b/i;
 // A role's terms beside a ref also open it without the word "new": work mode, years, pay.
