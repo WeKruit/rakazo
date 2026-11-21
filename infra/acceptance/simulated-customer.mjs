@@ -1019,9 +1019,12 @@ function latencyLine(turns) {
 /** The strict bar: the play passes only with every goal, no false claim and no blocking issue. */
 function strictBar(verdict, result) {
   // Rule checks the scripted conversations use apply here too.
+  const recruiter = (result?.chats ?? []).flatMap(({ messages }) =>
+    messages.filter((m) => m.role === "user"),
+  );
   const checks = [
     ...visible(result?.chats ?? []).flatMap(({ group, messages }) =>
-      conversationChecks(messages).map((failure) => `${group.name}: ${failure}`),
+      conversationChecks(messages, { recruiter }).map((failure) => `${group.name}: ${failure}`),
     ),
     ...(result?.turns ?? [])
       .filter((turn) => turn.placeholder)
