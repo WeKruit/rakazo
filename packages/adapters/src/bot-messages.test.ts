@@ -995,6 +995,30 @@ describe("delegating to a role team in another conversation", () => {
     expect(returnedTo(harness)).toEqual([]);
   });
 
+  it("returns the round after the recruiter taps an answer on a card in the role's chat", async () => {
+    // fr 11-21 (41c12cca): answering the role's intake question there ended the scan, so the
+    // round that followed never came back and Kruit said it wasn't recorded.
+    const label = "Building and operating large-scale batch and streaming pipelines";
+    const card = {
+      role: "bot",
+      blocks: [
+        {
+          kind: "ask",
+          text: "Which core work should I prioritize?",
+          answer: "choice-1",
+          status: "answered",
+          actions: [{ id: "choice-1", label }],
+        },
+      ],
+    };
+    const round = "9 people this round:\n\n1. **[Kiran K](https://www.linkedin.com/in/kk)** · SDE";
+    const harness = team({
+      later: [card, { role: "user", blocks: [{ kind: "text", text: label }] }, said(round)],
+    });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).toEqual([{ kind: "text", text: round }]);
+  });
+
   it("stops at the recruiter's own next message in the role conversation", async () => {
     const harness = team({
       later: [

@@ -6333,9 +6333,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
               next: `${held ? "These people are kept for the round; the recruiter sees the round once it is recorded and checked, so never list them in chat." : "These people are in chat now;"} the round is not recorded yet. Next, record the full ten with calibration_round${held ? " (candidateKeys only, without checks: the Reviewer checks each person from their full profile)" : ""}, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
           }
+          // fr 11-21 (6c40ad1d): the Reviewer's checked round was refused for two people listed only
+          // as "United States"; each new show turn asked again, so the round was never shown. The
+          // checked round's people were graded from full profiles and are shown as picked.
+          const showingChecked =
+            researchInput?.data?.operation === "calibration_round" &&
+            researchInput.data.corrects === true &&
+            thread.activeRecruitingRoleId !== null &&
+            (await roundState(deps.prisma, thread.activeRecruitingRoleId).catch(() => null))
+              ?.status === "checked";
           if (
             researchInput?.data?.operation === "calibration_round" &&
-            thread.activeRecruitingRoleId
+            thread.activeRecruitingRoleId &&
+            !showingChecked
           ) {
             const { regionOnly, outliers, beyond, place } = await locationSlips(
               thread.activeRecruitingRoleId,
@@ -7624,6 +7634,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               roleId: thread.activeRecruitingRoleId,
               botId: run.botId,
               recordedThisTurn: roundHeldRecorded,
+              sourceMessageId: run.sourceMessageId,
             }).catch(() => (roundHeldRecorded ? ROUND_HELD_SEARCH_REFUSAL : null));
             if (held) return { error: held };
           }

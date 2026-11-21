@@ -207,7 +207,7 @@ export function recruitingGradePrompt(
       `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements. You grade them yourself, from each person's full public profile.`,
       `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge only from what each page shows; when a page can't be read, use the person's saved profile from recruiting_candidates.`,
       SELF_GRADE_RUBRIC,
-      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, current title, company, location, education (each degree with school, degree and dates), match_score 0 to 100, match_tier, fit_reasons naming the evidence, concerns, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown and the profile words that show it. Keep every grade short, since the recruiter is waiting: the evidence is the few profile words that show it, one short fit reason, a concern only for what is not met. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
+      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, current title, company, location, education (a list of strings, one per degree: school, degree and dates), match_score 0 to 100, match_tier, fit_reasons naming the evidence, concerns, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown and the profile words that show it. Keep every grade short, since the recruiter is waiting: the evidence is the few profile words that show it, one short fit reason, a concern only for what is not met. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
       "",
       ...list,
     ].join("\n");
@@ -572,6 +572,7 @@ export async function startRecruitingGrading(
           clientNonce,
           async () => roundReviewPrompt(review.round.round, shownPeople),
           grader?.botId,
+          review.round.ownerBotId,
         );
         if (runId) {
           getLogger().info("recruiting.round.review", {
@@ -806,16 +807,24 @@ async function startLeadRun(
   prompt: () => Promise<string>,
   /** The teammate whose result this is: it joins the lead's running turn instead of waiting. */
   from?: string,
+  /**
+   * The bot that recorded the round, the only one that may show it. fosp 11-21 (9082bb56): "再来5个"
+   * reached the Sourcer, which recorded round 3; its check went to Main, whose show was refused as
+   * not the round's owner, and the checked round was never shown.
+   */
+  owner?: string | null,
 ): Promise<string | null> {
-  const lead = thread.groupId
-    ? (
-        await deps.prisma.chatGroupMember.findMany({
-          where: { groupId: thread.groupId },
-          orderBy: { createdAt: "asc" },
-          select: { botId: true, bot: { select: { name: true, spawnKey: true } } },
-        })
-      ).find((member) => member.bot && recruitingBotKey(member.bot) === "main")?.botId
-    : thread.botId;
+  const lead = owner
+    ? owner
+    : thread.groupId
+      ? (
+          await deps.prisma.chatGroupMember.findMany({
+            where: { groupId: thread.groupId },
+            orderBy: { createdAt: "asc" },
+            select: { botId: true, bot: { select: { name: true, spawnKey: true } } },
+          })
+        ).find((member) => member.bot && recruitingBotKey(member.bot) === "main")?.botId
+      : thread.botId;
   if (!lead) return null;
   const started = await deps.prisma.run.findFirst({
     where: { spaceId: thread.spaceId, clientNonce },
@@ -926,7 +935,14 @@ async function roundUnderReview(
   reviewer: boolean,
   now = Date.now(),
 ): Promise<{
-  round: { id: string; round: number; candidateKeys: string[]; version: number; createdAt: Date };
+  round: {
+    id: string;
+    round: number;
+    candidateKeys: string[];
+    version: number;
+    createdAt: Date;
+    ownerBotId: string | null;
+  };
   grades: Map<string, RoundGrade>;
   /** Not shown yet: it waits for the Reviewer's check, or for its owner to show it. */
   held: boolean;
@@ -948,6 +964,7 @@ async function roundUnderReview(
       status: true,
       statusAt: true,
       version: true,
+      ownerBotId: true,
     },
   });
   if (!round || round.approvedAt) return null;
@@ -1419,14 +1436,61 @@ export const ROUND_AWAITING_SEARCH_REFUSAL =
  */
 export async function heldRoundSearchRefusal(
   prisma: PrismaClient,
-  input: { roleId: string | null | undefined; botId: string; recordedThisTurn: boolean },
+  input: {
+    roleId: string | null | undefined;
+    botId: string;
+    recordedThisTurn: boolean;
+    sourceMessageId?: string | null;
+  },
 ): Promise<string | null> {
   if (input.recordedThisTurn) return ROUND_HELD_SEARCH_REFUSAL;
   if (!input.roleId) return null;
   const state = await roundState(prisma, input.roleId);
-  if (!state || state.status === "shown") return null;
+  if (!state || state.status === "shown")
+    return input.sourceMessageId
+      ? answeredRequestRefusal(prisma, input.roleId, input.sourceMessageId)
+      : null;
   if (state.status === "checked" && state.ownerBotId === input.botId) return null;
   return ROUND_AWAITING_SEARCH_REFUSAL;
+}
+
+/**
+ * Why a search for a request a round shown since then already answers must not run, or null.
+ * fosp 11-21 (a0e844e4): the round checked after the feedback was shown at the 5 of "再来5个",
+ * which had come in while it was checked; the lead's turn for "再来5个" then ran another round,
+ * and the recruiter got 9 more and asked "我只要5个，怎么又来9个？".
+ */
+async function answeredRequestRefusal(
+  prisma: PrismaClient,
+  roleId: string,
+  sourceMessageId: string,
+): Promise<string | null> {
+  const [round, asked] = await Promise.all([
+    prisma.recruitingCalibrationRound.findFirst({
+      where: { roleId },
+      orderBy: { round: "desc" },
+      select: { round: true, candidateKeys: true, status: true, statusAt: true, approvedAt: true },
+    }),
+    prisma.message.findUnique({
+      where: { id: sourceMessageId },
+      select: { role: true, createdAt: true, blocks: true },
+    }),
+  ]);
+  if (!round || round.round < 2 || round.approvedAt || round.status !== "shown") return null;
+  if (asked?.role !== "user" || !(round.statusAt > asked.createdAt)) return null;
+  const words = (
+    Array.isArray(asked.blocks) ? (asked.blocks as { kind?: string; text?: unknown }[]) : []
+  )
+    .flatMap((block) =>
+      (block.kind === "text" || block.kind === "bot_message_received") &&
+      typeof block.text === "string"
+        ? [handedInRecruiterWords(block.text) ?? block.text]
+        : [],
+    )
+    .join("\n");
+  const target = requestedPeopleTarget(words);
+  if (!target || target > round.candidateKeys.length) return null;
+  return `Not run: round ${round.round}, shown after this request came in, already gives the recruiter the ${round.candidateKeys.length} people it asks for. Don't search for more: end the turn with an empty reply. Search again only when the recruiter asks for more people after that round.`;
 }
 
 /** The people of the round waiting for the Reviewer's check, or null when no round waits. */

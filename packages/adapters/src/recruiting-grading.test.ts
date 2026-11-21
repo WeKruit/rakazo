@@ -336,6 +336,18 @@ describe("startRecruitingGrading", () => {
       "1. Fits (candidateKey linkedin:/in/fits)\n2. spare (candidateKey linkedin:/in/spare)\n3. Unshown (candidateKey linkedin:/in/unshown)\n\n",
     );
     expect(promptOf(f)).not.toContain("linkedin:/in/misfit");
+    // fosp 11-21 (9082bb56): the Sourcer recorded round 3 for "再来5个", its check went to Main,
+    // whose show was refused as not the owner's, and the round was never shown.
+    const sourcers = fixture({
+      ...options,
+      rounds: options.rounds.map((stored) => ({ ...stored, ownerBotId: "sourcer" })),
+    });
+    sourcers.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    sourcers.prisma.externalEffect.findMany.mockResolvedValue([] as never);
+    await startRecruitingGrading(sourcers.deps, { threadId: "thread" }, now);
+    expect(sourcers.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({ botId: "sourcer" }),
+    });
     // fosp 11-20: a short round has saved people no round showed checked first, once, then shows.
     const short = fixture({ ...options, found: [...options.found, person("new")] });
     short.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
@@ -1213,6 +1225,37 @@ describe("heldRoundSearchRefusal", () => {
     expect(
       await heldRoundSearchRefusal(prismaWith(held("checked", "other")), shown),
     ).not.toBeNull();
+  });
+
+  it("refuses a search for a request that a round shown since then answers", async () => {
+    // fosp 11-21 (a0e844e4): round 2 was shown at the 5 of "再来5个", then the lead's turn for
+    // "再来5个" ran another round of 9.
+    const shownAt = new Date("2026-11-21T02:57:09Z");
+    const round = { ...held("shown"), candidateKeys: ["a", "b", "c", "d", "e"], statusAt: shownAt };
+    const handIn = (text: string, createdAt: Date) => ({
+      role: "user",
+      createdAt,
+      blocks: [
+        {
+          kind: "bot_message_received",
+          text: `The recruiter wrote, word for word:\n"${text}"\n\nKruit's note: more people`,
+        },
+      ],
+    });
+    const prisma = (message: unknown) =>
+      ({
+        recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
+        message: { findUnique: vi.fn(async () => message) },
+      }) as never;
+    const input = { roleId: "role", botId: "lead", recordedThisTurn: false, sourceMessageId: "m" };
+    const before = new Date("2026-11-21T02:56:01Z");
+    expect(await heldRoundSearchRefusal(prisma(handIn("再来5个", before)), input)).toContain(
+      "already gives",
+    );
+    // Asked after the round was shown, or for more than it showed: the search runs.
+    const after = new Date("2026-11-21T02:58:00Z");
+    expect(await heldRoundSearchRefusal(prisma(handIn("再来5个", after)), input)).toBeNull();
+    expect(await heldRoundSearchRefusal(prisma(handIn("再来20个", before)), input)).toBeNull();
   });
 
   it("refuses after this turn recorded the held round, whatever the stored state", async () => {
