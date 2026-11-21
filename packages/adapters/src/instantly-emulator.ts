@@ -15,8 +15,8 @@ type Lead = Row & { id: string; email: string; campaign: string };
 type Campaign = Row & { id: string; status: number };
 
 const API = "/api/v2";
-/** Minutes between activation and the first email: the real service often takes most of an hour. */
-const PICKUP_MINUTES = 45;
+/** Minutes between activation and the first email: a healthy real mailbox started in about two (staging 11-21). */
+const PICKUP_MINUTES = 2;
 const DAILY_LIMIT = 50;
 const MCP_TOOLS = ["get_email", "list_emails", "reply_to_email"] as const;
 

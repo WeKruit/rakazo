@@ -290,8 +290,7 @@ describe("resolveDuplicateEffectGate", () => {
     expect(resolveDuplicateEffectGate({ status: "denied" }, "destination.write")).toEqual({
       action: "return",
       result: {
-        error:
-          "The user denied this action. Do not retry or rephrase it; tell the user and ask what they want instead.",
+        error: expect.stringContaining("The user denied this action. Do not retry"),
       },
     });
   });

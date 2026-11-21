@@ -223,7 +223,7 @@ it.each([
         steps: [{ subject: "Hi", body: "Hello", delay_days: 0 }],
       },
     ),
-  ).rejects.toThrow("existing mail workspace");
+  ).rejects.toThrow("cannot be edited here");
   expect(rest.mock.calls.every(([method]) => method === "GET")).toBe(true);
 });
 

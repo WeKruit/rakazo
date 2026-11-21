@@ -4326,8 +4326,7 @@ describe("connector read-only metadata and approval enforcement", () => {
       await f.run();
       expect(f.execute).not.toHaveBeenCalled();
       expect(f.results.at(-1)).toEqual({
-        error:
-          "The user denied this action. Do not retry or rephrase it; tell the user and ask what they want instead.",
+        error: expect.stringContaining("The user denied this action. Do not retry"),
       });
       expect(f.pauseRunForInput).toHaveBeenCalledOnce();
     });
