@@ -1018,7 +1018,9 @@ export function queuePace(
     // Minutes from now only: the schedule's zone is the role's, not the recruiter's, so a clock
     // time there alone (05:23 in Seattle) read as "not tonight" and the send was paused, and
     // agents converted it wrongly (gate b2005684: 01:10 UTC told as 17:10 Seattle the next day).
-    time = `about ${left} minutes from now (by ${end.toISOString().slice(11, 16)} UTC)`;
+    // No clock at all: agents added minutes to one ("06:62 UTC") or moved it into another zone
+    // (send-at-night 11-21), so the end stays fixed and only the minutes left are given.
+    time = `about ${left} minutes from now`;
     queuedAt = at(start);
   } catch {
     return `sending now, not held for a later time: handed to the mail service, the first email can take up to ${PICKUP_MINUTES} minutes to leave, then about one every ${gap} minutes from the mailbox`;

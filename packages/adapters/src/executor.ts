@@ -12568,12 +12568,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : undefined;
             if (savedReference?.kind === "saved" && savedReference.by.startsWith("ref "))
               return finish({ error: savedRoleNote(savedReference) });
-            const openHere = await roleAlreadyOpenedHere(deps.prisma, {
-              spaceId: run.spaceId,
-              userId: run.userId,
-              threadId: run.threadId,
-              title,
-            });
+            // A ref no saved role carries is a new role, even under a title opened here before:
+            // delegate_to_role refuses it as new, so this refusal sent the two back and forth
+            // (send-at-night 11-21, ref 06164 beside an earlier "Senior Data Engineer — Seattle").
+            const openHere =
+              savedReference?.kind === "new"
+                ? undefined
+                : await roleAlreadyOpenedHere(deps.prisma, {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    threadId: run.threadId,
+                    title,
+                  });
             if (openHere && !roleReferenceOverruled.has(openHere.groupId)) {
               roleReferenceOverruled.add(openHere.groupId);
               return finish({ error: roleAlreadyOpenNote(openHere) });
