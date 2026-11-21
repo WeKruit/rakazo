@@ -10,6 +10,7 @@ import {
 import type { PrismaClient } from "@rakazo/db";
 import { recruitingHomeGroupId } from "@rakazo/db";
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
+import { openRecruitingRoles } from "./recruiting-account.js";
 import type { RoleRecord } from "./role-records.js";
 import { loadRoleRecords } from "./role-records.js";
 import { referredRole } from "./role-reference.js";
@@ -362,7 +363,7 @@ export async function loadWorkingState(
     recruiterLanguageRows(prisma, thread.id, accountThreadIds),
     global
       ? prisma.recruitingRole.findMany({
-          where: { spaceId: scope.spaceId, userId: scope.userId, archivedAt: null },
+          where: openRecruitingRoles(scope),
           orderBy: { id: "desc" },
           take: ROLES_FOR_REFERENCE,
           select: {
@@ -411,11 +412,7 @@ export async function loadWorkingState(
           select: { payload: true },
         })
       : [],
-    global
-      ? prisma.recruitingRole.count({
-          where: { spaceId: scope.spaceId, userId: scope.userId, archivedAt: null },
-        })
-      : 0,
+    global ? prisma.recruitingRole.count({ where: openRecruitingRoles(scope) }) : 0,
   ]);
 
   const recruiterTexts = recruiterWords(recruiterRows);
@@ -728,7 +725,8 @@ export async function loadWorkingState(
     // unknown (honest-limits 8a002815: with nothing said, 「不对啊，我昨天建了三个」 got an apology).
     const archived = await prisma.recruitingRole
       .count({
-        where: { spaceId: scope.spaceId, userId: scope.userId, archivedAt: { not: null } },
+        // None is open, so every role left is archived itself or in an archived chat.
+        where: { spaceId: scope.spaceId, userId: scope.userId },
       })
       .catch(() => 0);
     lines.push(

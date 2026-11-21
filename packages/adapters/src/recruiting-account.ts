@@ -122,6 +122,20 @@ async function readRoleStatuses(
 }
 
 /** One account-scoped read used by the recruiting pages and the native recruiting tool. */
+/** The account's open roles: not archived, and the role's chat (or bot) not archived either. */
+export function openRecruitingRoles(actor: { userId: string; spaceId: string }) {
+  return {
+    userId: actor.userId,
+    spaceId: actor.spaceId,
+    archivedAt: null,
+    sourceThread: {
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      OR: [{ group: { archivedAt: null } }, { bot: { archivedAt: null } }],
+    },
+  };
+}
+
 export async function readRecruitingAccountView(
   deps: RecruitingAccountReadDeps,
   actor: Actor,
@@ -135,15 +149,8 @@ export async function readRecruitingAccountView(
     };
     await guard();
     const scope = {
-      userId: actor.userId,
-      spaceId: actor.spaceId,
-      archivedAt: null,
+      ...openRecruitingRoles(actor),
       activeThreads: { some: { userId: actor.userId, spaceId: actor.spaceId } },
-      sourceThread: {
-        userId: actor.userId,
-        spaceId: actor.spaceId,
-        OR: [{ group: { archivedAt: null } }, { bot: { archivedAt: null } }],
-      },
     };
     if (input.roleId && input.groupId) throw new ORPCError("BAD_REQUEST");
     if (input.groupId) {

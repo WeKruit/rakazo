@@ -42,8 +42,15 @@ function fakePrisma(input: {
       findMany: vi.fn(async ({ where }: { where: { id?: unknown } }) =>
         where.id ? (input.revisions ?? []) : (input.roles ?? []),
       ),
-      count: vi.fn(async ({ where }: { where: { archivedAt?: unknown } }) =>
-        where.archivedAt === null ? (input.roleCount ?? 1175) : (input.archivedCount ?? 0),
+      count: vi.fn(
+        async ({ where }: { where: { archivedAt?: unknown; sourceThread?: unknown } }) =>
+          where.archivedAt !== null
+            ? (input.archivedCount ?? 0)
+            : // Staging 11-21 (what-happened x5): a count that kept roles whose chat was archived
+              // said 977 next to the activity read's 53, so every reply hedged on 924 "uncovered".
+              where.sourceThread
+              ? (input.roleCount ?? 1175)
+              : (input.roleCount ?? 1175) + 924,
       ),
     },
     message: {
