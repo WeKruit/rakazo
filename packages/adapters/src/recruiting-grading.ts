@@ -610,29 +610,6 @@ export async function startRecruitingGrading(
       } else {
         if (!review.checked && !(await markCalibrationRoundChecked(deps.prisma, review.round)))
           return skipped("round changed");
-        if (shownPeople.length < size && grader?.tool === "self" && !toppedUp) {
-          const runId = await startLeadRun(
-            deps,
-            thread,
-            topUpNonce,
-            async () => roundTopUpPrompt(review.round.round, size - shownPeople.length),
-            grader.botId,
-            review.round.ownerBotId,
-          );
-          if (runId) {
-            // A search that saves nobody wakes no check, so the round is shown after it anyway.
-            await deps.jobs.enqueue(
-              laterGradingStart({ threadId: thread.id }, now + TOP_UP_SHOW_MS),
-            );
-            getLogger().info("recruiting.round.top_up", {
-              runId,
-              roleId: role.id,
-              round: review.round.round,
-              short: size - shownPeople.length,
-            });
-            return;
-          }
-        }
         // Once per recruiter message, so the corrected round is never corrected again on its own.
         const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
         const runId = await startLeadRun(
