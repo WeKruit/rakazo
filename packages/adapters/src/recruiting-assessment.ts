@@ -309,7 +309,7 @@ export async function executeRecruitingCandidatesTool(
         since: input.since,
         until,
         ...result,
-        note: `Roles not listed had nothing new (quietRoles counts them): say so plainly. emailedPeople and repliedPeople come from the role's stored email; mail "none_stored" means those two are unknown for that role, not zero. ${ONE_OFF_REPLIES_NOTE}`,
+        note: `Roles not listed had nothing new (quietRoles counts them): say so plainly. emailedPeople and repliedPeople come from the role's stored email; mail "none_stored" means those two are unknown for that role, not zero; mail "no_outreach" means no email was ever set up for that role, so it sent none and has 0 replies: say 0. ${ONE_OFF_REPLIES_NOTE}`,
       };
     }
     if (input.operation === "contacts") {
