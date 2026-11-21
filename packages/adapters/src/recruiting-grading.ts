@@ -572,6 +572,7 @@ export async function startRecruitingGrading(
           clientNonce,
           async () => roundReviewPrompt(review.round.round, shownPeople),
           grader?.botId,
+          review.round.ownerBotId,
         );
         if (runId) {
           getLogger().info("recruiting.round.review", {
@@ -806,16 +807,24 @@ async function startLeadRun(
   prompt: () => Promise<string>,
   /** The teammate whose result this is: it joins the lead's running turn instead of waiting. */
   from?: string,
+  /**
+   * The bot that recorded the round, the only one that may show it. fosp 11-21 (9082bb56): "再来5个"
+   * reached the Sourcer, which recorded round 3; its check went to Main, whose show was refused as
+   * not the round's owner, and the checked round was never shown.
+   */
+  owner?: string | null,
 ): Promise<string | null> {
-  const lead = thread.groupId
-    ? (
-        await deps.prisma.chatGroupMember.findMany({
-          where: { groupId: thread.groupId },
-          orderBy: { createdAt: "asc" },
-          select: { botId: true, bot: { select: { name: true, spawnKey: true } } },
-        })
-      ).find((member) => member.bot && recruitingBotKey(member.bot) === "main")?.botId
-    : thread.botId;
+  const lead = owner
+    ? owner
+    : thread.groupId
+      ? (
+          await deps.prisma.chatGroupMember.findMany({
+            where: { groupId: thread.groupId },
+            orderBy: { createdAt: "asc" },
+            select: { botId: true, bot: { select: { name: true, spawnKey: true } } },
+          })
+        ).find((member) => member.bot && recruitingBotKey(member.bot) === "main")?.botId
+      : thread.botId;
   if (!lead) return null;
   const started = await deps.prisma.run.findFirst({
     where: { spaceId: thread.spaceId, clientNonce },
@@ -926,7 +935,14 @@ async function roundUnderReview(
   reviewer: boolean,
   now = Date.now(),
 ): Promise<{
-  round: { id: string; round: number; candidateKeys: string[]; version: number; createdAt: Date };
+  round: {
+    id: string;
+    round: number;
+    candidateKeys: string[];
+    version: number;
+    createdAt: Date;
+    ownerBotId: string | null;
+  };
   grades: Map<string, RoundGrade>;
   /** Not shown yet: it waits for the Reviewer's check, or for its owner to show it. */
   held: boolean;
@@ -948,6 +964,7 @@ async function roundUnderReview(
       status: true,
       statusAt: true,
       version: true,
+      ownerBotId: true,
     },
   });
   if (!round || round.approvedAt) return null;

@@ -336,6 +336,18 @@ describe("startRecruitingGrading", () => {
       "1. Fits (candidateKey linkedin:/in/fits)\n2. spare (candidateKey linkedin:/in/spare)\n3. Unshown (candidateKey linkedin:/in/unshown)\n\n",
     );
     expect(promptOf(f)).not.toContain("linkedin:/in/misfit");
+    // fosp 11-21 (9082bb56): the Sourcer recorded round 3 for "再来5个", its check went to Main,
+    // whose show was refused as not the owner's, and the round was never shown.
+    const sourcers = fixture({
+      ...options,
+      rounds: options.rounds.map((stored) => ({ ...stored, ownerBotId: "sourcer" })),
+    });
+    sourcers.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    sourcers.prisma.externalEffect.findMany.mockResolvedValue([] as never);
+    await startRecruitingGrading(sourcers.deps, { threadId: "thread" }, now);
+    expect(sourcers.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({ botId: "sourcer" }),
+    });
     // fosp 11-20: a short round has saved people no round showed checked first, once, then shows.
     const short = fixture({ ...options, found: [...options.found, person("new")] });
     short.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
