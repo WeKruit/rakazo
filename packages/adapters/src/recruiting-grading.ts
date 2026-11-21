@@ -195,7 +195,7 @@ export function recruitingGradePrompt(
   const list = [
     ...(asked.length
       ? [
-          "The recruiter also asked for these; grade each as a hard requirement (someone like the people they turned down is not_met, and when they turned people down because the profile did not show something, a profile that does not show it is not_met, not unknown), except the job's own terms (pay, office days, benefits), which are about the job, not the person:",
+          "The recruiter also asked for these; grade each as a hard requirement (someone like the people they turned down is not_met), except the job's own terms (pay, office days, benefits), which are about the job, not the person:",
           ...asked.map((statement) => `* ${statement}`),
           "",
         ]
