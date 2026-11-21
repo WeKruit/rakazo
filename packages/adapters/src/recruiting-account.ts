@@ -25,6 +25,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
+import { openRecruitingRoles } from "./open-recruiting-roles.js";
 import type { CrmMembershipReads, PhaseTimer, RecruitingThreadTarget } from "./recruiting-reads.js";
 import {
   authenticated,
@@ -135,15 +136,8 @@ export async function readRecruitingAccountView(
     };
     await guard();
     const scope = {
-      userId: actor.userId,
-      spaceId: actor.spaceId,
-      archivedAt: null,
+      ...openRecruitingRoles(actor),
       activeThreads: { some: { userId: actor.userId, spaceId: actor.spaceId } },
-      sourceThread: {
-        userId: actor.userId,
-        spaceId: actor.spaceId,
-        OR: [{ group: { archivedAt: null } }, { bot: { archivedAt: null } }],
-      },
     };
     if (input.roleId && input.groupId) throw new ORPCError("BAD_REQUEST");
     if (input.groupId) {
