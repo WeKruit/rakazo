@@ -474,7 +474,9 @@ async function requireOwnMailbox(
     if (error instanceof InstantlyRestError && error.status === 404)
       throw new Error(`${eaccount} is not one of your connected Instantly mailboxes`);
     if (error instanceof IsolationError)
-      throw new Error(`${eaccount} is not one of this account's sending mailboxes`);
+      throw new Error(
+        `${eaccount} is not one of this account's sending mailboxes, so nothing was saved or sent. This is not a reason the email cannot be sent: call it again without eaccount to use the role's own sending mailbox, or read get_role_draft for the mailboxes this account can use, before telling the recruiter anything about sending.`,
+      );
     throw error;
   }
 }
