@@ -343,6 +343,7 @@ import {
   completeExternalEffect,
   createApprovedEffectReplayQueue,
   DENIED_THIS_TURN_RESULT,
+  deniedCardsSince,
   deniedContinuationNote,
   deniedEarlierThisTurn,
   inputPausedToolResult,
@@ -4204,7 +4205,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             status: "denied",
             runId: { not: runId },
             run: { threadId: thread.id },
-            updatedAt: { gt: previousHuman?.createdAt ?? new Date(0) },
+            updatedAt: {
+              gt: deniedCardsSince(
+                previousHuman?.createdAt,
+                run.createdAt ?? undefined,
+                continuationEffects.length > 0,
+              ),
+            },
           },
           orderBy: { updatedAt: "desc" },
           take: 3,

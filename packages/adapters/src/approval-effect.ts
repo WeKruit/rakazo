@@ -212,6 +212,20 @@ export function catalogApprovalInnerArgs(catalog: {
 }
 
 /**
+ * From when another run's cancelled cards are news to this run: since the recruiter's previous
+ * message, and once this run has been resumed after a card, only those cancelled after it began
+ * (it was told about older ones when it started).
+ */
+export function deniedCardsSince(
+  previousHuman: Date | undefined,
+  runStarted: Date | undefined,
+  resumed: boolean,
+): Date {
+  const since = previousHuman ?? new Date(0);
+  return resumed && runStarted && runStarted > since ? runStarted : since;
+}
+
+/**
  * What a run resumed after a denied card is told: the paused call's result stays "Waiting for
  * approval.", so without this the model read the recruiter's next words with no sign the card was
  * cancelled (deny plays 11-21: "标题不对" renamed the role two seconds after the cancel).
