@@ -264,6 +264,21 @@ const DENIED_ACTION =
 const DENIED_SEND =
   "A 标题, title or subject they give now is this email's subject line, never the role's name: save the whole email with the new subject (ensure_role_campaign steps), then call activate_campaign again for a new card.";
 
+/** The send card's own subject beside the reading of a new title, when the card was a send. */
+function sendCard(result: unknown, toolName: string) {
+  const shown =
+    result && typeof result === "object" && !Array.isArray(result)
+      ? (result as { instantlyActivationShown?: unknown }).instantlyActivationShown
+      : undefined;
+  if (!shown && !toolName.endsWith("activate_campaign")) return "";
+  const card = (shown ?? {}) as {
+    firstEmail?: { subject?: unknown } | null;
+    recipients?: { firstEmail?: { subject?: unknown } }[];
+  };
+  const subject = card.firstEmail?.subject ?? card.recipients?.[0]?.firstEmail?.subject;
+  return ` ${typeof subject === "string" ? `The cancelled card's subject was "${subject.slice(0, 200)}". ` : ""}${DENIED_SEND}`;
+}
+
 export function resolveDuplicateEffectGate(
   effect: { status: string; result?: unknown },
   toolName: string,
@@ -289,7 +304,7 @@ export function resolveDuplicateEffectGate(
     return {
       action: "return",
       result: {
-        error: `${DENIED_ACTION}${toolName.endsWith("activate_campaign") ? ` ${DENIED_SEND}` : ""}`,
+        error: `${DENIED_ACTION}${sendCard(effect.result, toolName)}`,
       },
     };
   }

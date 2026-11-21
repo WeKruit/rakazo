@@ -286,6 +286,26 @@ describe("resolveDuplicateEffectGate", () => {
     });
   });
 
+  it("names a cancelled send card's subject and reads a new title as the email's", () => {
+    const gate = resolveDuplicateEffectGate(
+      {
+        status: "denied",
+        result: {
+          instantlyActivationShown: {
+            firstEmail: null,
+            recipients: [{ firstEmail: { subject: "Old subject", body: "Hi" } }],
+          },
+        },
+      },
+      "connectors_execute_tool",
+    );
+    expect(gate).toMatchObject({
+      action: "return",
+      result: { error: expect.stringContaining('subject was "Old subject"') },
+    });
+    expect(JSON.stringify(gate)).toContain("never the role's name");
+  });
+
   it("returns denial without executing", () => {
     expect(resolveDuplicateEffectGate({ status: "denied" }, "destination.write")).toEqual({
       action: "return",
