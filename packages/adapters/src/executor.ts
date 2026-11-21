@@ -5427,12 +5427,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const lastOwnReplyText = async () => {
           try {
             const rows = await deps.prisma.message.findMany({
-              where: { threadId: thread.id, NOT: { runId } },
+              where: { threadId: thread.id },
               orderBy: { seq: "desc" },
-              take: 8,
-              select: { role: true, botId: true, blocks: true },
+              take: 12,
+              select: { role: true, botId: true, blocks: true, runId: true, clientNonce: true },
             });
-            return lastOwnUpdate(rows, run.botId);
+            return lastOwnUpdate(rows, run.botId, runId);
           } catch {
             return undefined;
           }
