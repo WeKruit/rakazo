@@ -12532,8 +12532,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     roleId: role
                       ? String(args.role_id)
                       : (group?.thread?.activeRecruitingRoleId ?? undefined),
-                    // Only the recruiter's own turn hands over their words.
-                    recruiterWords: run.trigger === "user" ? lastRecruiterText : "",
+                    // Only the recruiter's own words are handed over: their turn's, or the
+                    // message they wrote into a running turn. Branch fosp 11-21 (747382b0):
+                    // 「这三个不要。换掉，再补人」 arrived while Kruit read a team's report, reached
+                    // the team as Kruit's paraphrase alone, and the search cap took the role's
+                    // first "找10个人" as the request, so every replacement search was refused.
+                    recruiterWords:
+                      run.trigger === "user" ? lastRecruiterText : (steeredText ?? ""),
                     brief: String(args.message ?? ""),
                   }),
                   runSecrets,
