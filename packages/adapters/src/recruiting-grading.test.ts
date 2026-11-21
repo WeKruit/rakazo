@@ -106,7 +106,7 @@ function fixture(options: {
   const taskCreate = vi.fn(async () => ({ id: "grade-task" }));
   const tx = {
     thread: { updateMany: vi.fn(async () => ({ count: 1 })) },
-    run: { findFirst: vi.fn(async () => null), create: runCreate },
+    run: { findFirst: vi.fn(async () => null), count: vi.fn(async () => 0), create: runCreate },
     task: { create: taskCreate },
     message: { findFirst: vi.fn(async () => null) },
     steeringMessage: { create: vi.fn(async () => ({ id: "steering" })) },
@@ -929,6 +929,28 @@ describe("startRecruitingGrading", () => {
 
   // Reliability plan S3 (11-16): the check is the Reviewer's own work. It waits only on the
   // Reviewer's turns, not on teammates working in the same role conversation.
+  it("has the quality check grade a second batch beside the first", async () => {
+    // fosp 11-21 (70fd2326): a round's three batches ran one after another, 35 s each.
+    const team = [
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const second = (inFlight: number) => {
+      const f = fixture({ found: [person("a")] });
+      f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+      f.prisma.run.findFirst.mockImplementation((async ({ where }: { where: object }) =>
+        "status" in where ? { id: "batch-1", trigger: "recruiting_grade" } : null) as never);
+      Object.assign(f.prisma.run, { count: vi.fn(async () => inFlight) });
+      f.tx.run.count.mockResolvedValue(inFlight);
+      return f;
+    };
+    const one = second(1);
+    await startRecruitingGrading(one.deps, { threadId: "thread" }, now);
+    expect(one.runCreate).toHaveBeenCalledOnce();
+    const two = second(2);
+    await startRecruitingGrading(two.deps, { threadId: "thread" }, now);
+    expect(two.runCreate).not.toHaveBeenCalled();
+  });
+
   it("waits only on the grader's own turns, not on teammates' turns", async () => {
     const f = fixture({ found: [person("a")] });
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);

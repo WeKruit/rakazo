@@ -207,6 +207,18 @@ describe("thread lanes for automation runs", () => {
     expect(await db.start("routine")).toBe(false);
   });
 
+  it("lets the Reviewer grade a second batch beside the first", async () => {
+    // fosp 11-21 (70fd2326): three batches of one round ran one after another, 35 s each, while
+    // the recruiter waited for "再来5个".
+    const db = lane([
+      { id: "grade-1", botId: "reviewer", trigger: "recruiting_grade", status: "running" },
+      { id: "grade-2", botId: "reviewer", trigger: "recruiting_grade", status: "queued" },
+      { id: "routine", botId: "reviewer", trigger: "routine", status: "queued" },
+    ]);
+    expect(await db.start("grade-2")).toBe(true);
+    expect(await db.start("routine")).toBe(false);
+  });
+
   it("ignores runs in other threads", async () => {
     const db = lane([
       { id: "elsewhere", threadId: "thread-2", trigger: "routine", status: "running" },

@@ -18053,12 +18053,19 @@ async function threadLaneBusy(
   // behind background grading (staging 11-13: feedback waited 2 minutes behind a grade run).
   // Neither does a turn resuming on the recruiter's card answer (staging 11-14: 103 s).
   const delegated = run.trigger === "bot_message" || run.leaseFence > 0;
+  // The Reviewer's batches of other people grade side by side (fosp 11-21: three batches of one
+  // round ran one after another, 35 s each); the grading start caps how many run at once.
+  const grade = run.trigger === "recruiting_grade";
   const blockers = await tx.run.count({
     where: {
       threadId: run.threadId,
       botId: run.botId,
       id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
-      ...(delegated ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } } : {}),
+      ...(delegated
+        ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } }
+        : grade
+          ? { trigger: { not: "recruiting_grade" } }
+          : {}),
       OR: [
         { status: { in: ["leased", "running"] } },
         // A delegated child inherits an active ancestor turn; queued work cannot preempt that turn.

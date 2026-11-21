@@ -36,6 +36,8 @@ const MAX_ATTEMPTS = 120;
 export const GRADE_BATCH = 50;
 /** People per batch the quality check grades itself, since it reads each full profile. */
 export const SELF_GRADE_BATCH = 10;
+/** Batches the quality check grades at once in one conversation. */
+const SELF_GRADE_IN_FLIGHT = 2;
 /** Grading requests the research service works on at once for one conversation. */
 export const GRADE_IN_FLIGHT = 4;
 /** A grading request whose grades never came back stops holding up the next batch after this. */
@@ -321,7 +323,14 @@ export async function startRecruitingGrading(
     },
     select: { id: true, trigger: true },
   });
-  if (busy) {
+  // A second batch of the quality check starts beside the first (see SELF_GRADE_IN_FLIGHT).
+  const beside =
+    busy?.trigger === ("recruiting_grade" satisfies RunTrigger) &&
+    grader?.tool === "self" &&
+    (await deps.prisma.run.count({
+      where: { threadId: thread.id, botId: grader.botId, status: { in: BUSY_STATUSES } },
+    })) < SELF_GRADE_IN_FLIGHT;
+  if (busy && !beside) {
     // The recruiter waits on a held round, so its check starts within seconds of the turn ending,
     // and the next batch starts within seconds of the batch before it (staging 11-15: half of a
     // search's 20 people were still unscored when the recruiter looked, with 30 s between batches).
@@ -741,12 +750,13 @@ export async function startRecruitingGrading(
       tx.run.findFirst({ where: { spaceId: thread.spaceId, clientNonce }, select: { id: true } }),
       // Only the grader's own turn holds the check, as above: a lead turn that recorded the
       // round is still running when its check starts (staging 11-16: no retry, 4 min unchecked).
-      tx.run.findFirst({
+      tx.run.count({
         where: { threadId: thread.id, botId: grader.botId, status: { in: BUSY_STATUSES } },
-        select: { id: true },
       }),
     ]);
-    if (existing || running) return null;
+    // The quality check grades two batches side by side (fosp 11-21: a round's three batches ran
+    // one after another, 35 s each, while the recruiter waited).
+    if (existing || running >= (grader.tool === "self" ? SELF_GRADE_IN_FLIGHT : 1)) return null;
     const task = await tx.task.create({
       data: {
         spaceId: thread.spaceId,
