@@ -2930,7 +2930,7 @@ async function sendCampaign(
  */
 /** A paused campaign emails nobody until it is activated again, which only activate_campaign does. */
 const PAUSED_NEXT =
-  'Paused: nobody still waiting is emailed while it stays paused; tell the recruiter who is held in plain words (never "queue"). When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.';
+  'Paused: nobody still waiting is emailed while it stays paused; tell the recruiter who is held in plain words (never "queue"), and if they were told an email was on its way that has not gone out, that it was stopped before it went out, so that person did not get it. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.';
 async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
   const mailbox = Array.isArray(campaign.email_list) ? campaign.email_list.join(", ") : "";
   const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });
