@@ -10,7 +10,7 @@ import {
 import type { PrismaClient } from "@rakazo/db";
 import { recruitingHomeGroupId } from "@rakazo/db";
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
-import { openRecruitingRoles } from "./recruiting-account.js";
+import { openRecruitingRoles } from "./open-recruiting-roles.js";
 import type { RoleRecord } from "./role-records.js";
 import { loadRoleRecords } from "./role-records.js";
 import { referredRole } from "./role-reference.js";

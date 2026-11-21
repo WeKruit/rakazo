@@ -25,6 +25,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
+import { openRecruitingRoles } from "./open-recruiting-roles.js";
 import type { CrmMembershipReads, PhaseTimer, RecruitingThreadTarget } from "./recruiting-reads.js";
 import {
   authenticated,
@@ -122,20 +123,6 @@ async function readRoleStatuses(
 }
 
 /** One account-scoped read used by the recruiting pages and the native recruiting tool. */
-/** The account's open roles: not archived, and the role's chat (or bot) not archived either. */
-export function openRecruitingRoles(actor: { userId: string; spaceId: string }) {
-  return {
-    userId: actor.userId,
-    spaceId: actor.spaceId,
-    archivedAt: null,
-    sourceThread: {
-      userId: actor.userId,
-      spaceId: actor.spaceId,
-      OR: [{ group: { archivedAt: null } }, { bot: { archivedAt: null } }],
-    },
-  };
-}
-
 export async function readRecruitingAccountView(
   deps: RecruitingAccountReadDeps,
   actor: Actor,
