@@ -455,10 +455,21 @@ export async function executeRecruitingCandidatesTool(
         succeeded = true;
         return noCurrentRole();
       }
-      const result = await listRecruitingCandidates(deps.prisma, trusted.actor, {
+      const listed = await listRecruitingCandidates(deps.prisma, trusted.actor, {
         roleId: listRoleId,
         ...query,
       });
+      // The review is each person's ranking (the Reviewer's grade). The local-assessment fields
+      // stay empty for Reviewer-graded people, so staging aefd141e (what-happened x5) read
+      // "7 unassessed" beside a 52/Partial grade as a conflicting status in 5 of 5 runs.
+      const { assessed: _assessed, unassessed: _unassessed, ...counts } = listed.counts ?? {};
+      const result = {
+        ...listed,
+        ...(listed.counts ? { counts } : {}),
+        items: listed.items.map(({ latestAssessment, ...item }) =>
+          latestAssessment ? { ...item, latestAssessment } : item,
+        ),
+      };
       queryMs = Math.round(performance.now() - queryStarted);
       itemCount = result.items.length;
       // Every agent sees the emails earlier contact lookups saved, in any later turn.

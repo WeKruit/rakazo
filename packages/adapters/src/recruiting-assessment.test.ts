@@ -694,6 +694,33 @@ describe("native saved candidate reads", () => {
     expect((result as { items: object[] }).items[2]).not.toHaveProperty("alreadySeen");
   });
 
+  // Staging aefd141e: "7 unassessed" beside a Reviewer's 52/Partial read as a conflicting status.
+  it("gives the Reviewer's grade as the review, without empty local-assessment fields", async () => {
+    const f = fixture();
+    db.roleId.mockResolvedValueOnce("role");
+    const ranking = { source: "reviewer", state: "current", grade: "Partial", score: 52 };
+    db.candidates.mockResolvedValueOnce({
+      roleId: "role",
+      items: [
+        { candidateKey: "graded", ranking, latestAssessment: null },
+        { candidateKey: "local", latestAssessment: { version: 1, hardGate: "fail" } },
+      ],
+      total: 2,
+      nextCursor: null,
+      counts: { candidates: 2, assessed: 1, unassessed: 1, shortlisted: 0 },
+    });
+    const result = (await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list" },
+      context,
+    )) as { counts: object; items: object[] };
+    expect(result.counts).toEqual({ candidates: 2, shortlisted: 0 });
+    expect(result.items[0]).toMatchObject({ candidateKey: "graded", ranking });
+    expect(result.items[0]).not.toHaveProperty("latestAssessment");
+    expect(result.items[1]).toMatchObject({ latestAssessment: { hardGate: "fail" } });
+  });
+
   // Staging 11-15: "shown in round 2" on the latest round's own people read as nine repeats.
   it("says the latest round's people are in it, not repeats", async () => {
     const f = fixture();
