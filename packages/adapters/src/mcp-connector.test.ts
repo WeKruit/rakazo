@@ -5366,6 +5366,28 @@ describe("local native Instantly campaign and lead tools", () => {
       expect(again).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
     });
 
+    it("says a draft's person is emailed from another campaign instead of calling it unsent", async () => {
+      // Staging 11-21: a denied one-off draft was read after the role's campaign sent, and the
+      // recruiter was told their email was still a draft.
+      const { f } = await roleWithSixteen();
+      const OTHER = "223e4567-e89b-42d3-a456-4266141740c2";
+      f.state.campaigns = [{ id: OTHER, name: "Senior Data Engineer Seattle", status: 1 }];
+      f.state.effects.set("instantly-role-campaign:other-role", {
+        id: "binding-other",
+        kind: "instantly_role_campaign",
+        status: "completed",
+        spaceId: "w1",
+        request: { roleId: "role-2", serverId: SERVER.id },
+        result: { campaignId: OTHER, leads: { abe: { leadId: "x-abe", email: "abe@x.test" } } },
+      });
+      const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+      expect(read).toMatchObject({
+        status: 0,
+        sentFrom: { "abe@x.test": "Senior Data Engineer Seattle" },
+        next: expect.stringContaining("unsent draft, not the send"),
+      });
+    });
+
     it("takes the unnamed never-sent people out of a draft before activating it", async () => {
       const { f, binding } = await roleWithSixteen();
       const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
