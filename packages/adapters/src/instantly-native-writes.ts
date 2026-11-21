@@ -1023,7 +1023,7 @@ export function queuePace(
   }
   if (overdue)
     return `handed to the mail service since ${queuedAt} ${shown}, longer than its usual ${PICKUP_MINUTES} minutes; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}. ${IN_MINUTES}`;
-  return `sending now, not held for a later time: handed to the mail service, the first email can take up to ${PICKUP_MINUTES} minutes to leave because the mail service starts each new send on its own schedule, so asking again or sending now does not make it sooner (tell the recruiter it is already on its way and when it will be out at the latest; give that reason once, and if it was already said, give only the time), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
+  return `sending now, not held for a later time: handed to the mail service, the first email usually leaves within a few minutes and at most ${PICKUP_MINUTES}, because the mail service starts each new send on its own schedule, so asking again does not make that first one sooner (tell the recruiter it is already on its way and when it will be out at the latest; give that reason once, and if it was already said, give only the time and anything new, such as who has been emailed since), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
 }
 /** One role's campaign record is changed by one call at a time: saves, adds and sends. */
 const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
@@ -2959,7 +2959,7 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
           }
         : window
           ? {
-              next: `The people not emailed yet are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still waiting to be emailed with that time, the same time each check, in plain words (never "queue"); do not send them again. None of them has been emailed yet, so if the recruiter asks to stop or hold, pause_campaign holds every one of them.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone waiting one a minute instead of one every ten." : ""}`,
+              next: `The people not emailed yet are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still waiting to be emailed with that time, the same time each check, in plain words (never "queue"); do not send them again.${people.some((person) => person.contacted) ? " If the recruiter asks to stop or hold, pause_campaign holds everyone not emailed yet; those already emailed cannot be taken back." : " None of them has been emailed yet, so if the recruiter asks to stop or hold, pause_campaign holds every one of them."}${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone waiting one a minute instead of one every ten." : ""}`,
             }
           : campaign.status === PAUSED && queued.length
             ? { next: PAUSED_NEXT }

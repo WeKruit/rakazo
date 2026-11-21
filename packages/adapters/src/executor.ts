@@ -343,6 +343,7 @@ import {
   completeExternalEffect,
   createApprovedEffectReplayQueue,
   DENIED_THIS_TURN_RESULT,
+  deniedContinuationNote,
   deniedEarlierThisTurn,
   inputPausedToolResult,
   isToolPauseResult,
@@ -4189,6 +4190,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const approvedEffects = continuationEffects.filter(
           (effect) => effect.status === "approved",
         );
+        // A card denied in an earlier run of this thread since the recruiter's previous message:
+        // their message now is their first word since, and its follow-up run would not know the
+        // card was cancelled (deny plays 11-21: "标题不对" renamed the role).
+        const [, previousHuman] = await deps.prisma.message.findMany({
+          where: { threadId: thread.id, role: "user" },
+          orderBy: { createdAt: "desc" },
+          take: 2,
+          select: { createdAt: true },
+        });
+        const deniedSinceLastWord = await deps.prisma.externalEffect.findMany({
+          where: {
+            status: "denied",
+            runId: { not: runId },
+            run: { threadId: thread.id },
+            updatedAt: { gt: previousHuman?.createdAt ?? new Date(0) },
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 3,
+          select: { kind: true, status: true, result: true },
+        });
         const discardedReplies = continuationEffects.flatMap((effect) => {
           if (effect.status !== "denied") return [];
           const retained =
@@ -14186,6 +14207,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           takeoverResume?.promptNote,
           approvalContinuation,
+          deniedContinuationNote([...continuationEffects, ...deniedSinceLastWord]),
           discardedReplies
             .map(
               (reply) =>
