@@ -2343,9 +2343,10 @@ export async function createPendingSteeringRun(
       trigger: { not: "tool_background" },
       status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
     },
-    select: { id: true },
+    select: { id: true, status: true },
   });
-  if (active) return null;
+  const waiting = active?.status === "waiting_input" || active?.status === "waiting_takeover";
+  if (active && !waiting) return null;
   const pending = await tx.steeringMessage.findMany({
     where: {
       botId: input.botId,
@@ -2356,6 +2357,25 @@ export async function createPendingSteeringRun(
     orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
   });
   if (pending.length === 0) return null;
+  // A teammate's report doesn't wait on a card nobody answers, as a teammate's message doesn't
+  // (fr 11-21: a checked round sat 60–90 s, or until the recruiter gave up, behind a role chat's
+  // open "what next?" card while the recruiter talked in Kruit's chat).
+  if (
+    waiting &&
+    (!pending.every((item) =>
+      (item.message.blocks as MessageBlock[] | null)?.some((block) => block.kind === "handoff"),
+    ) ||
+      (await tx.run.findFirst({
+        where: {
+          threadId: input.threadId,
+          botId: input.botId,
+          trigger: { not: "tool_background" },
+          status: { in: ["queued", "leased", "running"] },
+        },
+        select: { id: true },
+      })))
+  )
+    return null;
   // One origin per continuation so a group channel and a direct chat are not answered together.
   const origin = steeringOrigin(pending[0]!);
   const batch = pending.filter((item) => steeringOrigin(item) === origin);

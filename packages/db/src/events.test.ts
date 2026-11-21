@@ -4661,6 +4661,44 @@ describe("hasUnclaimedSteering", () => {
 });
 
 describe("claimSteering", () => {
+  // fr 11-21 (fc199112): a checked round's report sat behind the role chat's open "what next?"
+  // card for 60–90 s, or until the recruiter gave up.
+  it("continues with a teammate's report beside a turn waiting on a card, not with a person's words", async () => {
+    const continuation = async (block: object) => {
+      const tx = {
+        run: {
+          findFirst: vi.fn(async ({ where }: { where: { status: { in: string[] } } }) =>
+            where.status.in.includes("waiting_input")
+              ? { id: "asking", status: "waiting_input" }
+              : null,
+          ),
+          create: vi.fn().mockResolvedValue({ id: "next-run" }),
+        },
+        task: { create: vi.fn().mockResolvedValue({ id: "task" }) },
+        steeringMessage: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "row",
+              userId: "user",
+              originTrigger: null,
+              message: { id: "message", seq: 2, blocks: [block] },
+            },
+          ]),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      return createPendingSteeringRun(tx as never, {
+        threadId: "thread",
+        botId: "bot",
+        spaceId: "space",
+      });
+    };
+    await expect(
+      continuation({ kind: "handoff", fromBotId: "reviewer", toBotId: "bot", text: "Show it" }),
+    ).resolves.toBe("next-run");
+    await expect(continuation({ kind: "text", text: "more like these" })).resolves.toBeNull();
+  });
+
   it("keeps follow-up input unread until the old turn ends, then activates it in message order", async () => {
     let active = true;
     let originTrigger: string | null = "follow_up";
