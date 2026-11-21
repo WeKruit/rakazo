@@ -14,7 +14,7 @@ copied "batch" account, so its plays start empty here.
 --env RAKAZO_SIM_SANDBOX=desktop runs the agent's shell commands inside this Sandbox (default: fake).
 
 Without simulated-customer args it plays the free journeys that need no mailbox, copied account or
-paid search. Send plays use nine more accounts whose mailboxes are on the emulated mail service. Results land where the simulated customer writes them (--out, else simulated-<time>/).
+paid search. Each send play gets a new account whose mailbox is on the emulated mail service. Results land where the simulated customer writes them (--out, else simulated-<time>/).
 Needs MODAL_TOKEN_ID/MODAL_TOKEN_SECRET and the simulated customer's own model access.
 """
 
@@ -112,18 +112,6 @@ def image(web):
     )
 
 
-def owner_rpc(url, origin, email, password, route, payload):
-    """One call as the deployment owner (the first account), through the web app's own RPC."""
-    signed = urllib.request.urlopen(urllib.request.Request(
-        f"{url}/api/auth/sign-in/email", method="POST",
-        data=json.dumps({"email": email, "password": password}).encode(),
-        headers={"content-type": "application/json", "origin": origin}), timeout=60)
-    cookie = "; ".join(line.split(";")[0] for line in signed.headers.get_all("set-cookie") or [])
-    urllib.request.urlopen(urllib.request.Request(
-        f"{url}/rpc/{route}", method="POST", data=json.dumps({"json": payload}).encode(),
-        headers={"content-type": "application/json", "origin": origin, "cookie": cookie}), timeout=60).read()
-
-
 def sign_up(url, origin, email, password, name):
     """Creates a verified account: sign up, then follow the link the emulated mailbox received."""
     request = urllib.request.Request(
@@ -155,7 +143,6 @@ def main(argv):
     search, web = "--search" in own, "--web" in own
     owner, password = "branch-owner@example.com", f"Branch-{secrets.token_urlsafe(18)}"
     batch, batch_password = "branch-batch@example.com", f"Branch-{secrets.token_urlsafe(18)}"
-    senders = [(f"branch-sender{n}@example.com", f"Branch-{secrets.token_urlsafe(18)}") for n in range(1, 10)]
 
     app = modal.App.lookup("rakazo-branch-plays", create_if_missing=True, environment_name=ENVIRONMENT)
     print("building the branch image (cached after the first run)", flush=True)
@@ -194,23 +181,16 @@ def main(argv):
         url = sandbox.tunnels()[PORT].url
         sign_up(url, origin, owner, password, "Branch Owner")
         sign_up(url, origin, batch, batch_password, "Batch Recruiter")
-        # The send plays' accounts, nine (as many as the simulated customer takes), so each sample of a
-        # send journey gets its own account and no play reads another's roles: the owner assigns each one of
-        # the emulated mail service's mailboxes. Emails are signed with this name, so it reads as a person's.
-        for n, (sender, sender_password) in enumerate(senders, 1):
-            sign_up(url, origin, sender, sender_password, "Noah Reed")
-            owner_rpc(url, origin, owner, password, "deployment/assignSendingMailbox",
-                      {"accountEmail": sender, "mailbox": MAILBOX.format(n=n), "displayName": "Noah Reed"})
         print(f"branch backend up at {url}{f' (web {origin})' if web else ''}; playing {' '.join(plays)}", flush=True)
         # Mailbox, copied-account and recipient settings point at staging accounts, not this backend.
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("RAKAZO_MAILBOX_", "RAKAZO_BATCH_", "RAKAZO_SIM_RECIPIENTS"))}
         env.update(RAKAZO_URL=url, RAKAZO_ORIGIN=origin, RAKAZO_EMAIL=owner, RAKAZO_PASSWORD=password,
                    RAKAZO_BATCH_EMAIL=batch, RAKAZO_BATCH_PASSWORD=batch_password,
-                   RAKAZO_SIM_RECIPIENTS=RECIPIENT)
-        for n, (sender, sender_password) in enumerate(senders, 1):
-            suffix = "" if n == 1 else f"_{n}"
-            env.update({f"RAKAZO_MAILBOX_EMAIL{suffix}": sender, f"RAKAZO_MAILBOX_PASSWORD{suffix}": sender_password})
+                   RAKAZO_SIM_RECIPIENTS=RECIPIENT,
+                   # Each send play gets a new account holding the next emulated mailbox, so plays
+                   # never share an account's roles or sends.
+                   RAKAZO_FRESH_SENDER=MAILBOX)
         started = time.time()
         code = subprocess.call(["node", str(ROOT / "infra/acceptance/simulated-customer.mjs"), *plays], env=env, cwd=ROOT)
         # The test database too (fake accounts only), to read what a play's tools returned.
