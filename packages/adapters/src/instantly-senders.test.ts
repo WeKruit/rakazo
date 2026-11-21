@@ -11,6 +11,7 @@ import {
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
+  adoptAssignedSenders,
   adoptLegacySender,
   asksSenderCompanyName,
   defaultSendingMailbox,
@@ -794,6 +795,26 @@ it("adopts every mailbox the owner assigned, keeping each one's name when none i
   );
   expect(f.rows.filter((row) => row.kind === "instantly_sender_account")).toHaveLength(3);
   expect(f.accounts.get("liu@b.test")?.first_name).toBe("Noah");
+});
+it("still hands back an assigned mailbox a parallel call of this account just recorded", async () => {
+  // stop-after-approve 11-21: two mail calls in one turn both adopted the new account's mailbox;
+  // the one that lost the race got none, so its save was refused as "not this account's mailbox".
+  const f = fixture(2, false);
+  const email = "new@product.test";
+  f.accounts.set(email, { email, first_name: "Noah", status: 1, setup_pending: false });
+  f.assignments.push({ email, userId: "owner", displayName: "", createdAt: new Date() });
+  f.rows.push({
+    id: "parallel",
+    kind: "instantly_sender_account",
+    status: "completed",
+    idempotencyKey: `instantly-sender-mailbox:${email}`,
+    result: { email, displayName: "Noah", domain: "product.test", attached: true },
+    request: { serverId: "source", adopted: "owner_assignment" },
+    run: { userId: context.userId, spaceId: context.spaceId },
+    spaceId: context.spaceId,
+  });
+  expect(await adoptAssignedSenders(f.prisma, f.rest, context, "source")).toEqual([email]);
+  expect(f.rows.filter((row) => row.kind === "instantly_sender_account")).toHaveLength(1);
 });
 it("never adopts an assigned mailbox another account already holds", async () => {
   const f = fixture(2, false);
