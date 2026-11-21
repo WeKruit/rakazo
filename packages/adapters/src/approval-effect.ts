@@ -226,15 +226,23 @@ export function deniedCardsSince(
 }
 
 /**
- * What a run resumed after a denied card is told: the paused call's result stays "Waiting for
+ * What a run resumed after a denied card is told, oldest first: the paused call's result stays "Waiting for
  * approval.", so without this the model read the recruiter's next words with no sign the card was
  * cancelled (deny plays 11-21: "标题不对" renamed the role two seconds after the cancel).
  */
 export function deniedContinuationNote(
   effects: readonly { kind: string; status: string; result?: unknown }[],
 ): string | undefined {
-  const notes = effects.flatMap((effect) => {
+  const notes = effects.flatMap((effect, index) => {
     if (effect.status !== "denied") return [];
+    // A later card of the same kind was approved, so this run already acted on the cancel (deny
+    // 11-21: told again after the new card's approval, it saved and sent the email once more).
+    if (
+      effects
+        .slice(index + 1)
+        .some((later) => later.kind === effect.kind && later.status === "approved")
+    )
+      return [];
     const gate = resolveDuplicateEffectGate(effect, effect.kind);
     const error =
       gate.action === "return" && gate.result && typeof gate.result === "object"

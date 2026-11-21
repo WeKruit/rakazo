@@ -319,6 +319,12 @@ describe("resolveDuplicateEffectGate", () => {
     expect(deniedContinuationNote([{ kind: "destination.write", status: "approved" }])).toBe(
       undefined,
     );
+    expect(
+      deniedContinuationNote([
+        { kind: "instantly__x__activate_campaign", status: "denied", result: null },
+        { kind: "instantly__x__activate_campaign", status: "approved" },
+      ]),
+    ).toBe(undefined);
   });
 
   it("tells a run about another run's cancelled card only before it has acted on it", () => {
