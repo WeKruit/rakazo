@@ -320,7 +320,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     ActivateCampaignInput,
     false,
-    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued (for later sending hours, or behind the gap between emails) and the recruiter wants them sent now, pass send_now: its card lists who is queued, and on confirm they go out as soon as the mail service picks them up (often minutes, at most about an hour), one a minute. Never tell the recruiter a queue cannot be sped up; offer send_now. When the recruiter cancels this card, their next words are about the email it showed: a new 标题 or title is its subject line, not the role name (save it with ensure_role_campaign, then call this again for a new card) unless they name the role.",
+    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued (for later sending hours, or behind the gap between emails) and the recruiter wants them sent now, pass send_now: its card lists who is queued, and on confirm they go out as soon as the mail service picks them up (usually a few minutes, at most about 15), one a minute. Never tell the recruiter a queue cannot be sped up; offer send_now. When the recruiter cancels this card, their next words are about the email it showed: a new 标题 or title is its subject line, not the role name (save it with ensure_role_campaign, then call this again for a new card) unless they name the role.",
   ),
   tool(
     "pause_campaign",
@@ -955,12 +955,13 @@ const FASTEST_GAP = 1;
 const FEW_RECIPIENTS = 10;
 /**
  * Minutes the provider can take to start emailing a campaign it just activated or whose hours
- * just opened (observed up to about an hour, often a few minutes).
+ * just opened: the provider documents 10–15 minutes, and a healthy mailbox started in about two
+ * (staging 11-21). Longer waits were a mailbox it did not count, which its sending status names.
  */
-const PICKUP_MINUTES = 60;
+const PICKUP_MINUTES = 15;
 
 const IN_MINUTES =
-  "Tell the recruiter that time in minutes from now, never as a clock time in any zone.";
+  "Tell the recruiter that time in minutes from now, never as a clock time in any zone";
 
 export function queuePace(
   campaign: Record<string, unknown> | undefined,
@@ -1018,11 +1019,11 @@ export function queuePace(
     time = `about ${left} minutes from now (by ${end.toISOString().slice(11, 16)} UTC)`;
     queuedAt = at(start);
   } catch {
-    return `sending now, not held for a later time: handed to the mail service, the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
+    return `sending now, not held for a later time: handed to the mail service, the first email can take up to ${PICKUP_MINUTES} minutes to leave, then about one every ${gap} minutes from the mailbox`;
   }
   if (overdue)
-    return `handed to the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}. ${IN_MINUTES}`;
-  return `sending now, not held for a later time: handed to the mail service, the first email can take up to an hour to leave because the mail service starts each new send on its own schedule, so asking again or sending now does not make it sooner (tell the recruiter it is already on its way and when it will be out at the latest, with that reason, rather than only that it cannot be sped up), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
+    return `handed to the mail service since ${queuedAt} ${shown}, longer than its usual ${PICKUP_MINUTES} minutes; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}. ${IN_MINUTES}`;
+  return `sending now, not held for a later time: handed to the mail service, the first email can take up to ${PICKUP_MINUTES} minutes to leave because the mail service starts each new send on its own schedule, so asking again or sending now does not make it sooner (tell the recruiter it is already on its way and when it will be out at the latest, with that reason, rather than only that it cannot be sped up), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
 }
 /** One role's campaign record is changed by one call at a time: saves, adds and sends. */
 const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
