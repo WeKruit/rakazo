@@ -425,7 +425,9 @@ async function ownedLegacySender(
 /**
  * The mailboxes the deployment owner assigned to this account become its senders on the account's
  * next mail call, each recorded as the same native receipt, unless another account already holds
- * it. Returns the newly adopted addresses.
+ * it. Returns the assigned addresses this account now holds, including one a parallel call of
+ * this account recorded first (stop-after-approve 11-21: the call that lost that race got none,
+ * so its save was refused as another account's mailbox).
  */
 export async function adoptAssignedSenders(
   prisma: PrismaClient,
@@ -442,7 +444,11 @@ export async function adoptAssignedSenders(
   const adopted: string[] = [];
   for (const assignment of assignments) {
     const email = assignment.email.trim().toLowerCase();
-    if (await prisma.externalEffect.findUnique({ where: { idempotencyKey: key(email) } })) continue;
+    const held = await heldBy(prisma, email);
+    if (held) {
+      if (held === "this") adopted.push(email);
+      continue;
+    }
     let account: Record<string, unknown>;
     try {
       account = await rest("GET", `/accounts/${encodeURIComponent(email)}`);
@@ -464,8 +470,8 @@ export async function adoptAssignedSenders(
     const runId = context.runId;
     const recorded = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["sending-identity", context.userId, context.spaceId])}, 0))`;
-      if (await tx.externalEffect.findUnique({ where: { idempotencyKey: key(email) } }))
-        return false;
+      const now = await heldBy(tx, email);
+      if (now) return now;
       await tx.externalEffect.create({
         data: {
           spaceId: context.spaceId,
@@ -477,13 +483,29 @@ export async function adoptAssignedSenders(
           result: value as unknown as Prisma.InputJsonValue,
         },
       });
-      return true;
+      return "new" as const;
     });
-    if (!recorded) continue;
+    if (recorded !== "other") adopted.push(email);
+    if (recorded !== "new") continue;
     if (value.displayName !== current) await refreshMailbox(rest, email, value.displayName);
-    adopted.push(email);
   }
   return adopted;
+
+  /** Whether a receipt already holds this mailbox, and for which account. */
+  async function heldBy(db: Pick<PrismaClient, "externalEffect">, email: string) {
+    const receipt = await db.externalEffect.findUnique({
+      where: { idempotencyKey: key(email) },
+      include: { run: { select: { userId: true, spaceId: true } } },
+    });
+    if (!receipt) return undefined;
+    return receipt.spaceId === context.spaceId &&
+      receipt.status === "completed" &&
+      (receipt.request as { serverId?: unknown } | null)?.serverId === serverId &&
+      receipt.run.userId === context.userId &&
+      receipt.run.spaceId === context.spaceId
+      ? ("this" as const)
+      : ("other" as const);
+  }
 }
 
 /**
