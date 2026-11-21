@@ -670,7 +670,12 @@ import {
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
-import { checkRound, roundCriteria, roundPeopleNamed } from "./recruiting-round-check.js";
+import {
+  checkRound,
+  everyPickGraded,
+  roundCriteria,
+  roundPeopleNamed,
+} from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject, peopleRoomForRequest } from "./recruiting-research.js";
 import {
@@ -6164,7 +6169,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               relaxed: agentRunsBeforeRound > 0,
               reviewed:
                 (await roundState(deps.prisma, roleId).catch(() => null))?.status === "checked" ||
-                (await roundHeld(roleId)),
+                (await roundHeld(roleId)) ||
+                (await everyPickGraded(deps.prisma, roleId, keys).catch(() => false)),
               shortOfTen: SHORT_OF_TEN,
             });
             if (!checked.ok) {
