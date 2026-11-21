@@ -330,6 +330,18 @@ const asSeen = (text, chinese) =>
   chinese
     ? text.replace(/^([^\n→]+?)(?= → |$)/gm, (title) => ZH_UI.get(title.trim()) ?? title)
     : text;
+// A card's content (an email's subject and body) stays on the page while it waits and after it is
+// answered, so the transcript keeps it: it is what the recruiter approved.
+const cardDetails = (message) =>
+  (message.blocks ?? [])
+    .filter(
+      (block) =>
+        block.kind === "ask" &&
+        block.detail &&
+        block.input !== "secret" &&
+        (!block.status || block.status === "pending" || block.status === "answered"),
+    )
+    .map((block) => block.detail);
 // What a card offers on the page, so a reader of the text transcript knows which buttons exist.
 // The newest connect card per service keeps Connect until a sign-in finishes, as the app shows it.
 function cardControls(message, newestConnect, chinese) {
@@ -384,6 +396,8 @@ export async function transcripts(rpc, since, chinese = false) {
         text: (message.blocks ?? []).some((block) => block.approvalEffectId)
           ? asSeen(botText(message), chinese)
           : botText(message),
+        // Kept apart from text: the rule checks read Kruit's own words, not the email it drafted.
+        detail: cardDetails(message).join("\n"),
         card: (message.blocks ?? []).some((block) => block.kind === "ask"),
         controls: cardControls(message, newestConnect, chinese),
         sendCard: (message.blocks ?? []).some((block) => block.approvalEffectId),
