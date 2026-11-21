@@ -568,7 +568,7 @@ export async function startRecruitingGrading(
           deps,
           thread,
           clientNonce,
-          async () => roundReviewPrompt(review.round.round, shownPeople),
+          async () => roundReviewPrompt(review.round.round, shownPeople, size),
           grader?.botId,
           review.round.ownerBotId,
         );
@@ -1004,7 +1004,7 @@ async function roundUnderReview(
         name: row.name,
         title: row.title,
         company: row.company,
-        tier: (row.matchFields as { match_tier?: unknown } | null)?.match_tier,
+        tier: placeTier(row.matchFields),
       });
   return { round, grades, held, checked: held && status === "checked", since, feedbackAt };
 }
@@ -1246,7 +1246,7 @@ async function roundReplacements(
   const tiers = new Map<string, unknown>();
   for (const row of graded)
     if (!tiers.has(row.candidateKey))
-      tiers.set(row.candidateKey, (row.matchFields as { match_tier?: unknown } | null)?.match_tier);
+      tiers.set(row.candidateKey, placeTier(row.matchFields));
   const people = new Map<string, Replacement>();
   for (const tier of usable)
     for (const row of rows) {
@@ -1301,6 +1301,23 @@ export async function askedRoundSize(
   return roundSize(asked.map((message) => message.blocks));
 }
 
+/** An Uncertain grade scored under this saw too little of the profile to take a round's place. */
+const SEEN_TOO_LITTLE_SCORE = 50;
+
+/**
+ * The tier a grade fills a round's place with. fr 11-21 (b3671ce9): two people graded Uncertain at
+ * 15 ("the profile details available here do not establish role fit") filled round 3's last places,
+ * and the recruiter found no Spark or Kafka on either after being told the round was checked.
+ */
+export function placeTier(fields: unknown): unknown {
+  const grade = fields as { match_tier?: unknown; match_score?: unknown } | null;
+  return grade?.match_tier === "Uncertain" &&
+    typeof grade.match_score === "number" &&
+    grade.match_score < SEEN_TOO_LITTLE_SCORE
+    ? "Unseen"
+    : grade?.match_tier;
+}
+
 /** How close a misfit the Reviewer checked is: kept in a place no Strong person can fill. */
 const KEPT_MISFIT_TIERS = ["Promising", "Uncertain"];
 /** Checked people from Results who may fill a round's open places, best first. */
@@ -1353,12 +1370,22 @@ export function checkedRoundPeople(
   return people.slice(0, size);
 }
 
-export function roundReviewPrompt(round: number, people: readonly { key: string; name: string }[]) {
+export function roundReviewPrompt(
+  round: number,
+  people: readonly { key: string; name: string }[],
+  asked = people.length,
+) {
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and exactly these people, in this order:`,
     ...people.map((person, index) => `${index + 1}. ${person.name} (candidateKey ${person.key})`),
     "",
     "The Reviewer's grades stand for them: no checks, no search, and don't read Results or anyone's profile again. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.",
+    // The recruiter's rule 11-21: "补不满就问问用户要不要就行，要不然会浪费钱".
+    ...(people.length < asked
+      ? [
+          `That is ${people.length} of the ${asked} they asked for. In the same reply, ask whether these are enough or which one point they named to loosen, and search no more until they answer.`,
+        ]
+      : []),
   ].join("\n");
 }
 
