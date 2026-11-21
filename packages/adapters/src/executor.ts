@@ -7624,6 +7624,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               roleId: thread.activeRecruitingRoleId,
               botId: run.botId,
               recordedThisTurn: roundHeldRecorded,
+              sourceMessageId: run.sourceMessageId,
             }).catch(() => (roundHeldRecorded ? ROUND_HELD_SEARCH_REFUSAL : null));
             if (held) return { error: held };
           }

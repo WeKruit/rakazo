@@ -1419,14 +1419,61 @@ export const ROUND_AWAITING_SEARCH_REFUSAL =
  */
 export async function heldRoundSearchRefusal(
   prisma: PrismaClient,
-  input: { roleId: string | null | undefined; botId: string; recordedThisTurn: boolean },
+  input: {
+    roleId: string | null | undefined;
+    botId: string;
+    recordedThisTurn: boolean;
+    sourceMessageId?: string | null;
+  },
 ): Promise<string | null> {
   if (input.recordedThisTurn) return ROUND_HELD_SEARCH_REFUSAL;
   if (!input.roleId) return null;
   const state = await roundState(prisma, input.roleId);
-  if (!state || state.status === "shown") return null;
+  if (!state || state.status === "shown")
+    return input.sourceMessageId
+      ? answeredRequestRefusal(prisma, input.roleId, input.sourceMessageId)
+      : null;
   if (state.status === "checked" && state.ownerBotId === input.botId) return null;
   return ROUND_AWAITING_SEARCH_REFUSAL;
+}
+
+/**
+ * Why a search for a request a round shown since then already answers must not run, or null.
+ * fosp 11-21 (a0e844e4): the round checked after the feedback was shown at the 5 of "再来5个",
+ * which had come in while it was checked; the lead's turn for "再来5个" then ran another round,
+ * and the recruiter got 9 more and asked "我只要5个，怎么又来9个？".
+ */
+async function answeredRequestRefusal(
+  prisma: PrismaClient,
+  roleId: string,
+  sourceMessageId: string,
+): Promise<string | null> {
+  const [round, asked] = await Promise.all([
+    prisma.recruitingCalibrationRound.findFirst({
+      where: { roleId },
+      orderBy: { round: "desc" },
+      select: { round: true, candidateKeys: true, status: true, statusAt: true, approvedAt: true },
+    }),
+    prisma.message.findUnique({
+      where: { id: sourceMessageId },
+      select: { role: true, createdAt: true, blocks: true },
+    }),
+  ]);
+  if (!round || round.round < 2 || round.approvedAt || round.status !== "shown") return null;
+  if (asked?.role !== "user" || !(round.statusAt > asked.createdAt)) return null;
+  const words = (
+    Array.isArray(asked.blocks) ? (asked.blocks as { kind?: string; text?: unknown }[]) : []
+  )
+    .flatMap((block) =>
+      (block.kind === "text" || block.kind === "bot_message_received") &&
+      typeof block.text === "string"
+        ? [handedInRecruiterWords(block.text) ?? block.text]
+        : [],
+    )
+    .join("\n");
+  const target = requestedPeopleTarget(words);
+  if (!target || target > round.candidateKeys.length) return null;
+  return `Not run: round ${round.round}, shown after this request came in, already gives the recruiter the ${round.candidateKeys.length} people it asks for. Don't search for more: end the turn with an empty reply. Search again only when the recruiter asks for more people after that round.`;
 }
 
 /** The people of the round waiting for the Reviewer's check, or null when no round waits. */
