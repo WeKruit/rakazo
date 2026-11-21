@@ -82,12 +82,15 @@ const MAILBOXES = ["", ..."23456789".split("").map((n) => `_${n}`)]
 // The staging copy of our own account (account: "batch"), whose every address was rewritten to a
 // plus-alias of an internal test inbox, so a batch send from it reaches only our inbox.
 const BATCH = [process.env.RAKAZO_BATCH_EMAIL, process.env.RAKAZO_BATCH_PASSWORD];
+// A backend of its own (pnpm sim:branch) gives every mailbox play a new account with the next
+// emulated mailbox ("sender{n}@…"), so no play reads another's roles or sends.
+const FRESH_SENDER = process.env.RAKAZO_FRESH_SENDER;
 /** An internal test inbox, or a plus-alias of one (admin1+p1a2b@… reaches admin1@…). */
 const allowedRecipient = (address) =>
   RECIPIENTS.includes(address) || RECIPIENTS.includes(address.replace(/\+[^@]*@/, "@"));
 /** What a journey needs that this run was not given. */
 const missing = (journey) => [
-  ...(journey.account === "mailbox" && !MAILBOXES.length
+  ...(journey.account === "mailbox" && !MAILBOXES.length && !FRESH_SENDER
     ? ["RAKAZO_MAILBOX_EMAIL", "RAKAZO_MAILBOX_PASSWORD"]
     : []),
   ...(journey.account === "batch" && !BATCH.every(Boolean)
@@ -541,6 +544,9 @@ async function play(journey, label, owner, mailbox, out) {
   if (journey.account) {
     await user.auth(...credentials);
     if (journey.account === "batch") await withoutContactLookups(user.rpc);
+  }
+  // A reused account first goes quiet and loses what earlier plays left; a new one has nothing to clear.
+  if (journey.account && !credentials.fresh) {
     // Waiting for a reused account to go quiet watches only its working chats, not every role.
     watchFrom(user.rpc, Date.now());
     await stopAll(user.rpc);
@@ -560,7 +566,8 @@ async function play(journey, label, owner, mailbox, out) {
         );
     }
     if (journey.account === "mailbox") await forgetEarlierPlays(user.rpc, label);
-  } else {
+  }
+  if (!journey.account) {
     const email = `kruit-sim-${journey.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
     const password = `Sim-${crypto.randomUUID()}`;
     await owner.rpc("deployment/createAccount", { email, name: ACCOUNT_NAME, password });
@@ -1327,10 +1334,30 @@ await owner.auth(OWNER_EMAIL, OWNER_PASSWORD);
 // A mailbox journey waits for a free mailbox account.
 const freeMailboxes = [...MAILBOXES];
 const waiting = [];
+let senders = 0;
+async function freshMailbox() {
+  const email = `kruit-sim-sender-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
+  const password = `Sim-${crypto.randomUUID()}`;
+  await owner.rpc("deployment/createAccount", { email, name: "Noah Reed", password });
+  await owner.rpc("deployment/assignSendingMailbox", {
+    accountEmail: email,
+    mailbox: FRESH_SENDER.replace("{n}", String((senders += 1))),
+    displayName: "Noah Reed",
+  });
+  return Object.assign([email, password], { fresh: true });
+}
 const takeMailbox = () =>
-  freeMailboxes.length ? Promise.resolve(freeMailboxes.pop()) : new Promise((r) => waiting.push(r));
+  FRESH_SENDER
+    ? freshMailbox()
+    : freeMailboxes.length
+      ? Promise.resolve(freeMailboxes.pop())
+      : new Promise((r) => waiting.push(r));
 const giveBack = (mailbox) =>
-  waiting.length ? waiting.shift()(mailbox) : freeMailboxes.push(mailbox);
+  FRESH_SENDER
+    ? undefined
+    : waiting.length
+      ? waiting.shift()(mailbox)
+      : freeMailboxes.push(mailbox);
 // The batch copy is one account with one main chat, so its journeys play one after another:
 // side by side, each judge would read the other plays' replies.
 let batchTurn = Promise.resolve();

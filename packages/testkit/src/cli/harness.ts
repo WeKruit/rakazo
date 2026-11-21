@@ -189,9 +189,9 @@ async function main() {
     ] = await Promise.all([import("@rakazo/adapters"), import("../../../../apps/api/src/app.ts")]);
     const { serve } = await import("@hono/node-server");
     const thirdParties = new ThirdPartyConnectorEmulator();
-    // The mailboxes a branch backend assigns to its sending accounts (infra/modal/branch_backend.py).
+    // The mailboxes a branch backend's send plays get, one per play (RAKAZO_FRESH_SENDER).
     if (serveMode)
-      for (let n = 1; n <= 9; n++)
+      for (let n = 1; n <= 100; n++)
         thirdParties.instantly.addMailbox({ email: `sender${n}@branch-mail.example.test` });
     const journey = e2eSpec?.includes("recruiting-global-journey")
       ? new (
