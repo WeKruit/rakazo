@@ -9227,6 +9227,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? result
                   : uncertainEffectResult(name);
               }
+              if (waitingSend && "unchanged" in waitingSend) {
+                const result = {
+                  error:
+                    "Nothing was sent and no card was made: this is exactly the email the recruiter cancelled (same subject, body and people). If their message since asks for any change, such as a new 标题 or title, subject, wording or people, save it first (update_role_draft, or ensure_role_campaign steps), then call activate_campaign again. If they asked to send it unchanged, call activate_campaign again with the same arguments and its card shows.",
+                  dispatched: false,
+                };
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
               if (waitingSend) {
                 const result = {
                   status: "already_waiting",
