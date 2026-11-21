@@ -1501,6 +1501,13 @@ function requireConfirmableBrief(revision: RecruitingRoleRevision) {
     );
 }
 
+/**
+ * The message a brief confirmation posts as the recruiter's: their approval of the brief, not
+ * anything they said about the people shown.
+ */
+export const BRIEF_CONFIRMATION_TEXT =
+  /^Confirm recruiting brief for .+ \(requirements version \d+\)\.$/;
+
 async function confirmRecruitingBriefInTransaction(
   tx: Prisma.TransactionClient,
   actor: Actor,

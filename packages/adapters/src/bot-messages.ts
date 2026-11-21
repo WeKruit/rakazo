@@ -802,12 +802,47 @@ export async function returnDelegatedTeamOutcome(
     take: 200,
     select: { role: true, blocks: true },
   });
+  // fr 11-21 (41c12cca): the recruiter tapped an answer on the role's intake question there; that
+  // ended the scan, so the round that followed never came back and Kruit said it wasn't recorded.
+  // A tapped card answer is not the recruiter taking the conversation there.
+  const labels = new Set(
+    (
+      await deps.prisma.message
+        .findMany({
+          where: { threadId: run.threadId, role: "bot" },
+          orderBy: { seq: "desc" },
+          take: 20,
+          select: { blocks: true },
+        })
+        .catch(() => [])
+    ).flatMap((message) =>
+      (Array.isArray(message.blocks) ? message.blocks : []).flatMap((block) => {
+        const ask = (block ?? {}) as {
+          kind?: string;
+          answer?: unknown;
+          actions?: { id?: unknown; label?: unknown }[];
+        };
+        if (ask.kind !== "ask" || !Array.isArray(ask.actions)) return [];
+        return ask.actions.flatMap((action) =>
+          action.id === ask.answer && typeof action.label === "string" ? [action.label] : [],
+        );
+      }),
+    ),
+  );
+  const answersCard = (blocks: MessageBlock[]) => {
+    const words = blocks
+      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+      .join("\n")
+      .trim();
+    return words !== "" && labels.has(words);
+  };
   let text = "";
   let round = "";
   let answeredThere = false;
   for (const message of later) {
     const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
     if (message.role === "user" && !botMessageContext(blocks)) {
+      if (answersCard(blocks)) continue;
       answeredThere = true;
       break;
     }
