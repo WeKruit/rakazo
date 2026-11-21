@@ -525,7 +525,13 @@ export async function startRecruitingGrading(
       const shownPeople = checkedRoundPeople(
         roundKeys,
         review.grades,
-        await roundReplacements(deps.prisma, role.id, open, early ? feedbackAt : review.since),
+        await roundReplacements(
+          deps.prisma,
+          role.id,
+          open,
+          early ? feedbackAt : review.since,
+          SHOWN_REPLACEMENT_TIERS,
+        ),
         size,
       );
       // fosp 11-20 (4eb42c98): "再来5个" came back with 2 while ten saved people no round had shown
@@ -1169,6 +1175,7 @@ async function roundReplacements(
   roleId: string,
   open: number,
   since: Date | undefined,
+  usable: readonly string[] = REPLACEMENT_TIERS,
 ): Promise<Replacement[]> {
   if (!open) return [];
   const [rounds, graded, rows] = await Promise.all([
@@ -1194,7 +1201,7 @@ async function roundReplacements(
     if (!tiers.has(row.candidateKey))
       tiers.set(row.candidateKey, (row.matchFields as { match_tier?: unknown } | null)?.match_tier);
   const people = new Map<string, Replacement>();
-  for (const tier of REPLACEMENT_TIERS)
+  for (const tier of usable)
     for (const row of rows) {
       if (shown.has(row.candidateKey) || people.has(row.candidateKey)) continue;
       if (tiers.get(row.candidateKey) !== tier) continue;
@@ -1251,11 +1258,19 @@ export async function askedRoundSize(
 const KEPT_MISFIT_TIERS = ["Promising", "Uncertain"];
 /** Checked people from Results who may fill a round's open places, best first. */
 const REPLACEMENT_TIERS = [FIT_TIER, "Promising"];
+/**
+ * A checked round that is shown now may also take Results' Uncertain people in its last places.
+ * fosp 11-21 (f68ae6bf): "再来5个" came back with 4 while three checked Uncertain people sat in
+ * Results, and the recruiter's "要5个只给4个" spent two more turns. Not for showing a round
+ * early, which waits for the search's better people instead.
+ */
+const SHOWN_REPLACEMENT_TIERS = [...REPLACEMENT_TIERS, "Uncertain"];
 
 /**
  * The checked round to show, in order: the round's people who fit, then the Strong people from
  * Results in the misfits' places, then the round's Promising people, then Promising people from
- * Results, then the round's Uncertain people (never Partial) in any place still open, up to
+ * Results, then the round's Uncertain people, then Uncertain people from Results (never Partial)
+ * in any place still open, up to
  * `size` (roundSize). Staging 11-16 (982a0ac9): told to "keep the round's
  * other people" without being given them, the lead asked the recruiter which three to keep.
  */
@@ -1275,21 +1290,18 @@ export function checkedRoundPeople(
     candidateKeys
       .filter((key) => misfit(key) && grades.get(key)?.tier === tier)
       .map((key) => named(key, grades.get(key)?.name));
-  const fromResults = (strong: boolean) =>
+  const fromResults = (tier: string) =>
     replacements
-      .filter(
-        (person) =>
-          !candidateKeys.includes(person.key) &&
-          ((person.tier ?? FIT_TIER) === FIT_TIER) === strong,
-      )
+      .filter((person) => !candidateKeys.includes(person.key) && (person.tier ?? FIT_TIER) === tier)
       .map((person) => named(person.key, person.name));
   const [promising, uncertain] = KEPT_MISFIT_TIERS.map(closest);
   const people = [
     ...kept.map((key) => named(key, grades.get(key)?.name)),
-    ...fromResults(true),
+    ...fromResults(FIT_TIER),
     ...(promising ?? []),
-    ...fromResults(false),
+    ...fromResults("Promising"),
     ...(uncertain ?? []),
+    ...fromResults("Uncertain"),
   ];
   return people.slice(0, size);
 }

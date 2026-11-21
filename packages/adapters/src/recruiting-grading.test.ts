@@ -1122,6 +1122,29 @@ describe("checkedRoundPeople", () => {
       "q3",
     ]);
   });
+
+  it("fills the last places of a short round with checked Uncertain people from Results", () => {
+    // fosp 11-21 (f68ae6bf): "再来5个" came back with 4 while three checked Uncertain people sat
+    // in Results; the round's own Uncertain people still go first.
+    const keys = ["p1", "u1", "x1"];
+    const grades = new Map([
+      ["p1", grade("P1", "Promising")],
+      ["u1", grade("U1", "Uncertain")],
+      ["x1", grade("X1", "Partial")],
+    ]);
+    const replacements = [
+      { key: "q1", name: "Q1", tier: "Promising" },
+      { key: "v1", name: "V1", tier: "Uncertain" },
+      { key: "v2", name: "V2", tier: "Uncertain" },
+    ];
+    expect(checkedRoundPeople(keys, grades, replacements, 5).map((p) => p.key)).toEqual([
+      "p1",
+      "q1",
+      "u1",
+      "v1",
+      "v2",
+    ]);
+  });
 });
 
 describe("roundSize", () => {

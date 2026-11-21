@@ -8,9 +8,9 @@ import {
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { Client } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { STOPPED_TURN } from "./cancel-runs.js";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
-import { STOPPED_TURN } from "./cancel-runs.js";
 import { appendEventInTransaction } from "./events.js";
 import { createThreadMessageInTransaction } from "./messages.js";
 import * as recruiting from "./recruiting.js";
@@ -7300,7 +7300,7 @@ describe("people search candidate save", () => {
 });
 
 describe("quality check grade save", () => {
-  function gradesFixture() {
+  function gradesFixture(changes: Record<string, unknown> = {}) {
     const f = nativeCandidateFixture();
     const grade = {
       name: "Ada Example",
@@ -7313,6 +7313,7 @@ describe("quality check grade save", () => {
       requirements_assessment: [
         { requirement: "Based in New Jersey", status: "met" as const, evidence: "Edison, NJ" },
       ],
+      ...changes,
     };
     const input = {
       operation: "save_grades" as const,
@@ -7382,6 +7383,21 @@ describe("quality check grade save", () => {
       graded: 1,
     });
     expect(f.saveEffect).toMatchObject({ status: "completed", result });
+  });
+
+  it("saves an Uncertain grade with a requirement not met as Partial", async () => {
+    // Branch fosp 11-21 (c8635512): someone in Singapore for a Shanghai role was saved Uncertain
+    // and filled a round's last place.
+    const f = gradesFixture({
+      match_tier: "Uncertain",
+      requirements_assessment: [
+        { requirement: "Based in New Jersey", status: "not_met", evidence: "Singapore" },
+      ],
+    });
+    await f.save();
+    expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [expect.objectContaining({ matchFields: { match_score: 88, match_tier: "Partial" } })],
+    });
   });
 
   it.each(["not-in-role", "receipt-hash"])("refuses %s", async (boundary) => {
