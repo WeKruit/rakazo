@@ -284,7 +284,7 @@ export function resolveDuplicateEffectGate(
       action: "return",
       result: {
         error:
-          "The user denied this action. Do not retry or rephrase it; tell the user in one line that it was not done and ask what they want instead. Do not show again what the card showed (an email, its subject or people): a copy goes stale once they change it, and their next message may already say what to change.",
+          "The user denied this action. Do not retry it unchanged. If the user has written since and asks for a change (such as a new subject, wording or people), save that change and ask again, which shows a new card; never say it is changed before the tool that saves it succeeds. Otherwise tell the user in one line that it was not done and ask what they want instead. Do not show again what the card showed (an email, its subject or people): a copy goes stale once they change it.",
       },
     };
   }
