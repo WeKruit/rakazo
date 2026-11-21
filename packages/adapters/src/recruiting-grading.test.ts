@@ -41,11 +41,17 @@ const thread = {
   activeRecruitingRole: role,
 };
 
-type Occurrence = { candidateKey: string; name: string; linkedinUrl: string | null };
+type Occurrence = {
+  candidateKey: string;
+  name: string;
+  linkedinUrl: string | null;
+  page?: { observedAt: Date };
+};
 const person = (slug: string): Occurrence => ({
   candidateKey: `linkedin:/in/${slug}`,
   name: slug,
   linkedinUrl: `https://x.test/in/${slug}`,
+  page: { observedAt: new Date(0) },
 });
 
 /** A round as stored: one after feedback waits for its check unless the test says otherwise. */
@@ -344,6 +350,27 @@ describe("startRecruitingGrading", () => {
     const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
     waiting.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now);
+    // fosp 11-20 (eeaf5035): when people checked since the feedback already fill the round, it
+    // shows without waiting for its unchecked person.
+    const filled = fixture({
+      ...options,
+      roundGrades: options.roundGrades.slice(1),
+      said: [{ blocks: [{ kind: "text", text: "再来2个" }] }],
+    });
+    filled.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    filled.prisma.externalEffect.findMany.mockResolvedValue([] as never);
+    filled.prisma.message.findFirst.mockResolvedValue({
+      id: "said-last",
+      createdAt: new Date(0),
+    } as never);
+    await startRecruitingGrading(filled.deps, { threadId: "thread" }, now);
+    expect(filled.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        clientNonce: expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX),
+      }),
+    });
+    expect(promptOf(filled)).toContain("linkedin:/in/spare");
+    expect(promptOf(filled)).not.toContain("linkedin:/in/fits");
     // A round already shown is never swapped afterwards: the recruiter sees each round once.
     const shown = fixture(options);
     await startRecruitingGrading(shown.deps, { threadId: "thread" }, now);
@@ -386,6 +413,23 @@ describe("startRecruitingGrading", () => {
     ownPeople.prisma.run.findFirst.mockImplementation(picking.prisma.run.findFirst);
     await startRecruitingGrading(ownPeople.deps, { threadId: "thread" }, now);
     expect(ownPeople.runCreate).not.toHaveBeenCalled();
+    // People the lead's searches saved after the feedback are the next round's, so they are
+    // checked as they arrive (fosp 11-20: nothing was checked for the 1.5 minutes the lead searched).
+    const fresh = {
+      ...person("fresh"),
+      page: { observedAt: new Date(now - 30_000) },
+    };
+    const arriving = fixture({ found: [fresh, person("pool")], rounds: shown });
+    arriving.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    arriving.prisma.run.findFirst.mockImplementation(picking.prisma.run.findFirst);
+    arriving.prisma.message.findFirst.mockResolvedValue({
+      id: "feedback",
+      createdAt: new Date(now - 60_000),
+    } as never);
+    await startRecruitingGrading(arriving.deps, { threadId: "thread" }, now);
+    expect(arriving.runCreate).toHaveBeenCalledOnce();
+    expect(promptOf(arriving)).toContain("x.test/in/fresh");
+    expect(promptOf(arriving)).not.toContain("x.test/in/pool");
     // With the lead idle the pool is graded as before.
     const idle = fixture({ found: [person("pool")], rounds: shown });
     idle.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
