@@ -654,8 +654,6 @@ export async function returnBotMessageOutcome(
 /** Model-facing: the round a role team returned is already on the recruiter's screen. */
 const ROUND_SHOWN_ABOVE =
   "The role's new round is already posted above in this conversation, exactly as recorded, and the recruiter already sees it. Do not list, count, retell or judge the round's people again.";
-const ROUND_SHOWN_NOTHING_ELSE =
-  "Reply only if the recruiter's last message asked something the round leaves open; otherwise say nothing.";
 
 /** Posts the returned round in the conversation that asked for it, once per request. */
 async function showRoundWhereAsked(
@@ -678,13 +676,20 @@ async function showRoundWhereAsked(
       select: { blocks: true },
     })
     .catch(() => []);
-  const shownBefore = recent.some(
-    (message) =>
-      Array.isArray(message.blocks) &&
-      (message.blocks as { kind?: string; text?: unknown }[]).some(
-        (block) => block?.kind === "text" && block.text === posted,
-      ),
+  // fosp 11-21 (f2a69ebe): Kruit read the recorded round itself and listed its five people, and
+  // the round posted 90 s later read as the list sent twice. A message naming every person counts.
+  const names = [...posted.matchAll(/^\d+\.\s+\*\*\[?([^\]*\n]+)/gm)].map((match) =>
+    match[1]!.trim(),
   );
+  const shownBefore = recent.some((message) => {
+    const texts = (Array.isArray(message.blocks) ? message.blocks : [])
+      .flatMap((block) => {
+        const { kind, text } = (block ?? {}) as { kind?: string; text?: unknown };
+        return kind === "text" && typeof text === "string" ? [text] : [];
+      })
+      .join("\n");
+    return texts === posted || (names.length > 0 && names.every((name) => texts.includes(name)));
+  });
   if (shownBefore) return true;
   const shown = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
@@ -847,10 +852,15 @@ export async function returnDelegatedTeamOutcome(
   // is shown as recorded where they asked; Kruit learns only that it is there.
   // Branch dc97b5bc 11-20: the copy carried the saved list's note to Kruit ("Reply with one line
   // giving that count…") to the recruiter. Only the round is posted; the note stays Kruit's.
-  if (round && (await showRoundWhereAsked(deps, run, root, delegated.id, round)))
+  // fosp/fr 11-21 (f68ae6bf): told the round was already shown and to say nothing, Kruit still
+  // summarised it 5 s later, or relayed the team's closing line, so the recruiter read the round
+  // twice. A round with nothing else to pass on is the whole answer: Kruit gets no turn for it.
+  const roundShown =
+    Boolean(round) && (await showRoundWhereAsked(deps, run, root, delegated.id, round));
+  if (roundShown)
     text = saved
       ? `${ROUND_SHOWN_ABOVE}\n\n${saved.replace(" Show the round above; mention", " Mention")}`
-      : `${ROUND_SHOWN_ABOVE} ${ROUND_SHOWN_NOTHING_ELSE}`;
+      : "";
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)
     text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
