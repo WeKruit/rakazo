@@ -207,8 +207,7 @@ export function checkRound(input: {
     // Something no pick's row shows is still unverified for each of them; the round list says
     // it once when every note is the same. A turned-down reason is not a requirement to list.
     const listed = unknown.filter((criterion) => !criterion.id.startsWith("turned-down:"));
-    if (listed.length)
-      unverified[key] = listed.map((criterion) => criterion.statement).join("; ");
+    if (listed.length) unverified[key] = listed.map((criterion) => criterion.statement).join("; ");
     const raised = unknown.filter((criterion) => criterion.added);
     if (raised.length && !input.relaxed && !input.reviewed && !input.asked.has(key))
       newlyUnknown.push(`${key} (${raised.map((criterion) => criterion.statement).join("; ")})`);
@@ -228,6 +227,32 @@ export function checkRound(input: {
       .filter(Boolean)
       .join(" "),
   };
+}
+
+/**
+ * Whether the Reviewer saved a grade for every pick on this role. Those grades are the check a
+ * round's verdicts stand for, so a missing verdict is not asked for again. Branch fr 11-21: the
+ * lead's round of ten graded people was refused four times for verdicts, and round 2 never showed.
+ */
+export async function everyPickGraded(
+  prisma: Pick<PrismaClient, "recruitingCandidateOccurrence">,
+  roleId: string,
+  keys: readonly string[],
+): Promise<boolean> {
+  if (!keys.length) return false;
+  const rows = await prisma.recruitingCandidateOccurrence.findMany({
+    where: { roleId, candidateKey: { in: [...keys] } },
+    select: { candidateKey: true, matchFields: true },
+  });
+  const graded = new Set(
+    rows
+      .filter(
+        (row) =>
+          typeof (row.matchFields as { match_tier?: unknown } | null)?.match_tier === "string",
+      )
+      .map((row) => row.candidateKey),
+  );
+  return keys.every((key) => graded.has(key));
 }
 
 /** What a recorded round's read says about repeats: the round record refuses anyone already seen. */

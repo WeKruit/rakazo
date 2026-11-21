@@ -2,6 +2,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   checkRound,
+  everyPickGraded,
   listedBeforeRound,
   roundCriteria,
   roundListedNotRecorded,
@@ -415,5 +416,25 @@ describe("roundRepeats", () => {
       candidates: ["a"].map(person),
     });
     expect(text).toMatch(/^none/);
+  });
+});
+
+describe("everyPickGraded", () => {
+  const prisma = (rows: Array<{ candidateKey: string; matchFields: unknown }>) =>
+    ({
+      recruitingCandidateOccurrence: { findMany: vi.fn(async () => rows) },
+    }) as unknown as PrismaClient;
+
+  it("holds a round the Reviewer already graded every pick of (branch fr 11-21)", async () => {
+    // The lead's round was refused four times for verdicts the Reviewer's grades already gave,
+    // and round 2 never showed.
+    const graded = prisma([
+      { candidateKey: "a", matchFields: { match_tier: "Strong" } },
+      { candidateKey: "a", matchFields: {} },
+      { candidateKey: "b", matchFields: { match_tier: "Uncertain", match_score: 40 } },
+    ]);
+    expect(await everyPickGraded(graded, "role-1", ["a", "b"])).toBe(true);
+    expect(await everyPickGraded(graded, "role-1", ["a", "b", "c"])).toBe(false);
+    expect(await everyPickGraded(graded, "role-1", [])).toBe(false);
   });
 });
