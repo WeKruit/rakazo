@@ -313,7 +313,10 @@ export async function findWaitingCampaignSend(
   tx: Prisma.TransactionClient,
   input: { spaceId: string; effectId: string; campaignId: string; card: unknown },
 ): Promise<
-  { effectId: string; threadId: string; place: string | null } | { declined: true } | undefined
+  | { effectId: string; threadId: string; place: string | null }
+  | { declined: true }
+  | { unchanged: true }
+  | undefined
 > {
   const card = campaignSendCardHash(input.card);
   const lock = `campaign-send:${input.spaceId}:${input.campaignId}`;
@@ -331,7 +334,7 @@ export async function findWaitingCampaignSend(
       result: { path: ["instantlyActivationCampaign"], equals: input.campaignId },
     },
     orderBy: { updatedAt: "desc" },
-    select: { updatedAt: true },
+    select: { id: true, updatedAt: true, result: true },
   });
   if (
     declined &&
@@ -347,6 +350,25 @@ export async function findWaitingCampaignSend(
     }))
   )
     return { declined: true };
+  // deny-then-change-and-send 11-21: after "标题不对，改成 …" the agent asked again with the very
+  // email the recruiter cancelled. The first identical ask after a decline is refused once so the
+  // change gets saved; asked again unchanged (the recruiter wants it as it was), the card shows.
+  const declinedResult = object(declined?.result) ?? {};
+  if (
+    declined &&
+    declinedResult.instantlyActivationCard === card &&
+    declinedResult.instantlyUnchangedRefused !== true
+  ) {
+    await tx.externalEffect.update({
+      where: { id: declined.id },
+      data: {
+        result: { ...declinedResult, instantlyUnchangedRefused: true } as Prisma.InputJsonValue,
+        // The decline's time stays the decline's: later writes are compared with it.
+        updatedAt: declined.updatedAt,
+      },
+    });
+    return { unchanged: true };
+  }
   const waiting = await tx.externalEffect.findFirst({
     where: {
       spaceId: input.spaceId,

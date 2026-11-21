@@ -485,7 +485,8 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
     expect(await waiting(retry.effect.id, { ...card, firstEmail: "b" })).toEqual({
       declined: true,
     });
-    // Once the recruiter writes, even the same email may be asked again.
+    // Once the recruiter writes, the same email is refused once so a change they asked for
+    // gets saved first (deny-then-change-and-send 11-21), then asked again if it is unchanged.
     await createThreadMessage(prisma, {
       threadId: identity.threadId,
       role: "user",
@@ -496,6 +497,14 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
       where: { id: later.effect.id },
       data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
     });
+    expect(await waiting(later.effect.id)).toEqual({ unchanged: true });
     expect(await waiting(later.effect.id)).toBeUndefined();
+    // A changed email after the recruiter writes gets its card at once.
+    const changed = await fixture(true);
+    await prisma.externalEffect.update({
+      where: { id: changed.effect.id },
+      data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
+    });
+    expect(await waiting(changed.effect.id, { ...card, firstEmail: "c" })).toBeUndefined();
   });
 });
