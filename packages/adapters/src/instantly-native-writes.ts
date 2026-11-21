@@ -3020,6 +3020,33 @@ async function mailboxBlocked(rest: InstantlyRest, campaignId: string) {
   return held && MAILBOX_BLOCKED.has(held.status) ? held : null;
 }
 
+/**
+ * A draft whose people another of this account's campaigns is sending: the send went out from
+ * that one, so this draft says nothing about it. Staging 11-21: a denied one-off draft was read
+ * after the role's campaign sent, and Kruit told the recruiter the email was still a draft.
+ */
+async function sentFromAnotherCampaign(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  campaign: Record<string, unknown>,
+  delivery: { notEmailedYet: string[] },
+) {
+  if (campaign.status !== DRAFT || !delivery.notEmailedYet.length) return {};
+  const elsewhere = await sendingElsewhere(prisma, (id) => rest("GET", `/campaigns/${id}`), {
+    spaceId: context.spaceId,
+    serverId,
+    campaignId: String(campaign.id),
+    emails: delivery.notEmailedYet,
+  }).catch(() => new Map<string, string>());
+  if (!elsewhere.size) return {};
+  return {
+    sentFrom: Object.fromEntries(elsewhere),
+    next: `This campaign is an unsent draft, not the send: ${[...elsewhere].map(([email, name]) => `${email} is emailed from "${name}"`).join("; ")}. Read that campaign (get_campaign) for whether it went out, and never tell the recruiter their email is a draft or not sent because of this one.`,
+  };
+}
+
 function draftDelivery(campaign: Record<string, unknown>) {
   const schedules = (
     campaign.campaign_schedule as { schedules?: Record<string, unknown>[] } | undefined
@@ -3686,6 +3713,7 @@ export async function runInstantlyWrite(
       const mailbox = typeof senders[0] === "string" ? senders[0] : binding?.binding.eaccount;
       const senderState =
         owned && mailbox ? await sendingMailboxState(accountRest, mailbox) : undefined;
+      const delivery = await leadDelivery(rest, campaign);
       return {
         id: campaign.id,
         observedAt,
@@ -3697,10 +3725,11 @@ export async function runInstantlyWrite(
         sendingMailbox: campaign.email_list,
         ...(senderState ? { senderState } : {}),
         ...(today ? { sendingToday: today } : {}),
-        ...(await leadDelivery(rest, campaign)),
+        ...delivery,
         ...(owned
           ? await confirmedSends(prisma, context, String(campaign.id)).catch(() => ({}))
           : {}),
+        ...(await sentFromAnotherCampaign(prisma, rest, context, serverId, campaign, delivery)),
         campaign_schedule: campaign.campaign_schedule,
         sequences: isTemplated(campaign)
           ? ownEmailSequences(campaign.sequences)
