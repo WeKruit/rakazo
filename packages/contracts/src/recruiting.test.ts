@@ -1855,3 +1855,26 @@ describe("calibration round keys", () => {
     expect(result.error?.issues[0]?.message).toContain("Repeated: linkedin:/in/p3");
   });
 });
+
+describe("quality-check grades", () => {
+  it("saves a degree given as an object as one line of text", () => {
+    // fr 11-21 (8ef94139): Reviewer saves were refused for education objects.
+    const row = {
+      name: "Ada",
+      linkedin_url: "https://www.linkedin.com/in/ada",
+      education: [
+        { school: "State University", degree: "MS, Computer Science", dates: "2014–2016" },
+      ],
+      match_score: 80,
+      match_tier: "Promising",
+      fit_reasons: "Senior Data Engineer",
+      requirements_assessment: [{ requirement: "Kafka", status: "met", evidence: "Kafka" }],
+    };
+    expect(contracts.RecruitingGradeRowSchema.parse(row).education).toEqual([
+      "State University | MS, Computer Science | 2014–2016",
+    ]);
+    expect(contracts.RecruitingGradeRowSchema.safeParse({ ...row, education: [{}] }).success).toBe(
+      false,
+    );
+  });
+});

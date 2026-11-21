@@ -98,7 +98,7 @@ function fixture(options: {
     pageId?: string;
   }>;
   /** The recruiter's messages in the role's conversation, oldest first. */
-  said?: Array<{ blocks: unknown[] }>;
+  said?: Array<{ blocks: unknown[]; createdAt?: Date }>;
 }) {
   const runCreate = vi.fn(async () => ({ id: "grade-run" }));
   const taskCreate = vi.fn(async () => ({ id: "grade-task" }));
@@ -367,14 +367,10 @@ describe("startRecruitingGrading", () => {
     const filled = fixture({
       ...options,
       roundGrades: options.roundGrades.slice(1),
-      said: [{ blocks: [{ kind: "text", text: "再来2个" }] }],
+      said: [{ createdAt: new Date(0), blocks: [{ kind: "text", text: "再来2个" }] }],
     });
     filled.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     filled.prisma.externalEffect.findMany.mockResolvedValue([] as never);
-    filled.prisma.message.findFirst.mockResolvedValue({
-      id: "said-last",
-      createdAt: new Date(0),
-    } as never);
     await startRecruitingGrading(filled.deps, { threadId: "thread" }, now);
     expect(filled.runCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
@@ -383,6 +379,33 @@ describe("startRecruitingGrading", () => {
     });
     expect(promptOf(filled)).toContain("linkedin:/in/spare");
     expect(promptOf(filled)).not.toContain("linkedin:/in/fits");
+    // fr 11-21 (8ef94139): the brief confirmation the product posts as the recruiter's came right
+    // after round 1, so people checked before the feedback ("no staff, no AWS infra") counted as
+    // checked with it, and round 2 was shown 30 s later with a Principal and five AWS people.
+    const confirmed = fixture({
+      ...options,
+      said: [
+        {
+          createdAt: new Date(now - 50 * 60_000),
+          blocks: [
+            {
+              kind: "text",
+              text: "Confirm recruiting brief for Data Engineer (requirements version 2).",
+            },
+          ],
+        },
+        { createdAt: new Date(now - 40 * 60_000), blocks: [{ kind: "text", text: "no staff" }] },
+      ],
+    });
+    confirmed.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    await startRecruitingGrading(confirmed.deps, { threadId: "thread" }, now);
+    const gradeReads = (
+      confirmed.prisma.recruitingCandidateOccurrence.findMany.mock.calls as unknown as [
+        { where: { page?: { observedAt?: { gt?: Date } } } },
+      ][]
+    ).flatMap(([call]) => (call.where.page?.observedAt?.gt ? [call.where.page.observedAt.gt] : []));
+    expect(gradeReads.length).toBeGreaterThan(0);
+    for (const since of gradeReads) expect(since).toEqual(new Date(now - 40 * 60_000));
     // A round already shown is never swapped afterwards: the recruiter sees each round once.
     const shown = fixture(options);
     await startRecruitingGrading(shown.deps, { threadId: "thread" }, now);
@@ -431,13 +454,13 @@ describe("startRecruitingGrading", () => {
       ...person("fresh"),
       page: { observedAt: new Date(now - 30_000) },
     };
-    const arriving = fixture({ found: [fresh, person("pool")], rounds: shown });
+    const arriving = fixture({
+      found: [fresh, person("pool")],
+      rounds: shown,
+      said: [{ createdAt: new Date(now - 60_000), blocks: [{ kind: "text", text: "no staff" }] }],
+    });
     arriving.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     arriving.prisma.run.findFirst.mockImplementation(picking.prisma.run.findFirst);
-    arriving.prisma.message.findFirst.mockResolvedValue({
-      id: "feedback",
-      createdAt: new Date(now - 60_000),
-    } as never);
     await startRecruitingGrading(arriving.deps, { threadId: "thread" }, now);
     expect(arriving.runCreate).toHaveBeenCalledOnce();
     expect(promptOf(arriving)).toContain("x.test/in/fresh");

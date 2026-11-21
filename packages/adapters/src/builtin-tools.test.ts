@@ -171,6 +171,7 @@ describe("recruiting tool budget", () => {
         JSON.stringify(normalizeOpenAiToolParameters(tool.inputSchema)).length,
       0,
     );
-    expect(chars).toBeLessThanOrEqual(96_500);
+    // +100 (11-21): grades accept a degree given as an object instead of refusing the save.
+    expect(chars).toBeLessThanOrEqual(96_600);
   });
 });
