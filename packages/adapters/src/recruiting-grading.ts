@@ -568,7 +568,7 @@ export async function startRecruitingGrading(
           deps,
           thread,
           clientNonce,
-          async () => roundReviewPrompt(review.round.round, shownPeople),
+          async () => roundReviewPrompt(review.round.round, shownPeople, size),
           grader?.botId,
           review.round.ownerBotId,
         );
@@ -1370,12 +1370,22 @@ export function checkedRoundPeople(
   return people.slice(0, size);
 }
 
-export function roundReviewPrompt(round: number, people: readonly { key: string; name: string }[]) {
+export function roundReviewPrompt(
+  round: number,
+  people: readonly { key: string; name: string }[],
+  asked = people.length,
+) {
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and exactly these people, in this order:`,
     ...people.map((person, index) => `${index + 1}. ${person.name} (candidateKey ${person.key})`),
     "",
     "The Reviewer's grades stand for them: no checks, no search, and don't read Results or anyone's profile again. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.",
+    // The recruiter's rule 11-21: "补不满就问问用户要不要就行，要不然会浪费钱".
+    ...(people.length < asked
+      ? [
+          `That is ${people.length} of the ${asked} they asked for. In the same reply, ask whether these are enough or which one point they named to loosen, and search no more until they answer.`,
+        ]
+      : []),
   ].join("\n");
 }
 
