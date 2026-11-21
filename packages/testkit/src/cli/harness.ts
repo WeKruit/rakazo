@@ -191,7 +191,7 @@ async function main() {
     const thirdParties = new ThirdPartyConnectorEmulator();
     // The mailboxes a branch backend assigns to its sending accounts (infra/modal/branch_backend.py).
     if (serveMode)
-      for (const n of [1, 2, 3])
+      for (let n = 1; n <= 9; n++)
         thirdParties.instantly.addMailbox({ email: `sender${n}@branch-mail.example.test` });
     const journey = e2eSpec?.includes("recruiting-global-journey")
       ? new (
