@@ -5536,7 +5536,7 @@ describe("local native Instantly campaign and lead tools", () => {
       expect(out).toMatchObject({
         queued: true,
         recipients: ["abe.new@x.test"],
-        next: expect.stringContaining("never that they were sent"),
+        next: expect.stringContaining("never that it was sent"),
       });
       expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
       const saved = binding.result as { leads: object; staged: object };
@@ -5553,7 +5553,7 @@ describe("local native Instantly campaign and lead tools", () => {
       f.state.campaign.status = 1;
       const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
       expect((events[0] as { message: string }).message).toMatch(
-        /Already queued in this sending campaign, not emailed yet: .*Nothing failed\. .*send_now/,
+        /Already in this sending campaign and waiting to be emailed: .*Nothing failed\. .*send_now/,
       );
       expect(sends(f)).toEqual([]);
     });
@@ -5580,7 +5580,7 @@ describe("local native Instantly campaign and lead tools", () => {
       });
       const message = (events[0] as { message: string }).message;
       expect(message).toMatch(/Already emailed by this campaign: /);
-      expect(message).toMatch(/Already queued in this sending campaign, not emailed yet: Abe/);
+      expect(message).toMatch(/Already in this sending campaign and waiting to be emailed: Abe/);
       expect(sends(f)).toEqual([]);
     });
 
