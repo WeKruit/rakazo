@@ -1023,7 +1023,7 @@ export function queuePace(
   }
   if (overdue)
     return `handed to the mail service since ${queuedAt} ${shown}, longer than its usual ${PICKUP_MINUTES} minutes; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}. ${IN_MINUTES}`;
-  return `sending now, not held for a later time: handed to the mail service, the first email can take up to ${PICKUP_MINUTES} minutes to leave because the mail service starts each new send on its own schedule, so asking again or sending now does not make it sooner (tell the recruiter it is already on its way and when it will be out at the latest, with that reason, rather than only that it cannot be sped up), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
+  return `sending now, not held for a later time: handed to the mail service, the first email can take up to ${PICKUP_MINUTES} minutes to leave because the mail service starts each new send on its own schedule, so asking again or sending now does not make it sooner (tell the recruiter it is already on its way and when it will be out at the latest; give that reason once, and if it was already said, give only the time), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
 }
 /** One role's campaign record is changed by one call at a time: saves, adds and sends. */
 const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
@@ -2926,7 +2926,7 @@ async function sendCampaign(
  */
 /** A paused campaign emails nobody until it is activated again, which only activate_campaign does. */
 const PAUSED_NEXT =
-  "Paused: nobody still waiting is emailed while it stays paused. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.";
+  'Paused: nobody still waiting is emailed while it stays paused; tell the recruiter who is held in plain words (never "queue"). When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.';
 async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
   const mailbox = Array.isArray(campaign.email_list) ? campaign.email_list.join(", ") : "";
   const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });

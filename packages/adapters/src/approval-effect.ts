@@ -258,6 +258,12 @@ export type ExternalEffectStore = {
   };
 };
 
+const DENIED_ACTION =
+  "The user denied this action. Do not retry it unchanged. If the user has written since and asks for a change (such as a new subject, wording or people), save that change and ask again, which shows a new card; never say it is changed before the tool that saves it succeeds. Otherwise tell the user in one line, in their language, that it was not done and ask what they want instead. Do not show again what the card showed (an email, its subject or people): a copy goes stale once they change it.";
+/** Deny plays 11-20/21: "标题不对" after a cancelled send card was put on the role's name. */
+const DENIED_SEND =
+  "A 标题, title or subject they give now is this email's subject line, never the role's name: save the whole email with the new subject (ensure_role_campaign steps), then call activate_campaign again for a new card.";
+
 export function resolveDuplicateEffectGate(
   effect: { status: string; result?: unknown },
   toolName: string,
@@ -283,8 +289,7 @@ export function resolveDuplicateEffectGate(
     return {
       action: "return",
       result: {
-        error:
-          "The user denied this action. Do not retry it unchanged. If the user has written since and asks for a change (such as a new subject, wording or people), save that change and ask again, which shows a new card; never say it is changed before the tool that saves it succeeds. Otherwise tell the user in one line, in their language, that it was not done and ask what they want instead. Do not show again what the card showed (an email, its subject or people): a copy goes stale once they change it.",
+        error: `${DENIED_ACTION}${toolName.endsWith("activate_campaign") ? ` ${DENIED_SEND}` : ""}`,
       },
     };
   }
