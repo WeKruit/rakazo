@@ -719,6 +719,22 @@ export const historyKey = (serverId: string, roleId: string) =>
   `${bindingKey(serverId, roleId)}:history`;
 
 /** The recruiting role linked to this run's conversation, if any. */
+const ROLE_SENDS_THERE =
+  "Nothing was created: you opened this role's conversation in this turn, and its team writes this email and shows its send card there. Do not email these people from here; tell the recruiter in one line, in their language, that the role is handling it.";
+async function openedRoleThisRun(prisma: PrismaClient, context: AdapterContext) {
+  if (!context.runId) return false;
+  const opened = await prisma.externalEffect.findFirst({
+    where: {
+      runId: context.runId,
+      spaceId: context.spaceId,
+      kind: "start_role",
+      status: "completed",
+    },
+    select: { id: true },
+  });
+  return Boolean(opened);
+}
+
 async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
   if (!context.runId) return null;
   const run = await prisma.run.findFirst({
@@ -1023,11 +1039,11 @@ export function queuePace(
     time = `about ${left} minutes from now`;
     queuedAt = at(start);
   } catch {
-    return `sending now, not held for a later time: handed to the mail service, the first email can take up to ${PICKUP_MINUTES} minutes to leave, then about one every ${gap} minutes from the mailbox`;
+    return `not sent yet and not held for a later time: it goes out by itself (tell the recruiter "not sent yet, out within …", never that it is sending or handed over, which a stop before it leaves makes untrue); the first email can take up to ${PICKUP_MINUTES} minutes to leave, then about one every ${gap} minutes from the mailbox`;
   }
   if (overdue)
     return `handed to the mail service since ${queuedAt} ${shown}, longer than its usual ${PICKUP_MINUTES} minutes; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}. ${IN_MINUTES}`;
-  return `sending now, not held for a later time: handed to the mail service, the first email usually leaves within a few minutes and at most ${PICKUP_MINUTES}, because the mail service starts each new send on its own schedule, so asking again does not make that first one sooner (tell the recruiter it is already on its way and when it will be out at the latest; give that reason once, and if it was already said, give only the time and anything new, such as who has been emailed since), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
+  return `not sent yet and not held for a later time: it goes out by itself (tell the recruiter "not sent yet, out within …", never that it is sending or handed over, which a stop before it leaves makes untrue); the first email usually leaves within a few minutes and at most ${PICKUP_MINUTES}, because the mail service starts each new send on its own schedule, so asking again does not make that first one sooner (say when it will be out at the latest; give that reason once, and if it was already said, give only the time and anything new, such as who has been emailed since), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
 }
 /** One role's campaign record is changed by one call at a time: saves, adds and sends. */
 const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
@@ -3489,6 +3505,9 @@ export async function runInstantlyWrite(
       : false;
   if (owned && toolName === "native_instantly_create_campaign" && !direct)
     throw new Error("In a role conversation, use ensure_role_campaign for the role's campaign");
+  // deny-then-change-and-send 11-21: Kruit opened the role and then also emailed the same people
+  // from this chat, so two send cards with different emails showed at once.
+  if (direct && (await openedRoleThisRun(prisma, context))) throw new Error(ROLE_SENDS_THERE);
   // Mailboxes the owner assigned become this account's on its first mail call of any kind, so a
   // reply in a thread one of them already holds works as well as a new send.
   if (owned && toolName !== "native_instantly_ensure_sender") {

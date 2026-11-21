@@ -562,7 +562,7 @@ describe("shared mail account isolation", () => {
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
       sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
-      externalEffect: { create },
+      externalEffect: { create, findFirst: vi.fn(async () => null) },
     };
     const result = await runInstantlyWrite(
       prisma as never,
@@ -590,6 +590,33 @@ describe("shared mail account isolation", () => {
     });
   });
 
+  it("sends nothing from the Kruit chat in a turn that opened the role", async () => {
+    // deny-then-change-and-send 11-21: Kruit opened the role, then also emailed the same two
+    // people from the Kruit chat, so two different send cards showed at once.
+    const rest = vi.fn();
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { findFirst: vi.fn(async () => ({ id: "opened" })) },
+    };
+    await expect(
+      runInstantlyWrite(
+        prisma as never,
+        rest as never,
+        { ...(context as object), runId: "run-1" } as never,
+        "server",
+        "native_instantly_create_campaign",
+        {
+          name: "First email",
+          eaccount: "me@ours.test",
+          steps: [{ subject: "Role", body: "Hi {{firstName}}" }],
+        },
+        { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
+      ),
+    ).rejects.toThrow("the role is handling it");
+    expect(rest).not.toHaveBeenCalled();
+  });
+
   it("refuses a new campaign whose email greets one person by name", async () => {
     // Staging 11-13: "Hi Noah," for Noah and Ada split them into two campaigns, so the first
     // card listed only Noah.
@@ -597,6 +624,7 @@ describe("shared mail account isolation", () => {
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
       sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { findFirst: vi.fn(async () => null) },
     };
     await expect(
       runInstantlyWrite(
@@ -622,6 +650,7 @@ describe("shared mail account isolation", () => {
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
       sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { findFirst: vi.fn(async () => null) },
     };
     await expect(
       runInstantlyWrite(
