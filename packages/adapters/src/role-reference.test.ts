@@ -74,4 +74,16 @@ describe("titleWithRef", () => {
       "Senior Data Engineer",
     );
   });
+
+  it("keeps a bare role number the recruiter gave beside a new role", () => {
+    // Branch fosp 11-21 (417ffeea): the title dropped 14131 and the role was opened three times.
+    const asked =
+      "新岗位 「测试固定 · 数据工程师 6 · 14131」 上海 Senior Data Engineer，5年以上，base 50-70万";
+    expect(titleWithRef("Senior Data Engineer（上海）", asked)).toBe(
+      "Senior Data Engineer（上海） (Ref 14131)",
+    );
+    expect(titleWithRef("测试固定 · 数据工程师 6 · 14131", asked)).toBe(
+      "测试固定 · 数据工程师 6 · 14131",
+    );
+  });
 });
