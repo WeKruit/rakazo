@@ -343,6 +343,7 @@ import {
   completeExternalEffect,
   createApprovedEffectReplayQueue,
   DENIED_THIS_TURN_RESULT,
+  deniedContinuationNote,
   deniedEarlierThisTurn,
   inputPausedToolResult,
   isToolPauseResult,
@@ -14175,6 +14176,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           takeoverResume?.promptNote,
           approvalContinuation,
+          deniedContinuationNote(continuationEffects),
           discardedReplies
             .map(
               (reply) =>

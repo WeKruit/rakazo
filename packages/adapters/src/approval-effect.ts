@@ -211,6 +211,26 @@ export function catalogApprovalInnerArgs(catalog: {
   return inner as Record<string, unknown>;
 }
 
+/**
+ * What a run resumed after a denied card is told: the paused call's result stays "Waiting for
+ * approval.", so without this the model read the recruiter's next words with no sign the card was
+ * cancelled (deny plays 11-21: "标题不对" renamed the role two seconds after the cancel).
+ */
+export function deniedContinuationNote(
+  effects: readonly { kind: string; status: string; result?: unknown }[],
+): string | undefined {
+  const notes = effects.flatMap((effect) => {
+    if (effect.status !== "denied") return [];
+    const gate = resolveDuplicateEffectGate(effect, effect.kind);
+    const error =
+      gate.action === "return" && gate.result && typeof gate.result === "object"
+        ? (gate.result as { error?: unknown }).error
+        : undefined;
+    return typeof error === "string" ? [`Card answered for ${effect.kind}: ${error}`] : [];
+  });
+  return notes.length ? notes.join("\n\n") : undefined;
+}
+
 export function approvalPausedToolResult(): ApprovalPausedToolResult {
   return {
     kind: "agent_tool_result",

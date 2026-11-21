@@ -24,6 +24,7 @@ import {
   isApprovalPausedResult,
   isToolPauseResult,
   replaceCompletedExternalEffectResult,
+  deniedContinuationNote,
   resolveDuplicateEffectGate,
   settleUncertainEffect,
 } from "./approval-effect.js";
@@ -304,6 +305,19 @@ describe("resolveDuplicateEffectGate", () => {
       result: { error: expect.stringContaining('subject was "Old subject"') },
     });
     expect(JSON.stringify(gate)).toContain("never the role's name");
+  });
+
+  it("tells a resumed run which of its cards were denied", () => {
+    const note = deniedContinuationNote([
+      { kind: "instantly__x__activate_campaign", status: "denied", result: null },
+      { kind: "destination.write", status: "approved" },
+    ]);
+    expect(note).toContain("Card answered for instantly__x__activate_campaign: The user denied");
+    expect(note).toContain("never the role's name");
+    expect(note).not.toContain("destination.write");
+    expect(deniedContinuationNote([{ kind: "destination.write", status: "approved" }])).toBe(
+      undefined,
+    );
   });
 
   it("returns denial without executing", () => {
