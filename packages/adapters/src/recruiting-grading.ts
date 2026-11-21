@@ -548,9 +548,25 @@ export async function startRecruitingGrading(
             : [],
         ),
       );
+      // fosp 11-21 (70fd2326): "再来5个" was shown with 2 when nobody saved was left to check, and
+      // the promised top-up never came. A short checked round has its owner search once more, then
+      // the people that search saves are checked like the round's own and fill it.
+      const topUpNonce = `${RECRUITING_ROUND_TOPUP_NONCE_PREFIX}${review.round.id}`;
+      const toppedUp =
+        shownPeople.length < size && grader?.tool === "self"
+          ? await deps.prisma.run.findFirst({
+              where: { spaceId: thread.spaceId, clientNonce: topUpNonce },
+              select: { createdAt: true, status: true },
+            })
+          : null;
+      if (toppedUp && BUSY_STATUSES.includes(toppedUp.status)) return skipped("topping up");
+      const fillSince =
+        toppedUp && toppedUp.createdAt > review.round.createdAt
+          ? toppedUp.createdAt
+          : review.round.createdAt;
       const filled = requests.some(
         (request) =>
-          request.createdAt >= review.round.createdAt &&
+          request.createdAt >= fillSince &&
           [...sentUrls(request.task?.prompt ?? "")].some((url) => !roundPeople.has(url)),
       );
       const fill = filled ? [] : unshown.filter((row) => !sent.has(row.linkedinUrl));
@@ -562,6 +578,29 @@ export async function startRecruitingGrading(
       } else {
         if (!review.checked && !(await markCalibrationRoundChecked(deps.prisma, review.round)))
           return skipped("round changed");
+        if (shownPeople.length < size && grader?.tool === "self" && !toppedUp) {
+          const runId = await startLeadRun(
+            deps,
+            thread,
+            topUpNonce,
+            async () => roundTopUpPrompt(review.round.round, size - shownPeople.length),
+            grader.botId,
+            review.round.ownerBotId,
+          );
+          if (runId) {
+            // A search that saves nobody wakes no check, so the round is shown after it anyway.
+            await deps.jobs.enqueue(
+              laterGradingStart({ threadId: thread.id }, now + TOP_UP_SHOW_MS),
+            );
+            getLogger().info("recruiting.round.top_up", {
+              runId,
+              roleId: role.id,
+              round: review.round.round,
+              short: size - shownPeople.length,
+            });
+            return;
+          }
+        }
         // Once per recruiter message, so the corrected round is never corrected again on its own.
         const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
         const runId = await startLeadRun(
@@ -1351,6 +1390,18 @@ export function checkedRoundPeople(
     ...fromResults("Uncertain"),
   ];
   return people.slice(0, size);
+}
+
+/** Client nonce of the one search a short checked round's owner runs before it is shown. */
+export const RECRUITING_ROUND_TOPUP_NONCE_PREFIX = "recruiting-round-top-up:";
+/** When a short round is shown after its top-up search even if that search saved nobody. */
+const TOP_UP_SHOW_MS = 2 * 60_000;
+
+export function roundTopUpPrompt(round: number, missing: number) {
+  return [
+    `The Reviewer has checked round ${round}; the recruiter has not seen it yet, and it is ${missing} short of the people they asked for. Before it is shown, look for ${missing} more ${missing === 1 ? "person" : "people"} who fit the brief and what the recruiter said about the people they turned down: one step of four people searches (each saves itself to Results), nothing else.`,
+    "Don't record a round or message the recruiter: end the turn with an empty reply. The new people are checked, and the round is shown with whoever fits.",
+  ].join("\n");
 }
 
 export function roundReviewPrompt(round: number, people: readonly { key: string; name: string }[]) {

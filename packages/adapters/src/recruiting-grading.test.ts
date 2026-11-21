@@ -24,6 +24,7 @@ const {
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
+  RECRUITING_ROUND_TOPUP_NONCE_PREFIX,
   roundSize,
   ROUND_HELD_SEARCH_REFUSAL,
   scheduleRecruitingGrading,
@@ -285,6 +286,7 @@ describe("startRecruitingGrading", () => {
       ],
       tiers: { "linkedin:/in/spare": "Strong" },
       rounds: round(["linkedin:/in/fits", "linkedin:/in/misfit", "linkedin:/in/unshown"]),
+      said: [{ blocks: [{ kind: "text", text: "再来3个" }] }],
       roundGrades: [
         { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
         {
@@ -349,7 +351,11 @@ describe("startRecruitingGrading", () => {
       data: expect.objectContaining({ botId: "sourcer" }),
     });
     // fosp 11-20: a short round has saved people no round showed checked first, once, then shows.
-    const short = fixture({ ...options, found: [...options.found, person("new")] });
+    const short = fixture({
+      ...options,
+      found: [...options.found, person("new")],
+      said: [{ blocks: [{ kind: "text", text: "再来4个" }] }],
+    });
     short.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     short.prisma.externalEffect.findMany.mockResolvedValue([] as never);
     await startRecruitingGrading(short.deps, { threadId: "thread" }, now);
@@ -358,6 +364,44 @@ describe("startRecruitingGrading", () => {
     });
     expect(promptOf(short)).toContain("x.test/in/new");
     expect(promptOf(short)).not.toContain("x.test/in/fits");
+    // fosp 11-21 (70fd2326): "再来5个" was shown with 2 when nobody saved was left to check, and
+    // the promised top-up never came. A short checked round first has its lead search once more.
+    const topUp = fixture({ ...options, said: [{ blocks: [{ kind: "text", text: "再来4个" }] }] });
+    topUp.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    topUp.prisma.externalEffect.findMany.mockResolvedValue([] as never);
+    await startRecruitingGrading(topUp.deps, { threadId: "thread" }, now);
+    expect(topUp.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        botId: "lead",
+        clientNonce: `${RECRUITING_ROUND_TOPUP_NONCE_PREFIX}round-2`,
+      }),
+    });
+    expect(promptOf(topUp)).toContain("1 more");
+    expect(topUp.prisma.recruitingCalibrationRound.updateMany).toHaveBeenCalledWith({
+      where: { id: "round-2", version: 0, status: "checking" },
+      data: expect.objectContaining({ status: "checked" }),
+    });
+    // Once that search is done, the round is shown with whoever fits, short or not.
+    const toppedUp = fixture({
+      ...options,
+      said: [{ blocks: [{ kind: "text", text: "再来4个" }] }],
+    });
+    toppedUp.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    toppedUp.prisma.externalEffect.findMany.mockResolvedValue([] as never);
+    toppedUp.prisma.run.findFirst.mockImplementation((async ({
+      where,
+    }: {
+      where: { clientNonce?: string };
+    }) =>
+      where.clientNonce?.startsWith(RECRUITING_ROUND_TOPUP_NONCE_PREFIX)
+        ? { id: "top-up", createdAt: new Date(now - 60_000), status: "completed" }
+        : null) as never);
+    await startRecruitingGrading(toppedUp.deps, { threadId: "thread" }, now);
+    expect(toppedUp.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        clientNonce: expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX),
+      }),
+    });
     // Nothing is shown while a round person still waits for a grade made with the feedback.
     const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
     waiting.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
@@ -505,6 +549,7 @@ describe("startRecruitingGrading", () => {
       roundGrades: [
         { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
       ],
+      said: [{ blocks: [{ kind: "text", text: "再来1个" }] }],
     });
     f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
@@ -525,6 +570,7 @@ describe("startRecruitingGrading", () => {
       roundGrades: [
         { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
       ],
+      said: [{ blocks: [{ kind: "text", text: "再来1个" }] }],
     });
     answering.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     answering.tx.run.findFirst.mockImplementation((async ({ where }: { where: object }) =>
@@ -577,6 +623,7 @@ describe("startRecruitingGrading", () => {
       roundGrades: [
         { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
       ],
+      said: [{ blocks: [{ kind: "text", text: "再来1个" }] }],
     });
     await startRecruitingGrading(solo.deps, { threadId: "thread" }, now);
     expect(solo.runCreate).not.toHaveBeenCalled();
