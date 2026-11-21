@@ -16,6 +16,7 @@ const {
   GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
   checkedRoundPeople,
+  placeTier,
   gradingTools,
   heldRoundSearchRefusal,
   nextRoundHeld,
@@ -1179,6 +1180,20 @@ describe("checkedRoundPeople", () => {
       "v1",
       "v2",
     ]);
+  });
+
+  it("never fills a place with someone the check saw too little of", () => {
+    // fr 11-21 (b3671ce9): two people graded Uncertain at 15 filled round 3's last places.
+    const tier = (match_score: number) => placeTier({ match_tier: "Uncertain", match_score });
+    const grades = new Map([
+      ["seen", grade("Seen", String(tier(55)))],
+      ["blind", grade("Blind", String(tier(15)))],
+    ]);
+    const replacements = [{ key: "r", name: "R", tier: String(tier(20)) }];
+    expect(
+      checkedRoundPeople(["seen", "blind"], grades, replacements, 3).map((p) => p.key),
+    ).toEqual(["seen"]);
+    expect(placeTier({ match_tier: "Promising", match_score: 15 })).toBe("Promising");
   });
 });
 
