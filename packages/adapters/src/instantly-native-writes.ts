@@ -1487,7 +1487,7 @@ function planRecipients(
       refusal: [
         emailed.length ? `Already emailed by this campaign: ${label(emailed)}.` : "",
         queued.length
-          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. ${queuedWhen(campaign, queued)} Nothing failed. If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten.`
+          ? `Already in this sending campaign and waiting to be emailed: ${label(queued)}. ${queuedWhen(campaign, queued)} Nothing failed. If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten.`
           : "",
         "Nobody new was added, so nothing else was sent.",
       ]
@@ -2805,7 +2805,7 @@ async function sendCampaign(
   const paced = (count: number) => ({
     next: blocked
       ? `Nobody is emailed and nobody will be yet: the mail service says "${blocked.message}" for this campaign's sending mailbox (${(Array.isArray(campaign.email_list) ? campaign.email_list : []).join(", ")}). Tell the recruiter the email has not gone out because that sending mailbox cannot send right now, and give no time; it needs the mailbox fixed before anything leaves.`
-      : `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter they are queued and that time, never that they were sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still queued, not failed, so never take the queued answer back.`,
+      : `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter their email is on its way and that time, in plain words (never "queue"), never that it was sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still on its way, not failed, so never take that answer back.`,
     ...(blocked ? { mailServiceSays: blocked } : {}),
   });
   if (plan.send === "now") {
@@ -2824,7 +2824,7 @@ async function sendCampaign(
     later && !later.now
       ? {
           firstEmailAt: later.at,
-          next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are queued and their first email goes out ${later.local}. Tell the recruiter that time and that activate_campaign send_now can send them now; it is not a failure.`,
+          next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are waiting and their first email goes out ${later.local}. Tell the recruiter that time and that activate_campaign send_now can send them now; it is not a failure.`,
         }
       : {};
   const save = async (binding: RoleBinding) => {
