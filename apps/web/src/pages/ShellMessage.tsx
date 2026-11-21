@@ -721,7 +721,19 @@ export const MessageView = memo(function MessageView({
           );
         }
         if (block.kind === "role_link")
-          return <RoleLinkCard key={i} groupId={block.groupId} title={block.title} />;
+          return (
+            <RoleLinkCard
+              key={i}
+              groupId={block.groupId}
+              title={block.title}
+              // A role team's card copied here opens the role's conversation at that card.
+              messageId={
+                message.blocks.flatMap((other) =>
+                  other.kind === "ask" && other.answerTarget ? [other.answerTarget.messageId] : [],
+                )[0]
+              }
+            />
+          );
         if (block.kind === "card") {
           return (
             <div key={i} className="flex justify-start">
@@ -815,7 +827,15 @@ export const MessageView = memo(function MessageView({
   );
 });
 
-function RoleLinkCard({ groupId, title }: { groupId: string; title: string }) {
+function RoleLinkCard({
+  groupId,
+  title,
+  messageId,
+}: {
+  groupId: string;
+  title: string;
+  messageId?: string;
+}) {
   return (
     <div className="flex justify-start">
       <div className="flex w-[min(360px,90%)] items-center justify-between gap-3 rounded-[18px] border border-border bg-muted px-[18px] py-3.5">
@@ -824,7 +844,7 @@ function RoleLinkCard({ groupId, title }: { groupId: string; title: string }) {
         </span>
         {/* The shell opens it stacked beside this chat; a modified click opens the page. */}
         <a
-          href={`/app/g/${encodeURIComponent(groupId)}`}
+          href={`/app/g/${encodeURIComponent(groupId)}${messageId ? `?m=${encodeURIComponent(messageId)}` : ""}`}
           data-stacked-conversation
           className={buttonVariants({ size: "sm" })}
         >

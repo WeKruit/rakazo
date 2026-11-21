@@ -50,6 +50,13 @@ export async function mirrorAskInTransaction(
     )
     .map((block) => ({ ...block, answerTarget }) as MessageBlock);
   if (!blocks.length) return null;
+  // The copy leads back to the role's own conversation, opened beside this one at the card.
+  const sourceChat = await tx.thread.findUnique({
+    where: { id: input.sourceThreadId },
+    select: { groupId: true, group: { select: { name: true } } },
+  });
+  if (sourceChat?.groupId && sourceChat.group)
+    blocks.push({ kind: "role_link", groupId: sourceChat.groupId, title: sourceChat.group.name });
   const clientNonce = mirroredAskClientNonce(input.sourceMessageId);
   const already = await tx.message.findUnique({
     where: { threadId_clientNonce: { threadId: input.targetThreadId, clientNonce } },
