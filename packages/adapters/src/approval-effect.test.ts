@@ -19,6 +19,7 @@ import {
   claimIntendedEffect,
   completeExternalEffect,
   createApprovedEffectReplayQueue,
+  deniedCardsSince,
   deniedEarlierThisTurn,
   inputPausedToolResult,
   isApprovalPausedResult,
@@ -318,6 +319,17 @@ describe("resolveDuplicateEffectGate", () => {
     expect(deniedContinuationNote([{ kind: "destination.write", status: "approved" }])).toBe(
       undefined,
     );
+  });
+
+  it("tells a run about another run's cancelled card only before it has acted on it", () => {
+    // deny 11-21: after the new card was approved, the resumed run was told again about the card
+    // cancelled before it started, saved the email again and asked a needless question.
+    const lastWord = new Date("2026-11-21T10:03:30Z");
+    const started = new Date("2026-11-21T10:04:35Z");
+    expect(deniedCardsSince(lastWord, started, false)).toEqual(lastWord);
+    expect(deniedCardsSince(lastWord, started, true)).toEqual(started);
+    expect(deniedCardsSince(undefined, started, true)).toEqual(started);
+    expect(deniedCardsSince(undefined, undefined, false)).toEqual(new Date(0));
   });
 
   it("returns denial without executing", () => {
