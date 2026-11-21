@@ -676,13 +676,20 @@ async function showRoundWhereAsked(
       select: { blocks: true },
     })
     .catch(() => []);
-  const shownBefore = recent.some(
-    (message) =>
-      Array.isArray(message.blocks) &&
-      (message.blocks as { kind?: string; text?: unknown }[]).some(
-        (block) => block?.kind === "text" && block.text === posted,
-      ),
+  // fosp 11-21 (f2a69ebe): Kruit read the recorded round itself and listed its five people, and
+  // the round posted 90 s later read as the list sent twice. A message naming every person counts.
+  const names = [...posted.matchAll(/^\d+\.\s+\*\*\[?([^\]*\n]+)/gm)].map((match) =>
+    match[1]!.trim(),
   );
+  const shownBefore = recent.some((message) => {
+    const texts = (Array.isArray(message.blocks) ? message.blocks : [])
+      .flatMap((block) => {
+        const { kind, text } = (block ?? {}) as { kind?: string; text?: unknown };
+        return kind === "text" && typeof text === "string" ? [text] : [];
+      })
+      .join("\n");
+    return texts === posted || (names.length > 0 && names.every((name) => texts.includes(name)));
+  });
   if (shownBefore) return true;
   const shown = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {

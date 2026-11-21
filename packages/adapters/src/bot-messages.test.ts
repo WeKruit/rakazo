@@ -837,6 +837,22 @@ describe("delegating to a role team in another conversation", () => {
     expect(returnedTo(harness)).not.toContainEqual({ kind: "text", text: round });
   });
 
+  it("does not post a round whose people Kruit already listed where it was asked", async () => {
+    // fosp 11-21 (f2a69ebe): Kruit read the recorded round and listed its people itself; the
+    // round posted 90 s later read as the list sent twice.
+    const round =
+      "2 people this round:\n\n1. **[Yanan Wang](https://www.linkedin.com/in/yw)** · Senior Data Engineer · Shopee\n2. **[赵磊](https://www.linkedin.com/in/zl)** · 高级数据工程师 · Ant Group";
+    const listed =
+      "新找到 2 位：\n\n1. [Yanan Wang](https://www.linkedin.com/in/yw) — Shopee\n2. [赵磊](https://www.linkedin.com/in/zl) — Ant Group";
+    const harness = team({ later: [said(round)], shown: [said(listed)] });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).toEqual([]);
+    // A different earlier round naming only one of them does not count.
+    const other = team({ later: [said(round)], shown: [said("1. [Yanan Wang](x) — Shopee")] });
+    await returnDelegatedTeamOutcome(other.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(other)).toEqual([{ kind: "text", text: round }]);
+  });
+
   it("brings the round's people back with the team's closing line", async () => {
     // Staging 11-14: only "the next round has been posted" came back, so Kruit could not show
     // the people or say who has both must-haves.
