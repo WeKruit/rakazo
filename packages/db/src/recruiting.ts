@@ -7949,6 +7949,18 @@ export async function saveRecruitingCandidatePeopleSearch(
 
 type GradesInput = Extract<RecruitingResearchToolInput, { operation: "save_grades" }>;
 
+/**
+ * Uncertain means the profile can't tell; a requirement the profile shows is not met makes the
+ * person Partial, as the grading rubric says. Branch fosp 11-21 (c8635512): someone located in
+ * Singapore for a Shanghai role was saved Uncertain and filled a round's last place.
+ */
+function gradeTier(grade: { match_tier: string; requirements_assessment: { status: string }[] }) {
+  return grade.match_tier === "Uncertain" &&
+    grade.requirements_assessment.some((item) => item.status === "not_met")
+    ? "Partial"
+    : grade.match_tier;
+}
+
 /** Canonical receipt bytes for one save_grades call; recomputed here, never trusted from the caller. */
 export function recruitingGradesReceipt(input: GradesInput) {
   return {
@@ -8013,7 +8025,7 @@ export async function saveRecruitingCandidateGrades(
       if (grade.location) row.location = grade.location;
       return {
         row,
-        matchFields: { match_score: grade.match_score, match_tier: grade.match_tier },
+        matchFields: { match_score: grade.match_score, match_tier: gradeTier(grade) },
         candidateKey: normalizeRecruitingCandidateRow(row, { schemaKnown: true }).candidateKey,
       };
     });
