@@ -935,7 +935,7 @@ async function savedForRequest(
     // request's round is found by its people, not by when it was first recorded.
     prisma.recruitingCalibrationRound.findMany({
       where: { roleId: input.roleId },
-      select: { round: true, candidateKeys: true },
+      select: { round: true, candidateKeys: true, createdAt: true },
     }),
   ]);
   const found = new Set(keys);
@@ -945,7 +945,14 @@ async function savedForRequest(
   const rest = keys.filter((key) => !inRound.has(key));
   if (!rest.length) return "";
   const listed = keys.length - rest.length;
-  if (listed && !input.listRest)
+  // fr 11-21 (e72bd4f3): the first request's search finished after round 2 was shown, and its ten
+  // unchecked people went out as a second "round 2" list ("you gave me two different lists").
+  const answeredSince = rounds.some(
+    (round) => round.round > 1 && (round.createdAt?.getTime() ?? 0) > input.since.getTime(),
+  );
+  if (answeredSince && !listed)
+    return `Also saved by this search after a newer round was shown: ${rest.length} more ${rest.length === 1 ? "person" : "people"} in the role's Results, not checked yet. Name none of them and post no list; at most mention that count.`;
+  if ((listed && !input.listRest) || answeredSince)
     return `Also saved for this request, not checked yet and not shown to the recruiter: ${rest.length} more ${rest.length === 1 ? "person" : "people"}, in the role's Results. Show the round above; mention only that count for the rest, without naming them.`;
   const all = `${keys.length} ${keys.length === 1 ? "person" : "people"} in all`;
   return recruitingRoundListText(prisma, {

@@ -902,6 +902,38 @@ describe("delegating to a role team in another conversation", () => {
     expect(returned?.text).not.toContain("Saved 20; 4 more");
   });
 
+  it("names nobody a search saved once a later round answered the recruiter", async () => {
+    // fr 11-21 (e72bd4f3): the first request's search finished after round 2 was shown, and its
+    // ten unchecked people went out as a second "round 2" list.
+    const harness = team({ roleId: "role-1", later: [said("Search finished.")] });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const person = (slug: string, name: string) => ({
+      candidateKey: `linkedin:/in/${slug}`,
+      name,
+      title: "SRE",
+      company: "Visa",
+      location: "Austin",
+    });
+    prisma.recruitingCandidateOccurrence!.findMany = vi.fn(async () => [
+      person("bo", "Bo B"),
+      person("cy", "Cy C"),
+    ]);
+    prisma.recruitingCalibrationRound = {
+      findMany: vi.fn(async () => [
+        { round: 1, candidateKeys: ["linkedin:/in/amy"], createdAt: new Date(0) },
+        { round: 2, candidateKeys: ["linkedin:/in/dee"], createdAt: new Date(Date.now() + 60_000) },
+      ]),
+    };
+    prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
+    prisma.externalEffect = { findMany: vi.fn(async () => []) };
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    const text = (returnedTo(harness) as Array<{ text?: string }>)
+      .map((b) => b.text ?? "")
+      .join("\n");
+    expect(text).toContain("2 more");
+    expect(text).not.toContain("Bo B");
+  });
+
   it("names no unchecked people beyond the round when no number was asked for (simulated 2026-11-16)", async () => {
     // feedback-round edb7834f: "can you pull some people?" came back with the round and 17
     // unchecked people, Kruit listed all 27, and the next round's Gaya read as a repeat.
