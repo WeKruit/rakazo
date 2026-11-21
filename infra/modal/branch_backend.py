@@ -14,7 +14,7 @@ copied "batch" account, so its plays start empty here.
 --env RAKAZO_SIM_SANDBOX=desktop runs the agent's shell commands inside this Sandbox (default: fake).
 
 Without simulated-customer args it plays the free journeys that need no mailbox, copied account or
-paid search. Send plays use three more accounts whose mailboxes are on the emulated mail service. Results land where the simulated customer writes them (--out, else simulated-<time>/).
+paid search. Send plays use nine more accounts whose mailboxes are on the emulated mail service. Results land where the simulated customer writes them (--out, else simulated-<time>/).
 Needs MODAL_TOKEN_ID/MODAL_TOKEN_SECRET and the simulated customer's own model access.
 """
 
@@ -155,7 +155,7 @@ def main(argv):
     search, web = "--search" in own, "--web" in own
     owner, password = "branch-owner@example.com", f"Branch-{secrets.token_urlsafe(18)}"
     batch, batch_password = "branch-batch@example.com", f"Branch-{secrets.token_urlsafe(18)}"
-    senders = [(f"branch-sender{n}@example.com", f"Branch-{secrets.token_urlsafe(18)}") for n in (1, 2, 3)]
+    senders = [(f"branch-sender{n}@example.com", f"Branch-{secrets.token_urlsafe(18)}") for n in range(1, 10)]
 
     app = modal.App.lookup("rakazo-branch-plays", create_if_missing=True, environment_name=ENVIRONMENT)
     print("building the branch image (cached after the first run)", flush=True)
@@ -194,7 +194,8 @@ def main(argv):
         url = sandbox.tunnels()[PORT].url
         sign_up(url, origin, owner, password, "Branch Owner")
         sign_up(url, origin, batch, batch_password, "Batch Recruiter")
-        # The send plays' accounts, three so plays run side by side: the owner assigns each one of
+        # The send plays' accounts, nine (as many as the simulated customer takes), so each sample of a
+        # send journey gets its own account and no play reads another's roles: the owner assigns each one of
         # the emulated mail service's mailboxes. Emails are signed with this name, so it reads as a person's.
         for n, (sender, sender_password) in enumerate(senders, 1):
             sign_up(url, origin, sender, sender_password, "Noah Reed")
