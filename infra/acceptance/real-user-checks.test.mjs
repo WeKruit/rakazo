@@ -573,3 +573,15 @@ test("an unfilled placeholder in a reply fails, a merge field does not", () => {
     /unfilled placeholder/,
   );
 });
+
+test("a role chat's reply follows the recruiter's newest message in any chat", () => {
+  // 11-21 change-while-opening: an English JD opened the role, then a Chinese aside went to Kruit's
+  // chat; the product answers in the newest message's language, so the role's Chinese list is right.
+  const at = (message, time) => ({ ...message, at: `2026-11-21T10:${time}Z` });
+  const jd = at(user("Senior Data Engineer, Seattle, 6+ years, Spark and Kafka"), "00:00");
+  const aside = at(user("对了，远程也可以，不一定要在西雅图"), "00:05");
+  const list = at(bot("本轮 10 人：张伟、李娜等，都做过 Spark 和 Kafka。"), "01:00");
+  const language = (failures) => failures.some((f) => f.startsWith("language"));
+  assert(!language(conversationChecks([jd, list], { recruiter: [jd, aside] })));
+  assert(language(conversationChecks([jd, list], { recruiter: [jd] })));
+});

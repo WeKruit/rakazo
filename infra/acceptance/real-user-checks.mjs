@@ -135,7 +135,12 @@ export const botText = (message) =>
 // A recruiter asking for a recap or a one-line summary of what changed.
 const RECAP = /一句话|总结|概括|说下改了|改了(什么|啥)|summari[sz]e|\brecap\b|what changed|in one line|tl;?dr/i;
 
-export function conversationChecks(messages) {
+/**
+ * `recruiter` is every message the recruiter wrote in any chat (with `at`): the product answers in
+ * the language of their newest message wherever they wrote it, so a role chat's reply follows an
+ * aside typed in Kruit's chat. Without it, the chat's own last message counts.
+ */
+export function conversationChecks(messages, { recruiter } = {}) {
   const failures = [];
   const typed = messages
     .filter((message) => message.role === "user")
@@ -147,9 +152,16 @@ export function conversationChecks(messages) {
     const text = message.text;
     if (!text.trim()) continue;
     const asked = messages.slice(0, index).findLast((item) => item.role === "user");
-    // The reply follows the language of the recruiter's last message; a lone "？" has none.
-    if (asked && /[\p{Script=Han}A-Za-z]/u.test(asked.text)) {
-      const chinese = mostlyChinese(asked.text);
+    const newest =
+      (recruiter && message.at
+        ? recruiter
+            .filter((item) => item.at <= message.at)
+            .sort((a, b) => a.at.localeCompare(b.at))
+            .at(-1)
+        : undefined) ?? asked;
+    // The reply follows the language of the recruiter's newest message; a lone "？" has none.
+    if (newest && /[\p{Script=Han}A-Za-z]/u.test(newest.text)) {
+      const chinese = mostlyChinese(newest.text);
       const words = prose(text);
       // A reply that only repeats words the recruiter typed (a name, an address) has no language.
       const typed = new Set(
