@@ -7385,20 +7385,26 @@ describe("quality check grade save", () => {
     expect(f.saveEffect).toMatchObject({ status: "completed", result });
   });
 
-  it("saves an Uncertain grade with a requirement not met as Partial", async () => {
-    // Branch fosp 11-21 (c8635512): someone in Singapore for a Shanghai role was saved Uncertain
-    // and filled a round's last place.
-    const f = gradesFixture({
-      match_tier: "Uncertain",
-      requirements_assessment: [
-        { requirement: "Based in New Jersey", status: "not_met", evidence: "Singapore" },
-      ],
-    });
-    await f.save();
-    expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledExactlyOnceWith({
-      data: [expect.objectContaining({ matchFields: { match_score: 88, match_tier: "Partial" } })],
-    });
-  });
+  // Branch fosp 11-21 (c8635512): someone in Singapore for a Shanghai role was saved Uncertain
+  // and filled a round's last place. fr 11-21 (8ef94139): Principal, Staff and Data Engineer II
+  // people were saved Promising with "Senior Data Engineer: not_met" and filled round 2.
+  it.each(["Uncertain", "Promising", "Strong"])(
+    "saves a %s grade with a requirement not met as Partial",
+    async (tier) => {
+      const f = gradesFixture({
+        match_tier: tier,
+        requirements_assessment: [
+          { requirement: "Based in New Jersey", status: "not_met", evidence: "Singapore" },
+        ],
+      });
+      await f.save();
+      expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledExactlyOnceWith({
+        data: [
+          expect.objectContaining({ matchFields: { match_score: 88, match_tier: "Partial" } }),
+        ],
+      });
+    },
+  );
 
   it.each(["not-in-role", "receipt-hash"])("refuses %s", async (boundary) => {
     const f = gradesFixture();
