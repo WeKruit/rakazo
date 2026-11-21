@@ -5,6 +5,7 @@ import type { RunTrigger } from "@rakazo/contracts";
 import { recruitingBotKey } from "@rakazo/core";
 import type { CalibrationRoundStatus, PrismaClient } from "@rakazo/db";
 import {
+  BRIEF_CONFIRMATION_TEXT,
   calibrationRoundStatus,
   createThreadMessageInTransaction,
   listRecruitingCandidates,
@@ -457,7 +458,13 @@ export async function startRecruitingGrading(
     }),
   ]);
   // The round the recruiter is reviewing is graded first, against what they said since the last one.
-  const review = await roundUnderReview(deps.prisma, role.id, grader?.tool === "self", now);
+  const review = await roundUnderReview(
+    deps.prisma,
+    role.id,
+    grader?.tool === "self",
+    now,
+    thread.id,
+  );
   const unreviewed = new Set(
     review?.round.candidateKeys.filter((key) => !review.grades.has(key)) ?? [],
   );
@@ -481,16 +488,7 @@ export async function startRecruitingGrading(
   // Only people checked after the recruiter's words fill it: fr 11-20 (3696a182) filled "Spark and
   // Kafka in prod" rounds with people checked a minute before that was said.
   const gradedKeys = review?.round.candidateKeys.filter((key) => review.grades.has(key)) ?? [];
-  const feedbackAt =
-    review?.held && review.since
-      ? (
-          await deps.prisma.message.findFirst({
-            where: { threadId: thread.id, role: "user", createdAt: { gt: review.since } },
-            orderBy: { seq: "asc" },
-            select: { createdAt: true },
-          })
-        )?.createdAt
-      : undefined;
+  const feedbackAt = review?.held ? review.feedbackAt : undefined;
   const early =
     review?.held === true &&
     grader?.tool === "self" &&
@@ -618,16 +616,12 @@ export async function startRecruitingGrading(
     !review.held &&
     (await nextRoundComing(deps.prisma, thread.id, review.round.createdAt, grader.botId));
   if (coming) {
-    const feedback = await deps.prisma.message.findFirst({
-      where: { threadId: thread.id, role: "user", createdAt: { gt: review.round.createdAt } },
-      orderBy: { seq: "asc" },
-      select: { createdAt: true },
-    });
+    const feedbackAt = await recruiterFeedbackAt(deps.prisma, thread.id, review.round.createdAt);
     const checked = new Set(graded.map((row) => row.candidateKey));
     people.clear();
     for (const row of found) {
       if (people.size >= batchSize) break;
-      if (!feedback?.createdAt || !(row.page?.observedAt > feedback.createdAt)) continue;
+      if (!feedbackAt || !(row.page?.observedAt > feedbackAt)) continue;
       if (!row.linkedinUrl || checked.has(row.candidateKey) || sent.has(row.linkedinUrl)) continue;
       people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
     }
@@ -934,6 +928,7 @@ async function roundUnderReview(
   roleId: string,
   reviewer: boolean,
   now = Date.now(),
+  threadId?: string,
 ): Promise<{
   round: {
     id: string;
@@ -948,8 +943,13 @@ async function roundUnderReview(
   held: boolean;
   /** The Reviewer's grades are all in and the owner has not shown it yet. */
   checked: boolean;
-  /** When the round before was recorded: grades made since then had the recruiter's feedback. */
+  /**
+   * When the recruiter first wrote after the round before (else when it was recorded): grades
+   * made since then had their feedback.
+   */
   since: Date | undefined;
+  /** When the recruiter first wrote after the round before, if they have. */
+  feedbackAt: Date | undefined;
 } | null> {
   const [round, previous] = await prisma.recruitingCalibrationRound.findMany({
     where: { roleId },
@@ -970,12 +970,17 @@ async function roundUnderReview(
   if (!round || round.approvedAt) return null;
   const status = calibrationRoundStatus(round, now);
   const held = reviewer && status !== "shown";
+  const feedbackAt =
+    previous && threadId
+      ? await recruiterFeedbackAt(prisma, threadId, previous.createdAt)
+      : undefined;
+  const since = feedbackAt ?? previous?.createdAt;
   const rows = await prisma.recruitingCandidateOccurrence.findMany({
     where: {
       roleId,
       candidateKey: { in: round.candidateKeys },
       page: {
-        ...(previous ? { observedAt: { gt: previous.createdAt } } : {}),
+        ...(since ? { observedAt: { gt: since } } : {}),
         effect: {
           OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
             request: { path: ["operation"], equals: operation },
@@ -1001,7 +1006,32 @@ async function roundUnderReview(
         company: row.company,
         tier: (row.matchFields as { match_tier?: unknown } | null)?.match_tier,
       });
-  return { round, grades, held, checked: held && status === "checked", since: previous?.createdAt };
+  return { round, grades, held, checked: held && status === "checked", since, feedbackAt };
+}
+
+/**
+ * When the recruiter first wrote in the role's conversation after `after`, leaving out the brief
+ * confirmation posted as theirs. fr 11-21 (8ef94139): that confirmation came right after round 1,
+ * so people checked before the feedback ("no staff, no AWS infra") counted as checked with it,
+ * and round 2 was shown 30 s later with a Principal and five AWS people.
+ */
+async function recruiterFeedbackAt(
+  prisma: PrismaClient,
+  threadId: string,
+  after: Date,
+): Promise<Date | undefined> {
+  const said = await prisma.message.findMany({
+    where: { threadId, role: "user", createdAt: { gt: after } },
+    orderBy: { seq: "asc" },
+    take: 5,
+    select: { createdAt: true, blocks: true },
+  });
+  return said.find(
+    (message) =>
+      !(Array.isArray(message.blocks) ? message.blocks : []).every((block) =>
+        BRIEF_CONFIRMATION_TEXT.test(String((block as { text?: unknown } | null)?.text ?? "")),
+      ),
+  )?.createdAt;
 }
 
 /** The recruiter wrote since the shown round and a teammate's turn is working on it. */
