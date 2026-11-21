@@ -2641,3 +2641,14 @@ describe("native calibration approval evidence", () => {
     expect(f.tx.recruitingAssessment.findFirst).not.toHaveBeenCalled();
   });
 });
+
+describe("keepNumberedTitle", () => {
+  it("keeps the recruiter's numbered role name when a rename drops its number", () => {
+    // Branch fosp 11-21 (479fde17): the rename to "Senior Data Engineer" lost 15261 and the role
+    // was opened twice.
+    const named = "测试固定 · 数据工程师 6 · 15261";
+    expect(recruiting.keepNumberedTitle("Senior Data Engineer", named)).toBe(named);
+    expect(recruiting.keepNumberedTitle("数据工程师 · 15261", named)).toBe("数据工程师 · 15261");
+    expect(recruiting.keepNumberedTitle("Data Lead", "Data Engineer 2026")).toBe("Data Lead");
+  });
+});

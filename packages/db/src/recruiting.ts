@@ -1407,6 +1407,18 @@ export async function reviseRecruitingRole(
   });
 }
 
+/**
+ * A rename keeps the role number the recruiter's name for the role carries. Branch fosp 11-21
+ * (479fde17): the role agent renamed 「测试固定 · 数据工程师 6 · 15261」 to "Senior Data Engineer",
+ * every later handoff for 15261 was refused as a new role, and the role was opened twice.
+ */
+export function keepNumberedTitle(next: string, current: string | null): string {
+  const number = [...(current ?? "").matchAll(/(?<![\p{L}\p{N}])(\d{4,6})(?![\p{L}\p{N}])/gu)]
+    .map((match) => match[1])
+    .find((n) => n && !/^(?:19|20)\d\d$/.test(n));
+  return next && current && number && !next.includes(number) ? current : next;
+}
+
 async function reviseRoleInTransaction(
   tx: Tx,
   actor: Actor,
@@ -1431,6 +1443,7 @@ async function reviseRoleInTransaction(
   });
   const revisedStage =
     input.brief && input.title ? stageAfter(role, "calibration_10") : role.playbookStage;
+  const title = keepNumberedTitle(input.title, role.title);
   const changed = await tx.recruitingRole.updateMany({
     where: {
       id: role.id,
@@ -1440,7 +1453,7 @@ async function reviseRoleInTransaction(
       currentRevisionId: role.currentRevisionId,
     },
     data: {
-      title: input.title,
+      title,
       revision: revision.revision,
       currentRevisionId: revision.id,
       playbookStage: revisedStage,
@@ -1448,14 +1461,14 @@ async function reviseRoleInTransaction(
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
   const sourceThread = authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId));
-  await syncRoleGroupName(tx, actor, sourceThread, input.title, role.title);
+  await syncRoleGroupName(tx, actor, sourceThread, title, role.title);
   await recordRecruitingChange(tx, actor, sourceThread, role.id);
   return roleSnapshot(
     tx,
     actor,
     {
       ...role,
-      title: input.title,
+      title,
       revision: revision.revision,
       currentRevisionId: revision.id,
       playbookStage: revisedStage,
