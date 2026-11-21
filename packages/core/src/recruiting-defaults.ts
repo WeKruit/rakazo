@@ -226,7 +226,8 @@ export function roleOpenedNote(chinese: boolean): string {
   // Staging 11-14: "its first question is waiting there" was said while a Send card waited.
   // x5 11-16, progress-and-where: the role's own first message asked for the JD again, so the
   // recruiter read the same ask twice, and "团队" named a teammate they never see.
-  return `The role's conversation is open and is starting with the recruiter's requirements. A card that opens it is already shown: say once, in one line, in the language of their newest message (also one that arrives now), only that the role is open and you are on it there (for example ${example}); its conversation asks for anything it needs, so never repeat that here, never say what is waiting there (a question, a card, a draft) until it reports, never say intake, and do not paste a link.`;
+  // Sends 11-21: a draft pasted here differed from the one on the role's send card.
+  return `The role's conversation is open and is starting with the recruiter's requirements. A card that opens it is already shown: say once, in one line, in the language of their newest message (also one that arrives now), only that the role is open and you are on it there (for example ${example}); its conversation asks for anything it needs, so never repeat that here, never say what is waiting there (a question, a card, a draft) until it reports, never say intake, and do not paste a link. Write no email or draft here, not even one already asked for: the role's conversation writes each one and shows it on its own card, so a second copy here would differ from what is sent.`;
 }
 
 /**
