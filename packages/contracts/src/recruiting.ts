@@ -1077,6 +1077,24 @@ const ResearchText = z.string().regex(/\S/, "Text must not be blank");
 /** People one save_grades call may grade. */
 export const RECRUITING_GRADE_PAGE_LIMIT = 20;
 const GradeText = (max: number) => ResearchText.max(max);
+/**
+ * One degree as "School | Degree | dates". A degree given as an object is joined into that text:
+ * fr 11-21 (8ef94139) Reviewer saves were refused for education objects, and the round waited for
+ * the batch to be graded again.
+ */
+const GradeEducation = z
+  .union([z.string(), z.record(z.string(), z.unknown())])
+  .transform((degree) =>
+    typeof degree === "string"
+      ? degree
+      : Object.values(degree)
+          .filter((value) => typeof value === "string" || typeof value === "number")
+          .map(String)
+          .filter((value) => value.trim())
+          .join(" | ")
+          .slice(0, 500),
+  )
+  .pipe(GradeText(500));
 /** One person's grade from the quality check: the same columns a search's grading returns. */
 export const RecruitingGradeRowSchema = z.object({
   name: GradeText(300),
@@ -1084,7 +1102,7 @@ export const RecruitingGradeRowSchema = z.object({
   current_title: GradeText(300).nullish(),
   current_company: GradeText(300).nullish(),
   location: GradeText(300).nullish(),
-  education: z.array(GradeText(500)).max(10).nullish(),
+  education: z.array(GradeEducation).max(10).nullish(),
   match_score: z.number().int().min(0).max(100),
   match_tier: z.enum(["Strong", "Promising", "Partial", "Uncertain"]),
   fit_reasons: GradeText(2000),
