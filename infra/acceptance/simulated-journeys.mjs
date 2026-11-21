@@ -414,6 +414,30 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "industry-and-what-they-built",
+    // Each play opens its own role, so one play's rejects and passes never seed the next.
+    leftover: /^测试固定 · 支付风控数据 · \d{4,5}/,
+    mechanisms: ["reference", "long-task"],
+    paid: true,
+    title: "看行业和做过什么，不只是关键词",
+    area: "search",
+    source:
+      "11-21 user: 「还有要测试理解公司行业 做过的内容这些」「资料看不出来就重新找 类似的」「补不满就问问用户要不要」",
+    account: "batch",
+    chinese: true,
+    maxTurns: 8,
+    waitMs: 12 * 60_000,
+    persona: `${AGENCY_RECRUITER} Your client is a payments company; keyword matches from unrelated industries waste your time.`,
+    facts: (_recipients, tag) =>
+      `The role is named 「测试固定 · 支付风控数据 · ${tag}」: Senior Data Engineer for a payments company, Shanghai, 5+ years, must have built real-time risk, fraud or payment data pipelines at a payments, fintech, bank or e-commerce payments team (Spark or Flink is how, not the point). Ad-tech, games or generic BI work does not count. Base 500k–700k RMB. Do not approve any send. Keep any search small (10 people per round, 20 in all).`,
+    goals: [
+      "Give Kruit the role under that exact name in one message and ask it to find people.",
+      "When the first people show, pick one or two whose company or work is outside payments/risk (from what Kruit actually shows) and say why in one short message; ask for more who actually built risk or payment pipelines.",
+      "Check each new person's company and what they built fit payments/risk, not just the Spark or Flink keyword, and that Kruit says plainly what it changed.",
+      "If Kruit can't find enough, expect it to say how many fit and ask whether that's enough or what to loosen, instead of padding the list or going quiet.",
+    ],
+  },
+  {
     name: "long-search-finishes",
     mechanisms: ["long-task", "state-claims"],
     paid: true,
