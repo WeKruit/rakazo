@@ -5732,7 +5732,9 @@ describe("local native Instantly campaign and lead tools", () => {
       });
       expect(read.next).not.toMatch(/within|since/);
       expect(read.next).toContain("it sends from sender@x.test");
-      f.state.sendingStatus = { summary: { status: "healthy" } };
+      f.state.sendingStatus = {
+        summary: { status: "waiting_for_leads", status_message: "No leads are ready" },
+      };
       const sending = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
       expect(sending).not.toHaveProperty("mailServiceSays");
       expect(sending.next).toMatch(/going out now/);

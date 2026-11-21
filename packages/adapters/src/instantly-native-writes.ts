@@ -2976,7 +2976,9 @@ async function sendingHeld(rest: InstantlyRest, campaignId: string) {
   const summary = read?.summary as Record<string, unknown> | null | undefined;
   const diagnostics = read?.diagnostics as Record<string, unknown> | null | undefined;
   const status = typeof summary?.status === "string" ? summary.status : diagnostics?.status;
-  if (typeof status !== "string" || status === "healthy") return null;
+  // Normal moments of a sending campaign, not holds: just after people are added it reports
+  // no leads ready until it picks them up (staging 11-21, read two minutes after a send).
+  if (typeof status !== "string" || STILL_SENDING.has(status)) return null;
   // Which mailboxes cannot send and why, so "no sending accounts available" names the cause.
   const accounts = diagnostics?.accounts_summary as Record<string, unknown> | undefined;
   const unavailable = Object.entries(
@@ -3000,6 +3002,12 @@ async function sendingHeld(rest: InstantlyRest, campaignId: string) {
   };
 }
 
+const STILL_SENDING = new Set([
+  "healthy",
+  "waiting_for_leads",
+  "follow_up_delay_not_met",
+  "campaign_running_subsequences",
+]);
 /** Statuses that mean the campaign's mailbox cannot send, whatever the schedule says. */
 const MAILBOX_BLOCKED = new Set([
   "no_accounts_available",
