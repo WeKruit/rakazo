@@ -166,19 +166,27 @@ describe("roundCriteria", () => {
         id: "brief:production technologies",
         statement: "production technologies: Spark and Kafka in production",
         added: false,
+        raised: false,
       },
-      { id: "brief:location", statement: "location: Seattle metro, hybrid", added: true },
+      {
+        id: "brief:location",
+        statement: "location: Seattle metro, hybrid",
+        added: true,
+        raised: true,
+      },
       {
         id: "brief:Should I cap experience at 10 years?",
         statement: "Target 6–10 years",
         added: false,
+        raised: false,
       },
-      { id: "titles", statement: "data engineer titles only", added: true },
+      { id: "titles", statement: "data engineer titles only", added: true, raised: true },
       {
         id: "turned-down:fb-1",
         statement:
           "not what the recruiter turned down: William Z. is a generic software engineer, not hands-on data eng",
         added: true,
+        raised: true,
       },
     ]);
   });

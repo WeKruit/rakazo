@@ -196,14 +196,24 @@ export function recruitingGradePrompt(
   service: GradingService,
   asked: readonly string[] = [],
   niceToHave: readonly string[] = [],
+  raised: readonly string[] = [],
 ) {
   // What the recruiter said for the round they are reviewing are hard requirements too, except
   // what they called nice to have: whether a point is a must is theirs to say (11-21 user).
   const list = [
     ...(asked.length
       ? [
-          "The recruiter also asked for these; grade each as a hard requirement (someone like the people they turned down is not_met), except the job's own terms (pay, office days, benefits), which are about the job, not the person:",
+          "The recruiter also asked for these; grade each as a hard requirement, except the job's own terms (pay, office days, benefits), which are about the job, not the person:",
           ...asked.map((statement) => `* ${statement}`),
+          "",
+        ]
+      : []),
+    // 11-21 user: what the recruiter raised in feedback must be shown on the profile, since they
+    // turned people down for not showing it ("要明确写 Spark/Flink").
+    ...(raised.length
+      ? [
+          "The recruiter raised these in their feedback on the people shown; grade each as a hard requirement with raised: true in requirements_assessment (someone like the people they turned down is not_met; a profile silent on it is unknown), except the job's own terms (pay, office days, benefits):",
+          ...raised.map((statement) => `* ${statement}`),
           "",
         ]
       : []),
@@ -695,11 +705,13 @@ export async function startRecruitingGrading(
       );
     return skipped("next round coming");
   }
-  const asked = review
+  const criteria = review
+    ? await roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId })
+    : [];
+  const asked = criteria.filter((criterion) => !criterion.raised).map((c) => c.statement);
+  const raised = review
     ? [
-        ...(await roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId })).map(
-          (criterion) => criterion.statement,
-        ),
+        ...criteria.filter((criterion) => criterion.raised).map((c) => c.statement),
         ...(
           await recruiterWordsSinceFirstRound(deps.prisma, { threadId: thread.id, roleId: role.id })
         ).map((words) => `In their words: "${words}"`),
@@ -710,6 +722,7 @@ export async function startRecruitingGrading(
     grader,
     asked,
     await roleNiceToHaves(deps.prisma, role.id),
+    raised,
   );
   // A retry of the same people after a request that never started research is a new request.
   const batch = createHash("sha256")

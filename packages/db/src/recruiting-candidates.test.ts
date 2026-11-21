@@ -7406,6 +7406,21 @@ describe("quality check grade save", () => {
     },
   );
 
+  it("saves a grade silent on a point the recruiter raised in feedback as Partial", async () => {
+    // fosp 11-21: "要明确写 Spark/Flink" kept getting people whose profiles never said it.
+    const f = gradesFixture({
+      match_tier: "Promising",
+      requirements_assessment: [
+        { requirement: "Spark or Flink", status: "unknown", evidence: null, raised: true },
+        { requirement: "Shanghai", status: "unknown", evidence: null },
+      ],
+    });
+    await f.save();
+    expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [expect.objectContaining({ matchFields: { match_score: 88, match_tier: "Partial" } })],
+    });
+  });
+
   it("keeps the tier when only a nice-to-have point is not met", async () => {
     // 11-21 user: whether a point is a must is the recruiter's to say; a miss on a nice-to-have
     // one ranks lower and never keeps the person out.

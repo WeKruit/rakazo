@@ -13,7 +13,8 @@ import { handedInRecruiterWords } from "./global-role-writes.js";
 export type RoundVerdict = "shown" | "unknown" | "fails";
 export type RoundChecks = Readonly<Record<string, Readonly<Record<string, RoundVerdict>>>>;
 
-export type RoundCriterion = { id: string; statement: string; added: boolean };
+/** `raised`: said in feedback on a round (after the first was recorded), not with the role. */
+export type RoundCriterion = { id: string; statement: string; added: boolean; raised?: boolean };
 
 function statementOf(expression: RecruitingCriterionExpression): string {
   if (expression.kind === "atom") return expression.statement;
@@ -113,7 +114,7 @@ export async function roundCriteria(
   input: { roleId: string; spaceId: string },
 ): Promise<RoundCriterion[]> {
   const { roleId } = input;
-  const [role, last, turnedDown] = await Promise.all([
+  const [role, last, first, turnedDown] = await Promise.all([
     prisma.recruitingRole.findUnique({
       where: { id: roleId },
       select: { currentRevision: { select: { criteria: true, brief: true } } },
@@ -121,6 +122,11 @@ export async function roundCriteria(
     prisma.recruitingCalibrationRound.findFirst({
       where: { roleId },
       orderBy: { round: "desc" },
+      select: { createdAt: true },
+    }),
+    prisma.recruitingCalibrationRound.findFirst({
+      where: { roleId },
+      orderBy: { round: "asc" },
       select: { createdAt: true },
     }),
     prisma.externalEffect.findMany({
@@ -143,16 +149,19 @@ export async function roundCriteria(
     ...hardCriteria(role?.currentRevision.criteria),
   ];
   const cited = [...new Set(stated.flatMap((requirement) => requirement.messages))];
-  const saidAfter = new Set(
-    last && cited.length
-      ? (
-          await prisma.message.findMany({
-            where: { id: { in: cited }, createdAt: { gt: last.createdAt } },
-            select: { id: true },
-          })
-        ).map((message) => message.id)
-      : [],
-  );
+  const citedSince = async (round: { createdAt: Date } | null) =>
+    new Set(
+      round && cited.length
+        ? (
+            await prisma.message.findMany({
+              where: { id: { in: cited }, createdAt: { gt: round.createdAt } },
+              select: { id: true },
+            })
+          ).map((message) => message.id)
+        : [],
+    );
+  const saidAfter = await citedSince(last);
+  const saidInFeedback = await citedSince(first);
   const reasons = turnedDown.reverse().flatMap((effect) => {
     const summary = (effect.request as { summary?: unknown } | null)?.summary;
     return typeof summary === "string" && summary.trim()
@@ -161,6 +170,7 @@ export async function roundCriteria(
             id: `turned-down:${effect.id}`,
             statement: `not what the recruiter turned down: ${summary.trim()}`,
             added: !!last && effect.createdAt > last.createdAt,
+            raised: true,
           },
         ]
       : [];
@@ -170,6 +180,7 @@ export async function roundCriteria(
       id,
       statement,
       added: messages.some((message) => saidAfter.has(message)),
+      raised: messages.some((message) => saidInFeedback.has(message)),
     })),
     ...reasons,
   ];

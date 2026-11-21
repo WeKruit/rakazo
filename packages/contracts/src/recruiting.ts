@@ -1115,6 +1115,7 @@ export const RecruitingGradeRowSchema = z.object({
         status: z.enum(["met", "not_met", "unknown"]),
         evidence: z.string().max(1000).nullable(),
         required: z.boolean().optional(),
+        raised: z.boolean().optional(),
       }),
     )
     .min(1)
