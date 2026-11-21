@@ -205,6 +205,7 @@ describe("a role team's card copied into the conversation that delegated the wor
       },
       thread: {
         update: vi.fn(async () => ({ nextEventSeq: 7, nextMessageSeq: 3, userId: "user-1" })),
+        findUnique: vi.fn(async () => ({ groupId: "role-group", group: { name: "Senior DE" } })),
       },
       run: { findUnique: vi.fn(async () => ({ status: "waiting_input", startedAt: null })) },
       event: {
@@ -231,6 +232,8 @@ describe("a role team's card copied into the conversation that delegated the wor
     botId: "kruit",
   };
 
+  // 11-21 user: the copy should lead back to the role's own conversation, opened beside this
+  // one at that card, so the recruiter can act on it there.
   it("writes one copy that points at the card, however often the pause is replayed", async () => {
     const { tx, rows } = store([question]);
     await expect(mirrorAskInTransaction(tx, mirror)).resolves.toMatchObject({
@@ -247,6 +250,7 @@ describe("a role team's card copied into the conversation that delegated the wor
             ...question,
             answerTarget: { threadId: "role", runId: "team-run", messageId: "source" },
           },
+          { kind: "role_link", groupId: "role-group", title: "Senior DE" },
         ],
       }),
     ]);
@@ -289,6 +293,7 @@ describe("a role team's card copied into the conversation that delegated the wor
         ...answered[0],
         answerTarget: { threadId: "role", runId: "team-run", messageId: "source" },
       },
+      { kind: "role_link", groupId: "role-group", title: "Senior DE" },
     ]);
   });
 });

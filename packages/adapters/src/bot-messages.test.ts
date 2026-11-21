@@ -1046,10 +1046,24 @@ describe("delegating to a role team in another conversation", () => {
       args.where.runId ? cardRow : delegated(args),
     );
     (harness.tx.message as Record<string, unknown>).findFirst = vi.fn(async () => cardRow);
+    (harness.tx.thread as Record<string, unknown>).findUnique = vi.fn(async () => ({
+      groupId: "role-group",
+      group: { name: "Senior DE" },
+    }));
     await showDelegatedTeamCard(harness.deps, roleRun);
     expect(returnedTo(harness)).toEqual([
       { ...card, answerTarget: { threadId: "thread-role", runId: "run-1", messageId: "card-1" } },
     ]);
+    // 11-21 user: the copy leads back to the role's own conversation, opened at the card.
+    expect(harness.tx.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blocks: expect.arrayContaining([
+            { kind: "role_link", groupId: "role-group", title: "Senior DE" },
+          ]),
+        }),
+      }),
+    );
   });
 
   it("copies neither the card nor the result when the recruiter is in the role's chat (branch sends 2026-11-20)", async () => {
