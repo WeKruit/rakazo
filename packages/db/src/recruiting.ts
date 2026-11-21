@@ -7957,14 +7957,20 @@ export async function saveRecruitingCandidatePeopleSearch(
 type GradesInput = Extract<RecruitingResearchToolInput, { operation: "save_grades" }>;
 
 /**
- * A requirement the profile shows is not met makes the person Partial at most, as the grading
- * rubric says. Branch fosp 11-21 (c8635512): someone located in Singapore for a Shanghai role was
- * saved Uncertain and filled a round's last place; fr 11-21 (8ef94139): Principal, Staff and Data
+ * A required point the profile shows is not met makes the person Partial at most, as the grading
+ * rubric says; a nice-to-have one (required: false, from the recruiter's words) only ranks lower.
+ * Branch fosp 11-21 (c8635512): someone located in Singapore for a Shanghai role was saved
+ * Uncertain and filled a round's last place; fr 11-21 (8ef94139): Principal, Staff and Data
  * Engineer II people were saved Promising with the Senior title not met and filled round 2.
  */
-function gradeTier(grade: { match_tier: string; requirements_assessment: { status: string }[] }) {
+function gradeTier(grade: {
+  match_tier: string;
+  requirements_assessment: { status: string; required?: boolean }[];
+}) {
   return grade.match_tier !== "Partial" &&
-    grade.requirements_assessment.some((item) => item.status === "not_met")
+    grade.requirements_assessment.some(
+      (item) => item.status === "not_met" && item.required !== false,
+    )
     ? "Partial"
     : grade.match_tier;
 }

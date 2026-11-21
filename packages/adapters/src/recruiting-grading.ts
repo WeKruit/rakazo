@@ -16,7 +16,11 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { handedInRecruiterWords } from "./global-role-writes.js";
 import { requestedPeopleTarget } from "./people-target.js";
-import { recruiterWordsSinceFirstRound, roundCriteria } from "./recruiting-round-check.js";
+import {
+  recruiterWordsSinceFirstRound,
+  roleNiceToHaves,
+  roundCriteria,
+} from "./recruiting-round-check.js";
 
 export { RECRUITING_GRADE_NONCE_PREFIX };
 /** Newly saved searches settle this long before grading starts, so one request covers them. */
@@ -191,13 +195,22 @@ export function recruitingGradePrompt(
   people: readonly { name: string; url: string }[],
   service: GradingService,
   asked: readonly string[] = [],
+  niceToHave: readonly string[] = [],
 ) {
-  // What the recruiter said for the round they are reviewing are hard requirements too.
+  // What the recruiter said for the round they are reviewing are hard requirements too, except
+  // what they called nice to have: whether a point is a must is theirs to say (11-21 user).
   const list = [
     ...(asked.length
       ? [
           "The recruiter also asked for these; grade each as a hard requirement (someone like the people they turned down is not_met), except the job's own terms (pay, office days, benefits), which are about the job, not the person:",
           ...asked.map((statement) => `* ${statement}`),
+          "",
+        ]
+      : []),
+    ...(niceToHave.length
+      ? [
+          "The recruiter called these nice to have, not a must: grade each with required: false in requirements_assessment; a miss ranks the person lower and never makes them Partial:",
+          ...niceToHave.map((statement) => `* ${statement}`),
           "",
         ]
       : []),
@@ -208,7 +221,7 @@ export function recruitingGradePrompt(
       `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements. You grade them yourself, from each person's full public profile.`,
       `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge only from what each page shows; when a page can't be read, use the person's saved profile from recruiting_candidates.`,
       SELF_GRADE_RUBRIC,
-      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, current title, company, location, education (a list of strings, one per degree: school, degree and dates), match_score 0 to 100, match_tier, fit_reasons naming the evidence, concerns, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown and the profile words that show it. Keep every grade short, since the recruiter is waiting: the evidence is the few profile words that show it, one short fit reason, a concern only for what is not met. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
+      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, current title, company, location, education (a list of strings, one per degree: school, degree and dates), match_score 0 to 100, match_tier, fit_reasons naming the evidence, concerns, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown and the profile words that show it (required: false on a preference). Keep every grade short, since the recruiter is waiting: the evidence is the few profile words that show it, one short fit reason, a concern only for what is not met. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
       "",
       ...list,
     ].join("\n");
@@ -607,7 +620,17 @@ export async function startRecruitingGrading(
           deps,
           thread,
           clientNonce,
-          async () => roundReviewPrompt(review.round.round, shownPeople),
+          async () =>
+            roundReviewPrompt(
+              review.round.round,
+              shownPeople,
+              shownPeople.length < size
+                ? {
+                    asked: size,
+                    gaps: await requirementsMostMissed(deps.prisma, role.id, review.since),
+                  }
+                : undefined,
+            ),
           grader?.botId,
           review.round.ownerBotId,
         );
@@ -682,7 +705,12 @@ export async function startRecruitingGrading(
         ).map((words) => `In their words: "${words}"`),
       ]
     : [];
-  const prompt = recruitingGradePrompt([...people.values()], grader, asked);
+  const prompt = recruitingGradePrompt(
+    [...people.values()],
+    grader,
+    asked,
+    await roleNiceToHaves(deps.prisma, role.id),
+  );
   // A retry of the same people after a request that never started research is a new request.
   const batch = createHash("sha256")
     .update([String(requests.length), ...people.keys()].join("\n"))
@@ -1404,13 +1432,64 @@ export function roundTopUpPrompt(round: number, missing: number) {
   ].join("\n");
 }
 
-export function roundReviewPrompt(round: number, people: readonly { key: string; name: string }[]) {
+export function roundReviewPrompt(
+  round: number,
+  people: readonly { key: string; name: string }[],
+  short?: { asked: number; gaps: readonly string[] },
+) {
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and exactly these people, in this order:`,
     ...people.map((person, index) => `${index + 1}. ${person.name} (candidateKey ${person.key})`),
     "",
     "The Reviewer's grades stand for them: no checks, no search, and don't read Results or anyone's profile again. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.",
+    // 11-21 user: when too few people meet a must, say so and offer to relax it, never quietly
+    // show fewer or include people who miss it.
+    ...(short
+      ? [
+          `Only ${people.length} of the ${short.asked} people they asked for fit, after one more search.${short.gaps.length ? ` What kept most people out: ${short.gaps.join("; ")}.` : ""} With the round, say so in one plain line and ask them, with ask_user, whether to relax that requirement or keep it, as concrete choices.`,
+        ]
+      : []),
   ].join("\n");
+}
+
+/**
+ * The required points checked people most often did not meet since `since`, most first, from
+ * the Reviewer's saved grades: what a short round's recruiter is asked about relaxing.
+ */
+async function requirementsMostMissed(
+  prisma: PrismaClient,
+  roleId: string,
+  since: Date | undefined,
+): Promise<string[]> {
+  const pages = await prisma.recruitingCandidatePage.findMany({
+    where: {
+      roleId,
+      ...(since ? { observedAt: { gt: since } } : {}),
+      effect: { request: { path: ["operation"], equals: "save_grades" } },
+    },
+    select: { effect: { select: { request: true } } },
+    take: 20,
+  });
+  const missed = new Map<string, number>();
+  for (const page of pages) {
+    const rows = (page.effect.request as { rows?: unknown } | null)?.rows;
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const items = (row as { requirements_assessment?: unknown } | null)?.requirements_assessment;
+      for (const item of Array.isArray(items) ? items : []) {
+        const { requirement, status, required } = (item ?? {}) as {
+          requirement?: unknown;
+          status?: unknown;
+          required?: unknown;
+        };
+        if (status === "not_met" && required !== false && typeof requirement === "string")
+          missed.set(requirement, (missed.get(requirement) ?? 0) + 1);
+      }
+    }
+  }
+  return [...missed]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([requirement, count]) => `${requirement} (${count} people)`);
 }
 
 /** Who grades a batch: the quality check itself, or a teammate's search service. */

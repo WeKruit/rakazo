@@ -21,6 +21,7 @@ const {
   nextRoundHeld,
   roundAwaitingReview,
   roundListHeld,
+  roundReviewPrompt,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
@@ -150,6 +151,7 @@ function fixture(options: {
             : (options.found ?? []),
       ),
     },
+    recruitingCandidatePage: { findMany: vi.fn(async () => []) },
     recruitingCalibrationRound: {
       findMany: vi.fn(async () => (options.rounds ?? []).map(stored)),
       findFirst: vi.fn(async () => (options.rounds?.[0] ? stored(options.rounds[0]) : null)),
@@ -241,6 +243,39 @@ describe("startRecruitingGrading", () => {
     const prompt = promptOf(f);
     expect(prompt.indexOf("in/picked")).toBeLessThan(prompt.indexOf("in/newer"));
     expect(prompt).toContain("* Title: Data Engineer");
+  });
+
+  it("tells the Reviewer what the recruiter called nice to have, and asks about a short round", async () => {
+    const f = fixture({ found: [person("pool")], rounds: round(["linkedin:/in/pool"]) });
+    f.prisma.recruitingRole.findUnique.mockResolvedValue({
+      currentRevision: {
+        criteria: null,
+        brief: {
+          fields: [
+            { key: "Title", value: "Data Engineer", state: "known", origin: "user_instruction" },
+            {
+              key: "Language",
+              value: "Mandarin",
+              state: "known",
+              origin: "user_instruction",
+              required: false,
+            },
+          ],
+        },
+      },
+    } as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    const prompt = promptOf(f);
+    expect(prompt).toContain("nice to have, not a must");
+    expect(prompt).toContain("* Language: Mandarin");
+    expect(prompt).not.toContain("* Language: Mandarin\n* Title");
+    const short = roundReviewPrompt(2, [{ key: "a", name: "A" }], {
+      asked: 5,
+      gaps: ["Mandarin (4 people)"],
+    });
+    expect(short).toContain("Only 1 of the 5");
+    expect(short).toContain("Mandarin (4 people)");
+    expect(roundReviewPrompt(2, [{ key: "a", name: "A" }])).not.toContain("Only");
   });
 
   it("grades against the recruiter's own feedback words, also when a teammate handed them in", async () => {

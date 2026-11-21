@@ -172,6 +172,7 @@ describe("recruiting tool budget", () => {
       0,
     );
     // +100 (11-21): grades accept a degree given as an object instead of refusing the save.
-    expect(chars).toBeLessThanOrEqual(96_600);
+    // +100 (11-21): a brief point and a graded point say whether the recruiter requires it.
+    expect(chars).toBeLessThanOrEqual(96_700);
   });
 });

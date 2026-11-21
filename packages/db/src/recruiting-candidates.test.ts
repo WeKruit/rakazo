@@ -7406,6 +7406,23 @@ describe("quality check grade save", () => {
     },
   );
 
+  it("keeps the tier when only a nice-to-have point is not met", async () => {
+    // 11-21 user: whether a point is a must is the recruiter's to say; a miss on a nice-to-have
+    // one ranks lower and never keeps the person out.
+    const f = gradesFixture({
+      match_tier: "Promising",
+      requirements_assessment: [
+        { requirement: "Mandarin", status: "not_met", evidence: "English only", required: false },
+      ],
+    });
+    await f.save();
+    expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [
+        expect.objectContaining({ matchFields: { match_score: 88, match_tier: "Promising" } }),
+      ],
+    });
+  });
+
   it.each(["not-in-role", "receipt-hash"])("refuses %s", async (boundary) => {
     const f = gradesFixture();
     if (boundary === "not-in-role") f.saved.count = 0;

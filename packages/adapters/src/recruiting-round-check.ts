@@ -52,26 +52,48 @@ type BriefField = {
   value?: unknown;
   state?: unknown;
   origin?: unknown;
+  required?: unknown;
   sourceRefIds?: unknown;
 };
+
+/** A brief field in the recruiter's words: the answer alone when its key is the intake question. */
+const fieldStatement = (field: { key: string; value: string }) =>
+  field.key.trim().endsWith("?") ? field.value : `${field.key}: ${field.value}`;
+
+const recruiterField = (field: BriefField): field is BriefField & { key: string; value: string } =>
+  typeof field?.key === "string" &&
+  typeof field.value === "string" &&
+  field.state === "known" &&
+  field.origin === "user_instruction";
+
+/**
+ * What the recruiter called nice to have rather than a must, in their words: a miss ranks the
+ * person lower and never keeps them out (11-21 user: whether level, language or a skill is a must
+ * comes from the recruiter, not from the check).
+ */
+export async function roleNiceToHaves(prisma: PrismaClient, roleId: string): Promise<string[]> {
+  const role = await prisma.recruitingRole.findUnique({
+    where: { id: roleId },
+    select: { currentRevision: { select: { brief: true } } },
+  });
+  const fields = (role?.currentRevision.brief as { fields?: unknown } | null)?.fields;
+  return Array.isArray(fields)
+    ? (fields as BriefField[])
+        .filter((field) => recruiterField(field) && field.required === false)
+        .map((field) => fieldStatement(field as { key: string; value: string }))
+    : [];
+}
 
 /** The brief fields the recruiter stated themselves, as requirements in their words. */
 function statedFields(brief: unknown): Requirement[] {
   const fields = (brief as { fields?: unknown } | null)?.fields;
   if (!Array.isArray(fields)) return [];
   return (fields as BriefField[]).flatMap((field) =>
-    typeof field?.key === "string" &&
-    typeof field.value === "string" &&
-    field.state === "known" &&
-    field.origin === "user_instruction"
+    recruiterField(field) && field.required !== false
       ? [
           {
             id: `brief:${field.key}`,
-            // A field saved from an intake question keeps the question as its key; the answer
-            // alone says the requirement.
-            statement: field.key.trim().endsWith("?")
-              ? field.value
-              : `${field.key}: ${field.value}`,
+            statement: fieldStatement(field),
             messages: citedMessages(field.sourceRefIds),
           },
         ]
@@ -207,8 +229,7 @@ export function checkRound(input: {
     // Something no pick's row shows is still unverified for each of them; the round list says
     // it once when every note is the same. A turned-down reason is not a requirement to list.
     const listed = unknown.filter((criterion) => !criterion.id.startsWith("turned-down:"));
-    if (listed.length)
-      unverified[key] = listed.map((criterion) => criterion.statement).join("; ");
+    if (listed.length) unverified[key] = listed.map((criterion) => criterion.statement).join("; ");
     const raised = unknown.filter((criterion) => criterion.added);
     if (raised.length && !input.relaxed && !input.reviewed && !input.asked.has(key))
       newlyUnknown.push(`${key} (${raised.map((criterion) => criterion.statement).join("; ")})`);

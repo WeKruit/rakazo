@@ -210,6 +210,7 @@ export const RecruitingBriefDraftSchema = z.strictObject({
         .boolean()
         .default(false)
         .describe("True when this field changes who is searched for."),
+      required: z.boolean().optional().describe("false when the recruiter called it nice to have"),
       sourceRefIds: z
         .array(RecruitingId)
         .default([])
@@ -1113,6 +1114,7 @@ export const RecruitingGradeRowSchema = z.object({
         requirement: GradeText(500),
         status: z.enum(["met", "not_met", "unknown"]),
         evidence: z.string().max(1000).nullable(),
+        required: z.boolean().optional(),
       }),
     )
     .min(1)
