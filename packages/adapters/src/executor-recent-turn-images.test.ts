@@ -372,10 +372,10 @@ async function runWithModel(
         async (args: {
           where?: { threadId?: string; runId?: string; role?: string; NOT?: object };
           orderBy?: object;
-          select?: { runId?: boolean };
+          select?: { runId?: boolean; clientNonce?: boolean };
           take?: number;
         }) =>
-          options.ownLastText !== undefined && args.where?.NOT && args.take === 8
+          options.ownLastText !== undefined && args.select?.clientNonce && args.take === 12
             ? [
                 { role: "bot", botId: "bot-1", blocks: [{ kind: "handoff", report: "completed" }] },
                 { role: "bot", botId: "bot-main", blocks: [{ kind: "handoff", toBotId: "bot-1" }] },

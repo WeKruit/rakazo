@@ -278,6 +278,28 @@ describe("lastOwnUpdate", () => {
       lastOwnUpdate([{ role: "assistant", botId: "other", blocks: text("x") }], "main"),
     ).toBeUndefined();
   });
+
+  it("counts the person's messages this turn answers, but not its own lines or a pushed-on nudge (staging 2026-11-21, aftercard)", () => {
+    // The same question asked again after a card: its answer matched the last one and was
+    // dropped, because the new question was this turn's own message and so was skipped.
+    const rows = [
+      { role: "assistant", botId: "main", runId: "run-2", blocks: text("收到，马上处理。") },
+      { role: "user", botId: null, runId: "run-2", blocks: text("列出 3 个候选人") },
+      { role: "assistant", botId: "main", runId: "run-1", blocks: text("Alex, Liang, Mia") },
+    ];
+    expect(lastOwnUpdate(rows, "main", "run-2")).toBeUndefined();
+    const nudged = [
+      {
+        role: "user",
+        botId: null,
+        runId: "run-2",
+        clientNonce: "autocontinue:run-1:decline",
+        blocks: text("retry"),
+      },
+      { role: "assistant", botId: "main", runId: "run-1", blocks: text("Alex, Liang, Mia") },
+    ];
+    expect(lastOwnUpdate(nudged, "main", "run-2")).toBe("Alex, Liang, Mia");
+  });
 });
 
 describe("TurnReportLedger.memorySaveFailed", () => {

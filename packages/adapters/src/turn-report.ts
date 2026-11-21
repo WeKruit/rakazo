@@ -468,7 +468,13 @@ const words = (text: string) =>
  * A final reply that only says again what the turn's last progress update just said (same
  * facts, not much longer) adds a duplicate message, so the update stands as the answer.
  */
-type HistoryRow = { role: string; botId: string | null; blocks: unknown };
+type HistoryRow = {
+  role: string;
+  botId: string | null;
+  blocks: unknown;
+  runId?: string | null;
+  clientNonce?: string | null;
+};
 const rowText = (blocks: unknown, kind: string) =>
   (Array.isArray(blocks) ? blocks : [])
     .flatMap((block) =>
@@ -482,8 +488,17 @@ const rowText = (blocks: unknown, kind: string) =>
  * This bot's newest reply in the conversation, newest-first rows, when the recruiter has not
  * written since: a teammate's report relayed after it adds nothing if it only says it again.
  */
-export function lastOwnUpdate(rows: readonly HistoryRow[], botId: string): string | undefined {
+export function lastOwnUpdate(
+  rows: readonly HistoryRow[],
+  botId: string,
+  runId?: string,
+): string | undefined {
   for (const row of rows) {
+    // This turn's own lines are not an earlier reply; the person's messages it answers are still
+    // the person writing since (staging 11-21, aftercard: the same question asked again after a
+    // card got no answer, as its answer matched the last one). A server nudge is not the person.
+    if (runId && row.role !== "user" && row.runId === runId) continue;
+    if (row.clientNonce?.startsWith("autocontinue:")) continue;
     const relayed =
       Array.isArray(row.blocks) &&
       row.blocks.some(
