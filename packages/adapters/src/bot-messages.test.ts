@@ -633,7 +633,13 @@ describe("delegating to a role team in another conversation", () => {
   };
   /** A role team's conversation after Kruit's request, with what the team said since. */
   function team(
-    options: { busy?: boolean; later?: unknown[]; shown?: unknown[]; root?: unknown; roleId?: string } = {},
+    options: {
+      busy?: boolean;
+      later?: unknown[];
+      shown?: unknown[];
+      root?: unknown;
+      roleId?: string;
+    } = {},
   ) {
     const harness = deps({ bots: mainBot, hopBlocks: [delegation] });
     const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
@@ -810,23 +816,17 @@ describe("delegating to a role team in another conversation", () => {
         }),
       }),
     );
-    expect(returnedTo(harness)).toEqual([
-      { kind: "text", text: "10 people this round: …" },
-      expect.objectContaining({ intent: "result" }),
-    ]);
+    expect(returnedTo(harness)).toEqual([{ kind: "text", text: "10 people this round: …" }]);
   });
 
-  it("shows a returned round to the recruiter itself, so Kruit never retells it (feedback-round 11-20)", async () => {
+  it("shows a returned round to the recruiter itself and gives Kruit no turn to retell it", async () => {
     // feedback-round x5 on 44c1ad44: Kruit retold the team's round, graded the people itself and
-    // listed another eight from the pool, so the recruiter got three versions of one round.
+    // listed another eight from the pool. fosp 11-21 (f68ae6bf): told the round was shown and to
+    // say nothing, Kruit still summarised it 5 s later, so the recruiter read it twice.
     const round = "7 people this round:\n\n1. **Sathya G** · Sr Engineer · Zillow";
-    const harness = team({ later: [said(round)] });
+    const harness = team({ later: [said(round), said("Round 2 is posted.")] });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    const [shown, toKruit] = returnedTo(harness) as Array<{ kind: string; text: string }>;
-    expect(shown).toEqual({ kind: "text", text: round });
-    expect(toKruit).toMatchObject({ kind: "bot_message_received", intent: "result" });
-    expect(toKruit?.text).not.toContain("Sathya G");
-    expect(toKruit?.text).toMatch(/already sees/);
+    expect(returnedTo(harness)).toEqual([{ kind: "text", text: round }]);
   });
 
   it("posts a round once where it was asked, though two requests return it", async () => {
