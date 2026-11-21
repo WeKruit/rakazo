@@ -132,8 +132,11 @@ export type RecruitingActivityRole = {
   /** Distinct people emailed / heard from in the window, from the stored CRM mail. */
   emailedPeople: number;
   repliedPeople: number;
-  /** "none_stored": no CRM mail is stored for the role, so its email counts are unknown. */
-  mail: "stored" | "none_stored";
+  /**
+   * "none_stored": the role has email set up but none is stored, so its email counts are unknown.
+   * "no_outreach": no email was ever set up for the role, so it has sent nothing and has no replies.
+   */
+  mail: "stored" | "none_stored" | "no_outreach";
 };
 
 /**
@@ -162,7 +165,12 @@ export async function readRecruitingActivity(
           AND m.at >= ${since} AND m.at < ${until})::int AS "emailedPeople",
         (SELECT count(DISTINCT m.person) FROM mail m WHERE m.role = r.id AND m.direction = 'received'
           AND m.at >= ${since} AND m.at < ${until})::int AS "repliedPeople",
-        CASE WHEN EXISTS (SELECT 1 FROM mail m WHERE m.role = r.id) THEN 'stored' ELSE 'none_stored' END AS mail
+        CASE WHEN EXISTS (SELECT 1 FROM mail m WHERE m.role = r.id) THEN 'stored'
+          WHEN EXISTS (SELECT 1 FROM recruiting_crm_workspace_attachments a
+            WHERE a."roleId" = r.id AND a."userId" = ${actor.userId} AND a."spaceId" = ${actor.spaceId})
+            OR EXISTS (SELECT 1 FROM external_effects e WHERE e."spaceId" = ${actor.spaceId}
+              AND e.kind = 'instantly_role_campaign' AND e.status = 'completed' AND e.request->>'roleId' = r.id)
+          THEN 'none_stored' ELSE 'no_outreach' END AS mail
       FROM scoped_roles r
     )
     SELECT *, ("newPeople" + shortlisted + "emailedPeople" + "repliedPeople") = 0 AS quiet

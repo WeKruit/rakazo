@@ -32,6 +32,7 @@ beforeAll(async () => {
     CREATE TEMP TABLE recruiting_candidate_occurrences ("candidateKey" text, "roleId" text, name text, "pageId" text, "rowIndex" int);
     CREATE TEMP TABLE recruiting_candidate_pages ("effectId" text, "roleId" text, "observedAt" timestamp);
     CREATE TEMP TABLE recruiting_crm_messages ("userId" text, "spaceId" text, "mcpServerId" text, "organizationId" text, "crmCandidateId" text, "crmRoleId" text, direction text, "sentAt" timestamp);
+    CREATE TEMP TABLE external_effects ("spaceId" text, kind text, status text, request jsonb);
     INSERT INTO threads VALUES ('t1','g1'),('t2','g2');
     INSERT INTO recruiting_roles VALUES ('r1','One','t1','u','s',NULL),('r2','Two','t2','u','s',NULL),('foreign','Other','t1','other','s',NULL);
     INSERT INTO recruiting_candidates VALUES ('r1','linkedin:/in/a',true,'2026-10-02'),('r2','linkedin:/in/a',true,'2026-10-03'),('r1','unknown',true,NULL),('foreign','private',true,'2026-10-02');
@@ -192,5 +193,28 @@ it.skipIf(!url)(
     expect(later.quietRoles).toBe(1);
     const foreign = await readRecruitingActivity(prisma, actor, { ...window, roleId: "foreign" });
     expect(foreign).toEqual({ roles: [], quietRoles: 0 });
+  },
+);
+
+it.skipIf(!url)(
+  "says a role with no email set up has no replies, and one with email set up but none stored is unknown",
+  async () => {
+    // Staging 11-21 (what-happened x5): roles that never had email set up read as "replies
+    // unknown", so every catch-up hedged on the reply count.
+    await db.query(`
+      INSERT INTO threads VALUES ('t3','g3'),('t4','g4');
+      INSERT INTO recruiting_roles VALUES ('r3','Three','t3','u','s',NULL),('r4','Four','t4','u','s',NULL);
+      INSERT INTO recruiting_candidate_pages VALUES ('p3','r3','2026-12-02'),('p4','r4','2026-12-02');
+      INSERT INTO recruiting_candidate_occurrences VALUES ('linkedin:/in/d','r3',NULL,'p3',0),('linkedin:/in/e','r4',NULL,'p4',0);
+      INSERT INTO external_effects VALUES ('s','instantly_role_campaign','completed','{"roleId":"r4"}'),('other','instantly_role_campaign','completed','{"roleId":"r3"}');
+    `);
+    const result = await readRecruitingActivity(prisma, actor, {
+      since: "2026-12-01T00:00:00Z",
+      until: "2026-12-03T00:00:00Z",
+    });
+    expect(result.roles.map((role) => [role.roleId, role.mail])).toEqual([
+      ["r4", "none_stored"],
+      ["r3", "no_outreach"],
+    ]);
   },
 );
