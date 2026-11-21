@@ -362,10 +362,13 @@ try {
     // The only address real test email may go to.
     const to = "noah-scheduling@mail.grokbot.com";
     const mailTag = `${tag}m`;
+    // A role's card is also shown in Kruit's chat as a copy that answers the original
+    // (answerTarget); gate 5eba6751 counted that copy as a second card. Only originals count.
     const tagged = (items) =>
       items.flatMap((message) =>
         (message.blocks ?? []).filter(
-          (block) => block.kind === "ask" && block.mailReply?.body?.includes(mailTag),
+          (block) =>
+            block.kind === "ask" && !block.answerTarget && block.mailReply?.body?.includes(mailTag),
         ),
       );
     // The card may be in the role's chat or in Kruit's, where the recruiter asked: Kruit does the
