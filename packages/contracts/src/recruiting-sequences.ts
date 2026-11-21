@@ -61,6 +61,8 @@ export const RecruitingSequenceOutputSchema = z.strictObject({
   campaigns: z.array(z.strictObject({ id: z.uuid(), name: z.string() })).optional(),
   /** The role's email saved before any sending mailbox existed; it becomes the campaign's. */
   savedEmail: z.array(RecruitingSequenceStepSchema).optional(),
+  /** How to change an unsent email this writer cannot edit in place. */
+  next: z.string().max(500).optional(),
   campaign: z
     .strictObject({
       id: z.uuid(),

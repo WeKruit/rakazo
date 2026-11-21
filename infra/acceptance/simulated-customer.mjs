@@ -130,7 +130,8 @@ const named = story
     mechanisms?.flatMap((mechanism) => {
       // A replay never spends money unless asked: paid journeys join only with --paid.
       const found = JOURNEYS.filter(
-        (journey) => journey.mechanisms?.includes(mechanism) && (!journey.paid || args.includes("--paid")),
+        (journey) =>
+          journey.mechanisms?.includes(mechanism) && (!journey.paid || args.includes("--paid")),
       );
       if (!found.length) throw new Error(`no journey exercises ${mechanism}`);
       return found.map((journey) => journey.name);
@@ -261,11 +262,17 @@ async function campaignOf(rpc, chat) {
   const campaign = await rpc("recruiting/roleCampaign", { groupId: chat.id }).catch((error) => ({
     error: error.message,
   }));
-  const record = { chat: chat.name, status: campaign.status ?? campaign.error, ...campaignState(campaign) };
+  const record = {
+    chat: chat.name,
+    status: campaign.status ?? campaign.error,
+    ...campaignState(campaign),
+  };
   if (!campaign.campaign) return record;
-  const view = await rpc("recruiting/accountView", { view: "sequence", groupId: chat.id, limit: 1 }).catch(
-    () => null,
-  );
+  const view = await rpc("recruiting/accountView", {
+    view: "sequence",
+    groupId: chat.id,
+    limit: 1,
+  }).catch(() => null);
   const others = (view?.items?.[0]?.campaigns ?? []).filter(
     (other) => other.campaign && other.campaign.id !== campaign.campaign.id,
   );
@@ -308,7 +315,10 @@ async function records(rpc, since, before) {
     // claim is checked against what was stored, not only against sends.
     const results =
       touched && !group.id.startsWith("recruiting-global-") ? await resultsPage(rpc, group) : null;
-    if (record?.campaign && (touched || JSON.stringify(before.get(group.id)) !== JSON.stringify(record)))
+    if (
+      record?.campaign &&
+      (touched || JSON.stringify(before.get(group.id)) !== JSON.stringify(record))
+    )
       roles.push(results === null ? record : { ...record, ...results });
     else if (results !== null) roles.push({ chat: group.name, ...results });
   }
@@ -323,9 +333,11 @@ async function resultsPage(rpc, group) {
   const head = await rpc("threads/head", { groupId: group.id }).catch(() => null);
   const threadId = head?.threadId ?? group.threadId;
   if (!threadId) return null;
-  const page = await rpc("recruiting/roleCandidates", { groupId: group.id, threadId, limit: 1 }).catch(
-    () => null,
-  );
+  const page = await rpc("recruiting/roleCandidates", {
+    groupId: group.id,
+    threadId,
+    limit: 1,
+  }).catch(() => null);
   if (!page) return null;
   const roleId = (await rpc("recruiting/getWorkspace", { threadId }).catch(() => null))?.role?.id;
   if (!roleId) return { saved: page.total };
@@ -342,7 +354,10 @@ async function resultsPage(rpc, group) {
     for (const person of list.items) {
       const name = person.name ?? person.candidateKey;
       if (person.decision === "hold") marked.onHold.push(name);
-      else if (person.decision === "pass" || (!person.decision && person.recruiterVerdict === "not_fit"))
+      else if (
+        person.decision === "pass" ||
+        (!person.decision && person.recruiterVerdict === "not_fit")
+      )
         marked.passed.push(name);
     }
     cursor = list.nextCursor;
@@ -461,10 +476,14 @@ async function simulate(journey, turns, view, cards, screen, tag, since) {
     journey.account && screen
       ? `\n\nAnything on your screen from before ${new Date(since).toISOString().slice(11, 16)} UTC is an earlier session, not yours: your goals count only from the conversation above.${
           // The screen shows no times, so a similar earlier play there reads as this one's progress.
-          turns.length ? "" : " This is your first move, so none of your goals is met yet: start from the first."
+          turns.length
+            ? ""
+            : " This is your first move, so none of your goals is met yet: start from the first."
         }`
       : "";
-  const signedUp = journey.account ? "" : `\nYou signed up for Kruit as ${ACCOUNT_NAME}; unless "What you know" gives you another name, that is your name.`;
+  const signedUp = journey.account
+    ? ""
+    : `\nYou signed up for Kruit as ${ACCOUNT_NAME}; unless "What you know" gives you another name, that is your name.`;
   const prompt = `Who you are:\n${journey.persona}${signedUp}\n${journey.variation ?? ""}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS, tag)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
     screen
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}`
@@ -507,7 +526,9 @@ async function withoutContactLookups(rpc) {
     });
   const left = lookups(await rpc("mcp/servers/list", {}));
   if (left.length)
-    throw new InfraError(`contact lookup still on for the copied account (${left.map((s) => s.slug)})`);
+    throw new InfraError(
+      `contact lookup still on for the copied account (${left.map((s) => s.slug)})`,
+    );
 }
 
 // Real sign-ups carry the recruiter's own name, so a template Kruit signs can use it.
@@ -527,8 +548,16 @@ async function play(journey, label, owner, mailbox, out) {
     await closeStaleCards(user.rpc, label);
     // Roles earlier plays of this journey left behind (idle an hour, so not a play running now).
     if (journey.leftover) {
-      const old = (await groupsOf(user.rpc)).filter((group) => journey.leftover.test(group.name ?? ""));
-      if (old.length) await archiveRoles(credentials, old.map((group) => group.id), label, { idleHours: 1 });
+      const old = (await groupsOf(user.rpc)).filter((group) =>
+        journey.leftover.test(group.name ?? ""),
+      );
+      if (old.length)
+        await archiveRoles(
+          credentials,
+          old.map((group) => group.id),
+          label,
+          { idleHours: 1 },
+        );
     }
     if (journey.account === "mailbox") await forgetEarlierPlays(user.rpc, label);
   } else {
@@ -591,7 +620,9 @@ async function play(journey, label, owner, mailbox, out) {
       const move = await simulate(journey, turns, render(chats), cards, screen, tag, startedAt);
       // The planner model sometimes nests its text ({"text": {"zh": "…"}}); the recruiter types a string.
       if (move.text != null && typeof move.text !== "string")
-        move.text = Object.values(move.text).find((value) => typeof value === "string") ?? JSON.stringify(move.text);
+        move.text =
+          Object.values(move.text).find((value) => typeof value === "string") ??
+          JSON.stringify(move.text);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
       const problems = [];
@@ -796,7 +827,12 @@ async function closeStaleCards(rpc, label) {
               ? { action: "decline" }
               : undefined;
         if (answer === undefined || block.input === "secret") continue;
-        await rpc("threads/answer", { groupId: group.id, runId: message.runId, messageId: message.id, answer })
+        await rpc("threads/answer", {
+          groupId: group.id,
+          runId: message.runId,
+          messageId: message.id,
+          answer,
+        })
           .then(() => (closed += 1))
           .catch(() => {});
       }
@@ -814,7 +850,11 @@ async function forgetEarlierPlays(rpc, label) {
   for (const scope of ["user", "bot"])
     for (const doc of await rpc("memory/list", { scope })) {
       if (!doc.content) continue;
-      await rpc("memory/update", { documentId: doc.id, content: "", expectedRevision: doc.revision });
+      await rpc("memory/update", {
+        documentId: doc.id,
+        content: "",
+        expectedRevision: doc.revision,
+      });
       emptied += 1;
     }
   if (emptied) log(`${label}: emptied ${emptied} memory document(s) earlier plays left`);
@@ -833,7 +873,13 @@ function archiveRoles([email, password], groupIds, label, { idleHours = 0 } = {}
         groupIds.join(","),
       ],
       {
-        env: { ...process.env, RAKAZO_URL: BASE, RAKAZO_ORIGIN: ORIGIN, RAKAZO_EMAIL: email, RAKAZO_PASSWORD: password },
+        env: {
+          ...process.env,
+          RAKAZO_URL: BASE,
+          RAKAZO_ORIGIN: ORIGIN,
+          RAKAZO_EMAIL: email,
+          RAKAZO_PASSWORD: password,
+        },
         stdio: "ignore",
       },
     );
@@ -864,7 +910,7 @@ async function answered(rpc, card) {
 // --- The judge ----------------------------------------------------------------------------------
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
-- truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no", and so is saying people were found, added or saved for a role when its "saved" count after the reply is lower. The records hold only the campaigns the test could read: when a claim is about a campaign, role or person missing from them, it is "unknown", never "no"; a candidate name you cannot find in the records is not "invented" (saved search results are not in the records). Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send takes 45–60 minutes to go out: within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
+- truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no", and so is saying people were found, added or saved for a role when its "saved" count after the reply is lower. The records hold only the campaigns the test could read: when a claim is about a campaign, role or person missing from them, it is "unknown", never "no"; a candidate name you cannot find in the records is not "invented" (saved search results are not in the records). Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send can take up to about 15 minutes to go out (a healthy mailbox started in about two on staging): within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
 - issues: short labels for what went wrong, from: dead end, refused, lecture, repeat (Kruit says the same thing again unprompted or posts a message twice; answering a new or overlapping question with the same fact is not a repeat; a list posted once in the role's own chat and copied once into Kruit's chat, where the recruiter asked, is one showing, and only the same thing twice within one chat is a repeat), wrong language (Kruit's own words not in the recruiter's language; an email or template written for candidates is meant to be English and is never wrong language), false claim, internal jargon (anything in Kruit's own words a recruiter would not understand or should not see: a supplier or service name such as Exa, Instantly, FullEnrich, ContactOut, Modal or Supabase; an internal helper's name such as Sourcer, Reviewer, Main or a sub-agent; internal mechanics such as a handoff, queue, worker, session, retry, timeout, tool, task or record ID, or a gate code. Gmail, Calendar, LinkedIn, the app's own pages and the role's own chat by its role name are the recruiter's words, and quoted candidate profiles are not Kruit's own words), fake block (Kruit hands the work back or stalls without a result when it could act: "want me to…?"/"要不要我…？" about something the recruiter already asked for, "I couldn't check"/"我查不了" without saying what it tried, or "I've asked the team to check"/"已让团队核实" with no result later in the conversation; a confirmation before an outside send and a plain "cannot" for something it has no way to do are not fake blocks), slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), broken email (an email or template Kruit offers as ready contains a question to the recruiter, a "[...]" fill-in, or a sign-off with no name), did not act, asked again (only when Kruit actually asks a question or shows a card that asks about, or asks to confirm, something the recruiter's JD or messages already stated: location, work mode or commute when a city and mode are given, a stated number of years, including asking for a cap on it, or a language requirement when nothing implies a second language; a reply that asks nothing is never asked again; quote where the recruiter said it, and if you cannot, it is not asked again), screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
 - Check every move against the records and against what the page showed after Kruit's reply ("screen"): a claim the screen contradicts (a count, a status, "saved", "sent", a place to click that is not there) is truthful "no". Do not give the benefit of the doubt: an answer that is only "I'll check" or "on it" with nothing after it is "did not act".
 A new role searches first (the product's order): its first people come straight from the JD as written, and at most one short question about something the recruiter left open comes beside them, never before them. Opening the role and saying its team is searching counts as answered when the role chat then shows that search; no question is expected, a question about something already said is "asked again", and a second question is "wordy". When the customer asks for something else (a template, an email), doing it is the right move and no role question is expected.
@@ -887,11 +933,7 @@ async function judge(journey, result) {
   // One reading flips on borderline moves, so three judges read the play and a finding stands
   // only when most of them give it (majority voting, as in self-consistency).
   const readings = (
-    await Promise.all(
-      [0, 1, 2].map(() =>
-        askJson(JUDGE_RULES, prompt, JUDGE).catch(() => null),
-      ),
-    )
+    await Promise.all([0, 1, 2].map(() => askJson(JUDGE_RULES, prompt, JUDGE).catch(() => null)))
   ).filter(Boolean);
   if (!readings.length) throw new Error("the judge gave no reading");
   return majority(readings);
@@ -1066,7 +1108,11 @@ async function runOne(journey, sample, owner, mailbox) {
       : []),
     ...(checks.length ? ["## 规则检查", ...checks.map((c) => `- ${c}`), ""] : []),
     ...(slowStart.length
-      ? [`## 首次回复超过 ${SLOW_START_SECONDS} 秒（暂不挡发布）`, ...slowStart.map((s) => `- ${s}`), ""]
+      ? [
+          `## 首次回复超过 ${SLOW_START_SECONDS} 秒（暂不挡发布）`,
+          ...slowStart.map((s) => `- ${s}`),
+          "",
+        ]
       : []),
     "## 每一步",
     "| # | 客户 | 首次回复 | 回答了 | 属实 | 问题 | 截图 |",
@@ -1218,7 +1264,13 @@ if (CALIBRATE) {
       judge: bar.notRun ? "not run" : bar.pass ? "pass" : "fail",
       blocking: bar.blocking ?? [],
       score: verdict?.score,
-      other: [...new Set((verdict?.turns ?? []).flatMap((turn) => turn.issues ?? []).filter((issue) => !BLOCKING.has(issue)))],
+      other: [
+        ...new Set(
+          (verdict?.turns ?? [])
+            .flatMap((turn) => turn.issues ?? [])
+            .filter((issue) => !BLOCKING.has(issue)),
+        ),
+      ],
     });
     log(`${item.file}: label ${item.label}, judge ${graded.at(-1).judge}`);
   }
@@ -1359,9 +1411,15 @@ const summary = [
   `回归集（卡发布）：${passLine(decided.filter((row) => row.blocks))}；能力集：${passLine(decided.filter((row) => !row.blocks))}`,
   "",
   `按机制：${[...new Set(JOURNEYS.flatMap((journey) => journey.mechanisms ?? []))]
-    .map((mechanism) => [mechanism, decided.filter((row) => mechanismsOf(row.name).includes(mechanism))])
+    .map((mechanism) => [
+      mechanism,
+      decided.filter((row) => mechanismsOf(row.name).includes(mechanism)),
+    ])
     .filter(([, subset]) => subset.length)
-    .map(([mechanism, subset]) => `${mechanism} ${subset.filter((row) => row.status === "通过").length}/${subset.length}`)
+    .map(
+      ([mechanism, subset]) =>
+        `${mechanism} ${subset.filter((row) => row.status === "通过").length}/${subset.length}`,
+    )
     .join(" · ")}`,
   "",
   "标准：每次 8 分以上、目标全部达成、没有假话/死路/重复/没回应等一票否决；旅程要每次都通过才算通过；环境出错算没跑成。",

@@ -3067,6 +3067,10 @@ function draftDelivery(campaign: Record<string, unknown>) {
   return { timezone, hours };
 }
 
+/** The way to change an unsent email this writer cannot edit in place. */
+const RESAVE_DRAFT =
+  "To change this unsent email's subject, wording or people, call ensure_role_campaign with the whole new email as steps; it replaces the draft, then activate_campaign shows a new card. Never put a new subject on the role's title.";
+
 function editableDraft(campaign: Record<string, unknown>) {
   const list = campaign.sequences;
   if (list == null || (Array.isArray(list) && list.length === 0)) return true;
@@ -3457,6 +3461,9 @@ async function roleDraft(
       timezone,
       send_hours: hours,
     },
+    // Deny play 11-21: a per-person draft read as not editable, so a new subject was put on the
+    // role's title and the recruiter was told the email's subject cannot change.
+    ...(campaign.status === DRAFT && !editableDraft(campaign) ? { next: RESAVE_DRAFT } : {}),
   };
 }
 
@@ -3596,7 +3603,7 @@ export async function runInstantlyWrite(
         !Array.isArray(campaign.email_list) ||
         campaign.email_list.length !== 1
       )
-        throw new Error("This sequence needs to be edited in its existing mail workspace");
+        throw new Error(`This sequence cannot be edited here. ${RESAVE_DRAFT}`);
       if (sequenceConfigurationRevision(campaign) !== input.expected_revision)
         throw new Error(
           "This sequence changed since it was opened. Reopen it before saving again.",
