@@ -273,6 +273,79 @@ describe("startRecruitingGrading", () => {
   });
 
   // fosp 11-22 (352978a2): the round was left for a later turn to show and that turn never came.
+  // fr 11-22 (6aa4c10d): round 2 waited minutes on a pool batch sent before it that never finished.
+  it("sends a held round's people again when an older batch still holds them", async () => {
+    const f = fixture({
+      found: [person("picked")],
+      rounds: round(["linkedin:/in/picked"]),
+      researchBots: [],
+      agentRunBots: ["sourcer"],
+      requests: [
+        {
+          id: "pool-batch",
+          createdAt: new Date(now - 6 * 60_000),
+          task: { prompt: "- picked: https://x.test/in/picked" },
+        },
+      ],
+      researched: ["pool-batch"],
+    });
+    f.prisma.chatGroupMember.findMany.mockResolvedValue([
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ] as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(promptOf(f)).toContain("- picked: https://x.test/in/picked");
+  });
+
+  // fosp 11-22 (352978a2): the round was left for a later turn to show and that turn never came.
+  it("hands a checked round to the turn that recorded it and is waiting for it", async () => {
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const checked = () => {
+      const f = fixture({
+        found: [person("fits"), person("other")],
+        graded: ["linkedin:/in/fits", "linkedin:/in/other"],
+        rounds: round(["linkedin:/in/fits", "linkedin:/in/other"]),
+        roundGrades: [
+          {
+            candidateKey: "linkedin:/in/fits",
+            name: "Fits",
+            matchFields: { match_tier: "Strong", unknown: ["Mandarin"] },
+          },
+          {
+            candidateKey: "linkedin:/in/other",
+            name: "Other",
+            matchFields: { match_tier: "Promising", unknown: ["Mandarin", "Kafka"] },
+          },
+        ],
+      });
+      f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+      f.prisma.externalEffect.findUnique.mockResolvedValue({
+        run: { id: "recorder", status: "running" },
+      } as never);
+      return f;
+    };
+    const waiting = checked();
+    const result = await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now, {
+      runId: "recorder",
+    });
+    expect(waiting.runCreate).not.toHaveBeenCalled();
+    expect(result?.checkedRound).toContain(
+      "1. Fits (candidateKey linkedin:/in/fits)\n2. Other (candidateKey linkedin:/in/other)",
+    );
+    // A requirement most of their profiles don't show is asked about, not used to hide them.
+    expect(result?.checkedRound).toContain('say nothing about: "Mandarin"');
+    // Anyone else leaves the round to that turn and looks again in a few seconds.
+    const other = checked();
+    expect(await startRecruitingGrading(other.deps, { threadId: "thread" }, now)).toBeUndefined();
+    expect(other.runCreate).not.toHaveBeenCalled();
+    expect(other.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ availableAt: new Date(now + 3_000) }),
+    );
+  });
+
   it("has the lead replace a held round's people the Reviewer found not to fit", async () => {
     const team = [
       { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
