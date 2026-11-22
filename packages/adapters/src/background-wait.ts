@@ -29,7 +29,7 @@ const AGENT_RUN_NOTE =
 const USER_MESSAGE_NOTE =
   "A new message for you arrived while you waited. Finish this turn now so it is answered; wait again afterwards if the work still matters.";
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
+export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) return resolve();
     const timer = setTimeout(done, ms);

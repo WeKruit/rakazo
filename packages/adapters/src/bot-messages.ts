@@ -1,6 +1,7 @@
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { BotMessageIntent, MessageBlock } from "@rakazo/contracts";
 import {
+  BACKGROUND_RUN_TRIGGERS,
   BOT_MESSAGE_MAX_LENGTH,
   botMessageContext,
   botMessageHopExhausted,
@@ -497,7 +498,38 @@ export async function teamProgress(
   // Staging 11-15: a follow-up requeued the team's turn for 50 s, and in between Kruit listed
   // three pages of unchecked people from Results.
   const working = await teamWorkingFor(prisma, { ...input, queued: true });
-  if (!working) return null;
+  if (!working) {
+    // fosp 11-22 (352978a2): the team's turn had ended while its people were still being checked,
+    // so Kruit read the record, saw nothing new and said "0 new" three times. A finished turn
+    // whose answer has not come back yet is still the team working on the request.
+    const pending = await prisma.run.findFirst({
+      where: {
+        threadId: input.threadId,
+        trigger: "bot_message",
+        status: "completed",
+        botOutcomeReturnedAt: null,
+        sourceMessage: {
+          is: {
+            blocks: {
+              array_contains: [
+                { kind: "bot_message_received", returnThreadId: input.returnThreadId },
+              ],
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, bot: { select: { name: true } } },
+    });
+    if (!pending) return null;
+    const minutes = Math.max(0, Math.round((Date.now() - pending.createdAt.getTime()) / 60_000));
+    return {
+      name: pending.bot.name,
+      minutes,
+      peopleFound: 0,
+      note: `The team has searched for the recruiter's request (${minutes < 1 ? "under a minute" : `${minutes} min`} ago) and the people it found are being checked against the requirements; its answer comes back here as soon as that is done. Say so in one line; never say nothing new was found, and give no count of people.`,
+    };
+  }
   const since = working.startedAt ?? working.createdAt;
   const roleId =
     input.roleId ??
@@ -590,8 +622,11 @@ export async function returnBotMessageOutcome(
   // A teammate's progress or empty status is not that (send-at-night 11-16: each one woke Kruit,
   // which posted again and asked the team a second time); only a failure goes back at once.
   if (source.returnThreadId && (intent === "result" || !options?.forceUnread)) {
+    // fosp 11-22 (352978a2): the team's "found no 5" was marked returned, then dropped because the
+    // Reviewer was still running, and Kruit said "still searching" three times. A result the team
+    // is still working on stays unreturned, so the reconciler offers it again until it goes back.
+    if ((await returnDelegatedTeamOutcome(deps, run)) === "later") return false;
     await markBotOutcomeReturned(deps.prisma, run.id);
-    await returnDelegatedTeamOutcome(deps, run);
     return true;
   }
   const sent = await deps.prisma.message.findMany({
@@ -744,7 +779,7 @@ export async function returnDelegatedTeamOutcome(
     userId: string;
     sourceMessageId?: string | null;
   },
-): Promise<void> {
+): Promise<"later" | undefined> {
   const thread = await deps.prisma.thread.findFirst({
     where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
     select: { activeRecruitingRoleId: true, group: { select: { name: true } } },
@@ -775,16 +810,21 @@ export async function returnDelegatedTeamOutcome(
       // Staging 11-13: Kruit asked "where's the next round?" twice while the round ran; those
       // follow-ups queued behind it and held the finished round back for six minutes. A later
       // request still queued is answered by this result, not waited on.
-      NOT: { status: "queued", trigger: "bot_message", createdAt: { gt: delegated.createdAt } },
+      NOT: [
+        { status: "queued", trigger: "bot_message", createdAt: { gt: delegated.createdAt } },
+        // Background checks of saved people are not the team's answer; a round they hold is.
+        { trigger: { in: [...BACKGROUND_RUN_TRIGGERS] } },
+      ],
     },
     select: { id: true },
   });
-  if (busy) return;
+  // The chain is still going: its last turn returns the result, and so does the reconciler.
+  if (busy) return "later";
   if (
     thread.activeRecruitingRoleId &&
     (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId))
   )
-    return;
+    return "later";
   // Staging 11-15: a team turn ended right after recording round 2, its unchecked ten went back
   // and were listed, and the checked round never followed. The Reviewer's turn returns it.
   if (
@@ -794,7 +834,7 @@ export async function returnDelegatedTeamOutcome(
       roleId: thread.activeRecruitingRoleId,
     }).catch(() => null)) !== null
   )
-    return;
+    return "later";
   // The team's replies since the request, up to the recruiter's next own message there.
   const later = await deps.prisma.message.findMany({
     where: { threadId: run.threadId, seq: { gt: delegated.seq } },
@@ -1105,7 +1145,7 @@ export async function reportDelegatedTeamBlocked(
     sourceMessageId?: string | null;
   },
   blocked: { kind: "failed"; text: string },
-): Promise<void> {
+): Promise<"later" | undefined> {
   const thread = await deps.prisma.thread.findFirst({
     where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
     select: { group: { select: { name: true } } },
@@ -1143,7 +1183,7 @@ export async function reportDelegatedTeamBlocked(
 export async function showDelegatedTeamCard(
   deps: Pick<ExecutorDeps, "prisma" | "events">,
   run: { id: string; spaceId: string; threadId: string; userId: string },
-): Promise<void> {
+): Promise<"later" | undefined> {
   const thread = await deps.prisma.thread.findFirst({
     where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
     select: { id: true },

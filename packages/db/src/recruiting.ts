@@ -7981,6 +7981,16 @@ function gradeTier(grade: { match_tier: string; requirements_assessment: { statu
     : grade.match_tier;
 }
 
+/** The requirements this person's profile says nothing about, so the round can ask about them. */
+function unknownRequirements(grade: {
+  requirements_assessment: { requirement: string; status: string }[];
+}) {
+  return grade.requirements_assessment
+    .filter((item) => item.status === "unknown")
+    .slice(0, 6)
+    .map((item) => item.requirement.trim().slice(0, 120));
+}
+
 /** Canonical receipt bytes for one save_grades call; recomputed here, never trusted from the caller. */
 export function recruitingGradesReceipt(input: GradesInput) {
   return {
@@ -8045,7 +8055,11 @@ export async function saveRecruitingCandidateGrades(
       if (grade.location) row.location = grade.location;
       return {
         row,
-        matchFields: { match_score: grade.match_score, match_tier: gradeTier(grade) },
+        matchFields: {
+          match_score: grade.match_score,
+          match_tier: gradeTier(grade),
+          ...(unknownRequirements(grade).length ? { unknown: unknownRequirements(grade) } : {}),
+        },
         candidateKey: normalizeRecruitingCandidateRow(row, { schemaKnown: true }).candidateKey,
       };
     });

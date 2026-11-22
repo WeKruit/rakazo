@@ -240,7 +240,7 @@ describe("startRecruitingGrading", () => {
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     const prompt = promptOf(f);
     expect(prompt.indexOf("in/picked")).toBeLessThan(prompt.indexOf("in/newer"));
-    expect(prompt).toContain("* Title: Data Engineer");
+    expect(prompt).toContain("* F1: Title: Data Engineer");
   });
 
   it("grades against the recruiter's own feedback words, also when a teammate handed them in", async () => {
@@ -266,9 +266,58 @@ describe("startRecruitingGrading", () => {
     });
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     const prompt = promptOf(f);
-    expect(prompt).toContain('* In their words: "senior only, 6+ years"');
-    expect(prompt).toContain('* In their words: "no agency people"');
+    expect(prompt).toMatch(/\* F\d: In their words: "senior only, 6\+ years"/);
+    expect(prompt).toMatch(/\* F\d: In their words: "no agency people"/);
     expect(prompt).not.toContain("3 of 10 checked");
+  });
+
+  // fosp 11-22 (352978a2): the round was left for a later turn to show and that turn never came.
+  it("hands a checked round to the turn that recorded it and is waiting for it", async () => {
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const checked = () => {
+      const f = fixture({
+        found: [person("fits"), person("other")],
+        graded: ["linkedin:/in/fits", "linkedin:/in/other"],
+        rounds: round(["linkedin:/in/fits", "linkedin:/in/other"]),
+        roundGrades: [
+          {
+            candidateKey: "linkedin:/in/fits",
+            name: "Fits",
+            matchFields: { match_tier: "Strong", unknown: ["Mandarin"] },
+          },
+          {
+            candidateKey: "linkedin:/in/other",
+            name: "Other",
+            matchFields: { match_tier: "Promising", unknown: ["Mandarin", "Kafka"] },
+          },
+        ],
+      });
+      f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+      f.prisma.externalEffect.findUnique.mockResolvedValue({
+        run: { id: "recorder", status: "running" },
+      } as never);
+      return f;
+    };
+    const waiting = checked();
+    const result = await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now, {
+      runId: "recorder",
+    });
+    expect(waiting.runCreate).not.toHaveBeenCalled();
+    expect(result?.checkedRound).toContain(
+      "1. Fits (candidateKey linkedin:/in/fits)\n2. Other (candidateKey linkedin:/in/other)",
+    );
+    // A requirement most of their profiles don't show is asked about, not used to hide them.
+    expect(result?.checkedRound).toContain('say nothing about: "Mandarin"');
+    // Anyone else leaves the round to that turn and looks again in a few seconds.
+    const other = checked();
+    expect(await startRecruitingGrading(other.deps, { threadId: "thread" }, now)).toBeUndefined();
+    expect(other.runCreate).not.toHaveBeenCalled();
+    expect(other.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ availableAt: new Date(now + 3_000) }),
+    );
   });
 
   it("has the lead replace a held round's people the Reviewer found not to fit", async () => {
@@ -295,11 +344,12 @@ describe("startRecruitingGrading", () => {
           pageId: "grades",
         },
         // Staging 11-16: people whose profile doesn't show Kafka stayed in the checked round, and
-        // the recruiter asked why they were there.
+        // the recruiter asked why they were there. Only a point the recruiter stressed holds
+        // someone out when the profile is silent on it.
         {
           candidateKey: "linkedin:/in/unshown",
           name: "Unshown",
-          matchFields: { match_tier: "Promising" },
+          matchFields: { match_tier: "Promising", stressed_open: true },
         },
       ],
     };
@@ -818,10 +868,9 @@ describe("startRecruitingGrading", () => {
     );
     // Behind a grading batch the next one is tried within seconds.
     const behind = fixture({ busy: true, found: [person("a")] });
-    behind.prisma.run.findFirst.mockResolvedValueOnce({
-      id: "busy",
-      trigger: "recruiting_grade",
-    } as never);
+    behind.prisma.run.findMany.mockResolvedValueOnce([
+      { id: "busy", trigger: "recruiting_grade" },
+    ] as never);
     await startRecruitingGrading(behind.deps, { threadId: "thread" }, now);
     expect(behind.enqueue).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ availableAt: new Date(now + 5_000) }),
@@ -851,7 +900,7 @@ describe("startRecruitingGrading", () => {
   it("waits only on the grader's own turns, not on teammates' turns", async () => {
     const f = fixture({ found: [person("a")] });
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
-    expect(f.prisma.run.findFirst).toHaveBeenCalledWith(
+    expect(f.prisma.run.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ threadId: "thread", botId: "sourcer" }),
       }),
