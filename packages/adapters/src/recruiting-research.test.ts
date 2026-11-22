@@ -460,7 +460,10 @@ describe("people-search agent runs", () => {
         { createdAt: at("08:10:50"), blocks: [{ kind: "text", text: "好了没？" }] },
         ask,
       ]);
-      await expect(limit()).rejects.toThrow(/already holds/);
+      // Before the first round is recorded the ten may still be picked from up to twenty.
+      const notYetShown = await limit();
+      expect(notYetShown).toMatchObject({ numResults: 10 });
+      settlePeopleSearch(notYetShown, "done");
       // Branch e57f71af: "3、5、6不合适…下一批按这个调" names no number, so it was uncapped and
       // four searches saved 25 more. A new ask without a number is one round: ten more.
       const feedback = {
@@ -502,6 +505,15 @@ describe("people-search agent runs", () => {
       ]);
       const first = [await limit(), await limit(), await limit()];
       expect(first.map((search) => search.numResults)).toEqual([10, 10, 10]);
+      // Branch caa476af: two searches saved 14 and the rest were refused, but only 9 of them
+      // fit, so the first round showed 9. It may hold twice the number before it is capped.
+      for (const search of first) settlePeopleSearch(search, "done");
+      db.recruitingCandidate.count.mockResolvedValue(14);
+      found(14);
+      expect(await limit()).toMatchObject({ numResults: 10 });
+      db.recruitingCandidate.count.mockResolvedValue(20);
+      found(20);
+      await expect(limit()).rejects.toThrow(/already holds/);
     } finally {
       vi.useRealTimers();
     }

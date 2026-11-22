@@ -484,9 +484,13 @@ export async function peopleRoomForRequest(
     // The first ten on a new role are the round the recruiter sees, picked from overlapping
     // searches: branch 72b51e70, "先找10个" had two of its three first searches refused as in
     // flight. Until the role holds them, those searches are not capped by the ten.
+    // Branch caa476af: two searches saved 14, only 9 fit, and the rest were refused, so the first
+    // round showed 9. It may hold twice the number asked before it is capped at that.
     const firstRound = !round && total === fresh && asked <= RECRUITING_CALIBRATION_ROUND_SIZE;
-    if (firstRound && total < asked) return undefined;
-    const target = peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0;
+    if (firstRound && total < 2 * asked) return undefined;
+    const target = firstRound
+      ? 2 * asked
+      : (peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0);
     // Staging 11-20 (44c1ad44): "先找10个人" was met, then a numberless ask was refused as
     // done, twice. A message written once the number was reached is a new request, whatever its
     // wording; with no number of its own it is one round (branch e57f71af: left uncapped,
