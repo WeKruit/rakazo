@@ -243,6 +243,30 @@ describe("startRecruitingGrading", () => {
     expect(prompt).toContain("* F1: Title: Data Engineer");
   });
 
+  // fr 11-22 (6aa4c10d): round 2 waited minutes on a pool batch sent before it that never finished.
+  it("sends a held round's people again when an older batch still holds them", async () => {
+    const f = fixture({
+      found: [person("picked")],
+      rounds: round(["linkedin:/in/picked"]),
+      researchBots: [],
+      agentRunBots: ["sourcer"],
+      requests: [
+        {
+          id: "pool-batch",
+          createdAt: new Date(now - 6 * 60_000),
+          task: { prompt: "- picked: https://x.test/in/picked" },
+        },
+      ],
+      researched: ["pool-batch"],
+    });
+    f.prisma.chatGroupMember.findMany.mockResolvedValue([
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ] as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(promptOf(f)).toContain("- picked: https://x.test/in/picked");
+  });
+
   it("grades against the recruiter's own feedback words, also when a teammate handed them in", async () => {
     // Staging 11-16: "senior only, 6+ years" was never saved as feedback, so the next round's
     // check graded without it and juniors came back.

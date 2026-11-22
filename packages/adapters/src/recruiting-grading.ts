@@ -470,6 +470,24 @@ export async function startRecruitingGrading(
     now,
     thread.id,
   );
+  // fr 11-22 (6aa4c10d): a held round waited minutes on people still out in a batch of the pool
+  // sent before it, which never finished. A batch from before the round doesn't hold it: those
+  // people are sent again with the round's feedback.
+  if (review?.held) {
+    const since = review.round.createdAt;
+    const fresh = new Set(
+      requests.flatMap((request) =>
+        request.createdAt >= since ? [...sentUrls(request.task?.prompt ?? "")] : [],
+      ),
+    );
+    for (const request of requests) {
+      if (request.createdAt >= since || !started(request.id)) continue;
+      for (const url of sentUrls(request.task?.prompt ?? "")) {
+        if (fresh.has(url) || !waiting.delete(url)) continue;
+        if ((sends.get(url) ?? 0) < GRADE_SEND_LIMIT) sent.delete(url);
+      }
+    }
+  }
   const unreviewed = new Set(
     review?.round.candidateKeys.filter((key) => !review.grades.has(key)) ?? [],
   );
