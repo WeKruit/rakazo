@@ -885,41 +885,17 @@ describe("delegating to a role team in another conversation", () => {
     expect(returnedTo(harness)[0]).toEqual({ kind: "text", text: round });
   });
 
-  it("lists everyone the request saved from the record, beside the round, each once", async () => {
-    // Long-search-finishes 11-15: "找20个人，好了叫我" saved 20, but the team's reply named the
-    // round's 10 and 4 more, so Kruit listed 14 and said 6 were missing.
-    const round = "10 people this round:\n\n1. **[Amy A](https://www.linkedin.com/in/amy)** · SRE";
-    const harness = team({
-      roleId: "role-1",
-      later: [said(round), said("Saved 20; 4 more: Bo B")],
-    });
+  it("returns the team's answer as written, with where its saved people are read", async () => {
+    // fr 11-23 (s30): the record-built list was blanked by its own guards after a newer round, so
+    // "find 20 more" came back with no people; Kruit now reads them itself when asked.
+    const harness = team({ roleId: "role-1", later: [said("Saved 20 more; 8 look strong.")] });
     const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
-    const person = (slug: string, name: string) => ({
-      candidateKey: `linkedin:/in/${slug}`,
-      name,
-      title: "SRE",
-      company: "Visa",
-      location: "Austin",
-    });
-    const saved = [person("amy", "Amy A"), person("bo", "Bo B"), person("cy", "Cy C")];
-    prisma.recruitingCandidateOccurrence!.findMany = vi.fn(async () => saved);
-    prisma.recruitingCalibrationRound = {
-      findMany: vi.fn(async () => [{ round: 1, candidateKeys: ["linkedin:/in/amy"] }]),
-    };
     prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
-    prisma.externalEffect = { findMany: vi.fn(async () => []) };
+    prisma.recruitingCalibrationRound = { findMany: vi.fn(async () => []) };
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    const [posted, note] = returnedTo(harness) as Array<{ text: string }>;
-    // Branch dc97b5bc 11-20: the posted copy carried Kruit's "Reply with one line…" note.
-    expect(posted?.text).toBe(round);
-    const returned = note;
-    expect(returned?.text).not.toContain("Amy A");
-    expect(returned?.text).toContain("3 people in all");
-    expect(returned?.text).toContain("2. **[Bo B](https://www.linkedin.com/in/bo)** · SRE · Visa");
-    expect(returned?.text).toContain("3. **[Cy C](https://www.linkedin.com/in/cy)**");
-    // Gate 71a2cac2: Kruit squared the team's "profiles show 6+ years" with the record and
-    // contradicted it. The record is the whole answer; the team's retelling stays in its chat.
-    expect(returned?.text).not.toContain("Saved 20; 4 more");
+    const [returned] = returnedTo(harness) as Array<{ text: string }>;
+    expect(returned?.text).toContain("Saved 20 more; 8 look strong.");
+    expect(returned?.text).toContain('operation:"activity"');
   });
 
   it("names nobody a search saved once a later round answered the recruiter", async () => {
