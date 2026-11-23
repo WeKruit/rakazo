@@ -8,6 +8,7 @@ import {
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
   showDelegatedTeamCard,
+  showRoundWhereAskedNow,
   teamProgress,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
@@ -832,6 +833,19 @@ describe("delegating to a role team in another conversation", () => {
     const harness = team({ later: [said(round), said("Round 2 is posted.")] });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
     expect(returnedTo(harness)).toEqual([{ kind: "text", text: round }]);
+  });
+
+  it("shows a round where it was asked as it is shown, though the team is still busy", async () => {
+    // fosp 11-23 (s21): round 2 showed in the role chat while a check still ran; a newer request
+    // replaced the open one and the round never reached Kruit's chat ("稍后给你" four times).
+    const round = "本轮 10 人：\n\n1. **Yijun Y.** · Big Data Engineer · TEMU";
+    const harness = team({ busy: true });
+    await showRoundWhereAskedNow(harness.deps, roleRun, round, "effect-round-2");
+    expect(returnedTo(harness)).toEqual([{ kind: "text", text: round }]);
+    // Shown where it was asked already: not again.
+    const again = team({ busy: true, shown: [said(round)] });
+    await showRoundWhereAskedNow(again.deps, roleRun, round, "effect-round-2");
+    expect(returnedTo(again)).toEqual([]);
   });
 
   it("posts a round once where it was asked, though two requests return it", async () => {

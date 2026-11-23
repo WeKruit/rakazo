@@ -275,7 +275,11 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
   rows: readonly T[],
   result: unknown,
   reader?: ProfileReads,
-): Promise<{ rows: Array<T & { requiredLanguage?: LanguageSignal }>; withoutLanguage: number }> {
+): Promise<{
+  rows: Array<T & { requiredLanguage?: LanguageSignal }>;
+  withoutLanguage: number;
+  levels?: LanguageLevels;
+}> {
   try {
     const requirement = requiredLanguage(role);
     if (!requirement) return { rows: [...rows], withoutLanguage: 0 };
@@ -303,10 +307,62 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
     if (!signals.size) return { rows: [...rows], withoutLanguage: 0 };
     const ordered = withLanguageSignals(rows, signals);
     const kept = ordered.filter((row) => row.requiredLanguage !== "no sign");
-    return { rows: kept, withoutLanguage: ordered.length - kept.length };
+    return {
+      rows: kept,
+      withoutLanguage: ordered.length - kept.length,
+      levels: { requirement, levels: Object.fromEntries(signals) },
+    };
   } catch {
     return { rows: [...rows], withoutLanguage: 0 };
   }
+}
+
+/** The language check's finding per person, as saved with the search that found them. */
+export type LanguageLevels = { requirement: string; levels: Record<string, LanguageSignal> };
+
+type LanguagePrisma = {
+  externalEffect: {
+    findUnique(args: {
+      where: { id: string };
+      select: { result: true };
+    }): Promise<{ result: unknown } | null>;
+    update(args: { where: { id: string }; data: { result: object } }): Promise<unknown>;
+  };
+};
+
+/**
+ * Keeps the language check's finding with the search's saved record, so the Reviewer takes it as
+ * given instead of judging the language again (11-23: the Reviewer left Mandarin unknown for about
+ * half the people the check had already confirmed or ruled out).
+ */
+export async function saveLanguageLevels(
+  prisma: LanguagePrisma,
+  effectId: string,
+  levels: LanguageLevels | undefined,
+): Promise<void> {
+  if (!levels || !Object.keys(levels.levels).length) return;
+  const effect = await prisma.externalEffect.findUnique({
+    where: { id: effectId },
+    select: { result: true },
+  });
+  const result = effect?.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return;
+  await prisma.externalEffect.update({
+    where: { id: effectId },
+    data: { result: { ...result, languageLevels: levels } },
+  });
+}
+
+/** Each saved person's language finding from a conversation's saved searches, newest last. */
+export function languageFindings(results: readonly unknown[]): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const result of results) {
+    const saved = (result as { languageLevels?: LanguageLevels } | null)?.languageLevels;
+    if (!saved?.levels) continue;
+    for (const [key, level] of Object.entries(saved.levels))
+      found.set(key, `${saved.requirement}: ${level}`);
+  }
+  return found;
 }
 
 /**

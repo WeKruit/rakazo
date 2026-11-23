@@ -764,6 +764,33 @@ async function showRoundWhereAsked(
 }
 
 /**
+ * A round shown in the role's chat goes to the conversation that asked for it as it is shown, the
+ * way a finished subagent's result returns to its caller (Claude Code's Task tool). fosp 11-23
+ * (s21, c347): round 2 showed in the role chat while a background check still ran, so the
+ * return waited; a newer request then became the open one, the round never reached Kruit's chat,
+ * and Kruit said "稍后给你" four times.
+ */
+export async function showRoundWhereAskedNow(
+  deps: Pick<ExecutorDeps, "prisma" | "events">,
+  run: { id: string; spaceId: string; threadId: string },
+  text: string,
+  roundId: string,
+): Promise<void> {
+  const found = await openDelegation(deps.prisma, run.threadId);
+  if (!found) return;
+  const { delegated, root } = found;
+  if (
+    await recruiterInRoleChat(deps.prisma, {
+      roleThreadId: run.threadId,
+      returnThreadId: root.returnThreadId,
+      since: delegated.createdAt,
+    })
+  )
+    return;
+  await showRoundWhereAsked(deps, run, root, `round:${roundId}`, text);
+}
+
+/**
  * A role team's conversation went quiet after work another conversation delegated to it: send
  * the team's latest reply back there, exactly once per delegated request. Waits while a teammate
  * still has a turn queued, running or waiting on the recruiter, or the role's research is still
