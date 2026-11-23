@@ -452,7 +452,6 @@ export async function peopleRoomForRequest(
       select: { createdAt: true, blocks: true },
     }),
   ]);
-  if (round && !round.approvedAt) return undefined;
   const heldBefore = async (at: Date) =>
     (
       await prisma.recruitingCandidateOccurrence.findMany({
@@ -472,6 +471,10 @@ export async function peopleRoomForRequest(
       newerAsk ??= message.createdAt;
       continue;
     }
+    // Long-search 11-23 (s31, stage too): "找20个，最多20" showed its first ten as a round, and
+    // with that round unanswered the searches went on uncapped, saving 21 to 39. Only a round's
+    // own number goes uncapped while a round waits; a larger number still caps the role.
+    if (round && !round.approvedAt && asked <= RECRUITING_CALIBRATION_ROUND_SIZE) return undefined;
     // Staging 11-15: someone found again after the message is not new, so "继续找 10 位" on a
     // role of 24 read as a total of 10 while the approve result said 34.
     const [total, since, before] = await Promise.all([
