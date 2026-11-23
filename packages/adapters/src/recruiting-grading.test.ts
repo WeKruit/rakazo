@@ -15,7 +15,6 @@ const {
   GRADE_IN_FLIGHT,
   GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
-  checkedRoundPeople,
   placeTier,
   gradingTools,
   heldRoundSearchRefusal,
@@ -25,7 +24,6 @@ const {
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
-  roundSize,
   ROUND_HELD_SEARCH_REFUSAL,
   scheduleRecruitingGrading,
   startRecruitingGrading,
@@ -353,11 +351,11 @@ describe("startRecruitingGrading", () => {
       runId: "recorder",
     });
     expect(waiting.runCreate).not.toHaveBeenCalled();
+    // The lead picks from the checked people with their grades, and sees what profiles don't show.
     expect(result?.checkedRound).toContain(
-      "1. Fits (candidateKey linkedin:/in/fits)\n2. Other (candidateKey linkedin:/in/other)",
+      "- Fits (candidateKey linkedin:/in/fits) [in the round]: Strong. Profile doesn't show: Mandarin.",
     );
-    // A requirement most of their profiles don't show is asked about, not used to hide them.
-    expect(result?.checkedRound).toContain('say nothing about: "Mandarin"');
+    expect(result?.checkedRound).toContain("you recorded 2");
     // Anyone else leaves the round to that turn and looks again in a few seconds.
     const other = checked();
     expect(await startRecruitingGrading(other.deps, { threadId: "thread" }, now)).toBeUndefined();
@@ -427,12 +425,11 @@ describe("startRecruitingGrading", () => {
         clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
       }),
     });
-    // The system picks the round: who fits, then Strong people from Results in the misfits'
-    // places, then the closest misfit; the Partial one and anyone unchecked stay out.
+    // The lead picks the round from the grades: the round's people and Results' checked people.
     expect(promptOf(f)).toContain(
-      "1. Fits (candidateKey linkedin:/in/fits)\n2. spare (candidateKey linkedin:/in/spare)\n3. Unshown (candidateKey linkedin:/in/unshown)\n\n",
+      "- Fits (candidateKey linkedin:/in/fits) [in the round]: Strong.\n- Misfit (candidateKey linkedin:/in/misfit) [in the round]: Partial.",
     );
-    expect(promptOf(f)).not.toContain("linkedin:/in/misfit");
+    expect(promptOf(f)).toContain("- spare (candidateKey linkedin:/in/spare): Strong.");
     // fosp 11-21 (9082bb56): the Sourcer recorded round 3 for "再来5个", its check went to Main,
     // whose show was refused as not the owner's, and the round was never shown.
     const sourcers = fixture({
@@ -446,7 +443,11 @@ describe("startRecruitingGrading", () => {
       data: expect.objectContaining({ botId: "sourcer" }),
     });
     // fosp 11-20: a short round has saved people no round showed checked first, once, then shows.
-    const short = fixture({ ...options, found: [...options.found, person("new")] });
+    const short = fixture({
+      ...options,
+      found: [...options.found, person("new")],
+      tiers: { "linkedin:/in/spare": "Partial" },
+    });
     short.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     short.prisma.externalEffect.findMany.mockResolvedValue([] as never);
     await startRecruitingGrading(short.deps, { threadId: "thread" }, now);
@@ -463,8 +464,11 @@ describe("startRecruitingGrading", () => {
     // shows without waiting for its unchecked person.
     const filled = fixture({
       ...options,
+      found: [...options.found, person("spare2")],
+      graded: [...options.graded, "linkedin:/in/spare2"],
+      tiers: { ...options.tiers, "linkedin:/in/spare2": "Strong" },
       roundGrades: options.roundGrades.slice(1),
-      said: [{ createdAt: new Date(0), blocks: [{ kind: "text", text: "再来2个" }] }],
+      said: [{ createdAt: new Date(0), blocks: [{ kind: "text", text: "#2 不行" }] }],
     });
     filled.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     filled.prisma.externalEffect.findMany.mockResolvedValue([] as never);
@@ -611,7 +615,9 @@ describe("startRecruitingGrading", () => {
         clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
       }),
     });
-    expect(promptOf(f)).toContain("1. Fits (candidateKey linkedin:/in/fits)\n\n");
+    expect(promptOf(f)).toContain(
+      "- Fits (candidateKey linkedin:/in/fits) [in the round]: Strong.",
+    );
     // Staging 11-16 (7838c505): the check ended while the lead was answering "where's round 2?",
     // the start found the conversation busy, and the checked round waited 3.5 min for a free
     // moment. As a teammate's report joins the lead's running turn (S4), so does the round.
@@ -1204,123 +1210,12 @@ describe("gradingTools", () => {
   });
 });
 
-describe("checkedRoundPeople", () => {
-  const grade = (name: string, tier: string) => ({ name, tier });
-  it("keeps who fits in order, then Strong replacements, then the closest misfits, up to ten", () => {
-    const keys = ["a", "b", "c", "d"];
-    const grades = new Map([
-      ["a", grade("A", "Uncertain")],
-      ["b", grade("B", "Strong")],
-      ["c", grade("C", "Partial")],
-      ["d", grade("D", "Promising")],
-    ]);
-    expect(checkedRoundPeople(keys, grades, [{ key: "e", name: "E" }]).map((p) => p.name)).toEqual([
-      "B",
-      "E",
-      "D",
-      "A",
-    ]);
-    // Ten places at most: Strong replacements go before any misfit.
-    const many = Array.from({ length: 12 }, (_, i) => ({ key: `r${i}`, name: null }));
-    const picked = checkedRoundPeople(keys, grades, many);
-    expect(picked).toHaveLength(10);
-    expect(picked.map((p) => p.key)).not.toContain("d");
-    expect(picked[1]).toEqual({ key: "r0", name: "r0" });
-  });
-
-  it("fills a mostly turned-down round with checked Promising people from Results, never Partial", () => {
-    // Branch 2026-11-20 (feedback-round x5): the Reviewer graded 1–5 of up to 84 saved people
-    // Strong, so round 2 kept its 5 Promising, dropped its 5 Partial, found no Strong replacement
-    // and came back with 5 while 16 checked Promising people sat in Results.
-    const keys = ["p1", "p2", "p3", "p4", "p5", "x1", "x2", "x3", "x4", "x5"];
-    const grades = new Map([
-      ...keys.slice(0, 5).map((key) => [key, grade(key, "Promising")] as const),
-      ...keys.slice(5).map((key) => [key, grade(key, "Partial")] as const),
-    ]);
-    const replacements = [
-      { key: "s1", name: "S1", tier: "Strong" },
-      ...Array.from({ length: 6 }, (_, i) => ({ key: `q${i}`, name: `Q${i}`, tier: "Promising" })),
-    ];
-    expect(checkedRoundPeople(keys, grades, replacements).map((p) => p.key)).toEqual([
-      "s1",
-      "p1",
-      "p2",
-      "p3",
-      "p4",
-      "p5",
-      "q0",
-      "q1",
-      "q2",
-      "q3",
-    ]);
-  });
-
-  it("fills the last places of a short round with checked Uncertain people from Results", () => {
-    // fosp 11-21 (f68ae6bf): "再来5个" came back with 4 while three checked Uncertain people sat
-    // in Results; the round's own Uncertain people still go first.
-    const keys = ["p1", "u1", "x1"];
-    const grades = new Map([
-      ["p1", grade("P1", "Promising")],
-      ["u1", grade("U1", "Uncertain")],
-      ["x1", grade("X1", "Partial")],
-    ]);
-    const replacements = [
-      { key: "q1", name: "Q1", tier: "Promising" },
-      { key: "v1", name: "V1", tier: "Uncertain" },
-      { key: "v2", name: "V2", tier: "Uncertain" },
-    ];
-    expect(checkedRoundPeople(keys, grades, replacements, 5).map((p) => p.key)).toEqual([
-      "p1",
-      "q1",
-      "u1",
-      "v1",
-      "v2",
-    ]);
-  });
-
-  it("never fills a place with someone the check saw too little of", () => {
+describe("placeTier", () => {
+  it("never lets a grade that saw too little of the profile take a place", () => {
     // fr 11-21 (b3671ce9): two people graded Uncertain at 15 filled round 3's last places.
-    const tier = (match_score: number) => placeTier({ match_tier: "Uncertain", match_score });
-    const grades = new Map([
-      ["seen", grade("Seen", String(tier(55)))],
-      ["blind", grade("Blind", String(tier(15)))],
-    ]);
-    const replacements = [{ key: "r", name: "R", tier: String(tier(20)) }];
-    expect(
-      checkedRoundPeople(["seen", "blind"], grades, replacements, 3).map((p) => p.key),
-    ).toEqual(["seen"]);
+    expect(placeTier({ match_tier: "Uncertain", match_score: 15 })).toBe("Unseen");
+    expect(placeTier({ match_tier: "Uncertain", match_score: 55 })).toBe("Uncertain");
     expect(placeTier({ match_tier: "Promising", match_score: 15 })).toBe("Promising");
-  });
-});
-
-describe("roundSize", () => {
-  it("shows the few people the recruiter asked for, else ten", () => {
-    // fosp 11-20: "再来5个" was filled to 6.
-    const handIn = (words: string) => [
-      {
-        kind: "bot_message_received",
-        text: `The recruiter wrote, word for word:\n"${words}"\n\nKruit's note: find 10 more`,
-      },
-    ];
-    expect(roundSize([handIn("再来5个")])).toBe(5);
-    expect(roundSize([[{ kind: "text", text: "2 more people like the rest" }]])).toBe(2);
-    expect(roundSize([handIn("#7 and #8 aren't a fit, find more like the rest")])).toBe(10);
-    expect(roundSize([[{ kind: "text", text: "find 50" }]])).toBe(10);
-    // fosp 11-20 (a2d787f8): the newest message only asked where they were; the ask before set 5.
-    expect(
-      roundSize([
-        [{ kind: "text", text: "那5个出来了吗？Results页面里标了没" }],
-        handIn("再来5个"),
-      ]),
-    ).toBe(5);
-    // fosp 11-20 (f69df234): "你说的7个和23个到底哪个对，再来5个" read 23 and showed ten.
-    expect(
-      roundSize([
-        handIn("下一批具体改了什么？另外你说的7个和23个到底哪个对，再来5个，别让1、5、6回来"),
-      ]),
-    ).toBe(5);
-    expect(roundSize([])).toBe(10);
-    expect(checkedRoundPeople(["a", "b", "c"], new Map(), [], 2)).toHaveLength(2);
   });
 });
 
