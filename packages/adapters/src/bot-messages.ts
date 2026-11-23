@@ -15,7 +15,6 @@ import {
   cancelRunsInTransaction,
   countRecruitingPeopleFoundSince,
   createThreadMessageInTransaction,
-  listRecruitingPeopleFoundSince,
   mirrorAskInTransaction,
   type PrismaClient,
   withTransactionRetry,
@@ -24,11 +23,9 @@ import { getLogger } from "@rakazo/logging";
 import { sleep } from "./background-wait.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { requestedPeopleTarget } from "./people-target.js";
 import { roundAwaitingReview } from "./recruiting-grading.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
-import { recruitingRoundListText } from "./turn-end-guard.js";
 import { ROLE_START_NONCE } from "./working-state.js";
 
 /**
@@ -1044,28 +1041,15 @@ export async function returnDelegatedTeamOutcome(
   // Staging 11-14: only the team's closing line ("the next round has been posted") came back, so
   // Kruit could neither show the people nor say who has both must-haves. The round comes too.
   if (round && round !== text) text = `${text}\n\n${round}`;
+  // fr 11-23 (s30): a code-built list of what the request saved, beside or instead of the team's
+  // answer, was refused or blanked by its own guards after a newer round, so "find 20 more" came
+  // back with no people and Kruit read the older round instead. Like a subagent's result, the
+  // team's answer goes back as written, with where its saved people are read.
   const saved =
-    thread.activeRecruitingRoleId &&
-    (await savedForRequest(deps.prisma, {
-      threadId: run.threadId,
-      spaceId: run.spaceId,
-      roleId: thread.activeRecruitingRoleId,
-      since: delegated.createdAt,
-      // feedback-round 11-16: "can you pull some people?" came back with the round and 17
-      // unchecked people, Kruit listed all 27, and the next round's Gaya read as a repeat. Only
-      // a number the recruiter asked for lists people beyond the round.
-      listRest:
-        requestedPeopleTarget(
-          (Array.isArray(delegated.blocks) ? (delegated.blocks as MessageBlock[]) : [])
-            .flatMap((block) =>
-              block.kind === "text" || block.kind === "bot_message_received" ? [block.text] : [],
-            )
-            .join("\n"),
-        ) !== undefined,
-    }));
-  // Gate 71a2cac2: beside the record, the team's "profiles show 6+ years" left Kruit squaring a
-  // retelling with the record, and it contradicted itself. The record is the whole answer.
-  if (saved) text = round ? `${round}\n\n${saved}` : saved;
+    thread.activeRecruitingRoleId && !round
+      ? `People this request saved are in the role's Results: read them with recruiting_candidates {operation:"activity", since:"${delegated.createdAt.toISOString()}", roleId:"${thread.activeRecruitingRoleId}"} when the recruiter asks who they are.`
+      : "";
+  if (saved) text = `${text}\n\n${saved}`;
   // feedback-round x5 on 44c1ad44: Kruit retold the team's round, graded its people itself and
   // listed eight more from the pool, so the recruiter got three versions of one round. The round
   // is shown as recorded where they asked; Kruit learns only that it is there.
@@ -1076,10 +1060,7 @@ export async function returnDelegatedTeamOutcome(
   // twice. A round with nothing else to pass on is the whole answer: Kruit gets no turn for it.
   const roundShown =
     Boolean(round) && (await showRoundWhereAsked(deps, run, root, delegated.id, round));
-  if (roundShown)
-    text = saved
-      ? `${ROUND_SHOWN_ABOVE}\n\n${saved}`
-      : "";
+  if (roundShown) text = "";
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)
     text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
@@ -1101,56 +1082,6 @@ export async function returnDelegatedTeamOutcome(
   );
   if (!sent.ok)
     getLogger().warn("delegated team outcome not returned", { runId: run.id, error: sent.error });
-}
-
-/**
- * Everyone the role's search saved for a request and no round lists, read from the record.
- * Long-search-finishes 11-15: "找20个人，好了叫我" saved 20, but the team's reply named the round's
- * 10 and 4 more, so Kruit listed 14 and said 6 were missing. A round after feedback is the
- * Reviewer's checked list and the whole answer: the recruiter sees each round once.
- */
-async function savedForRequest(
-  prisma: PrismaClient,
-  input: { threadId: string; spaceId: string; roleId: string; since: Date; listRest: boolean },
-) {
-  const [keys, rounds] = await Promise.all([
-    listRecruitingPeopleFoundSince(prisma, input),
-    // A checked round replaces its held record in place and keeps the older time, so the
-    // request's round is found by its people, not by when it was first recorded.
-    prisma.recruitingCalibrationRound.findMany({
-      where: { roleId: input.roleId },
-      select: { round: true, candidateKeys: true, createdAt: true },
-    }),
-  ]);
-  const found = new Set(keys);
-  if (rounds.some((round) => round.round > 1 && round.candidateKeys.some((key) => found.has(key))))
-    return "";
-  const inRound = new Set(rounds.flatMap((round) => round.candidateKeys));
-  const rest = keys.filter((key) => !inRound.has(key));
-  if (!rest.length) return "";
-  const listed = keys.length - rest.length;
-  // fr 11-21 (e72bd4f3): the first request's search finished after round 2 was shown, and its ten
-  // unchecked people went out as a second "round 2" list ("you gave me two different lists").
-  const answeredSince = rounds.some(
-    (round) => round.round > 1 && (round.createdAt?.getTime() ?? 0) > input.since.getTime(),
-  );
-  // fosp 11-23 (s29): told "17 more people saved, not checked yet; mention only that count", Kruit
-  // passed the count on and the recruiter, who had asked for checked people, read it as the
-  // answer ("17个？…直接给我10个，复核过的"). People nobody checked are not news to relay; only a
-  // number the recruiter asked for lists them below.
-  if (answeredSince || (listed && !input.listRest)) return "";
-  const all = `${keys.length} ${keys.length === 1 ? "person" : "people"} in all`;
-  return recruitingRoundListText(prisma, {
-    ...input,
-    candidateKeys: rest,
-    brief: true,
-    firstNumber: listed + 1,
-    // Long-search-finishes 11-15: given 19 of 20, Kruit promised to keep looking for one more
-    // after the team had said the search found nobody new, and ended with paragraphs of caveats.
-    // Long-search-finishes 11-15: the round's "not verified" line was dropped and the rest went
-    // out as found, so Kruit called all 20 done while the team said they were not checked yet.
-    heading: `The team finished this request and is looking for nobody more. Saved for it, from the record: ${all}${listed ? `, the round above and these ${rest.length}` : ""}. ${listed ? `Only the round's people were checked against the requirements, with what is not verified for them in the round; these ${rest.length} are` : "These are"} not checked yet. Reply with one line giving that count and what is not checked, then every one of them once, one line each${listed ? ", the round's with their not-verified line" : ""}, and nothing after the list:`,
-  });
 }
 
 /**
