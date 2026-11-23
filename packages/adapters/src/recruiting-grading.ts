@@ -1462,7 +1462,7 @@ export function roundReviewPrompt(round: number, size: number, people: readonly 
   };
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
-    `Pick as many as the recruiter asked for this round (you recorded ${size}): Strong first, then Promising, the round's own people before others of the same grade; the Reviewer's grade already weighs what the recruiter stressed, so never pick someone graded Uncertain or Partial. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
+    `Pick as many as the recruiter asked for this round (you recorded ${size}): Strong first, then Promising, the round's own people before others of the same grade; the Reviewer's grade already weighs what the recruiter stressed, so never pick someone graded Uncertain or Partial unless the recruiter has said in this conversation to loosen or accept less: then Uncertain comes next, each with what their profile doesn't show. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
     // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
     "When most of your picks' profiles don't show the same requirement, ask in one line beside the list whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
     "",
