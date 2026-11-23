@@ -25,7 +25,7 @@ const rows = [
 ];
 const brief = {
   searchFilters: [
-    { id: "f1", statement: "Must speak Mandarin and English", mode: "include" },
+    { id: "f1", statement: "Must speak Mandarin", mode: "include" },
     { id: "f2", statement: "Within 30 miles of the site", mode: "include" },
   ],
   fields: [{ key: "title", value: "Maintenance Engineer" }],
@@ -46,7 +46,7 @@ function fakeJudge(seen: string[]): TextJudge {
 
 describe("required language", () => {
   it("reads the language requirement from the brief", () => {
-    expect(requiredLanguage({ brief })).toBe("Must speak Mandarin and English");
+    expect(requiredLanguage({ brief })).toBe("Must speak Mandarin");
     // Before the brief is saved, the role's criteria hold the JD's requirements.
     expect(
       requiredLanguage({
@@ -90,6 +90,36 @@ describe("required language", () => {
     expect(seen.join("\n")).not.toMatch(/Wei|Joe|Ana/);
   });
 
+  it("asks each language a requirement names on its own and keeps the weakest", async () => {
+    // fosp 11-23 (s26, s28): "中文及工作英语" asked as one language came back strong for everyone
+    // in Shanghai, and people with no sign of working English were listed as checked.
+    const asked: string[] = [];
+    const judge: TextJudge = {
+      yes: async () => undefined,
+      language: async (requirement, batch) => {
+        asked.push(requirement);
+        const english = requirement.includes("only English");
+        return new Map(
+          batch.map((row) => [
+            row.id,
+            english && row.id.includes("wei") ? "unknown" : ("strong" as const),
+          ]),
+        );
+      },
+    };
+    const both = {
+      ...brief,
+      searchFilters: [{ id: "f1", statement: "中文及工作英语", mode: "include" }],
+    };
+    const checked = await withRequiredLanguage({ resolve: async () => judge }, both, rows, result);
+    expect(asked.sort()).toEqual([
+      "中文及工作英语 (only Chinese is asked here)",
+      "中文及工作英语 (only English is asked here)",
+    ]);
+    expect(checked.levels?.levels["linkedin:/in/wei-test"]).toBe("unknown");
+    expect(checked.levels?.levels["linkedin:/in/joe-sample"]).toBe("strong");
+  });
+
   it("sends every row, with its whole profile, to the deployment's own check in one call", async () => {
     const calls: Array<{ requirement: string; rows: readonly LanguageRow[] }> = [];
     const judge: TextJudge = {
@@ -112,7 +142,7 @@ describe("required language", () => {
       ],
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.requirement).toBe("Must speak Mandarin and English");
+    expect(calls[0]!.requirement).toBe("Must speak Mandarin");
     expect(calls[0]!.rows.map((row) => [row.id, row.name])).toEqual([
       ["linkedin:/in/joe-sample", "Joe Sample"],
       ["linkedin:/in/ana-example", "Ana Example"],

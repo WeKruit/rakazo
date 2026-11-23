@@ -291,19 +291,29 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
       candidate: { ...row },
     }));
     const texts = profileTexts(result);
-    let signals = await languageSignals(judge, requirement, people, texts);
-    // A judge that answered for nobody (down or timed out) falls back to the profile text.
-    if (!signals.size)
-      signals = await languageSignals(textLanguageJudge(requirement), requirement, people, texts);
-    if (reader)
-      for (const [key, value] of await fullProfileSignals(
-        judge,
-        requirement,
-        people,
-        signals,
-        reader,
-      ))
-        signals.set(key, value);
+    const check = async (asked: string) => {
+      let signals = await languageSignals(judge, asked, people, texts);
+      // A judge that answered for nobody (down or timed out) falls back to the profile text.
+      if (!signals.size)
+        signals = await languageSignals(textLanguageJudge(asked), asked, people, texts);
+      if (reader)
+        for (const [key, value] of await fullProfileSignals(judge, asked, people, signals, reader))
+          signals.set(key, value);
+      return signals;
+    };
+    // fosp 11-23 (s26, s28): asked "中文及工作英语" as one language, the check found everyone in
+    // Shanghai strong, and people with no sign of working English were listed as checked. Each
+    // language a requirement names is asked on its own; a person has the weakest of them.
+    const named = languagesNamed(requirement);
+    const signals =
+      named.length < 2
+        ? await check(requirement)
+        : weakestSignals(
+            people.map((person) => person.candidateKey),
+            await Promise.all(
+              named.map((name) => check(`${requirement} (only ${name} is asked here)`)),
+            ),
+          );
     if (!signals.size) return { rows: [...rows], withoutLanguage: 0 };
     const ordered = withLanguageSignals(rows, signals);
     const kept = ordered.filter((row) => row.requiredLanguage !== "no sign");
@@ -315,6 +325,39 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
   } catch {
     return { rows: [...rows], withoutLanguage: 0 };
   }
+}
+
+/** Languages a requirement names, English included, each once. */
+const NAMED_LANGUAGES: ReadonlyArray<[RegExp, string]> = [
+  [/mandarin|chinese|普通话|國語|国语|中文/i, "Chinese"],
+  [/english|英语|英文/i, "English"],
+  [/cantonese|粤语|廣東話|广东话/i, "Cantonese"],
+  [/japanese|日语/i, "Japanese"],
+  [/korean|韩语/i, "Korean"],
+  [/spanish|西班牙语/i, "Spanish"],
+  [/\bfrench\b|法语/i, "French"],
+  [/\bgerman\b|德语/i, "German"],
+];
+
+export function languagesNamed(requirement: string): string[] {
+  return NAMED_LANGUAGES.flatMap(([pattern, name]) => (pattern.test(requirement) ? [name] : []));
+}
+
+/** Each person's weakest finding across the languages asked; one not answered is unknown. */
+function weakestSignals(
+  keys: readonly string[],
+  checks: ReadonlyArray<ReadonlyMap<string, LanguageSignal>>,
+): Map<string, LanguageSignal> {
+  const weakest = new Map<string, LanguageSignal>();
+  for (const key of keys) {
+    const found = checks.map((check) => check.get(key));
+    if (found.every((level) => level === undefined)) continue;
+    weakest.set(
+      key,
+      found.map((level) => level ?? "unknown").reduce((a, b) => (ORDER[b] > ORDER[a] ? b : a)),
+    );
+  }
+  return weakest;
 }
 
 /** The language check's finding per person, as saved with the search that found them. */
