@@ -14,6 +14,7 @@ import {
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { sleep } from "./background-wait.js";
 import { handedInRecruiterWords } from "./global-role-writes.js";
 import { requestedPeopleTarget } from "./people-target.js";
 import { recruiterWordsSinceFirstRound, roundCriteria } from "./recruiting-round-check.js";
@@ -269,7 +270,9 @@ export async function startRecruitingGrading(
   deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
   payload: { threadId: string; attempt?: number },
   now = Date.now(),
-): Promise<void> {
+  /** The turn that recorded the held round and waits for its check within the turn. */
+  owner?: { runId: string },
+): Promise<{ checkedRound: string } | undefined> {
   const attempt = payload.attempt ?? 0;
   const thread = await deps.prisma.thread.findUnique({
     where: { id: payload.threadId },
@@ -283,8 +286,10 @@ export async function startRecruitingGrading(
     },
   });
   const role = thread?.activeRecruitingRole;
-  const skipped = (reason: string) =>
+  const skipped = (reason: string) => {
     getLogger().info("recruiting.grade.skipped", { threadId: payload.threadId, reason });
+    return undefined;
+  };
   if (!thread || !role || role.archivedAt || role.userId !== thread.userId)
     return skipped("no role");
   // The check is the grader's own work: it waits only on the grader's turns, while teammates keep
@@ -465,6 +470,24 @@ export async function startRecruitingGrading(
     now,
     thread.id,
   );
+  // fr 11-22 (6aa4c10d): a held round waited minutes on people still out in a batch of the pool
+  // sent before it, which never finished. A batch from before the round doesn't hold it: those
+  // people are sent again with the round's feedback.
+  if (review?.held) {
+    const since = review.round.createdAt;
+    const fresh = new Set(
+      requests.flatMap((request) =>
+        request.createdAt >= since ? [...sentUrls(request.task?.prompt ?? "")] : [],
+      ),
+    );
+    for (const request of requests) {
+      if (request.createdAt >= since || !started(request.id)) continue;
+      for (const url of sentUrls(request.task?.prompt ?? "")) {
+        if (fresh.has(url) || !waiting.delete(url)) continue;
+        if ((sends.get(url) ?? 0) < GRADE_SEND_LIMIT) sent.delete(url);
+      }
+    }
+  }
   const unreviewed = new Set(
     review?.round.candidateKeys.filter((key) => !review.grades.has(key)) ?? [],
   );
@@ -562,13 +585,29 @@ export async function startRecruitingGrading(
       } else {
         if (!review.checked && !(await markCalibrationRoundChecked(deps.prisma, review.round)))
           return skipped("round changed");
+        // fosp 11-22 (352978a2): a round shown by a later turn never came when that turn did not
+        // start. The turn that recorded the round waits for its check and shows it itself, the
+        // way a parent agent awaits its child (Claude Code subagents, Workloop); a later turn
+        // starts only once that one has ended.
+        const prompt = roundReviewPrompt(review.round.round, shownPeople, size, review.grades);
+        const recorder = await deps.prisma.externalEffect.findUnique({
+          where: { id: review.round.effectId },
+          select: { run: { select: { id: true, status: true } } },
+        });
+        if (recorder?.run && ["leased", "running"].includes(recorder.run.status)) {
+          if (owner?.runId === recorder.run.id) return { checkedRound: prompt };
+          await deps.jobs.enqueue(
+            laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + HELD_RETRY_MS),
+          );
+          return skipped("owner waiting");
+        }
         // Once per recruiter message, so the corrected round is never corrected again on its own.
         const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
         const runId = await startLeadRun(
           deps,
           thread,
           clientNonce,
-          async () => roundReviewPrompt(review.round.round, shownPeople, size),
+          async () => prompt,
           grader?.botId,
           review.round.ownerBotId,
         );
@@ -917,6 +956,8 @@ type RoundGrade = {
   title: string | null;
   company: string | null;
   tier: unknown;
+  /** Requirements the person's profile says nothing about. */
+  unknown?: string[];
 };
 
 /**
@@ -937,6 +978,7 @@ async function roundUnderReview(
     version: number;
     createdAt: Date;
     ownerBotId: string | null;
+    effectId: string;
   };
   grades: Map<string, RoundGrade>;
   /** Not shown yet: it waits for the Reviewer's check, or for its owner to show it. */
@@ -965,6 +1007,7 @@ async function roundUnderReview(
       statusAt: true,
       version: true,
       ownerBotId: true,
+      effectId: true,
     },
   });
   if (!round || round.approvedAt) return null;
@@ -1005,6 +1048,7 @@ async function roundUnderReview(
         title: row.title,
         company: row.company,
         tier: placeTier(row.matchFields),
+        unknown: gradeUnknown(row.matchFields),
       });
   return { round, grades, held, checked: held && status === "checked", since, feedbackAt };
 }
@@ -1301,6 +1345,11 @@ export async function askedRoundSize(
   return roundSize(asked.map((message) => message.blocks));
 }
 
+function gradeUnknown(fields: unknown): string[] | undefined {
+  const unknown = (fields as { unknown?: unknown } | null)?.unknown;
+  return Array.isArray(unknown) ? unknown.filter((item) => typeof item === "string") : undefined;
+}
+
 /** An Uncertain grade scored under this saw too little of the profile to take a round's place. */
 const SEEN_TOO_LITTLE_SCORE = 50;
 
@@ -1374,7 +1423,9 @@ export function roundReviewPrompt(
   round: number,
   people: readonly { key: string; name: string }[],
   asked = people.length,
+  grades?: ReadonlyMap<string, RoundGrade>,
 ) {
+  const unknown = mostlyUnknown(people, grades);
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and exactly these people, in this order:`,
     ...people.map((person, index) => `${index + 1}. ${person.name} (candidateKey ${person.key})`),
@@ -1386,7 +1437,30 @@ export function roundReviewPrompt(
           `That is ${people.length} of the ${asked} they asked for. In the same reply, ask whether these are enough or which one point they named to loosen, and search no more until they answer.`,
         ]
       : []),
+    // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
+    ...(unknown.length
+      ? [
+          `Their profiles say nothing about: ${unknown.map((item) => `"${item}"`).join(", ")}. Unless you already asked about this in this conversation, ask the recruiter in one line beside the list whether people whose profile doesn't show it should still count, with the two choices.`,
+        ]
+      : []),
   ].join("\n");
+}
+
+/** Requirements that at least half of the shown people's profiles say nothing about. */
+function mostlyUnknown(
+  people: readonly { key: string }[],
+  grades: ReadonlyMap<string, RoundGrade> | undefined,
+): string[] {
+  if (!grades || !people.length) return [];
+  const counts = new Map<string, number>();
+  for (const person of people)
+    for (const item of new Set(grades.get(person.key)?.unknown ?? []))
+      counts.set(item, (counts.get(item) ?? 0) + 1);
+  return [...counts]
+    .filter(([, count]) => count * 2 >= people.length)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([item]) => item);
 }
 
 /** Who grades a batch: the quality check itself, or a teammate's search service. */
@@ -1567,4 +1641,40 @@ export async function heldRoundPeople(
     distinct: ["candidateKey"],
     select: { name: true, linkedinUrl: true },
   });
+}
+
+/** How long the turn that recorded a held round waits for its check before ending without it. */
+export const ROUND_CHECK_WAIT_MS = 4 * 60_000;
+const ROUND_CHECK_POLL_MS = 3_000;
+
+/**
+ * Waits, within the turn that recorded a held round, for the Reviewer's check of it, and returns
+ * the checked round for that turn to show. Undefined when the wait ends first (a new message, the
+ * turn stopping, or the time limit): the check then goes on and a later turn shows the round.
+ */
+export async function waitForRoundCheck(
+  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
+  input: {
+    threadId: string;
+    runId: string;
+    signal: AbortSignal;
+    timeoutMs?: number;
+    pollMs?: number;
+    userMessageWaiting?: () => Promise<boolean>;
+  },
+): Promise<string | undefined> {
+  const deadline = Date.now() + (input.timeoutMs ?? ROUND_CHECK_WAIT_MS);
+  for (;;) {
+    const result = await startRecruitingGrading(deps, { threadId: input.threadId }, Date.now(), {
+      runId: input.runId,
+    });
+    if (result?.checkedRound) return result.checkedRound;
+    if (
+      Date.now() >= deadline ||
+      input.signal.aborted ||
+      (await input.userMessageWaiting?.().catch(() => false))
+    )
+      return undefined;
+    await sleep(Math.min(input.pollMs ?? ROUND_CHECK_POLL_MS, deadline - Date.now()), input.signal);
+  }
 }

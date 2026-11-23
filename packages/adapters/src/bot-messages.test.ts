@@ -668,13 +668,14 @@ describe("delegating to a role team in another conversation", () => {
       .filter((call) => call.data.threadId === "thread-global")
       .map((call) => call.data.blocks[0]);
 
-  it("waits while a teammate the lead handed the work to is still on it", async () => {
+  // fosp 11-22 (352978a2): the result was marked returned and then dropped while the team was busy.
+  it("keeps the result unreturned while a teammate is still on it, so it is offered again", async () => {
     const harness = team({ busy: true, later: [said("Sourcer is finding 50 more.")] });
     expect(await returnBotMessageOutcome(harness.deps, roleRun, kruit, "Sourcer is on it.")).toBe(
-      true,
+      false,
     );
     expect(harness.tx.run.create).not.toHaveBeenCalled();
-    expect(harness.deps.prisma.run.updateMany).toHaveBeenCalled();
+    expect(harness.deps.prisma.run.updateMany).not.toHaveBeenCalled();
   });
 
   // Send-at-night 11-16: each teammate's "completed without a summary" status woke Kruit, which
@@ -808,11 +809,15 @@ describe("delegating to a role team in another conversation", () => {
     expect(harness.deps.prisma.run.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          NOT: {
-            status: "queued",
-            trigger: "bot_message",
-            createdAt: { gt: new Date("2026-11-13T09:06:40Z") },
-          },
+          NOT: [
+            {
+              status: "queued",
+              trigger: "bot_message",
+              createdAt: { gt: new Date("2026-11-13T09:06:40Z") },
+            },
+            // The Reviewer's background checks never hold the team's answer back.
+            { trigger: { in: ["tickets", "recruiting_grade"] } },
+          ],
         }),
       }),
     );

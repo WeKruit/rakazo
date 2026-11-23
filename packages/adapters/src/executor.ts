@@ -642,6 +642,7 @@ import {
   roundListHeld,
   roundState,
   scheduleRecruitingGrading,
+  waitForRoundCheck,
   ROUND_HELD_SEARCH_REFUSAL,
 } from "./recruiting-grading.js";
 import {
@@ -10727,7 +10728,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (recorded as { roundStatus?: unknown } | null)?.roundStatus === "checking";
                 if (held) {
                   roundHeldRecorded = true;
-                  // No settle wait: the check starts seconds after this turn ends.
+                  // fosp 11-22 (352978a2): the round was left for a later turn to show, and that
+                  // turn never started. This turn waits for the check and shows the round itself.
+                  const checked = await waitForRoundCheck(deps, {
+                    threadId: thread.id,
+                    runId,
+                    signal: context.signal,
+                    userMessageWaiting: () =>
+                      hasUnclaimedSteering(deps.prisma, {
+                        threadId: run.threadId,
+                        botId: bot.id,
+                        runId: run.id,
+                      }),
+                  }).catch((error) => {
+                    getLogger().warn("recruiting round check wait", { error: String(error) });
+                    return undefined;
+                  });
+                  if (checked) {
+                    roundHeldRecorded = false;
+                    return { ...(round as object), roundStatus: "checked", next: checked };
+                  }
+                  // No settle wait: the check goes on after this turn ends.
                   await scheduleRecruitingGrading(deps.jobs, thread.id, Date.now(), 0).catch(
                     (error) =>
                       getLogger().warn("recruiting grade schedule", { error: String(error) }),
