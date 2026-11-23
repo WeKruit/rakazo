@@ -1440,7 +1440,7 @@ export function roundReviewPrompt(round: number, size: number, people: readonly 
   };
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
-    `Pick as many as the recruiter asked for this round (you recorded ${size}): the best-graded first, the round's own people before others of the same grade. Leave out anyone whose profile misses a point the recruiter stressed. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
+    `Pick as many as the recruiter asked for this round (you recorded ${size}): the best-graded first, the round's own people before others of the same grade. The Reviewer's grade already weighs what each profile doesn't show: leave out only someone graded Partial, or whose profile shows they don't meet a point the recruiter stressed; a point their profile doesn't show doesn't leave them out. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
     // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
     "When most of your picks' profiles don't show the same requirement, ask in one line beside the list whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
     "",
