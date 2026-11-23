@@ -233,6 +233,7 @@ import {
   automationRateLimited,
   backgroundToolRun,
   backgroundToolSourceTrigger,
+  BRIEF_CONFIRMATION_TEXT,
   bindRecruitingSchedulingOperation,
   calibrationRoundRepeats,
   campaignSendCardHash,
@@ -14100,7 +14101,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   )
                   .join(" ")
               : "",
-          );
+          )
+          // fosp 11-23 (df2c09cb): the brief confirmation the product posts as the recruiter's is
+          // English, so a Chinese recruiter's checked rounds came in English.
+          .filter((text) => !BRIEF_CONFIRMATION_TEXT.test(text.trim()));
         const roleStartTexts = messages.flatMap((message) =>
           message.role === "user" &&
           message.clientNonce?.startsWith(ROLE_START_NONCE) &&
