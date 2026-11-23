@@ -3,11 +3,10 @@ import type { PrismaClient } from "@rakazo/db";
 import { handedInRecruiterWords } from "./global-role-writes.js";
 
 /**
- * One check for every calibration round: the agent gives each pick a verdict on every requirement
- * of the role ("shown", "unknown" or "fails"), and the server holds the round to those
- * verdicts. What the recruiter says (a city, a level, the reason they turned people down) is one
- * of those requirements, so the same check covers it without a rule per trait. The agent judges; this
- * only checks the judgement is complete and consistent (structured output against a rubric).
+ * A calibration round's requirements and the agent's optional verdicts on them ("shown",
+ * "unknown" or "fails"). What the recruiter says (a city, a level, the reason they turned people
+ * down) is one of those requirements. The agent judges; this keeps a pick out only on its own
+ * "fails" and turns its unknowns into the round list's notes.
  */
 
 export type RoundVerdict = "shown" | "unknown" | "fails";
@@ -155,104 +154,42 @@ export async function roundCriteria(
 
 export type RoundCheckResult =
   | { ok: true; unverified: Record<string, string> }
-  | { ok: false; error: string; asked: string[] };
+  | { ok: false; error: string };
 
 /**
- * Holds the picks to their verdicts. A missing verdict or a "fails" is always refused. "unknown"
- * on a criterion added since the last round is refused once per person (`asked`), since the
- * recruiter just said it matters; after that the agent's choice stands. Returns the "Not
- * verified" note per person, written from the criteria, for the round list.
+ * The picks' own verdicts, where the lead gave them: a "fails" keeps that person out, and what no
+ * row shows becomes the round list's "Not verified" note. Verdicts are optional: the Reviewer
+ * grades every round after feedback from full profiles, and asking the lead for a verdict on every
+ * criterion of every pick cost refusals and up to a minute a round (staging 11-15/16).
  */
 export function checkRound(input: {
   keys: readonly string[];
   checks: RoundChecks | undefined;
   criteria: readonly RoundCriterion[];
-  asked: ReadonlySet<string>;
-  /**
-   * A top-up search already came back and the round is still short: the bar relaxes, so an
-   * unknown on what the recruiter just raised no longer keeps a person out ("fails" still does).
-   */
-  relaxed?: boolean;
-  /**
-   * The Reviewer checks this round from each person's full profile before it shows (a held round,
-   * or the lead's turn after that check): a pick's own "fails" still keeps them out, but a missing
-   * or unknown verdict is the Reviewer's to settle. Staging 11-15: refusals for missing verdicts
-   * and for rows that did not show a newly raised point cost the held round 25 s to 4 minutes.
-   */
-  reviewed?: boolean;
   /** What to do when fewer than ten fit. */
   shortOfTen: string;
 }): RoundCheckResult {
   const unverified: Record<string, string> = {};
   if (!input.criteria.length) return { ok: true, unverified };
   const verdictOf = (key: string, id: string) => input.checks?.[key]?.[id];
-  const missing = input.keys.filter((key) =>
-    input.criteria.some((criterion) => !verdictOf(key, criterion.id)),
-  );
-  if (missing.length && !input.reviewed)
-    return {
-      ok: false,
-      asked: [],
-      error: `Not recorded: checks needs a verdict ("shown", "unknown" or "fails", from the person's row) on every hard criterion for every pick; missing for ${missing.join(", ")}. The hard criteria: ${input.criteria.map((criterion) => `${criterion.id} = ${criterion.statement}`).join("; ")}. Call calibration_round again now with the same people and a verdict on each of these for every pick; nothing else is needed first.`,
-    };
   const failing: string[] = [];
-  const newlyUnknown: string[] = [];
   for (const key of input.keys) {
     const fails = input.criteria.filter((criterion) => verdictOf(key, criterion.id) === "fails");
     if (fails.length)
       failing.push(`${key} (${fails.map((criterion) => criterion.statement).join("; ")})`);
-    const unknown = input.criteria.filter(
-      (criterion) => verdictOf(key, criterion.id) === "unknown",
-    );
     // Something no pick's row shows is still unverified for each of them; the round list says
     // it once when every note is the same. A turned-down reason is not a requirement to list.
-    const listed = unknown.filter((criterion) => !criterion.id.startsWith("turned-down:"));
+    const listed = input.criteria.filter(
+      (criterion) =>
+        verdictOf(key, criterion.id) === "unknown" && !criterion.id.startsWith("turned-down:"),
+    );
     if (listed.length) unverified[key] = listed.map((criterion) => criterion.statement).join("; ");
-    const raised = unknown.filter((criterion) => criterion.added);
-    if (raised.length && !input.relaxed && !input.reviewed && !input.asked.has(key))
-      newlyUnknown.push(`${key} (${raised.map((criterion) => criterion.statement).join("; ")})`);
   }
-  if (!failing.length && !newlyUnknown.length) return { ok: true, unverified };
+  if (!failing.length) return { ok: true, unverified };
   return {
     ok: false,
-    asked: newlyUnknown.map((entry) => entry.slice(0, entry.indexOf(" ("))),
-    error: [
-      "Not recorded.",
-      failing.length &&
-        `These picks fail a hard criterion by your own verdict, so they are not in the round: ${failing.join("; ")}.`,
-      newlyUnknown.length &&
-        `These rows do not show what the recruiter asked for since the last round: ${newlyUnknown.join("; ")}.`,
-      `Replace them with people whose rows show every hard criterion. If fewer than ten do, show the ones who do with show_picks, then ${input.shortOfTen}.`,
-    ]
-      .filter(Boolean)
-      .join(" "),
+    error: `Not recorded. These picks fail a hard criterion by your own verdict, so they are not in the round: ${failing.join("; ")}. Replace them with people whose rows show every hard criterion. If fewer than ten do, show the ones who do with show_picks, then ${input.shortOfTen}.`,
   };
-}
-
-/**
- * Whether the Reviewer saved a grade for every pick on this role. Those grades are the check a
- * round's verdicts stand for, so a missing verdict is not asked for again. Branch fr 11-21: the
- * lead's round of ten graded people was refused four times for verdicts, and round 2 never showed.
- */
-export async function everyPickGraded(
-  prisma: Pick<PrismaClient, "recruitingCandidateOccurrence">,
-  roleId: string,
-  keys: readonly string[],
-): Promise<boolean> {
-  if (!keys.length) return false;
-  const rows = await prisma.recruitingCandidateOccurrence.findMany({
-    where: { roleId, candidateKey: { in: [...keys] } },
-    select: { candidateKey: true, matchFields: true },
-  });
-  const graded = new Set(
-    rows
-      .filter(
-        (row) =>
-          typeof (row.matchFields as { match_tier?: unknown } | null)?.match_tier === "string",
-      )
-      .map((row) => row.candidateKey),
-  );
-  return keys.every((key) => graded.has(key));
 }
 
 /** What a recorded round's read says about repeats: the round record refuses anyone already seen. */

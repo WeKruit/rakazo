@@ -366,9 +366,9 @@ export function languageFindings(results: readonly unknown[]): Map<string, strin
 }
 
 /**
- * A round's people by language level, confirmed and strong first, with a "<language> not
- * confirmed" note for everyone below strong and no language note for anyone confirmed or strong.
- * People without a known level count as unknown; a round with no known level is unchanged.
+ * A round's people with a "<language> not confirmed" note for everyone below strong and no
+ * language note for anyone confirmed or strong. People without a known level count as unknown;
+ * a round with no known level is unchanged.
  */
 export function roundByLanguage(
   candidateKeys: readonly string[],
@@ -383,10 +383,8 @@ export function roundByLanguage(
       ...(unverified && Object.keys(unverified).length ? { unverified: { ...unverified } } : {}),
     };
   const level = (key: string) => levels.get(key) ?? "unknown";
-  const ordered = candidateKeys
-    .map((key, index) => ({ key, index }))
-    .sort((a, b) => ORDER[level(a.key)] - ORDER[level(b.key)] || a.index - b.index)
-    .map(({ key }) => key);
+  // The order is the lead's: it picks from grades that already carry the language finding.
+  const ordered = [...candidateKeys];
   const mentions = new RegExp(`\\b(${names.join("|")})\\b`, "i");
   const notes: Record<string, string> = {};
   for (const key of ordered) {
