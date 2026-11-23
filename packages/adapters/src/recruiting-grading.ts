@@ -188,8 +188,25 @@ export const NOT_GRADING_TASK = {
   },
 };
 
+/** What the search that found someone said of them, kept for the check (fosp 11-23). */
+function searchSnippet(
+  rows: readonly { candidateKey: string; report?: unknown }[],
+  key: string,
+): string | undefined {
+  for (const row of rows) {
+    if (row.candidateKey !== key) continue;
+    const fields = (row.report as { fields?: { label?: unknown; value?: unknown }[] } | null)
+      ?.fields;
+    const snippet = fields?.find((field) => field.label === "Snippet")?.value;
+    if (typeof snippet === "string" && snippet.trim())
+      return snippet.replace(/\s+/g, " ").trim().slice(0, SEARCH_SNIPPET_CHARS);
+  }
+  return undefined;
+}
+const SEARCH_SNIPPET_CHARS = 400;
+
 export function recruitingGradePrompt(
-  people: readonly { name: string; url: string }[],
+  people: readonly { name: string; url: string; found?: string }[],
   service: GradingService,
   asked: readonly string[] = [],
 ) {
@@ -202,12 +219,15 @@ export function recruitingGradePrompt(
           "",
         ]
       : []),
-    ...people.map((person) => `- ${person.name}: ${person.url}`),
+    ...people.map(
+      (person) =>
+        `- ${person.name}: ${person.url}${person.found ? `\n  The search that found them said: "${person.found}"` : ""}`,
+    ),
   ];
   if (service.tool === "self")
     return [
       `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements. You grade them yourself, from each person's full public profile.`,
-      `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge only from what each page shows; when a page can't be read, use the person's saved profile from recruiting_candidates.`,
+      `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge from what each page shows and what the search said of them below; a public page often shows less than the search did. When a page can't be read, use the person's saved profile from recruiting_candidates.`,
       SELF_GRADE_RUBRIC,
       "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, current title, company, location, education (a list of strings, one per degree: school, degree and dates), match_score 0 to 100, match_tier, fit_reasons naming the evidence, concerns, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown and the profile words that show it. Keep every grade short, since the recruiter is waiting: the evidence is the few profile words that show it, one short fit reason, a concern only for what is not met. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
       "",
@@ -458,6 +478,7 @@ export async function startRecruitingGrading(
         candidateKey: true,
         name: true,
         linkedinUrl: true,
+        report: true,
         page: { select: { observedAt: true } },
       },
     }),
@@ -494,7 +515,7 @@ export async function startRecruitingGrading(
   const skip = new Set(
     graded.flatMap((row) => (unreviewed.has(row.candidateKey) ? [] : [row.candidateKey])),
   );
-  const people = new Map<string, { name: string; url: string }>();
+  const people = new Map<string, { name: string; url: string; found?: string }>();
   const batchSize = grader?.tool === "self" ? SELF_GRADE_BATCH : GRADE_BATCH;
   const ordered = [
     ...found.filter((row) => unreviewed.has(row.candidateKey)),
@@ -580,7 +601,11 @@ export async function startRecruitingGrading(
       if (fill.length) {
         for (const row of fill.slice(0, SELF_GRADE_BATCH)) {
           skip.add(row.candidateKey);
-          people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
+          people.set(row.candidateKey, {
+            name: row.name || row.linkedinUrl,
+            url: row.linkedinUrl,
+            found: searchSnippet(found, row.candidateKey),
+          });
         }
       } else {
         if (!review.checked && !(await markCalibrationRoundChecked(deps.prisma, review.round)))
@@ -631,7 +656,11 @@ export async function startRecruitingGrading(
     if (roundOnly && !unreviewed.has(row.candidateKey)) break;
     if (!row.linkedinUrl || skip.has(row.candidateKey) || sent.has(row.linkedinUrl)) continue;
     skip.add(row.candidateKey);
-    people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
+    people.set(row.candidateKey, {
+      name: row.name || row.linkedinUrl,
+      url: row.linkedinUrl,
+      found: searchSnippet(found, row.candidateKey),
+    });
   }
   if (!people.size) {
     // Only a round that just finished is reported, never one from before this change.
@@ -662,7 +691,11 @@ export async function startRecruitingGrading(
       if (people.size >= batchSize) break;
       if (!feedbackAt || !(row.page?.observedAt > feedbackAt)) continue;
       if (!row.linkedinUrl || checked.has(row.candidateKey) || sent.has(row.linkedinUrl)) continue;
-      people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
+      people.set(row.candidateKey, {
+        name: row.name || row.linkedinUrl,
+        url: row.linkedinUrl,
+        found: searchSnippet(found, row.candidateKey),
+      });
     }
   }
   if (coming && !people.size) {
