@@ -494,6 +494,21 @@ describe("loadWorkingState", () => {
       now,
     );
     expect(handedOff.language).toBe("zh");
+    // fosp 11-23 (d6c65687): the brief confirmation the product posts as the recruiter's is
+    // English, and made a Chinese recruiter's role conversation English.
+    const confirmed = await loadWorkingState(
+      fakePrisma({
+        recruiter: [
+          text("Confirm recruiting brief for Senior Data Engineer · 上海 (requirements version 2)."),
+        ],
+        account: [text("候选人要会普通话")],
+      }) as never,
+      scope,
+      thread,
+      (t) => t,
+      now,
+    );
+    expect(confirmed.language).toBe("zh");
   });
 
   it("takes no language from the copy of the recruiter's message a new role opens with", async () => {
