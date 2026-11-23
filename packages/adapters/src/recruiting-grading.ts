@@ -263,7 +263,7 @@ export const SELF_GRADE_RUBRIC = [
   "- The job's own terms (pay range, office days or hybrid schedule, benefits) are what the job offers, not something a profile shows: leave them out of requirements_assessment, and they never lower a tier. The person's side of them still counts: a hybrid job needs someone living within a commute.",
   "- Years of experience: add up the dated roles that match the requirement, counting overlapping roles once; a stated total in the person's own summary counts too.",
   "- Location: the current location; a nearby commuting area counts.",
-  "Score and tier: Strong needs every hard requirement met, and a preference never keeps anyone from Strong (note a missed one in concerns); any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
+  "Score and tier: Strong needs every hard requirement met, and a preference never keeps anyone from Strong (note a missed one in concerns); any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong, and a point the recruiter turned someone down for that the profile doesn't show makes Uncertain at most. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
 ].join("\n");
 
 /** The profile links one grading request sent. */
@@ -569,7 +569,6 @@ export async function startRecruitingGrading(
         role.id,
         Math.max(0, size - placeable(roundKeys, review.grades)),
         early ? feedbackAt : review.since,
-        SHOWN_REPLACEMENT_TIERS,
       );
       // fosp 11-20 (4eb42c98): "再来5个" came back with 2 while ten saved people no round had shown
       // were never graded, so none could fill a place. A short round first has those people
@@ -1399,21 +1398,16 @@ export function placeTier(fields: unknown): unknown {
 /** Checked people from Results who may fill a round's open places, best first. */
 const REPLACEMENT_TIERS = [FIT_TIER, "Promising"];
 /**
- * A checked round that is shown now may also take Results' Uncertain people in its last places.
- * fosp 11-21 (f68ae6bf): "再来5个" came back with 4 while three checked Uncertain people sat in
- * Results, and the recruiter's "要5个只给4个" spent two more turns. Not for showing a round
- * early, which waits for the search's better people instead.
+ * How many of a round's checked people the check left fit to show: Strong or Promising. The
+ * recruiter deleted filling a round with Uncertain people (11-22): a short round asks instead.
  */
-const SHOWN_REPLACEMENT_TIERS = [...REPLACEMENT_TIERS, "Uncertain"];
-
-/** How many of a round's checked people the check left fit to show (never Partial or unseen). */
 function placeable(
   keys: readonly string[],
   grades: ReadonlyMap<string, Pick<RoundGrade, "tier">>,
 ): number {
   return keys.filter((key) => {
     const tier = grades.get(key)?.tier;
-    return typeof tier === "string" && SHOWN_REPLACEMENT_TIERS.includes(tier);
+    return typeof tier === "string" && REPLACEMENT_TIERS.includes(tier);
   }).length;
 }
 
@@ -1442,7 +1436,7 @@ export function roundReviewPrompt(round: number, size: number, people: readonly 
   };
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
-    `Pick as many as the recruiter asked for this round (you recorded ${size}): the best-graded first, the round's own people before others of the same grade. Leave out anyone graded Partial, and anyone whose profile doesn't show a point the recruiter stressed (a must-have they named, or why they turned someone down); a point they didn't stress doesn't leave anyone out. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
+    `Pick as many as the recruiter asked for this round (you recorded ${size}): Strong first, then Promising, the round's own people before others of the same grade; the Reviewer's grade already weighs what the recruiter stressed, so never pick someone graded Uncertain or Partial. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
     // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
     "When most of your picks' profiles don't show the same requirement, ask in one line beside the list whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
     "",
