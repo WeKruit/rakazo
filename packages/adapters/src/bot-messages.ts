@@ -1078,7 +1078,7 @@ export async function returnDelegatedTeamOutcome(
     Boolean(round) && (await showRoundWhereAsked(deps, run, root, delegated.id, round));
   if (roundShown)
     text = saved
-      ? `${ROUND_SHOWN_ABOVE}\n\n${saved.replace(" Show the round above; mention", " Mention")}`
+      ? `${ROUND_SHOWN_ABOVE}\n\n${saved}`
       : "";
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)
@@ -1134,10 +1134,11 @@ async function savedForRequest(
   const answeredSince = rounds.some(
     (round) => round.round > 1 && (round.createdAt?.getTime() ?? 0) > input.since.getTime(),
   );
-  if (answeredSince && !listed)
-    return `Also saved by this search after a newer round was shown: ${rest.length} more ${rest.length === 1 ? "person" : "people"} in the role's Results, not checked yet. Name none of them and post no list; at most mention that count.`;
-  if ((listed && !input.listRest) || answeredSince)
-    return `Also saved for this request, not checked yet and not shown to the recruiter: ${rest.length} more ${rest.length === 1 ? "person" : "people"}, in the role's Results. Show the round above; mention only that count for the rest, without naming them.`;
+  // fosp 11-23 (s29): told "17 more people saved, not checked yet; mention only that count", Kruit
+  // passed the count on and the recruiter, who had asked for checked people, read it as the
+  // answer ("17个？…直接给我10个，复核过的"). People nobody checked are not news to relay; only a
+  // number the recruiter asked for lists them below.
+  if (answeredSince || (listed && !input.listRest)) return "";
   const all = `${keys.length} ${keys.length === 1 ? "person" : "people"} in all`;
   return recruitingRoundListText(prisma, {
     ...input,

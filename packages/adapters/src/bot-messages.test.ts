@@ -950,7 +950,7 @@ describe("delegating to a role team in another conversation", () => {
     const text = (returnedTo(harness) as Array<{ text?: string }>)
       .map((b) => b.text ?? "")
       .join("\n");
-    expect(text).toContain("2 more");
+    expect(text).not.toContain("2 more");
     expect(text).not.toContain("Bo B");
   });
 
@@ -982,11 +982,10 @@ describe("delegating to a role team in another conversation", () => {
     prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
     prisma.externalEffect = { findMany: vi.fn(async () => []) };
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    // The round is the whole answer: no count of the unchecked rest goes along (fosp 11-23, s29).
     const [posted, returned] = returnedTo(harness) as Array<{ text: string }>;
     expect(posted?.text).toBe(round);
-    expect(returned?.text).toContain("2 more");
-    expect(returned?.text).not.toContain("Bo B");
-    expect(returned?.text).not.toContain("Cy C");
+    expect(returned).toBeUndefined();
   });
 
   it("holds the result while the round it made waits for the Reviewer (staging 2026-11-15)", async () => {
