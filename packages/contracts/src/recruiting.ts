@@ -1146,7 +1146,7 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       .record(RecruitingId, z.record(RecruitingId, z.enum(["shown", "unknown", "fails"])))
       .optional()
       .describe(
-        'candidateKey → { requirementId → verdict } for every requirement of the role (a refusal lists them with their ids: the brief fields in the recruiter\'s words, the hard criteria and the reasons they turned people down): "shown" when the person\'s row shows it, "unknown" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), "fails" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round\'s "not verified" notes are written from the unknown verdicts. Leave checks out of a round the Reviewer checks (after the recruiter\'s feedback, and its corrected version): its grades from full profiles stand for them.',
+        'Optional. candidateKey → { requirementId → verdict } on the role\'s requirements (the brief fields in the recruiter\'s words, the hard criteria and the reasons they turned people down): "shown" when the person\'s row shows it, "unknown" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), "fails" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round\'s "not verified" notes are written from the unknown verdicts. Leave checks out of a round the Reviewer checks (after the recruiter\'s feedback, and its corrected version): its grades from full profiles stand for them.',
       ),
     unverified: z
       .record(

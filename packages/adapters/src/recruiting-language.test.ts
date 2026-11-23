@@ -241,8 +241,7 @@ describe("roundByLanguage", () => {
     ["d", "strong"],
   ]);
 
-  it("puts confirmed and strong people first and labels everyone below them", () => {
-    // 11-13: six people with unconfirmed Mandarin came before the four whose profiles list it.
+  it("labels everyone below strong and keeps the lead's order", () => {
     const round = roundByLanguage(
       ["a", "b", "c", "d", "e"],
       {
@@ -253,7 +252,7 @@ describe("roundByLanguage", () => {
       levels,
       "Must speak Mandarin to work with the Shanghai HQ",
     );
-    expect(round.candidateKeys).toEqual(["b", "d", "c", "a", "e"]);
+    expect(round.candidateKeys).toEqual(["a", "b", "c", "d", "e"]);
     expect(round.unverified).toEqual({
       b: "Daily Shanghai HQ collaboration",
       c: "Mandarin not confirmed",

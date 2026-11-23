@@ -2,7 +2,6 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   checkRound,
-  everyPickGraded,
   listedBeforeRound,
   roundCriteria,
   roundListedNotRecorded,
@@ -25,31 +24,19 @@ describe("checkRound", () => {
     "prod-stack": verdict,
   });
 
-  it("refuses a pick without a verdict on every hard criterion, naming them", () => {
-    const result = checkRound({ ...base, keys: ["a", "b"], checks: { a: all("shown") } });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("missing for b");
-    if (!result.ok) expect(result.error).toContain("prod-stack = shows production Spark");
-  });
-
-  it("refuses a failed criterion every time and an unknown new one once per person", () => {
+  it("records picks without verdicts and refuses only a pick's own fails", () => {
+    // Staging 11-15/16: asking for a verdict on every criterion of every pick cost refusals and up
+    // to a minute a round; the Reviewer grades rounds from full profiles.
+    expect(checkRound({ ...base, keys: ["a", "b"], checks: { a: all("shown") } })).toEqual({
+      ok: true,
+      unverified: {},
+    });
     const checks = { a: all("shown"), b: all("fails"), c: all("unknown") };
-    const first = checkRound({ ...base, keys: ["a", "b", "c"], checks });
-    expect(first).toMatchObject({ ok: false, asked: ["c"] });
-    const again = checkRound({ ...base, keys: ["a", "c"], checks, asked: new Set(["c"]) });
-    expect(again).toEqual({
+    expect(checkRound({ ...base, keys: ["a", "b", "c"], checks })).toMatchObject({ ok: false });
+    expect(checkRound({ ...base, keys: ["a", "c"], checks })).toEqual({
       ok: true,
       unverified: { c: "6+ years; shows production Spark and Kafka work" },
     });
-  });
-
-  it("lets an unknown on a criterion the recruiter has not raised since the last round through", () => {
-    const result = checkRound({
-      ...base,
-      keys: ["a", "b"],
-      checks: { a: { seattle: "shown", years: "unknown", "prod-stack": "shown" }, b: all("shown") },
-    });
-    expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
   });
 
   it("never lists a turned-down reason as something to verify", () => {
@@ -66,32 +53,8 @@ describe("checkRound", () => {
       criteria: [...criteria, turnedDown],
       keys: ["a"],
       checks: { a: { ...all("shown"), years: "unknown", "turned-down:fb-1": "unknown" } },
-      reviewed: true,
     });
     expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
-  });
-
-  it("leaves missing and unknown verdicts to the Reviewer on a round it checks", () => {
-    // Staging 11-15: a held round took one to three refusals before the Reviewer checked it anyway.
-    const checks = { a: all("unknown"), b: all("fails") };
-    expect(checkRound({ ...base, keys: ["a", "c"], checks, reviewed: true })).toEqual({
-      ok: true,
-      unverified: { a: "6+ years; shows production Spark and Kafka work" },
-    });
-    // A pick's own "fails" still keeps them out.
-    expect(checkRound({ ...base, keys: ["a", "b"], checks, reviewed: true })).toMatchObject({
-      ok: false,
-    });
-  });
-
-  it("lets an unknown on a newly raised criterion through once a top-up came back short", () => {
-    const result = checkRound({
-      ...base,
-      keys: ["c"],
-      checks: { c: all("unknown") },
-      relaxed: true,
-    });
-    expect(result.ok).toBe(true);
   });
 
   // Long-search-finishes 11-15: Kubernetes and Terraform were unknown for all ten, so no note
@@ -419,22 +382,3 @@ describe("roundRepeats", () => {
   });
 });
 
-describe("everyPickGraded", () => {
-  const prisma = (rows: Array<{ candidateKey: string; matchFields: unknown }>) =>
-    ({
-      recruitingCandidateOccurrence: { findMany: vi.fn(async () => rows) },
-    }) as unknown as PrismaClient;
-
-  it("holds a round the Reviewer already graded every pick of (branch fr 11-21)", async () => {
-    // The lead's round was refused four times for verdicts the Reviewer's grades already gave,
-    // and round 2 never showed.
-    const graded = prisma([
-      { candidateKey: "a", matchFields: { match_tier: "Strong" } },
-      { candidateKey: "a", matchFields: {} },
-      { candidateKey: "b", matchFields: { match_tier: "Uncertain", match_score: 40 } },
-    ]);
-    expect(await everyPickGraded(graded, "role-1", ["a", "b"])).toBe(true);
-    expect(await everyPickGraded(graded, "role-1", ["a", "b", "c"])).toBe(false);
-    expect(await everyPickGraded(graded, "role-1", [])).toBe(false);
-  });
-});

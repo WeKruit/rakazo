@@ -675,7 +675,6 @@ import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting
 import type { RoundVerdict } from "./recruiting-round-check.js";
 import {
   checkRound,
-  everyPickGraded,
   roundCriteria,
   roundPeopleNamed,
 } from "./recruiting-round-check.js";
@@ -4815,8 +4814,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let gradingToolCalls = 0;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
-        // People the round check already asked the model about once.
-        const gapAsked = new Set<string>();
         // Recruiter messages whose round acceptance was questioned once because they name people of the round.
         const approvalAsked = new Set<string>();
         // Messages already told that a round shown after them answers them.
@@ -6157,24 +6154,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (criterion) =>
                   !languageRequirement || !languageFilters([criterion.statement]).length,
               ),
-              asked: gapAsked,
-              // The recruiter's rule: a short round relaxes the bar over at most three tries.
-              relaxed: agentRunsBeforeRound > 0,
-              reviewed:
-                (await roundState(deps.prisma, roleId).catch(() => null))?.status === "checked" ||
-                (await roundHeld(roleId)) ||
-                (await everyPickGraded(deps.prisma, roleId, keys).catch(() => false)),
               shortOfTen: SHORT_OF_TEN,
             });
-            if (!checked.ok) {
-              for (const key of checked.asked) gapAsked.add(key);
-              return { error: checked.error };
-            }
+            if (!checked.ok) return { error: checked.error };
             if (Object.keys(checked.unverified).length || checks)
               args = { ...args, unverified: checked.unverified };
           }
-          // The round lists people whose language is confirmed or strong first and labels the
-          // rest, whatever order the model picked them in.
+          // The round labels people whose language the check didn't confirm.
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
