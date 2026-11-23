@@ -257,9 +257,18 @@ describe("startRecruitingGrading", () => {
       researchBots: [],
       agentRunBots: ["sourcer"],
     });
+    // 11-23: the Reviewer judged Mandarin again and left it unknown for people the language check
+    // had already decided; the check's finding comes with the person instead.
+    f.prisma.externalEffect.findMany.mockResolvedValue([
+      {
+        result: {
+          languageLevels: { requirement: "Mandarin", levels: { "linkedin:/in/flink": "confirmed" } },
+        },
+      },
+    ] as never);
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     expect(promptOf(f)).toContain(
-      '- flink: https://x.test/in/flink\n  The search that found them said: "Apache Flink Contributor, streaming"',
+      '- flink: https://x.test/in/flink\n  The search that found them said: "Apache Flink Contributor, streaming"\n  The language check found: Mandarin: confirmed',
     );
   });
 

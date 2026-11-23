@@ -17,6 +17,7 @@ import { getLogger } from "@rakazo/logging";
 import { sleep } from "./background-wait.js";
 import { handedInRecruiterWords } from "./global-role-writes.js";
 import { requestedPeopleTarget } from "./people-target.js";
+import { languageFindings } from "./recruiting-language.js";
 import { recruiterWordsSinceFirstRound, roundCriteria } from "./recruiting-round-check.js";
 import { recruitingRoundPeople } from "./turn-end-guard.js";
 
@@ -207,7 +208,7 @@ function searchSnippet(
 const SEARCH_SNIPPET_CHARS = 400;
 
 export function recruitingGradePrompt(
-  people: readonly { name: string; url: string; found?: string }[],
+  people: readonly { name: string; url: string; found?: string; language?: string }[],
   service: GradingService,
   asked: readonly string[] = [],
 ) {
@@ -222,7 +223,7 @@ export function recruitingGradePrompt(
       : []),
     ...people.map(
       (person) =>
-        `- ${person.name}: ${person.url}${person.found ? `\n  The search that found them said: "${person.found}"` : ""}`,
+        `- ${person.name}: ${person.url}${person.found ? `\n  The search that found them said: "${person.found}"` : ""}${person.language ? `\n  The language check found: ${person.language}` : ""}`,
     ),
   ];
   if (service.tool === "self")
@@ -263,6 +264,7 @@ export const SELF_GRADE_RUBRIC = [
   "- The job's own terms (pay range, office days or hybrid schedule, benefits) are what the job offers, not something a profile shows: leave them out of requirements_assessment, and they never lower a tier. The person's side of them still counts: a hybrid job needs someone living within a commute.",
   "- Years of experience: add up the dated roles that match the requirement, counting overlapping roles once; a stated total in the person's own summary counts too.",
   "- Location: the current location; a nearby commuting area counts.",
+  "- A required language: when a person's line gives the language check's finding, that is the requirement's status (confirmed or strong: met; no sign: not_met; unknown: unknown). Don't judge the language again yourself.",
   "Score and tier: Strong needs every hard requirement met, and a preference never keeps anyone from Strong (note a missed one in concerns); any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong, and a point the recruiter turned someone down for that the profile doesn't show makes Uncertain at most. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
 ].join("\n");
 
@@ -516,7 +518,28 @@ export async function startRecruitingGrading(
   const skip = new Set(
     graded.flatMap((row) => (unreviewed.has(row.candidateKey) ? [] : [row.candidateKey])),
   );
-  const people = new Map<string, { name: string; url: string; found?: string }>();
+  const people = new Map<
+    string,
+    { name: string; url: string; found?: string; language?: string }
+  >();
+  // The language check's finding on each person stands for the required language.
+  const languages = languageFindings(
+    (
+      await deps.prisma.externalEffect
+        .findMany({
+          where: {
+            spaceId: thread.spaceId,
+            run: { threadId: thread.id },
+            kind: "recruiting_research",
+            status: "completed",
+            request: { path: ["operation"], equals: "save_search" },
+          },
+          select: { result: true },
+          orderBy: { createdAt: "asc" },
+        })
+        .catch(() => [])
+    ).map((effect) => effect.result),
+  );
   const batchSize = grader?.tool === "self" ? SELF_GRADE_BATCH : GRADE_BATCH;
   const ordered = [
     ...found.filter((row) => unreviewed.has(row.candidateKey)),
@@ -599,6 +622,7 @@ export async function startRecruitingGrading(
             name: row.name || row.linkedinUrl,
             url: row.linkedinUrl,
             found: searchSnippet(found, row.candidateKey),
+            language: languages.get(row.candidateKey),
           });
         }
       } else {
@@ -680,6 +704,7 @@ export async function startRecruitingGrading(
       name: row.name || row.linkedinUrl,
       url: row.linkedinUrl,
       found: searchSnippet(found, row.candidateKey),
+      language: languages.get(row.candidateKey),
     });
   }
   if (!people.size) {
@@ -715,6 +740,7 @@ export async function startRecruitingGrading(
         name: row.name || row.linkedinUrl,
         url: row.linkedinUrl,
         found: searchSnippet(found, row.candidateKey),
+        language: languages.get(row.candidateKey),
       });
     }
   }

@@ -390,6 +390,7 @@ import {
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
   showDelegatedTeamCard,
+  showRoundWhereAskedNow,
   teamProgress,
 } from "./bot-messages.js";
 import {
@@ -649,6 +650,7 @@ import {
   languageFilters,
   plannedLanguageFilters,
   requiredLanguage,
+  saveLanguageLevels,
   roundByLanguage,
   statedLanguageRequirement,
   withRequiredLanguage,
@@ -9829,6 +9831,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : { rows: shown, withoutLanguage: 0 };
                   if (checked.rows !== shown)
                     rememberLanguage(languageRole, roleId, checked.rows, checked.withoutLanguage);
+                  await saveLanguageLevels(
+                    deps.prisma,
+                    saving.effect.id,
+                    "levels" in checked ? checked.levels : undefined,
+                  ).catch(
+                    (error) => getLogger().warn("language levels not saved", { error: String(error) }),
+                  );
                   // Licences, clearances and the like are rarely in the row; before the first
                   // pick, lines of the full profile that speak to the must-haves come with it.
                   if (deps.profileReader && firstRoundPending && Array.isArray(checked.rows))
@@ -10786,6 +10795,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       error: String(error),
                     }),
                   );
+                  await showRoundWhereAskedNow(deps, run, text, applied.effect.id).catch((error) =>
+                    getLogger().warn("round not shown where asked", { error: String(error) }),
+                  );
                 }
                 return round && typeof round === "object" && !Array.isArray(round)
                   ? {
@@ -10850,6 +10862,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 );
                 if (checked.withoutLanguage || checked.rows.some((row) => row.requiredLanguage))
                   rememberLanguage(languageRole, roleId, checked.rows, checked.withoutLanguage);
+                await saveLanguageLevels(deps.prisma, applied.effect.id, checked.levels).catch(
+                  (error) =>
+                    getLogger().warn("language levels not saved", { error: String(error) }),
+                );
                 return {
                   ...saved,
                   candidateRows: checked.rows,
