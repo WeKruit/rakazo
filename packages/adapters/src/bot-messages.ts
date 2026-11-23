@@ -896,7 +896,12 @@ export function delegatedAnswerResult(waited: { answer?: string; roundShown?: tr
       answer: waited.answer,
       note: "The team's answer to this hand-off, returned in this turn; it does not come again. Answer the recruiter from it now.",
     };
-  if (waited?.roundShown) return { note: ROUND_SHOWN_ABOVE };
+  // fosp 11-23 (s27): told only not to retell the round, Kruit said nothing, so 「收到，马上处理。」
+  // stood as its answer and "下一批照这个改" went without a word on what changed.
+  if (waited?.roundShown)
+    return {
+      note: `${ROUND_SHOWN_ABOVE} Answer whatever else the recruiter asked in this message, such as what changed in the search, in one line.`,
+    };
   return {
     note: "The team is still working on it; its answer comes back here as a new message. Tell the recruiter in one line what the team is doing now, without promising a time.",
   };
