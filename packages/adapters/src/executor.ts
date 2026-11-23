@@ -384,6 +384,7 @@ import {
 import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import {
+  delegatedAnswerResult,
   loadBotMessageContext,
   messageBot,
   reportDelegatedTeamBlocked,
@@ -392,6 +393,7 @@ import {
   showDelegatedTeamCard,
   showRoundWhereAskedNow,
   teamProgress,
+  waitForDelegatedAnswer,
 } from "./bot-messages.js";
 import {
   allowPrivateHttpSecretOrigins,
@@ -12531,6 +12533,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 note: "Already handed to that team in this turn, with the recruiter's own words; nothing more was sent. Its answer comes back here.",
               });
             rolesDelegatedInTurn.add(target.threadId);
+            // A second's slack for the database clock, which stamps the team's answer.
+            const handedAt = new Date(Date.now() - 1_000);
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },
@@ -12571,10 +12575,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 title: target.title,
               },
             ]);
+            const waited = await waitForDelegatedAnswer(deps.prisma, {
+              spaceId: run.spaceId,
+              threadId: run.threadId,
+              botId: bot.id,
+              since: handedAt,
+              signal: context.signal,
+              userMessageWaiting: () =>
+                hasUnclaimedSteering(deps.prisma, {
+                  threadId: run.threadId,
+                  botId: bot.id,
+                  runId: run.id,
+                }),
+            }).catch((error) => {
+              getLogger().warn("delegated answer wait", { error: String(error) });
+              return undefined;
+            });
+            const answered = delegatedAnswerResult(waited);
             return finish({
               ok: true,
               team: sent.name,
-              note: `${sent.note ?? ""} A card that opens the role's conversation is already shown; do not paste a link.`.trim(),
+              ...answered,
+              note: `${answered.note} A card that opens the role's conversation is already shown; do not paste a link.`,
             });
           }
           if (name === "start_role") {

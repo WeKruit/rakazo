@@ -10,6 +10,7 @@ import {
   showDelegatedTeamCard,
   showRoundWhereAskedNow,
   teamProgress,
+  waitForDelegatedAnswer,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
 import * as mailReplies from "./mail-reply.js";
@@ -1619,5 +1620,70 @@ describe("teamProgress", () => {
         where: expect.objectContaining({ status: { in: ["queued", "leased", "running"] } }),
       }),
     );
+  });
+});
+
+describe("waitForDelegatedAnswer", () => {
+  const since = new Date("2026-11-23T10:00:00Z");
+  const wait = (
+    prisma: PrismaClient,
+    extra: { userMessageWaiting?: () => Promise<boolean> } = {},
+  ) =>
+    waitForDelegatedAnswer(prisma, {
+      spaceId: "space",
+      threadId: "global",
+      botId: "kruit",
+      since,
+      signal: new AbortController().signal,
+      timeoutMs: 50,
+      pollMs: 1,
+      ...extra,
+    });
+
+  it("takes the team's returned answer into the turn and cancels its queued turn", async () => {
+    // fosp/fr 11-23: Kruit said "已交给岗位" and later retold the relayed answer; a hand-off now
+    // returns the team's answer to the same turn, the way a subagent call does.
+    const returned = {
+      blocks: [{ kind: "bot_message_received", text: "本轮 5 人：…", hop: 2 }],
+      sourceRuns: [{ id: "queued-run", taskId: "task" }],
+    };
+    const tx = {
+      run: {
+        findMany: vi.fn(async () => [{ id: "queued-run", taskId: "task" }]),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn(async () => ({ status: "cancelled" })),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 0 })) },
+      task: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      event: { create: vi.fn(async () => ({ seq: 1 })) },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 2, userId: "user" })) },
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      message: {
+        findFirst: vi.fn(async ({ where }: { where: { role: string } }) =>
+          where.role === "user" ? returned : null,
+        ),
+      },
+      $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
+    } as unknown as PrismaClient;
+    expect(await wait(prisma)).toEqual({ answer: "本轮 5 人：…" });
+    expect(tx.run.updateMany).toHaveBeenCalled();
+    expect(tx.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: { in: ["queued-run"] } }) }),
+    );
+  });
+
+  it("ends when the recruiter writes, or when the team's round is posted here", async () => {
+    const none = { message: { findFirst: vi.fn(async () => null) } } as unknown as PrismaClient;
+    expect(await wait(none, { userMessageWaiting: async () => true })).toBeUndefined();
+    const round = {
+      message: {
+        findFirst: vi.fn(async ({ where }: { where: { role: string } }) =>
+          where.role === "bot" ? { id: "round" } : null,
+        ),
+      },
+    } as unknown as PrismaClient;
+    expect(await wait(round)).toEqual({ roundShown: true });
   });
 });

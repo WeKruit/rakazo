@@ -21,6 +21,7 @@ import {
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { sleep } from "./background-wait.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { requestedPeopleTarget } from "./people-target.js";
@@ -788,6 +789,117 @@ export async function showRoundWhereAskedNow(
   )
     return;
   await showRoundWhereAsked(deps, run, root, `round:${roundId}`, text);
+}
+
+export const DELEGATED_ANSWER_WAIT_MS = 4 * 60_000;
+const DELEGATED_ANSWER_POLL_MS = 3_000;
+
+/**
+ * Kruit's hand-off waits for the role team's answer inside the same turn, the way a subagent call
+ * returns its result to the caller (Claude Code's Task tool, Pi's subagent): the team's returned
+ * message is taken here and its queued turn cancelled, so Kruit answers once, with the result,
+ * instead of "已交给岗位" now and a relayed retelling later. fosp/fr 11-23 (s25, s26): 6 of 20
+ * runs were failed for deferrals or relay talk while the round was being prepared. Ends early when
+ * the recruiter writes, or when the team's round is posted here; after the timeout the answer
+ * still comes back as a new message.
+ */
+export async function waitForDelegatedAnswer(
+  prisma: PrismaClient,
+  input: {
+    spaceId: string;
+    threadId: string;
+    botId: string;
+    since: Date;
+    signal: AbortSignal;
+    timeoutMs?: number;
+    pollMs?: number;
+    userMessageWaiting?: () => Promise<boolean>;
+  },
+): Promise<{ answer?: string; roundShown?: true } | undefined> {
+  const deadline = Date.now() + (input.timeoutMs ?? DELEGATED_ANSWER_WAIT_MS);
+  for (;;) {
+    const [returned, round] = await Promise.all([
+      prisma.message.findFirst({
+        where: {
+          threadId: input.threadId,
+          role: "user",
+          createdAt: { gte: input.since },
+          blocks: { array_contains: [{ kind: "bot_message_received" }] },
+          sourceRuns: {
+            some: { botId: input.botId, status: "queued", trigger: "bot_message", leaseFence: 0 },
+          },
+        },
+        orderBy: { seq: "asc" },
+        select: {
+          blocks: true,
+          sourceRuns: {
+            where: { status: "queued", trigger: "bot_message", leaseFence: 0 },
+            select: { id: true, taskId: true },
+          },
+        },
+      }),
+      prisma.message.findFirst({
+        where: {
+          threadId: input.threadId,
+          role: "bot",
+          createdAt: { gte: input.since },
+          clientNonce: { startsWith: "delegated-round:" },
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (returned) {
+      const taken = await prisma.$transaction(async (tx) => {
+        const runs = await tx.run.findMany({
+          where: {
+            id: { in: returned.sourceRuns.map((queued) => queued.id) },
+            status: "queued",
+            leaseFence: 0,
+          },
+          select: { id: true, taskId: true },
+        });
+        if (!runs.length) return false;
+        await cancelRunsInTransaction(tx, runs, new Date());
+        for (const taken of runs)
+          await appendEventInTransaction(tx, {
+            spaceId: input.spaceId,
+            threadId: input.threadId,
+            botId: input.botId,
+            type: "run.cancelled",
+            runId: taken.id,
+            payload: { reason: "answered_in_turn" },
+          });
+        return true;
+      });
+      const answer = botMessageContext(
+        Array.isArray(returned.blocks) ? (returned.blocks as MessageBlock[]) : [],
+      )?.text;
+      if (taken && answer) return { answer, ...(round ? { roundShown: true as const } : {}) };
+    } else if (round) return { roundShown: true };
+    if (
+      Date.now() >= deadline ||
+      input.signal.aborted ||
+      (await input.userMessageWaiting?.().catch(() => false))
+    )
+      return undefined;
+    await sleep(
+      Math.min(input.pollMs ?? DELEGATED_ANSWER_POLL_MS, deadline - Date.now()),
+      input.signal,
+    );
+  }
+}
+
+/** Model-facing fields for delegate_to_role once its wait ends. */
+export function delegatedAnswerResult(waited: { answer?: string; roundShown?: true } | undefined) {
+  if (waited?.answer)
+    return {
+      answer: waited.answer,
+      note: "The team's answer to this hand-off, returned in this turn; it does not come again. Answer the recruiter from it now.",
+    };
+  if (waited?.roundShown) return { note: ROUND_SHOWN_ABOVE };
+  return {
+    note: "The team is still working on it; its answer comes back here as a new message. Tell the recruiter in one line what the team is doing now, without promising a time.",
+  };
 }
 
 /**
