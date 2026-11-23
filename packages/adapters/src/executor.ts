@@ -233,6 +233,7 @@ import {
   automationRateLimited,
   backgroundToolRun,
   backgroundToolSourceTrigger,
+  BRIEF_CONFIRMATION_TEXT,
   bindRecruitingSchedulingOperation,
   calibrationRoundRepeats,
   campaignSendCardHash,
@@ -6130,7 +6131,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 source &&
                 latest &&
                 latest.createdAt > source.createdAt &&
-                !(await roundRecordedThisRun())
+                // fosp 11-22 (df2c09cb): this turn showed the checked round 2, which "再补4个"
+                // (written while it was held) asked for, then recorded round 3 for the same words.
+                // Only swapping people within the shown round is not another round.
+                args.corrects !== true
               )
                 return {
                   error: `Not recorded yet: round ${state.round} was shown after this message was written, so it is the round the message asks for. Unless the message asks for something round ${state.round} does not do, record nothing and end the turn with one short line pointing to round ${state.round} above. If it does ask for more, call calibration_round again.`,
@@ -14100,7 +14104,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   )
                   .join(" ")
               : "",
-          );
+          )
+          // fosp 11-23 (df2c09cb): the brief confirmation the product posts as the recruiter's is
+          // English, so a Chinese recruiter's checked rounds came in English.
+          .filter((text) => !BRIEF_CONFIRMATION_TEXT.test(text.trim()));
         const roleStartTexts = messages.flatMap((message) =>
           message.role === "user" &&
           message.clientNonce?.startsWith(ROLE_START_NONCE) &&

@@ -47,6 +47,7 @@ type Occurrence = {
   name: string;
   linkedinUrl: string | null;
   page?: { observedAt: Date };
+  report?: unknown;
 };
 const person = (slug: string): Occurrence => ({
   candidateKey: `linkedin:/in/${slug}`,
@@ -244,6 +245,26 @@ describe("startRecruitingGrading", () => {
   });
 
   // fr 11-22 (6aa4c10d): round 2 waited minutes on a pool batch sent before it that never finished.
+  // fosp 11-23 (df2c09cb): the search said "Apache Flink Contributor"; the public page showed only
+  // courses, so the check graded Flink unknown and the list said there was no such experience.
+  it("gives the check what the search said of each person", async () => {
+    const f = fixture({
+      found: [
+        {
+          ...person("flink"),
+          report: { fields: [{ label: "Snippet", value: "Apache Flink Contributor,\n streaming" }] },
+        },
+      ],
+      rounds: round(["linkedin:/in/flink"]),
+      researchBots: [],
+      agentRunBots: ["sourcer"],
+    });
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(promptOf(f)).toContain(
+      '- flink: https://x.test/in/flink\n  The search that found them said: "Apache Flink Contributor, streaming"',
+    );
+  });
+
   it("grades against the recruiter's own feedback words, also when a teammate handed them in", async () => {
     // Staging 11-16: "senior only, 6+ years" was never saved as feedback, so the next round's
     // check graded without it and juniors came back.
