@@ -18,6 +18,7 @@ import { sleep } from "./background-wait.js";
 import { handedInRecruiterWords } from "./global-role-writes.js";
 import { requestedPeopleTarget } from "./people-target.js";
 import { recruiterWordsSinceFirstRound, roundCriteria } from "./recruiting-round-check.js";
+import { recruitingRoundPeople } from "./turn-end-guard.js";
 
 export { RECRUITING_GRADE_NONCE_PREFIX };
 /** Newly saved searches settle this long before grading starts, so one request covers them. */
@@ -262,7 +263,7 @@ export const SELF_GRADE_RUBRIC = [
   "- The job's own terms (pay range, office days or hybrid schedule, benefits) are what the job offers, not something a profile shows: leave them out of requirements_assessment, and they never lower a tier. The person's side of them still counts: a hybrid job needs someone living within a commute.",
   "- Years of experience: add up the dated roles that match the requirement, counting overlapping roles once; a stated total in the person's own summary counts too.",
   "- Location: the current location; a nearby commuting area counts.",
-  "Score and tier: Strong needs every hard requirement met, and a preference never keeps anyone from Strong (note a missed one in concerns); any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
+  "Score and tier: Strong needs every hard requirement met, and a preference never keeps anyone from Strong (note a missed one in concerns); any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong, and a point the recruiter turned someone down for that the profile doesn't show makes Uncertain at most. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
 ].join("\n");
 
 /** The profile links one grading request sent. */
@@ -539,14 +540,9 @@ export async function startRecruitingGrading(
     feedbackAt !== undefined &&
     gradedKeys.length < review.round.candidateKeys.length &&
     (await (async () => {
-      const size = await askedRoundSize(deps.prisma, role.id, review.round.round, thread.id);
-      const people = checkedRoundPeople(
-        gradedKeys,
-        review.grades,
-        await roundReplacements(deps.prisma, role.id, size, feedbackAt),
-        size,
-      );
-      return people.length >= size;
+      const size = review.round.candidateKeys.length;
+      const replacements = await roundReplacements(deps.prisma, role.id, size, feedbackAt);
+      return placeable(gradedKeys, review.grades) + replacements.length >= size;
     })());
   if (review && (early || ![...roundUrls].some((url) => waiting.has(url) || !sent.has(url)))) {
     const roundKeys = early ? gradedKeys : review.round.candidateKeys;
@@ -562,25 +558,23 @@ export async function startRecruitingGrading(
         orderBy: { seq: "desc" },
         select: { id: true },
       });
-      const size = await askedRoundSize(deps.prisma, role.id, review.round.round, thread.id);
-      const open = Math.max(0, size - (roundKeys.length - misfits.length));
-      const shownPeople = checkedRoundPeople(
-        roundKeys,
-        review.grades,
-        await roundReplacements(
-          deps.prisma,
-          role.id,
-          open,
-          early ? feedbackAt : review.since,
-          SHOWN_REPLACEMENT_TIERS,
-        ),
-        size,
+      // The lead reads how many the recruiter asked for and recorded that many; it picks the
+      // round from the round's checked people and Results' checked people, as a bare model does
+      // from the same grades (fosp x5 replay 11-23: right count or asks, no repeats, 10/10).
+      const size = review.round.candidateKeys.length;
+      // Only as many of Results' checked people as the round has open places (plus a few), so the
+      // lead weighs a short list: picking from 25 took it about 30 s more (s21, 11-23).
+      const replacements = await roundReplacements(
+        deps.prisma,
+        role.id,
+        Math.max(0, size - placeable(roundKeys, review.grades)),
+        early ? feedbackAt : review.since,
       );
       // fosp 11-20 (4eb42c98): "再来5个" came back with 2 while ten saved people no round had shown
       // were never graded, so none could fill a place. A short round first has those people
       // checked, once each, then shows.
       const unshown =
-        shownPeople.length < size && grader?.tool === "self"
+        placeable(roundKeys, review.grades) + replacements.length < size && grader?.tool === "self"
           ? await unshownUngraded(deps.prisma, role.id, found, review.since)
           : [];
       if (unshown.some((row) => waiting.has(row.linkedinUrl))) return skipped("filling round");
@@ -614,7 +608,33 @@ export async function startRecruitingGrading(
         // start. The turn that recorded the round waits for its check and shows it itself, the
         // way a parent agent awaits its child (Claude Code subagents, Workloop); a later turn
         // starts only once that one has ended.
-        const prompt = roundReviewPrompt(review.round.round, shownPeople, size, review.grades);
+        const keys = [
+          ...roundKeys,
+          ...replacements.flatMap((person) => (roundKeys.includes(person.key) ? [] : [person.key])),
+        ];
+        const passages = await recruitingRoundPeople(deps.prisma, {
+          threadId: thread.id,
+          spaceId: thread.spaceId,
+          roleId: role.id,
+          candidateKeys: keys,
+        });
+        const replacing = new Map(replacements.map((person) => [person.key, person]));
+        const prompt = roundReviewPrompt(
+          review.round.round,
+          size,
+          keys.map((key) => {
+            const grade = review.grades.get(key) ?? replacing.get(key);
+            return {
+              key,
+              name: grade?.name || key,
+              tier: typeof grade?.tier === "string" ? grade.tier : undefined,
+              score: grade?.score,
+              reason: passages.get(key)?.snippet ?? undefined,
+              unknown: grade?.unknown,
+              inRound: roundKeys.includes(key),
+            };
+          }),
+        );
         const recorder = await deps.prisma.externalEffect.findUnique({
           where: { id: review.round.effectId },
           select: { run: { select: { id: true, status: true } } },
@@ -989,6 +1009,7 @@ type RoundGrade = {
   title: string | null;
   company: string | null;
   tier: unknown;
+  score?: number;
   /** Requirements the person's profile says nothing about. */
   unknown?: string[];
 };
@@ -1081,6 +1102,7 @@ async function roundUnderReview(
         title: row.title,
         company: row.company,
         tier: placeTier(row.matchFields),
+        score: gradeScore(row.matchFields),
         unknown: gradeUnknown(row.matchFields),
       });
   return { round, grades, held, checked: held && status === "checked", since, feedbackAt };
@@ -1231,6 +1253,8 @@ export async function hasRoundReviewer(prisma: PrismaClient, threadId: string): 
 type Replacement = {
   key: string;
   tier: string;
+  score?: number;
+  unknown?: string[];
   name: string | null;
   title: string | null;
   company: string | null;
@@ -1321,61 +1345,32 @@ async function roundReplacements(
   ]);
   const shown = new Set(rounds.flatMap((round) => round.candidateKeys));
   const tiers = new Map<string, unknown>();
+  const fields = new Map<string, unknown>();
   for (const row of graded)
-    if (!tiers.has(row.candidateKey))
+    if (!tiers.has(row.candidateKey)) {
       tiers.set(row.candidateKey, placeTier(row.matchFields));
+      fields.set(row.candidateKey, row.matchFields);
+    }
   const people = new Map<string, Replacement>();
   for (const tier of usable)
     for (const row of rows) {
       if (shown.has(row.candidateKey) || people.has(row.candidateKey)) continue;
       if (tiers.get(row.candidateKey) !== tier) continue;
-      people.set(row.candidateKey, { ...row, key: row.candidateKey, tier });
+      const grade = fields.get(row.candidateKey);
+      people.set(row.candidateKey, {
+        ...row,
+        key: row.candidateKey,
+        tier,
+        score: gradeScore(grade),
+        unknown: gradeUnknown(grade),
+      });
     }
   return [...people.values()].slice(0, open + 5);
 }
 
-/**
- * How many people a checked round shows: the few the recruiter last asked for since the round
- * before ("再来5个"), else ten. `messages` are the recruiter's messages' blocks, newest first.
- * fosp 11-20: "再来5个" was filled to 6; capping at the recorded size instead left "the next ten"
- * rounds short when the lead recorded fewer; and reading only the newest message ("那5个出来了吗？")
- * filled a round asked as 5 to 8; "你说的7个和23个到底哪个对，再来5个" read 23 and showed ten.
- */
-export function roundSize(messages: readonly unknown[]): number {
-  for (const blocks of messages) {
-    const text = (Array.isArray(blocks) ? (blocks as { kind?: string; text?: unknown }[]) : [])
-      .flatMap((block) =>
-        (block.kind === "text" || block.kind === "bot_message_received") &&
-        typeof block.text === "string"
-          ? [handedInRecruiterWords(block.text) ?? block.text]
-          : [],
-      )
-      .join("\n");
-    const asked = requestedPeopleTarget(text);
-    if (asked) return asked < 10 ? asked : 10;
-  }
-  return 10;
-}
-
-/** roundSize for `round` of a role, from the recruiter's messages in `threadId` since the round before. */
-export async function askedRoundSize(
-  prisma: PrismaClient,
-  roleId: string,
-  round: number,
-  threadId: string,
-): Promise<number> {
-  const before = await prisma.recruitingCalibrationRound.findFirst({
-    where: { roleId, round: { lt: round } },
-    orderBy: { round: "desc" },
-    select: { createdAt: true },
-  });
-  const asked = await prisma.message.findMany({
-    where: { threadId, role: "user", ...(before ? { createdAt: { gt: before.createdAt } } : {}) },
-    orderBy: { seq: "desc" },
-    take: 10,
-    select: { blocks: true },
-  });
-  return roundSize(asked.map((message) => message.blocks));
+function gradeScore(fields: unknown): number | undefined {
+  const score = (fields as { match_score?: unknown } | null)?.match_score;
+  return typeof score === "number" ? score : undefined;
 }
 
 function gradeUnknown(fields: unknown): string[] | undefined {
@@ -1400,100 +1395,55 @@ export function placeTier(fields: unknown): unknown {
     : grade?.match_tier;
 }
 
-/** How close a misfit the Reviewer checked is: kept in a place no Strong person can fill. */
-const KEPT_MISFIT_TIERS = ["Promising", "Uncertain"];
 /** Checked people from Results who may fill a round's open places, best first. */
 const REPLACEMENT_TIERS = [FIT_TIER, "Promising"];
 /**
- * A checked round that is shown now may also take Results' Uncertain people in its last places.
- * fosp 11-21 (f68ae6bf): "再来5个" came back with 4 while three checked Uncertain people sat in
- * Results, and the recruiter's "要5个只给4个" spent two more turns. Not for showing a round
- * early, which waits for the search's better people instead.
+ * How many of a round's checked people the check left fit to show: Strong or Promising. The
+ * recruiter deleted filling a round with Uncertain people (11-22): a short round asks instead.
  */
-const SHOWN_REPLACEMENT_TIERS = [...REPLACEMENT_TIERS, "Uncertain"];
+function placeable(
+  keys: readonly string[],
+  grades: ReadonlyMap<string, Pick<RoundGrade, "tier">>,
+): number {
+  return keys.filter((key) => {
+    const tier = grades.get(key)?.tier;
+    return typeof tier === "string" && REPLACEMENT_TIERS.includes(tier);
+  }).length;
+}
+
+type CheckedPerson = {
+  key: string;
+  name: string;
+  tier?: string;
+  score?: number;
+  reason?: string;
+  unknown?: readonly string[];
+  /** In the round the lead recorded, rather than another checked person from Results. */
+  inRound: boolean;
+};
 
 /**
- * The checked round to show, in order: the round's people who fit, then the Strong people from
- * Results in the misfits' places, then the round's Promising people, then Promising people from
- * Results, then the round's Uncertain people, then Uncertain people from Results (never Partial)
- * in any place still open, up to
- * `size` (roundSize). Staging 11-16 (982a0ac9): told to "keep the round's
- * other people" without being given them, the lead asked the recruiter which three to keep.
+ * The checked round handed back to the lead, which picks whom to show from the Reviewer's grades
+ * itself. `size` is how many it recorded, i.e. read from the recruiter's words.
  */
-export function checkedRoundPeople(
-  candidateKeys: readonly string[],
-  grades: ReadonlyMap<string, Pick<RoundGrade, "name" | "tier">>,
-  replacements: readonly (Pick<Replacement, "key" | "name"> & { tier?: string })[] = [],
-  size = 10,
-): { key: string; name: string }[] {
-  const misfit = (key: string) => {
-    const tier = grades.get(key)?.tier;
-    return tier !== undefined && tier !== FIT_TIER;
+export function roundReviewPrompt(round: number, size: number, people: readonly CheckedPerson[]) {
+  const line = (person: CheckedPerson) => {
+    const grade = [person.tier, person.score].filter((part) => part !== undefined).join(" ");
+    const unknown = person.unknown?.length
+      ? ` Profile doesn't show: ${person.unknown.join("; ")}.`
+      : "";
+    return `- ${person.name} (candidateKey ${person.key})${person.inRound ? " [in the round]" : ""}: ${grade || "not graded"}.${person.reason ? ` ${person.reason.replace(/\s+/g, " ").trim()}` : ""}${unknown}`;
   };
-  const named = (key: string, name?: string | null) => ({ key, name: name || key });
-  const kept = candidateKeys.filter((key) => !misfit(key));
-  const closest = (tier: string) =>
-    candidateKeys
-      .filter((key) => misfit(key) && grades.get(key)?.tier === tier)
-      .map((key) => named(key, grades.get(key)?.name));
-  const fromResults = (tier: string) =>
-    replacements
-      .filter((person) => !candidateKeys.includes(person.key) && (person.tier ?? FIT_TIER) === tier)
-      .map((person) => named(person.key, person.name));
-  const [promising, uncertain] = KEPT_MISFIT_TIERS.map(closest);
-  const people = [
-    ...kept.map((key) => named(key, grades.get(key)?.name)),
-    ...fromResults(FIT_TIER),
-    ...(promising ?? []),
-    ...fromResults("Promising"),
-    ...(uncertain ?? []),
-    ...fromResults("Uncertain"),
-  ];
-  return people.slice(0, size);
-}
-
-export function roundReviewPrompt(
-  round: number,
-  people: readonly { key: string; name: string }[],
-  asked = people.length,
-  grades?: ReadonlyMap<string, RoundGrade>,
-) {
-  const unknown = mostlyUnknown(people, grades);
   return [
-    `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and exactly these people, in this order:`,
-    ...people.map((person, index) => `${index + 1}. ${person.name} (candidateKey ${person.key})`),
+    `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
+    `Pick as many as the recruiter asked for this round (you recorded ${size}): Strong first, then Promising, the round's own people before others of the same grade; the Reviewer's grade already weighs what the recruiter stressed, so never pick someone graded Uncertain or Partial. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
+    // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
+    "When most of your picks' profiles don't show the same requirement, ask in one line beside the list whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
+    "",
+    ...people.map(line),
     "",
     "The Reviewer's grades stand for them: no checks, no search, and don't read Results or anyone's profile again. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.",
-    // The recruiter's rule 11-21: "补不满就问问用户要不要就行，要不然会浪费钱".
-    ...(people.length < asked
-      ? [
-          `That is ${people.length} of the ${asked} they asked for. In the same reply, ask whether these are enough or which one point they named to loosen, and search no more until they answer.`,
-        ]
-      : []),
-    // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
-    ...(unknown.length
-      ? [
-          `Their profiles say nothing about: ${unknown.map((item) => `"${item}"`).join(", ")}. Unless you already asked about this in this conversation, ask the recruiter in one line beside the list whether people whose profile doesn't show it should still count, with the two choices.`,
-        ]
-      : []),
   ].join("\n");
-}
-
-/** Requirements that at least half of the shown people's profiles say nothing about. */
-function mostlyUnknown(
-  people: readonly { key: string }[],
-  grades: ReadonlyMap<string, RoundGrade> | undefined,
-): string[] {
-  if (!grades || !people.length) return [];
-  const counts = new Map<string, number>();
-  for (const person of people)
-    for (const item of new Set(grades.get(person.key)?.unknown ?? []))
-      counts.set(item, (counts.get(item) ?? 0) + 1);
-  return [...counts]
-    .filter(([, count]) => count * 2 >= people.length)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 2)
-    .map(([item]) => item);
 }
 
 /** Who grades a batch: the quality check itself, or a teammate's search service. */
