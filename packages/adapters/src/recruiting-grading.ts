@@ -562,10 +562,12 @@ export async function startRecruitingGrading(
       // round from the round's checked people and Results' checked people, as a bare model does
       // from the same grades (fosp x5 replay 11-23: right count or asks, no repeats, 10/10).
       const size = review.round.candidateKeys.length;
+      // Only as many of Results' checked people as the round has open places (plus a few), so the
+      // lead weighs a short list: picking from 25 took it about 30 s more (s21, 11-23).
       const replacements = await roundReplacements(
         deps.prisma,
         role.id,
-        size,
+        Math.max(0, size - placeable(roundKeys, review.grades)),
         early ? feedbackAt : review.since,
         SHOWN_REPLACEMENT_TIERS,
       );
@@ -1440,7 +1442,7 @@ export function roundReviewPrompt(round: number, size: number, people: readonly 
   };
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
-    `Pick as many as the recruiter asked for this round (you recorded ${size}): the best-graded first, the round's own people before others of the same grade. The Reviewer's grade already weighs what each profile doesn't show: leave out only someone graded Partial, or whose profile shows they don't meet a point the recruiter stressed; a point their profile doesn't show doesn't leave them out. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
+    `Pick as many as the recruiter asked for this round (you recorded ${size}): the best-graded first, the round's own people before others of the same grade. Leave out anyone graded Partial, and anyone whose profile doesn't show a point the recruiter stressed (a must-have they named, or why they turned someone down); a point they didn't stress doesn't leave anyone out. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
     // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
     "When most of your picks' profiles don't show the same requirement, ask in one line beside the list whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
     "",
