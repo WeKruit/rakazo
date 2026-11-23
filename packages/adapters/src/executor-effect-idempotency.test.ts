@@ -109,6 +109,7 @@ vi.mock("./group-handoff.js", async (importOriginal) => {
 vi.mock("./bot-messages.js", async (importOriginal) => ({
   ...(await importOriginal<typeof BotMessagesModule>()),
   messageBot: vi.fn(async () => ({ ok: true, name: "Role team" })),
+  waitForDelegatedAnswer: vi.fn(async () => undefined),
 }));
 vi.mock("./recruiting-context.js", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
