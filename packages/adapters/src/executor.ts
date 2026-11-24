@@ -632,12 +632,10 @@ import {
 } from "./recruiting-feedback.js";
 import { FULL_PROFILE_READS, withRequirementEvidence } from "./recruiting-full-profile.js";
 import {
-  correctionNeedsCheck,
   GRADE_TOOL_CALL_STOP,
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
   gradingTools,
-  hasRoundReviewer,
   heldRoundPeople,
   nextRoundHeld,
   ROUND_HELD_NEXT_STEP,
@@ -10659,17 +10657,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "Recruiting research requires a valid operation and artifact storage",
               });
-            // Only the Reviewer grades people when the team has one (the approved loop, 11-24):
-            // s43 fr1, the lead graded 37 people itself and never showed a round.
-            if (
-              researchInput.data.operation === "save_grades" &&
-              run.trigger !== "recruiting_grade" &&
-              (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false))
-            )
-              return finish({
-                error:
-                  "Not saved: the Reviewer grades people here. Record the round with calibration_round and the Reviewer checks it in this turn.",
-              });
             if (applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
@@ -10692,20 +10679,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ? await nextRoundHeld(deps.prisma, {
                           threadId: run.threadId,
                           roleId: thread.activeRecruitingRoleId,
-                        })
-                          .then(
-                            async (held) =>
-                              held ||
-                              (researchInput.data.operation === "calibration_round" &&
-                                researchInput.data.corrects === true &&
-                                (await correctionNeedsCheck(deps.prisma, {
-                                  threadId: run.threadId,
-                                  roleId: thread.activeRecruitingRoleId!,
-                                  candidateKeys:
-                                    researchInput.data.candidateKeys.map(savedCandidateKeyForm),
-                                }))),
-                          )
-                          .catch(() => false)
+                        }).catch(() => false)
                       : false,
                   },
                   researchInput.data,

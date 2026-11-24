@@ -7991,16 +7991,6 @@ function unknownRequirements(grade: {
     .map((item) => item.requirement.trim().slice(0, 120));
 }
 
-/** Requirements the grade found not met: with the unknown ones, what keeps people out of a round. */
-function missedRequirements(grade: {
-  requirements_assessment: { requirement: string; status: string }[];
-}) {
-  return grade.requirements_assessment
-    .filter((item) => item.status === "not_met")
-    .slice(0, 6)
-    .map((item) => item.requirement.trim().slice(0, 120));
-}
-
 /** Canonical receipt bytes for one save_grades call; recomputed here, never trusted from the caller. */
 export function recruitingGradesReceipt(input: GradesInput) {
   return {
@@ -8069,7 +8059,6 @@ export async function saveRecruitingCandidateGrades(
           match_score: grade.match_score,
           match_tier: gradeTier(grade),
           ...(unknownRequirements(grade).length ? { unknown: unknownRequirements(grade) } : {}),
-          ...(missedRequirements(grade).length ? { not_met: missedRequirements(grade) } : {}),
         },
         candidateKey: normalizeRecruitingCandidateRow(row, { schemaKnown: true }).candidateKey,
       };
@@ -12422,8 +12411,7 @@ export async function saveRecruitingCalibrationRound(
           candidateKeys: [...keys],
           effectId: saving.id,
           createdAt: now,
-          // New people in the correction wait for the Reviewer again, in the same turn.
-          status: trusted.holdForCheck ? "checking" : "shown",
+          status: "shown",
           statusAt: now,
           version: { increment: 1 },
         },
@@ -12432,11 +12420,7 @@ export async function saveRecruitingCalibrationRound(
         throw new RecruitingCalibrationRoundError(
           `Not recorded: round ${previous.round} changed while this was recorded. Read it again and record it once more if it still needs showing.`,
         );
-      round = {
-        round: previous.round,
-        candidateKeys: [...keys],
-        status: trusted.holdForCheck ? "checking" : "shown",
-      };
+      round = { round: previous.round, candidateKeys: [...keys], status: "shown" };
     } else
       round = await tx.recruitingCalibrationRound.create({
         data: {

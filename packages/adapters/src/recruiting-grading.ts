@@ -1296,41 +1296,6 @@ export async function nextRoundHeld(
 }
 
 /**
- * Whether a checked round the lead records again holds people the Reviewer has not checked since
- * the recruiter's feedback: the top-up search's people. The round is then held once more and the
- * same turn waits for their check, so only the Reviewer judges who is shown (the approved loop,
- * 11-24: s45/s46 shown top-ups were graded by the search alone).
- */
-export async function correctionNeedsCheck(
-  prisma: PrismaClient,
-  input: { threadId: string; roleId: string; candidateKeys: readonly string[] },
-): Promise<boolean> {
-  const state = await roundState(prisma, input.roleId);
-  if (state?.status !== "checked" || !(await hasRoundReviewer(prisma, input.threadId)))
-    return false;
-  const review = await roundUnderReview(prisma, input.roleId, true, Date.now(), input.threadId);
-  if (!review) return false;
-  const graded = await prisma.recruitingCandidateOccurrence.findMany({
-    where: {
-      roleId: input.roleId,
-      candidateKey: { in: [...input.candidateKeys] },
-      page: {
-        ...(review.since ? { observedAt: { gt: review.since } } : {}),
-        effect: {
-          OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
-            request: { path: ["operation"], equals: operation },
-          })),
-        },
-      },
-    },
-    distinct: ["candidateKey"],
-    select: { candidateKey: true },
-  });
-  const checked = new Set(graded.map((row) => row.candidateKey));
-  return input.candidateKeys.some((key) => !checked.has(key));
-}
-
-/**
  * Whether a round this run lists must stay out of chat: it would be held for the check, or the
  * round before it is still unshown, so recording it is refused. Staging 11-16: six such refused
  * attempts streamed their lists, and the recruiter saw the same people again and again.
