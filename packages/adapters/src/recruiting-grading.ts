@@ -33,6 +33,12 @@ const MAX_ATTEMPTS = 120;
 export const GRADE_BATCH = 50;
 /** People per batch the quality check grades itself, since it reads each full profile. */
 export const SELF_GRADE_BATCH = 5;
+/**
+ * The Reviewer's batches that run at once. One at a time, 20 people took about two minutes while
+ * the recruiter waited (s45/s46 11-24: one batch of five every ~25 s); a parent agent runs its
+ * subagents in parallel (Claude Code, Pi), so the check takes about one batch's time.
+ */
+export const SELF_GRADE_PARALLEL = 4;
 /** Grading requests the research service works on at once for one conversation. */
 export const GRADE_IN_FLIGHT = 4;
 /** A grading request whose grades never came back stops holding up the next batch after this. */
@@ -69,8 +75,6 @@ function laterGradingStart(payload: { threadId: string; attempt?: number }, at: 
 /** Tools a grading turn may use: read the role's people, run the grading research, save its rows. */
 const GRADING_BUILTIN_TOOLS = new Set([
   "artifact_read",
-  // The quality check reads each person's full public profile before grading them itself.
-  "web_fetch",
   "recruiting_candidates",
   "search_history",
   "read_history",
@@ -170,7 +174,7 @@ export function gradingToolRefusal(
     (executed !== undefined && gradingProviderCall(executed, record(args.arguments), start));
   if (allowed) return undefined;
   return start
-    ? "Not run: this turn only grades the batch: read each listed person's profile with web_fetch and save your grades with recruiting_research save_grades (or the people-search agent run then save_results with its run id, or the research request, whose grades are saved when it finishes). End the turn with an empty reply."
+    ? "Not run: this turn only grades the batch: judge each listed person from the saved profile in the request and save your grades with recruiting_research save_grades (or the people-search agent run then save_results with its run id, or the research request, whose grades are saved when it finishes). End the turn with an empty reply."
     : "Not run: this turn only reads the grading research's rows and saves them with recruiting_research save_results; nothing else.";
 }
 
@@ -188,22 +192,41 @@ export const NOT_GRADING_TASK = {
   },
 };
 
-/** What the search that found someone said of them, kept for the check (fosp 11-23). */
+/**
+ * What the search returned for someone, for the check: the Reviewer judges from this saved text and
+ * opens no page (LinkedIn refused 86 of 107 page reads in s50, 11-24).
+ */
 function searchSnippet(
   rows: readonly { candidateKey: string; report?: unknown }[],
   key: string,
 ): string | undefined {
+  const best = new Map<string, string>();
   for (const row of rows) {
     if (row.candidateKey !== key) continue;
     const fields = (row.report as { fields?: { label?: unknown; value?: unknown }[] } | null)
       ?.fields;
-    const snippet = fields?.find((field) => field.label === "Snippet")?.value;
-    if (typeof snippet === "string" && snippet.trim())
-      return snippet.replace(/\s+/g, " ").trim().slice(0, SEARCH_SNIPPET_CHARS);
+    for (const field of fields ?? []) {
+      if (typeof field.label !== "string" || !(field.label in SAVED_PROFILE_FIELDS)) continue;
+      const value = typeof field.value === "string" ? field.value.replace(/\s+/g, " ").trim() : "";
+      if (value.length > (best.get(field.label)?.length ?? 0)) best.set(field.label, value);
+    }
   }
-  return undefined;
+  const parts = Object.entries(SAVED_PROFILE_FIELDS).flatMap(([label, chars]) => {
+    const value = best.get(label);
+    return value ? [`${label}: ${value.slice(0, chars)}`] : [];
+  });
+  return parts.length ? parts.join(" | ") : undefined;
 }
-const SEARCH_SNIPPET_CHARS = 400;
+/** The saved fields the check reads, and how much of each. */
+const SAVED_PROFILE_FIELDS: Record<string, number> = {
+  "Current title": 120,
+  "Current company": 120,
+  Location: 80,
+  "Why recommended": 400,
+  Snippet: 600,
+  Experience: 2500,
+  Education: 500,
+};
 
 export function recruitingGradePrompt(
   people: readonly { name: string; url: string; found?: string; language?: string }[],
@@ -226,16 +249,16 @@ export function recruitingGradePrompt(
   ];
   const list = people.map(
     (person) =>
-      `- ${person.name}: ${person.url}${person.found ? `\n  The search that found them said: "${person.found}"` : ""}${person.language ? `\n  The language check found: ${person.language}` : ""}`,
+      `- ${person.name}: ${person.url}${person.found ? `\n  Saved profile: ${person.found}` : ""}${person.language ? `\n  The language check found: ${person.language}` : ""}`,
   );
   if (service.tool === "self")
     return [
-      `Grade these ${people.length} people who are already saved in Results for this role, by the recruiter's requirements and words below. You grade them yourself, from each person's full public profile.`,
+      `Grade these ${people.length} people who are already saved in Results for this role, by the recruiter's requirements and words below. You grade them yourself, from each person's saved profile below: what the search returned for them.`,
       "",
       ...asked,
-      `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge from what each page shows and what the search said of them below; a public page often shows less than the search did. When a page can't be read, use the person's saved profile from recruiting_candidates.`,
+      "Judge only from the saved profiles below; open no page and search for nothing. A requirement a saved profile doesn't show is unknown.",
       SELF_GRADE_RUBRIC,
-      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, match_score 0 to 100, match_tier, one short fit reason, a concern only for what is not met, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown. Evidence is at most six profile words, and only for not_met or a met that isn't plain from the title; leave it empty for unknown. Leave out title, company, location and education, which Results already holds: the recruiter is waiting on this. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
+      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, match_score 0 to 100, match_tier, one short fit reason, a concern only for what is not met, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown. Evidence is at most six profile words, and only for not_met or a met that isn't plain from the title; leave it empty for unknown. Leave out title, company, location and education, which Results already holds: the recruiter is waiting on this. Call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
       "",
       ...list,
     ].join("\n");
@@ -258,18 +281,15 @@ export function recruitingGradePrompt(
   ].join("\n");
 }
 
-/** Characters of each profile the quality check reads; the education section must fit. */
-const SELF_GRADE_PAGE_CHARS = 15_000;
-
 /** How the quality check grades: by the recruiter's requirements and feedback, plus their kept rules. */
 export const SELF_GRADE_RUBRIC = [
   "How to grade: the recruiter's latest words win over the requirements.",
   "- Each requirement is met, not_met or unknown by what the profile states. Never judge ethnicity, race or background from a name or photo.",
   "- Hard requirements and preferences are what the recruiter made them. Strong needs every hard requirement met; one not_met makes Partial at most; a missed preference only lowers the score.",
   "- A profile silent on a point the recruiter repeated after the first round or turned someone down for is Uncertain at most; silent on anything else, it can still be Promising.",
-  "- Years: count the dated roles that match.",
+  "- Years with a technology or kind of work: add up the dated roles whose description shows that work. The profile need not state the number or repeat the recruiter's wording; a bare skills-list mention with no role describing it is unknown.",
   "- A required language: the language check's finding on the person's line is its status.",
-  "- The job's own terms (pay, office days, benefits) are not requirements on the person.",
+  "- The job's own terms (pay, office days, hybrid or remote schedule, benefits) are not requirements on the person: leave them out of requirements_assessment and never lower a grade or name a concern for a profile not showing them. Location is the person's city or area only.",
 ].join("\n");
 
 /** The profile links one grading request sent. */
@@ -322,7 +342,7 @@ export async function startRecruitingGrading(
   // The check is the grader's own work: it waits only on the grader's turns, while teammates keep
   // working in the same conversation (reliability plan S3, one lane per agent).
   const grader = await researchTeammate(deps.prisma, thread);
-  const busy = await deps.prisma.run.findFirst({
+  const busyRun = await deps.prisma.run.findFirst({
     where: {
       threadId: thread.id,
       ...(grader ? { botId: grader.botId } : {}),
@@ -330,6 +350,33 @@ export async function startRecruitingGrading(
     },
     select: { id: true, trigger: true },
   });
+  // The Reviewer's own grading batches run side by side, up to SELF_GRADE_PARALLEL.
+  const grading = new Set<string>();
+  if (grader?.tool === "self" && busyRun?.trigger === ("recruiting_grade" satisfies RunTrigger)) {
+    const [other, batches] = await Promise.all([
+      deps.prisma.run.findFirst({
+        where: {
+          threadId: thread.id,
+          botId: grader.botId,
+          status: { in: BUSY_STATUSES },
+          trigger: { not: "recruiting_grade" satisfies RunTrigger },
+        },
+        select: { id: true },
+      }),
+      deps.prisma.run.findMany({
+        where: {
+          threadId: thread.id,
+          botId: grader.botId,
+          status: { in: BUSY_STATUSES },
+          trigger: "recruiting_grade" satisfies RunTrigger,
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (!other && batches.length < SELF_GRADE_PARALLEL)
+      for (const batch of batches) grading.add(batch.id);
+  }
+  const busy = grading.size ? undefined : busyRun;
   if (busy) {
     // The recruiter waits on a held round, so its check starts within seconds of the turn ending,
     // and the next batch starts within seconds of the batch before it (staging 11-15: half of a
@@ -383,7 +430,8 @@ export async function startRecruitingGrading(
         ).map((effect) => effect.runId)
       : [],
   );
-  const started = (id: string) => researchByRun.has(id) || savedRuns.has(id);
+  // A batch still grading counts as started: its people are waiting, not failed.
+  const started = (id: string) => researchByRun.has(id) || savedRuns.has(id) || grading.has(id);
   // Up to GRADE_IN_FLIGHT batches at once, since one batch takes the research service about half
   // an hour; the wake that saves a batch's grades schedules the next one. A request that never
   // started research holds the next batch for half an hour, so a failing grading turn can't
@@ -444,7 +492,8 @@ export async function startRecruitingGrading(
     const task = researchByRun.get(id);
     return (
       savedRuns.has(id) ||
-      (task !== undefined &&
+      (!grading.has(id) &&
+        task !== undefined &&
         wakes.some((run) => run.clientNonce?.startsWith(`${RESEARCH_WAKE_PREFIX}${task}:`)))
     );
   };
@@ -785,12 +834,15 @@ export async function startRecruitingGrading(
       tx.run.findFirst({ where: { spaceId: thread.spaceId, clientNonce }, select: { id: true } }),
       // Only the grader's own turn holds the check, as above: a lead turn that recorded the
       // round is still running when its check starts (staging 11-16: no retry, 4 min unchecked).
-      tx.run.findFirst({
+      tx.run.findMany({
         where: { threadId: thread.id, botId: grader.botId, status: { in: BUSY_STATUSES } },
-        select: { id: true },
+        select: { trigger: true },
       }),
     ]);
-    if (existing || running) return null;
+    // Only the Reviewer's own batches run beside each other, never beside its other turns.
+    const others = running.some((run) => run.trigger !== ("recruiting_grade" satisfies RunTrigger));
+    if (existing || others || running.length >= (grader.tool === "self" ? SELF_GRADE_PARALLEL : 1))
+      return null;
     const task = await tx.task.create({
       data: {
         spaceId: thread.spaceId,
@@ -1454,19 +1506,20 @@ export function roundReviewPrompt(round: number, size: number, people: readonly 
     return `- ${person.name} (candidateKey ${person.key})${person.inRound ? " [in the round]" : ""}: ${grade || "not graded"}.${person.reason ? ` ${person.reason.replace(/\s+/g, " ").trim()}` : ""}${unknown}`;
   };
   return [
-    `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
+    `The Reviewer has checked round ${round}; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
     round === 1
       ? // The first ten come straight from the JD (the recruiter's rule 11-22): checked people who
         // miss no hard requirement, those the profile can't confirm marked with what it doesn't show.
-        `Pick as many as the recruiter asked for (you recorded ${size}), best grade first: Strong, Promising, then Uncertain, each Uncertain with what their profile doesn't show; never someone graded Partial. If fewer than that are left, first search for the missing number: one agent_run with effort "low" and a query starting "Find N more people" naming every requirement; it skips everyone already in Results. Then record them.`
-      : `Pick as many as the recruiter asked for this round (you recorded ${size}), best grade first, the round's own people before others of the same grade. Show only people graded Strong or Promising, unless the recruiter has said to loosen or accept less: then Uncertain too, each with what their profile doesn't show. If fewer fit, first search for the missing number: one agent_run with effort "low" and a query starting "Find N more people" naming every requirement and the recruiter's feedback; it skips everyone already in Results, and the people it grades count like the checked ones. Search at most three times for this request; then record those who fit and in the same reply ask whether they are enough or which one point to loosen.`,
+        `Pick as many as the recruiter asked for (you recorded ${size}), best grade first: Strong, Promising, then Uncertain, each Uncertain with what their profile doesn't show; never someone graded Partial.`
+      : `Pick as many as the recruiter asked for this round (you recorded ${size}), best grade first, the round's own people before others of the same grade. Show only people graded Strong or Promising, unless the recruiter has said to loosen or accept less: then Uncertain too, each with what their profile doesn't show.`,
+    `The request is not done while fewer fit than asked: by your short-round rule, search for more now (agent_run, effort "low", "Find N more people", up to three searches for the request, together in one step when you can), then record the round again with those who fit and the new people; the Reviewer checks the new ones in the same turn. Only after the third search record who fits and, in the same reply, say how many are missing, which requirement rules out the most, who would count if it were loosened, and offer to loosen it.`,
     // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
     // s38 11-24: the lead asked with a card instead of recording, and the checked round was never shown.
     "When most of your picks' profiles don't show the same requirement, record the round first, then ask in one line in the same reply whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
     "",
     ...people.map(line),
     "",
-    "The Reviewer's grades stand for them: no checks, no search beyond the missing number, and don't read Results or anyone's profile again. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.",
+    "The Reviewer's grades stand for them: no checks, no search beyond your short-round rule, and don't read Results or anyone's profile again. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.",
   ].join("\n");
 }
 

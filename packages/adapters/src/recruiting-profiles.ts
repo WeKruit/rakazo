@@ -319,6 +319,8 @@ export type PeopleSearchRow = {
   location?: string;
   /** A short passage of the profile the search matched, so the pick can quote the work. */
   snippet?: string;
+  /** The search's own sentence on why this person fits what was asked, from the same request. */
+  why_recommended?: string;
   /** Positions newest first, one per line: "Title | Company | | Start – End | Location". */
   experience?: string;
   /** Schools, one per line: "School | Degree | Start – End". */
@@ -368,6 +370,7 @@ function experienceText(jobs: readonly SearchJob[]): string | undefined {
 }
 
 const SNIPPET_LENGTH = 300;
+const WHY_RECOMMENDED_LENGTH = 400;
 
 /** Plain profile prose: no headings, links or counters, cut to a short passage. */
 function snippetOf(text: string): string | undefined {
@@ -426,6 +429,8 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     if (company) row.current_company = company.slice(0, 200);
     if (location) row.location = location.slice(0, 200);
     if (typeof record.snippet === "string") row.snippet = record.snippet;
+    if (typeof record.why_recommended === "string" && record.why_recommended)
+      row.why_recommended = record.why_recommended;
     if (typeof record.experience === "string" && record.experience)
       row.experience = record.experience;
     if (typeof record.education === "string" && record.education) row.education = record.education;
@@ -711,6 +716,10 @@ function peopleFromResults(body: string): Record_[] {
         company_name: typeof job?.company?.name === "string" ? job.company.name : null,
         location: typeof person.location === "string" ? person.location : null,
         snippet: snippetOf(highlights),
+        why_recommended:
+          typeof item.summary === "string" && item.summary.trim()
+            ? item.summary.replace(/\s+/g, " ").trim().slice(0, WHY_RECOMMENDED_LENGTH)
+            : undefined,
         experience: experienceText(
           jobs.flatMap((entry): SearchJob[] =>
             typeof entry?.title === "string" || typeof entry?.company?.name === "string"

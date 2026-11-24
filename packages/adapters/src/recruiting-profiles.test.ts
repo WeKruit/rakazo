@@ -463,6 +463,7 @@ describe("peopleFromSearch", () => {
           image:
             "https://media.licdn.com/dms/image/v2/X/profile-displayphoto-shrink_200_200/0/1?e=1",
           highlights: ["Ran a 120-person distribution center"],
+          summary: "Fits: runs a large distribution center in Atlanta.",
           entities: [
             {
               type: "person",
@@ -498,6 +499,7 @@ describe("peopleFromSearch", () => {
         current_title: "Warehouse Manager",
         current_company: "Delta Freight",
         location: "Atlanta Metropolitan Area",
+        why_recommended: "Fits: runs a large distribution center in Atlanta.",
         snippet: "Ran a 120-person distribution center",
         experience:
           "Warehouse Manager | Delta Freight |  | Feb 2020 – Present\nSupervisor | Old Co",

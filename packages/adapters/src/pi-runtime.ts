@@ -809,7 +809,12 @@ export class PiAgentRuntime implements AgentRuntime {
                 // another model turn that would hide the error.
                 !providerFailureText(event.message) &&
                 !host.pausePending &&
-                silentToolContinuations < MAX_SILENT_TOOL_CONTINUATIONS
+                // A run that may end silent with nothing owed is asked once: a second empty
+                // reply is its answer (each grading batch spent three more model calls, s50).
+                silentToolContinuations <
+                  (request.allowSilentEmpty && !(request.reportOwed?.() ?? false)
+                    ? 1
+                    : MAX_SILENT_TOOL_CONTINUATIONS)
               ) {
                 silentToolContinuations += 1;
                 // Unreported work: the last continuation asks for the report itself.
