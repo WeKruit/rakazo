@@ -353,14 +353,37 @@ export async function saveLanguageLevels(
   });
 }
 
-/** Each saved person's language finding from a conversation's saved searches, newest last. */
-export function languageFindings(results: readonly unknown[]): Map<string, string> {
-  const found = new Map<string, string>();
-  for (const result of results) {
-    const saved = (result as { languageLevels?: LanguageLevels } | null)?.languageLevels;
+/**
+ * The language check's finding on each of these saved people, from the searches that found them,
+ * newest last: the round's notes and whoever grades take it as given.
+ */
+export async function savedLanguageLevels(
+  prisma: {
+    recruitingCandidateOccurrence: {
+      findMany(args: {
+        where: { roleId: string; candidateKey: { in: string[] } };
+        orderBy: { page: { observedAt: "asc" } };
+        select: { page: { select: { effect: { select: { result: true } } } } };
+      }): Promise<Array<{ page: { effect: { result: unknown } | null } }>>;
+    };
+  },
+  roleId: string,
+  candidateKeys: readonly string[],
+): Promise<Map<string, { requirement: string; level: LanguageSignal }>> {
+  const found = new Map<string, { requirement: string; level: LanguageSignal }>();
+  if (!candidateKeys.length) return found;
+  const wanted = new Set(candidateKeys);
+  const rows = await prisma.recruitingCandidateOccurrence.findMany({
+    where: { roleId, candidateKey: { in: [...wanted] } },
+    orderBy: { page: { observedAt: "asc" } },
+    select: { page: { select: { effect: { select: { result: true } } } } },
+  });
+  for (const row of rows) {
+    const saved = (row.page.effect?.result as { languageLevels?: LanguageLevels } | null)
+      ?.languageLevels;
     if (!saved?.levels) continue;
     for (const [key, level] of Object.entries(saved.levels))
-      found.set(key, `${saved.requirement}: ${level}`);
+      if (wanted.has(key)) found.set(key, { requirement: saved.requirement, level });
   }
   return found;
 }

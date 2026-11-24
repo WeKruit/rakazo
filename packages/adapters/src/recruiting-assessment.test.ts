@@ -127,6 +127,7 @@ function fixture() {
   }));
   const findRun = vi.fn(async () => run);
   const findArtifacts = vi.fn(async () => rows);
+  const findSearches = vi.fn(async (): Promise<unknown[]> => []);
   const get = vi.fn<ArtifactStore["get"]>(async (id) => Buffer.from(`bytes:${id}`));
   const put = vi.fn<ArtifactStore["put"]>(async () => ({
     id: "stored-material",
@@ -136,8 +137,10 @@ function fixture() {
     run: { findFirst: findRun },
     artifact: { findMany: findArtifacts },
     mcpServer: { findMany: vi.fn(async () => []) },
+    recruitingCandidateOccurrence: { findMany: findSearches },
   } as unknown as PrismaClient;
   return {
+    findSearches,
     deps: { prisma, artifacts: { get, put } as unknown as ArtifactStore },
     run,
     rows,
@@ -1081,6 +1084,22 @@ describe("native saved candidate reads", () => {
   it("returns verified selected source reports with unchanged references and pagination", async () => {
     const f = sourceFixture();
     f.page.items.push({ ...f.source });
+    // The language check's finding, saved with the search, comes with the person's sources.
+    Object.assign(f.deps.prisma, {
+      recruitingCandidateOccurrence: {
+        findMany: async () => [
+          {
+            page: {
+              effect: {
+                result: {
+                  languageLevels: { requirement: "Mandarin", levels: { "candidate-one": "strong" } },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
     const result = await executeRecruitingCandidatesTool(
       f.deps,
       trusted,
@@ -1108,6 +1127,9 @@ describe("native saved candidate reads", () => {
           sourceUrls: ["https://example.test/selected"],
         },
       })),
+    });
+    expect(result).toMatchObject({
+      requiredLanguage: "Mandarin: strong (the language check's finding)",
     });
     expect(JSON.stringify(result)).not.toContain("Neighbor Person");
     expect(f.page.items.every((source) => !("report" in source))).toBe(true);

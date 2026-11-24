@@ -132,8 +132,6 @@ function roundLine(
 ) {
   if (!round) return undefined;
   if (round.approvedAt) return `round ${round.round} approved`;
-  if (round.status === "checking") return `round ${round.round} being checked, not shown yet`;
-  if (round.status === "checked") return `round ${round.round} checked, not shown yet`;
   return `round ${round.round} shown in the role team's chat ${ago(round.statusAt, now)}`;
 }
 
@@ -676,11 +674,10 @@ export async function loadWorkingState(
             `  Doing now: ${activity ? workActivityLabel(activity).toLowerCase() : "starting"}${steps.done.length ? ` (${steps.done.length} step${steps.done.length === 1 ? "" : "s"} done this run)` : ""}.`,
           );
         }
-        // Once the round is checked or shown, the round line above is current: a team message
-        // from before that ("the checked round comes in a minute or two") is stale (staging
-        // 2a781497 feedback-round: main relayed it while the round's ten were on the page).
-        const round = roleId ? roundOf.get(roleId) : undefined;
-        const settledAt = round && round.status !== "checking" ? round.statusAt : undefined;
+        // Once the round is shown, the round line above is current: a team message from before
+        // that is stale (staging 2a781497 feedback-round: main relayed it while the round's ten
+        // were on the page).
+        const settledAt = (roleId ? roundOf.get(roleId) : undefined)?.statusAt;
         const current = settledAt ? since.filter((m) => m.createdAt > settledAt) : since;
         const posted = current
           .slice(0, SINCE_MESSAGES)

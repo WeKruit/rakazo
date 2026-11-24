@@ -400,38 +400,6 @@ function saidText(blocks: unknown): string[] {
 }
 
 /**
- * What the recruiter wrote in the role's conversation since its first round, oldest first: their
- * own messages and the words a teammate handed in for them, never a teammate's own report.
- * Staging 11-16: feedback the lead never saved ("senior only, 6+ years") was missing from the
- * next round's check, so it reached the Reviewer only if the lead remembered to save it.
- */
-export async function recruiterWordsSinceFirstRound(
-  prisma: PrismaClient,
-  input: { threadId: string; roleId: string },
-): Promise<string[]> {
-  const first = await prisma.recruitingCalibrationRound.findFirst({
-    where: { roleId: input.roleId },
-    orderBy: { round: "asc" },
-    select: { createdAt: true },
-  });
-  if (!first) return [];
-  const messages = await prisma.message.findMany({
-    where: { threadId: input.threadId, role: "user", createdAt: { gt: first.createdAt } },
-    orderBy: { createdAt: "desc" },
-    take: 8,
-    select: { blocks: true },
-  });
-  return messages.reverse().flatMap((message) =>
-    (Array.isArray(message.blocks) ? message.blocks : []).flatMap((block) => {
-      const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
-      if (typeof text !== "string") return [];
-      const words = kind === "text" ? text : handedInRecruiterWords(text);
-      return words?.trim() ? [words.trim().slice(0, 400)] : [];
-    }),
-  );
-}
-
-/**
  * People of the latest unapproved round that the recruiter's message names, by a name of theirs,
  * their number in the round ("#6") or their company ("the amazon ones"). A message that names
  * some of them is usually turning them down, which is feedback for the next round rather than

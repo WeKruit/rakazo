@@ -27,7 +27,6 @@ import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-d
 import { closePollAndWake } from "./poll-close.js";
 import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import { startRecruitingCheckin } from "./recruiting-checkin.js";
-import { startRecruitingGrading } from "./recruiting-grading.js";
 import { projectRecruitingCandidateProfiles } from "./recruiting-profiles.js";
 import { projectRecruitingInboxJob } from "./recruiting-reads.js";
 import { pollRecruitingResearch } from "./recruiting-research-poll.js";
@@ -171,9 +170,8 @@ export function createBackgroundJobHandlers(deps: {
         payload,
       );
     },
-    "recruiting_grade.start": async (payload) => {
-      await startRecruitingGrading({ prisma: deps.prisma, jobs: deps.jobs }, payload);
-    },
+    // People are checked by the lead's own helpers; a start queued before that change does nothing.
+    "recruiting_grade.start": async () => {},
     "recruiting_inbox.project": async (payload) => {
       await projectRecruitingInboxJob({ prisma: deps.prisma, events: deps.events }, payload);
     },

@@ -134,7 +134,6 @@ import {
   savePushToken,
   scheduleComputerControlExpiry,
   scheduleComputerSleep,
-  scheduleRecruitingGrading,
   screenLeaseIdForRun,
   scriptedCatalogEntry,
   selectDefaultCredentialId,
@@ -4505,13 +4504,7 @@ export function createRouter(deps: RouterDeps) {
         return saved;
       }),
       getWorkspace: authed.recruiting.getWorkspace.handler(async ({ context, input }) => {
-        const workspace = await getRecruitingWorkspace(deps.prisma, context.actor, input);
-        // Opening a role makes sure everyone in it gets the research service's grade.
-        if (workspace)
-          void scheduleRecruitingGrading(deps.jobs, input.threadId).catch((error) =>
-            getLogger().warn("recruiting grade schedule", { error: String(error) }),
-          );
-        return workspace;
+        return getRecruitingWorkspace(deps.prisma, context.actor, input);
       }),
       reviseRole: authed.recruiting.reviseRole.handler(async ({ context, input }) => {
         const saved = await reviseRecruitingRole(deps.prisma, context.actor, input, {
