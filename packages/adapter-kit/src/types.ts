@@ -586,6 +586,11 @@ export interface AgentRunRequest {
    * next turn boundary. The run's instructions stay as they were, keeping the cached prefix.
    */
   claimContextNotice?: () => Promise<string | undefined>;
+  /**
+   * Called when the model ends its turn without a tool call. A note sends the turn back once with
+   * it as the next message, the way a Stop hook keeps an agent working until it is done.
+   */
+  beforeStop?: () => Promise<string | undefined>;
 }
 
 export interface ScriptedTurn {

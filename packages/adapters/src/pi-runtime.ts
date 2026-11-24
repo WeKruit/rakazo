@@ -550,6 +550,16 @@ export class PiAgentRuntime implements AgentRuntime {
                 : request.model.maxImagesPerPrompt,
             ),
           finishTurn: async (turn, turnSignal) => {
+            // The model ended without a tool call: an unfinished ask sends it back once.
+            if (
+              turn.toolResults.length === 0 &&
+              turn.message.stopReason !== "error" &&
+              turn.message.stopReason !== "aborted" &&
+              !turnSignal?.aborted
+            ) {
+              const note = await request.beforeStop?.().catch(() => undefined);
+              if (note) agent.followUp({ role: "user", content: note, timestamp: Date.now() });
+            }
             await deliverFinishedShells(
               (text) => {
                 agent.followUp({

@@ -1302,3 +1302,39 @@ describe("askProgress", () => {
     });
   });
 });
+
+describe("unfinishedAskNote", () => {
+  const roundRow = (status: string, ownerBotId = "lead") => ({
+    id: "round",
+    round: 2,
+    candidateKeys: [],
+    approvedAt: null,
+    status,
+    statusAt: new Date(),
+    ownerBotId,
+    version: 1,
+  });
+  const prismaWith = (row: unknown) =>
+    ({
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => row) },
+    }) as unknown as PrismaClient;
+  // s43 fr1 11-24: the lead graded 37 people itself and ended its turn with no list.
+  it("sends a lead turn back when it would end with a checked round unshown or people unrecorded", async () => {
+    const { unfinishedAskNote } = await import("./recruiting-grading.js");
+    const input = { roleId: "role", botId: "lead", searchedSinceRound: false };
+    expect(await unfinishedAskNote(prismaWith(roundRow("checked")), input)).toContain(
+      "round 2 is in",
+    );
+    // Someone else's checked round is theirs to show.
+    expect(
+      await unfinishedAskNote(prismaWith(roundRow("checked", "other")), input),
+    ).toBeUndefined();
+    expect(await unfinishedAskNote(prismaWith(roundRow("shown")), input)).toBeUndefined();
+    expect(
+      await unfinishedAskNote(prismaWith(roundRow("shown")), {
+        ...input,
+        searchedSinceRound: true,
+      }),
+    ).toContain("recorded no round");
+  });
+});

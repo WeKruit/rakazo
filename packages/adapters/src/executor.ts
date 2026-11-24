@@ -637,6 +637,7 @@ import {
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
   gradingTools,
+  hasRoundReviewer,
   heldRoundPeople,
   nextRoundHeld,
   ROUND_HELD_NEXT_STEP,
@@ -644,6 +645,7 @@ import {
   roundListHeld,
   roundState,
   scheduleRecruitingGrading,
+  unfinishedAskNote,
   waitForRoundCheck,
 } from "./recruiting-grading.js";
 import {
@@ -4797,6 +4799,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let peopleSearchesRun = 0;
         // New people-search agent runs this turn started before its round was recorded.
         let agentRunsBeforeRound = 0;
+        // When this turn last searched for people and last recorded a round, for the check
+        // before it ends; and whether that check has already sent it back once.
+        let lastPeopleSearchAt = 0;
+        let lastRoundAt = 0;
+        let stopChecked = false;
         // Full profile pages the first round's searches may still read for a required language.
         const fullProfileReads = { left: FULL_PROFILE_READS };
         const profilePages = new Map<string, string>();
@@ -5827,6 +5834,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
+          if (/(?:web_search_advanced_exa|web_search_exa|agent_run)$/.test(name) && !rawArgs.runId)
+            lastPeopleSearchAt = Date.now();
           if (name.endsWith("agent_run") && !rawArgs.runId && !(await roundRecordedThisRun()))
             agentRunsBeforeRound++;
           // Tools that use the role from a job wait for its save; the first question and progress
@@ -10658,6 +10667,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "Recruiting research requires a valid operation and artifact storage",
               });
+            // Only the Reviewer grades people when the team has one (the approved loop, 11-24):
+            // s43 fr1, the lead graded 37 people itself and never showed a round.
+            if (
+              researchInput.data.operation === "save_grades" &&
+              run.trigger !== "recruiting_grade" &&
+              (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false))
+            )
+              return finish({
+                error:
+                  "Not saved: the Reviewer grades people here. Record the round with calibration_round and the Reviewer checks it in this turn.",
+              });
             if (applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
@@ -10698,6 +10718,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   researchInput.data,
                 );
+                lastRoundAt = Date.now();
                 // The ten go into chat as soon as the round is recorded, each with the profile
                 // passage the search returned; the turn then ends on the next-step choice.
                 const recorded = round as {
@@ -15230,6 +15251,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       completeRunStep,
                     );
                   },
+                  beforeStop:
+                    scripted || !thread.activeRecruitingRoleId || run.trigger === "recruiting_grade"
+                      ? undefined
+                      : async () => {
+                          if (stopChecked) return undefined;
+                          const note = await unfinishedAskNote(deps.prisma, {
+                            roleId: thread.activeRecruitingRoleId!,
+                            botId: bot.id,
+                            searchedSinceRound: lastPeopleSearchAt > lastRoundAt,
+                          }).catch(() => undefined);
+                          if (note) {
+                            stopChecked = true;
+                            getLogger().info("recruiting.ask.unfinished", { runId, note });
+                          }
+                          return note;
+                        },
                   claimContextNotice: scripted
                     ? undefined
                     : () =>

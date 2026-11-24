@@ -1587,6 +1587,24 @@ export async function askProgress(
   return { searches, ...(blocker ? { blocker } : {}) };
 }
 
+/**
+ * What a lead turn on a role leaves undelivered when it is about to end, from the records only:
+ * a checked round it has not shown, or people it searched for after its last round without
+ * recording any. The turn is sent back once with this, as Claude Code's Stop hook sends an agent
+ * back to finish (s43 fr1 11-24: the lead graded 37 people itself and ended with no list).
+ */
+export async function unfinishedAskNote(
+  prisma: PrismaClient,
+  input: { roleId: string; botId: string; searchedSinceRound: boolean },
+): Promise<string | undefined> {
+  const state = await roundState(prisma, input.roleId);
+  if (state?.status === "checked" && state.ownerBotId === input.botId)
+    return `Not done yet: the Reviewer's check of round ${state.round} is in and the recruiter hasn't seen it. Record it now with calibration_round and corrects: true, picking from the checked people; if fewer fit than asked, record those who fit and in the same reply say how many are missing and which requirement rules out the most, and ask whether to loosen it.`;
+  if (input.searchedSinceRound)
+    return "Not done yet: you searched for people in this turn but recorded no round, so the recruiter has seen no one. Record the round now with calibration_round with the people who fit; if none fit, say in one reply how many are missing and which requirement rules them out, and ask whether to loosen it.";
+  return undefined;
+}
+
 /** One line of an ask's progress for the lead. */
 export function askProgressLine(progress: AskProgress): string {
   const missing = Math.max(0, progress.asked - progress.fit);
