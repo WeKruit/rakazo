@@ -15,8 +15,6 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { sleep } from "./background-wait.js";
-import { handedInRecruiterWords } from "./global-role-writes.js";
-import { requestedPeopleTarget } from "./people-target.js";
 import { languageFindings } from "./recruiting-language.js";
 import { recruiterWordsSinceFirstRound, roundCriteria } from "./recruiting-round-check.js";
 import { recruitingRoundPeople } from "./turn-end-guard.js";
@@ -1555,79 +1553,6 @@ async function researchTeammate(
 /** What the team does after recording a round that waits for the Reviewer. */
 export const ROUND_HELD_NEXT_STEP =
   "Recorded, not shown yet: after the recruiter's feedback the Reviewer first checks each of these people's full profile against it (about three minutes), and the checked round is shown in this chat then, with the next-step card. Save the brief as after any round (one recruiting_role update with brief.fields only), then end the turn with one short line in the recruiter's language saying the checked people come in a few minutes. Don't list anyone, ask nothing and show no card.";
-
-/** A people search after this turn recorded a held round: the check starts when the turn ends. */
-export const ROUND_HELD_SEARCH_REFUSAL =
-  "Not run: this turn recorded the round, and it is shown once the Reviewer has checked it, which starts when this turn ends. A request for more people (“再来5个”, “the next ten”) is answered by that round, at the number they asked, so never say another batch can't start. Save the brief if not saved yet, then end the turn with one short line saying the checked people come in a few minutes.";
-
-/** A people search while an earlier turn's round waits for the check: that round is the answer. */
-export const ROUND_AWAITING_SEARCH_REFUSAL =
-  "Not run: the round is recorded and the Reviewer is checking it now; the checked round is shown in this chat as soon as the check ends, with the next-step card. A request for more people (“再来5个”, “the next ten”) is answered by that round, at the number they asked, so never say another batch can't start. End the turn with one short line in the recruiter's language saying it comes in a minute or two.";
-
-/**
- * Why a people search must not run now, or null. Staging 11-16 (982a0ac9): the recruiter's "still
- * waiting" started a new lead turn that searched again while round 2 was being checked, and the
- * checked round was then steered into that busy turn and not shown before the recruiter gave up.
- * The owner's turn that shows a checked round may still search to fill its places.
- */
-export async function heldRoundSearchRefusal(
-  prisma: PrismaClient,
-  input: {
-    roleId: string | null | undefined;
-    botId: string;
-    recordedThisTurn: boolean;
-    sourceMessageId?: string | null;
-  },
-): Promise<string | null> {
-  if (input.recordedThisTurn) return ROUND_HELD_SEARCH_REFUSAL;
-  if (!input.roleId) return null;
-  const state = await roundState(prisma, input.roleId);
-  if (!state || state.status === "shown")
-    return input.sourceMessageId
-      ? answeredRequestRefusal(prisma, input.roleId, input.sourceMessageId)
-      : null;
-  if (state.status === "checked" && state.ownerBotId === input.botId) return null;
-  return ROUND_AWAITING_SEARCH_REFUSAL;
-}
-
-/**
- * Why a search for a request a round shown since then already answers must not run, or null.
- * fosp 11-21 (a0e844e4): the round checked after the feedback was shown at the 5 of "再来5个",
- * which had come in while it was checked; the lead's turn for "再来5个" then ran another round,
- * and the recruiter got 9 more and asked "我只要5个，怎么又来9个？".
- */
-async function answeredRequestRefusal(
-  prisma: PrismaClient,
-  roleId: string,
-  sourceMessageId: string,
-): Promise<string | null> {
-  const [round, asked] = await Promise.all([
-    prisma.recruitingCalibrationRound.findFirst({
-      where: { roleId },
-      orderBy: { round: "desc" },
-      select: { round: true, candidateKeys: true, status: true, statusAt: true, approvedAt: true },
-    }),
-    prisma.message.findUnique({
-      where: { id: sourceMessageId },
-      select: { role: true, createdAt: true, blocks: true },
-    }),
-  ]);
-  if (!round || round.round < 2 || round.approvedAt || round.status !== "shown") return null;
-  if (asked?.role !== "user" || !(round.statusAt > asked.createdAt)) return null;
-  const words = (
-    Array.isArray(asked.blocks) ? (asked.blocks as { kind?: string; text?: unknown }[]) : []
-  )
-    .flatMap((block) =>
-      (block.kind === "text" || block.kind === "bot_message_received") &&
-      typeof block.text === "string"
-        ? [handedInRecruiterWords(block.text) ?? block.text]
-        : [],
-    )
-    .join("\n");
-  const target = requestedPeopleTarget(words);
-  if (!target || target > round.candidateKeys.length) return null;
-  return `Not run: round ${round.round}, shown after this request came in, already gives the recruiter the ${round.candidateKeys.length} people it asks for. Don't search for more: end the turn with an empty reply. Search again only when the recruiter asks for more people after that round.`;
-}
 
 /** The people of the round waiting for the Reviewer's check, or null when no round waits. */
 export async function heldRoundPeople(
