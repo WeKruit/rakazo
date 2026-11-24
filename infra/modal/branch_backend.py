@@ -15,7 +15,9 @@ copied "batch" account, so its plays start empty here.
 
 Without simulated-customer args it plays the free journeys that need no mailbox, copied account or
 paid search. Each send play gets a new account whose mailbox is on the emulated mail service. Results land where the simulated customer writes them (--out, else simulated-<time>/).
-Needs MODAL_TOKEN_ID/MODAL_TOKEN_SECRET and the simulated customer's own model access.
+Needs MODAL_TOKEN_ID/MODAL_TOKEN_SECRET. The simulated recruiter and its judge call the same model
+the backend uses, through this Sandbox and its Secret (so a play spends the product's model account,
+not the caller's), unless RAKAZO_SIM_MODEL_COMMAND names another command.
 """
 
 import os
@@ -132,6 +134,32 @@ def sign_up(url, origin, email, password, name):
         pass
 
 
+# Runs inside the Sandbox: one Responses call with the backend's own model setting.
+MODEL_CALL = """
+import json, os, sys, urllib.request
+body = json.dumps({"model": os.environ["PI_DEFAULT_MODEL"], "input": sys.stdin.read()}).encode()
+request = urllib.request.Request("https://api.openai.com/v1/responses", data=body, headers={
+    "authorization": "Bearer " + os.environ["OPENAI_API_KEY"], "content-type": "application/json"})
+reply = json.load(urllib.request.urlopen(request, timeout=600))
+print("".join(part.get("text", "") for item in reply.get("output", []) if item.get("type") == "message"
+              for part in item.get("content", [])))
+"""
+
+
+def model_call(sandbox_id):
+    """The simulated customer's model command: the prompt on stdin, the reply on stdout."""
+    import modal
+    process = modal.Sandbox.from_id(sandbox_id).exec("python3", "-c", MODEL_CALL)
+    process.stdin.write(sys.stdin.read().encode())
+    process.stdin.write_eof()
+    process.stdin.drain()
+    out = process.stdout.read()
+    if process.wait() != 0:
+        sys.exit(process.stderr.read()[-300:])
+    sys.stdout.write(out)
+    return 0
+
+
 def main(argv):
     import modal
     split = argv.index("--") if "--" in argv else len(argv)
@@ -191,6 +219,9 @@ def main(argv):
                    # Each send play gets a new account holding the next emulated mailbox, so plays
                    # never share an account's roles or sends.
                    RAKAZO_FRESH_SENDER=MAILBOX)
+        # 11-24: the plays' own model calls had used the caller's Claude account and ran it out.
+        env.setdefault("RAKAZO_SIM_MODEL_COMMAND",
+                       f"python3 {Path(__file__).resolve()} --model-call {sandbox.object_id}")
         started = time.time()
         code = subprocess.call(["node", str(ROOT / "infra/acceptance/simulated-customer.mjs"), *plays], env=env, cwd=ROOT)
         # The test database too (fake accounts only), to read what a play's tools returned.
@@ -207,4 +238,6 @@ def main(argv):
 if __name__ == "__main__":
     if sys.argv[1:] == ["--inside"]:
         inside()
+    if sys.argv[1:2] == ["--model-call"]:
+        sys.exit(model_call(sys.argv[2]))
     sys.exit(main(sys.argv[1:]))
