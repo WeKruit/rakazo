@@ -1764,7 +1764,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       }
       if (tool.name === "remember") {
         return {
-          content: raw.content,
+          // An edit carries no content; an undefined value here failed every edit-mode save.
+          ...(raw.content === undefined ? {} : { content: raw.content }),
           path: String(raw.path ?? "MEMORY.md"),
           expectedRevision: raw.expectedRevision,
           // The schema offers a partial edit; dropping it here failed every edit-mode save.
