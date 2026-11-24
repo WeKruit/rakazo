@@ -67,7 +67,6 @@ import {
   RecruitingApprovalToolCallSchema,
   RecruitingApprovalToolInputSchema,
   RecruitingCrmImportInputSchema,
-  RECRUITING_CALIBRATION_ROUND_SIZE,
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
   RecruitingNotesToolInputSchema,
@@ -178,7 +177,6 @@ import {
   recruiterLanguageText,
   recruitingBotKey,
   recruitingBriefConfirmedNextStep,
-  recruitingNextStepCard,
   redactSecrets,
   renderBotDirectory,
   replyLanguageNote,
@@ -1554,7 +1552,7 @@ const PLANNED_SEARCH_GRACE_MS = 3_000;
  * When fewer than ten fit, the recruiter is told the quick search came up short and one deeper
  * search runs; the round then holds everyone who fits, even fewer than ten.
  */
-const SHORT_OF_TEN = `fill the places left in at most three tries in all, counting the people-search agent runs this turn already ran for the round: each try is one agent_run with effort "low" and a query that starts "Find N more people" (N five times the places left, at least 10 and at most 20, since most people a search returns fail the check and a run costs the same) with the role, the location scope, every hard requirement and the round feedback; it leaves out everyone already in Results. No try loosens a requirement: only the recruiter does. Then record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line, in the recruiter's language, how many short of ten it is and which requirement rules out the most, offering to loosen that one. Run no deeper search before the round: the next-step card offers one, and it runs only when the recruiter asks (then one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement, its people recorded as the next round)`;
+const SHORT_OF_TEN = `fill the places left in at most three tries in all, counting the people-search agent runs this turn already ran for the round: each try is one agent_run with effort "low" and a query that starts "Find N more people" (N five times the places left, at least 10 and at most 20, since most people a search returns fail the check and a run costs the same) with the role, the location scope, every hard requirement and the round feedback; it leaves out everyone already in Results. No try loosens a requirement: only the recruiter does. Then record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line, in the recruiter's language, how many short of ten it is and which requirement rules out the most, offering to loosen that one. Run no deeper search before the round: it runs only when the recruiter asks (then one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement, its people recorded as the next round)`;
 /** With this many new people from the planned searches, the first ten come from them. */
 const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
@@ -5263,31 +5261,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .catch(() => null)
           )?.activeRecruitingRoleId ??
           undefined;
-        // After this run records a round, its only card is the next-step choice.
-        const nextStepCardAfterRound = async () => {
-          if (!thread.activeRecruitingRoleId) return undefined;
-          const round = await roundRecordedThisRun();
-          if (!round) return undefined;
-          // A round waiting for the Reviewer gets its card when the checked round is shown.
-          if ((round.result as { roundStatus?: unknown } | null)?.roundStatus === "checking")
-            return undefined;
-          const keys = (round.result as { candidateKeys?: unknown } | null)?.candidateKeys;
-          return recruitingNextStepCard(
-            turnLanguage === "zh",
-            Array.isArray(keys) && keys.length < RECRUITING_CALIBRATION_ROUND_SIZE,
-            recruiterTexts.map(requestedPeopleTarget).findLast(Boolean),
-          );
-        };
-        // The next-step card stands in for the agent's own question only right after the round
-        // (a brief save after it aside): the round's list is then the report, and the recruiter
-        // has not written their next step.
-        const nextStepCardInstead = async () => {
-          const last = turnReport.lastWork(["role"]);
-          if (last !== undefined && last !== "round") return undefined;
-          const card = await nextStepCardAfterRound();
-          if (!card || (await recruiterReplyAfterRound())) return undefined;
-          return card;
-        };
         /** The server's short report of work the model left unreported. */
         const turnReportFor = async (work: readonly TurnWork[]) => {
           const roleId = (
@@ -14951,11 +14924,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     // A run that recorded a round asks the next-step choice, which is asked anew each round,
                     // unless the recruiter already wrote their next step after the ten appeared: then it
                     // acts on that first, and may ask its own question after reporting what it did.
-                    if (await nextStepCardAfterRound()) {
+                    if (thread.activeRecruitingRoleId && (await roundRecordedThisRun())) {
                       const reply = await recruiterReplyAfterRound();
                       if (reply && !turnReport.worked())
                         return { instead: nextStepAlreadyGiven(reply) };
-                      if (await nextStepCardInstead()) return undefined;
+                      const last = turnReport.lastWork(["role"]);
+                      if (!reply && (last === undefined || last === "round")) return undefined;
                       const unreported = turnReport.bounceAsk(question);
                       return unreported ? { instead: unreported } : undefined;
                     }
@@ -15306,22 +15280,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 getLogger().warn("run.ask.saves_still_running", { runId }),
               );
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
-              if (!event.requestedSchema) {
-                // Beside the first ten the model's own question stands: it is the one open fact
-                // that changes who is searched for, if it judged there is one.
-                const shown = (await roundRecordedThisRun())?.result as { round?: unknown } | null;
-                const card = shown?.round === 1 ? undefined : await nextStepCardInstead();
-                if (card) {
-                  turnReport.report();
-                  event.text = card.text;
-                  event.detail = undefined;
-                  event.multiple = undefined;
-                  event.actions = card.options.map((label, index) => ({
-                    id: `choice-${index + 1}`,
-                    label,
-                  }));
-                }
-              }
               // Schema keys and enum values are identities: reject secrets rather than redact them.
               if (
                 event.requestedSchema &&

@@ -5,7 +5,6 @@ import {
   greetsByName,
   isChineseText,
   isEnglishText,
-  isRecruitingNextStepCard,
   namesPeopleToEmail,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
@@ -19,7 +18,6 @@ import {
   recruiterLanguage,
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
-  recruitingNextStepCard,
   replyLanguageNote,
   roleOpenedNote,
   screenLanguage,
@@ -217,30 +215,6 @@ describe("namesPeopleToEmail", () => {
       namesPeopleToEmail(["回复 noah@example.com 那封邮件（同一个线程），正文只写：Test note."]),
     ).toBe(false);
     expect(namesPeopleToEmail(["Reply to alex@example.com's email: thanks"])).toBe(false);
-  });
-});
-
-describe("recruitingNextStepCard", () => {
-  it("asks in the recruiter's language, so a Chinese chat gets no English card", () => {
-    const card = recruitingNextStepCard(true);
-    expect(`${card.text}${card.options.join("")}`).not.toMatch(/[A-Za-z]/);
-    expect(card.options).toHaveLength(3);
-    expect(recruitingNextStepCard().options[0]).toBe("Find 20 more similar people");
-    expect(recruitingNextStepCard(false, true).options[0]).toBe("Search deeper");
-    expect(recruitingNextStepCard(true, true).options[0]).toBe("深挖一次");
-  });
-
-  // Simulated long-search-finishes 11-14: "找20个" got "我去找 150 个类似的人".
-  it("offers the number the recruiter asked for, and is still known as the next-step card", () => {
-    const card = recruitingNextStepCard(true, false, 20);
-    expect(card.options[0]).toBe("一共找 20 个类似的人");
-    expect(card.text).not.toContain("150");
-    expect(recruitingNextStepCard(false, true, 20).options[1]).toBe(
-      "Find 20 similar people in total",
-    );
-    for (const known of [card, recruitingNextStepCard(), recruitingNextStepCard(false, true, 40)])
-      expect(isRecruitingNextStepCard(known.text)).toBe(true);
-    expect(isRecruitingNextStepCard("Should hybrid attendance be required?")).toBe(false);
   });
 });
 

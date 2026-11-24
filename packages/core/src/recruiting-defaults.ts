@@ -95,7 +95,7 @@ Search: four differently worded people searches as parallel calls in one step, e
 Pick the ten from the checked people, best grade first; you don't judge profiles yourself. Out whatever the grade: outside the location scope (no location, only a country or state, or beyond the commute area), or currently at the hiring company the JD or recruiter names (former employees are fine; never guess it).
 Fill: when fewer than ten fit after the first check, show those who fit at once with show_picks and in the same step start one agent_run with effort "low" and a query starting "Find N more people" (N twice the number missing) naming the role, location scope and every hard requirement on the person (never the job's pay or office days); it saves its people and skips those in Results. Have them checked, then record the ten with calibration_round, shown people first.
 Later rounds show nobody an earlier round showed or the recruiter turned down (saved people no round showed are new). Checked people who fit and no list has shown come first: when they cover the number asked, record them with calibration_round at once, without a search. Otherwise the recruiter is waiting, so the first step after their words is a new set of four quick searches as above, worded differently from every earlier set and carrying every requirement on the person and all feedback (they return in seconds; an agent_run takes over a minute); have the people not yet checked checked, and as soon as the check is back record those who fit with calibration_round, people meeting every hard requirement first, even when they are fewer than asked, saying how many are still to come. People found after that go in the next calibration_round, which holds only them: no list repeats a person an earlier list showed.
-Check before showing: "Reviewer check" helpers grade people, and nothing else does. After searches return, in one step start one run_subagent per five unchecked people (name "reviewer", background true, task: 'Read the skill "Reviewer check" and grade these saved people' plus each person's candidateKey exactly as the search returned it (linkedin:/in/...) with their name, and the recruiter's words since the first round, word for word), then one run_subagent wait on all their handles with timeout_seconds 120. A round is the N best checked people the recruiter has not seen: Strong and Promising first, then people whose profile is silent on a requirement, shown with that requirement as "unknown" in calibration_round's checks. Only a hard requirement checked not_met, or a point the recruiter repeated that the profile doesn't show, keeps a person out. The first round is never empty: it shows the ten best the searches found. A helper still working when the wait returns is not waited for again: its people stay out of this round and you say how many are still being checked.
+Check before showing: "Reviewer check" helpers grade people, and nothing else does. After searches return, in one step start one run_subagent per five unchecked people (name "reviewer", background true, tools ["skill_read", "recruiting_role", "recruiting_candidates", "recruiting_research"], task: 'Read the skill "Reviewer check" and grade these saved people' plus each person's candidateKey exactly as the search returned it (linkedin:/in/...) with their name, and the recruiter's words since the first round, word for word), then one run_subagent wait on all their handles with timeout_seconds 120. A round is the N best checked people the recruiter has not seen: Strong and Promising first, then people whose profile is silent on a requirement, shown with that requirement as "unknown" in calibration_round's checks. Only a hard requirement checked not_met, or a point the recruiter repeated that the profile doesn't show, keeps a person out. The first round is never empty: it shows the ten best the searches found. A helper still working when the wait returns is not waited for again: its people stay out of this round and you say how many are still being checked.
 Short round: a request for N people is done only when N who fit are shown, or you have said how many are missing and why. Keep its state yourself in your own memory document work.md (read_memory scope "bot", then remember with path "work.md"; edit the one line for this role after each step, and clear it when the request is done): asked N, fit so far, searches used of three, and the requirement most checked people fail. That note, not your recollection of the chat, says where the request stands. When fewer fit than asked, search for more: up to three agent_run calls together in one step, each effort "low" with a differently worded query starting "Find N more people" (N five times the number missing, at least 10 and at most 20, since most people a search returns fail the check and a run costs the same) naming every requirement on the person and all feedback, never the job's pay or office days, which no profile shows; each skips everyone in Results. Then record the new people who fit as the next round. After three searches for the request, stop searching: read why the checked people were turned down, record whoever fits and has not been shown, and in the same reply say how many are missing, which requirement rules out the most, who would count if it were loosened (their profile doesn't show it), and offer to loosen it. When a check finds nobody who fits because no profile shows a point the recruiter stressed, another search returns the same kind of profile: stop searching for this request at once, record the three to five closest the recruiter has not seen with calibration_round, that requirement marked "unknown" in its checks, and in the same reply say that none shows it and offer to loosen it.
 Every reason they give for turning people down or for what the next people must show ("no one without Kafka", "Seattle only") holds for all later rounds: record it with recruiting_feedback in their words; calibration_round's checks then judge every pick on it.
 ${RECRUITING_REQUIRED_LANGUAGE}`;
@@ -125,49 +125,7 @@ export function recruitingBriefConfirmedNextStep(revision: number) {
  */
 export const RECRUITING_REFERENCE_MATERIAL = `Material that steers the search (a profile or resume of someone to find more of, a person in Results, companies to target or avoid, a job post, a changed requirement) is feedback on the same role, at any stage. Read it first (web_fetch for links, LinkedIn included; artifact_read for files; recruiting_candidates resolve for saved people), then save its concrete signals with one recruiting_role update citing their message: a person to find more of goes in the brief field "Reference people" with link and fit details; someone or a company to avoid becomes an exclude filter or wrong-fit profile; a stated change replaces that requirement. What a reference shows stays a preference unless they call it required. Say in one or two lines what you took and what changed, then continue. A reference person is never a result and never contacted. If a link can't be read, say so and ask for the text; never guess a profile.`;
 
-export const RECRUITING_ROUND_NEXT_STEP = `calibration_round already lists the round's people in chat with their passages: never list them again. Your next step, with no text, saves the brief: one recruiting_role update with the round's expectedRevision and brief.fields only (short English labels; origin jd or user_instruction, inferred for a range you propose): target titles, core duties, years, other must-haves, location and work mode, language, pay, work authorization and exclusions. The step after is only one ask_user card in the recruiter's language: the one open fact that most changes who is searched for, else the next step ("Find 20 more similar people", "Draft the outreach emails", "Run another round"). Never end a round on a bare list or "any feedback?".`;
-
-/**
- * The only card a turn shows after it records a round: clarifying questions come before the
- * search, so any other question there is replaced by this one. It follows the recruiter's language.
- * A round short of ten offers the deeper search first: it costs more, so it runs only when asked.
- */
-export function recruitingNextStepCard(chinese = false, short = false, target?: number) {
-  // The number the recruiter asked for, as a total; 20 more when they named none.
-  const find = target
-    ? chinese
-      ? `一共找 ${target} 个类似的人`
-      : `Find ${target} similar people in total`
-    : chinese
-      ? "再找 20 个类似的人"
-      : "Find 20 more similar people";
-  const findText = target
-    ? chinese
-      ? `凑满 ${target} 个类似的人`
-      : `find similar people up to ${target} in total`
-    : chinese
-      ? "再去找 20 个类似的人"
-      : "find 20 more similar people";
-  if (short)
-    return chinese
-      ? {
-          text: `合格的人不到十个。要不要再深挖一次？会多花几分钟和一些额度。这些人方向对的话，也可以直接${findText}。`,
-          options: ["深挖一次", find, "再找一轮"],
-        }
-      : {
-          text: `Fewer than ten fit. Search deeper for more? It takes a few more minutes and uses more credits. If these people look right, I can ${findText} instead.`,
-          options: ["Search deeper", find, "Run another round"],
-        };
-  return chinese
-    ? {
-        text: `下一步怎么做？这些人方向对的话，我${findText}；不对的话告诉我哪几个不对，我再找一轮。`,
-        options: [find, "起草外联邮件", "再找一轮"],
-      }
-    : {
-        text: `What's next? I'd ${findText} if these people look right; otherwise tell me who is off and I'll run another round.`,
-        options: [find, "Draft the outreach emails", "Run another round"],
-      };
-}
+export const RECRUITING_ROUND_NEXT_STEP = `calibration_round already lists the round's people in chat with their passages: never list them again. While the request is still short of the number the recruiter asked for and the Short-round rule leaves searches, search on now with no question. Otherwise your next step, with no text, saves the brief: one recruiting_role update with the round's expectedRevision and brief.fields only (short English labels; origin jd or user_instruction, inferred for a range you propose): target titles, core duties, years, other must-haves, location and work mode, language, pay, work authorization and exclusions. The step after is only one ask_user card in the recruiter's language: the one open fact that most changes who is searched for, else the next step ("Find 20 more similar people", "Draft the outreach emails", "Run another round"). Never end a round on a bare list or "any feedback?".`;
 
 /** Any version of the next-step card, whatever number it offers: its answer is not an intake answer. */
 export function isRecruitingNextStepCard(text: string): boolean {
