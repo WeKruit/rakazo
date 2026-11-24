@@ -12246,7 +12246,7 @@ export async function saveRecruitingCalibrationRound(
   trusted: ResearchLease & {
     effectId: string;
     effectRequest: unknown;
-    /** A round after a shown one waits for the Reviewer's check (the team has the Reviewer). */
+    /** The round waits for the Reviewer's check before it is shown (the team has the Reviewer). */
     holdForCheck?: boolean;
   },
   raw: CalibrationRoundInput,
@@ -12428,7 +12428,7 @@ export async function saveRecruitingCalibrationRound(
           round: (previous?.round ?? 0) + 1,
           candidateKeys: [...keys],
           effectId: saving.id,
-          status: trusted.holdForCheck && previous ? "checking" : "shown",
+          status: trusted.holdForCheck ? "checking" : "shown",
           ownerBotId: run.botId,
           statusAt: now,
         },
