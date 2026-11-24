@@ -125,49 +125,7 @@ export function recruitingBriefConfirmedNextStep(revision: number) {
  */
 export const RECRUITING_REFERENCE_MATERIAL = `Material that steers the search (a profile or resume of someone to find more of, a person in Results, companies to target or avoid, a job post, a changed requirement) is feedback on the same role, at any stage. Read it first (web_fetch for links, LinkedIn included; artifact_read for files; recruiting_candidates resolve for saved people), then save its concrete signals with one recruiting_role update citing their message: a person to find more of goes in the brief field "Reference people" with link and fit details; someone or a company to avoid becomes an exclude filter or wrong-fit profile; a stated change replaces that requirement. What a reference shows stays a preference unless they call it required. Say in one or two lines what you took and what changed, then continue. A reference person is never a result and never contacted. If a link can't be read, say so and ask for the text; never guess a profile.`;
 
-export const RECRUITING_ROUND_NEXT_STEP = `calibration_round already lists the round's people in chat with their passages: never list them again. Your next step, with no text, saves the brief: one recruiting_role update with the round's expectedRevision and brief.fields only (short English labels; origin jd or user_instruction, inferred for a range you propose): target titles, core duties, years, other must-haves, location and work mode, language, pay, work authorization and exclusions. The step after is only one ask_user card in the recruiter's language: the one open fact that most changes who is searched for, else the next step ("Find 20 more similar people", "Draft the outreach emails", "Run another round"). Never end a round on a bare list or "any feedback?".`;
-
-/**
- * The only card a turn shows after it records a round: clarifying questions come before the
- * search, so any other question there is replaced by this one. It follows the recruiter's language.
- * A round short of ten offers the deeper search first: it costs more, so it runs only when asked.
- */
-export function recruitingNextStepCard(chinese = false, short = false, target?: number) {
-  // The number the recruiter asked for, as a total; 20 more when they named none.
-  const find = target
-    ? chinese
-      ? `一共找 ${target} 个类似的人`
-      : `Find ${target} similar people in total`
-    : chinese
-      ? "再找 20 个类似的人"
-      : "Find 20 more similar people";
-  const findText = target
-    ? chinese
-      ? `凑满 ${target} 个类似的人`
-      : `find similar people up to ${target} in total`
-    : chinese
-      ? "再去找 20 个类似的人"
-      : "find 20 more similar people";
-  if (short)
-    return chinese
-      ? {
-          text: `合格的人不到十个。要不要再深挖一次？会多花几分钟和一些额度。这些人方向对的话，也可以直接${findText}。`,
-          options: ["深挖一次", find, "再找一轮"],
-        }
-      : {
-          text: `Fewer than ten fit. Search deeper for more? It takes a few more minutes and uses more credits. If these people look right, I can ${findText} instead.`,
-          options: ["Search deeper", find, "Run another round"],
-        };
-  return chinese
-    ? {
-        text: `下一步怎么做？这些人方向对的话，我${findText}；不对的话告诉我哪几个不对，我再找一轮。`,
-        options: [find, "起草外联邮件", "再找一轮"],
-      }
-    : {
-        text: `What's next? I'd ${findText} if these people look right; otherwise tell me who is off and I'll run another round.`,
-        options: [find, "Draft the outreach emails", "Run another round"],
-      };
-}
+export const RECRUITING_ROUND_NEXT_STEP = `calibration_round already lists the round's people in chat with their passages: never list them again. While the request is still short of the number the recruiter asked for and the Short-round rule leaves searches, search on now with no question. Otherwise your next step, with no text, saves the brief: one recruiting_role update with the round's expectedRevision and brief.fields only (short English labels; origin jd or user_instruction, inferred for a range you propose): target titles, core duties, years, other must-haves, location and work mode, language, pay, work authorization and exclusions. The step after is only one ask_user card in the recruiter's language: the one open fact that most changes who is searched for, else the next step ("Find 20 more similar people", "Draft the outreach emails", "Run another round"). Never end a round on a bare list or "any feedback?".`;
 
 /** Any version of the next-step card, whatever number it offers: its answer is not an intake answer. */
 export function isRecruitingNextStepCard(text: string): boolean {
