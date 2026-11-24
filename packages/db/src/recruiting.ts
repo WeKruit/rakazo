@@ -12313,10 +12313,6 @@ export async function saveRecruitingCalibrationRound(
       where: { roleId: role.id },
       orderBy: { round: "desc" },
     });
-    if (previous?.approvedAt)
-      throw new RecruitingCalibrationRoundError(
-        "The recruiter already approved the calibration. Continue with finding more people instead of another calibration round.",
-      );
     const repeated =
       previous &&
       (await calibrationRoundRepeats(

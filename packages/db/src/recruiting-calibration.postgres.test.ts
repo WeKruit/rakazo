@@ -262,7 +262,7 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     ).rejects.toThrow(/already shown in an earlier round or turned down/);
   });
 
-  it("accepts a round from the recruiter's own words and then refuses more rounds", async () => {
+  it("accepts a round from the recruiter's own words and still records later rounds", async () => {
     const quote = "第 2 轮这批人可以，开始扩大搜索。";
     const sourceMessageId = await liveRun(quote);
     const approved = await recruiting.approveRecruitingCalibrationRoundFromMessage(prisma, actor, {
@@ -286,7 +286,7 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       recruiting.approveRecruitingCalibrationRound(prisma, actor, { threadId, round: 2 }),
     ).resolves.toMatchObject({ round: 2 });
     await savePage(keys("third"));
-    await expect(recordRound(keys("third"))).rejects.toThrow(/already approved/);
+    await expect(recordRound(keys("third"))).resolves.toMatchObject({ round: 3 });
   });
 
   it("refuses a quote the recruiter did not write", async () => {

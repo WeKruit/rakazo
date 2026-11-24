@@ -7205,7 +7205,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   error: round?.approvedAt
                     ? "The recruiter already accepted the latest calibration round. Start the scale-out now: send the research provider's research tool the confirmed brief, every round's feedback and the target number; no card is needed."
                     : round?.candidateKeys.length
-                      ? "Calibration rounds never use an approval card. The round is recorded: list its people in chat and end with the next-step question. When the recruiter asks for more people or presses accept on the round panel, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out."
+                      ? "Calibration rounds never use an approval card. The round is recorded: list its people in chat and end with the next-step question. When the recruiter accepts the round in their own words (these people look right, go find more like them) or presses accept on the round panel, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out."
                       : "Calibration rounds never use an approval card. Record the ten with recruiting_research calibration_round, list them in chat and end with the next-step question.",
                 };
               }
