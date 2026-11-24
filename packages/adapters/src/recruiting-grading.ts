@@ -210,25 +210,31 @@ const SEARCH_SNIPPET_CHARS = 400;
 export function recruitingGradePrompt(
   people: readonly { name: string; url: string; found?: string; language?: string }[],
   service: GradingService,
-  asked: readonly string[] = [],
+  requirements: readonly string[] = [],
+  said: readonly string[] = [],
 ) {
-  // What the recruiter said for the round they are reviewing are hard requirements too.
-  const list = [
-    ...(asked.length
+  // The recruiter's requirements and own words come first: the grade is judged by them.
+  const asked = [
+    ...(requirements.length
+      ? ["The role's requirements:", ...requirements.map((statement) => `* ${statement}`), ""]
+      : []),
+    ...(said.length
       ? [
-          "What the recruiter has said about this search:",
-          ...asked.map((statement) => `* ${statement}`),
+          "What the recruiter said after the first round, word for word:",
+          ...said.map((words) => `* "${words}"`),
           "",
         ]
       : []),
-    ...people.map(
-      (person) =>
-        `- ${person.name}: ${person.url}${person.found ? `\n  The search that found them said: "${person.found}"` : ""}${person.language ? `\n  The language check found: ${person.language}` : ""}`,
-    ),
   ];
+  const list = people.map(
+    (person) =>
+      `- ${person.name}: ${person.url}${person.found ? `\n  The search that found them said: "${person.found}"` : ""}${person.language ? `\n  The language check found: ${person.language}` : ""}`,
+  );
   if (service.tool === "self")
     return [
-      `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements. You grade them yourself, from each person's full public profile.`,
+      `Grade these ${people.length} people who are already saved in Results for this role, by the recruiter's requirements and words below. You grade them yourself, from each person's full public profile.`,
+      "",
+      ...asked,
       `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge from what each page shows and what the search said of them below; a public page often shows less than the search did. When a page can't be read, use the person's saved profile from recruiting_candidates.`,
       SELF_GRADE_RUBRIC,
       "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, match_score 0 to 100, match_tier, one short fit reason, a concern only for what is not met, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown. Evidence is at most six profile words, and only for not_met or a met that isn't plain from the title; leave it empty for unknown. Leave out title, company, location and education, which Results already holds: the recruiter is waiting on this. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
@@ -241,6 +247,7 @@ export function recruitingGradePrompt(
       `Call the people-search agent run once: mcp__${service.slug}__agent_run when it is listed, otherwise connectors_execute_tool with id "${service.serverId}:agent_run". Pass effort "auto", input.data with one {name, linkedin_url} per person below, and a query that names the role and lists every hard requirement and every preference by name, asking for each person: current title, company, location, education (each degree with school, degree and dates), evidence links, match_score 0 to 100, match_tier Strong, Promising, Partial or Uncertain, fit_reasons naming the evidence, concerns, and requirements_assessment with each requirement as met, not_met or unknown and the profile text that shows it. When the role is a job opening, the query also says that match_score and match_tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most, and Strong needs current work that fits the job and every hard requirement met. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, the query lists each with the details that make them a fit and asks how closely every person matches them on those details; wrong-fit profiles and companies to avoid are listed the same way. A requirement the public profile does not show is unknown, never met; the job's own terms (pay, office days, benefits) are not requirements on the person and are left out; never judge ethnicity, race or background from a name or photo. The server adds the output format.`,
       "While it reports running, call it again with its runId. When it has finished, call recruiting_research save_results with providerTaskId set to the run's id, then end the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
       "",
+      ...asked,
       ...list,
     ].join("\n");
   return [
@@ -248,6 +255,7 @@ export function recruitingGradePrompt(
     `Start new research for this with the research service's research tool: mcp__${service.slug}__research when it is listed, otherwise connectors_execute_tool with id "${service.serverId}:research". Put the request and the people below in its prompt. Don't reply on the role's earlier research.`,
     "Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything. Start the research and end the turn; the grades are saved when they come back.",
     "",
+    ...asked,
     ...list,
   ].join("\n");
 }
@@ -257,10 +265,10 @@ const SELF_GRADE_PAGE_CHARS = 15_000;
 
 /** How the quality check grades: by the recruiter's requirements and feedback, plus their kept rules. */
 export const SELF_GRADE_RUBRIC = [
-  "Grade each person against the role's requirements and everything the recruiter has said, feedback included; their latest words win.",
+  "How to grade: the recruiter's latest words win over the requirements.",
   "- Each requirement is met, not_met or unknown by what the profile states. Never judge ethnicity, race or background from a name or photo.",
   "- Hard requirements and preferences are what the recruiter made them. Strong needs every hard requirement met; one not_met makes Partial at most; a missed preference only lowers the score.",
-  "- A profile silent on a point the recruiter stressed is Uncertain at most; silent on anything else, it can still be Promising.",
+  "- A profile silent on a point the recruiter repeated after the first round or turned someone down for is Uncertain at most; silent on anything else, it can still be Promising.",
   "- Years: count the dated roles that match.",
   "- A required language: the language check's finding on the person's line is its status.",
   "- The job's own terms (pay, office days, benefits) are not requirements on the person.",
@@ -749,17 +757,16 @@ export async function startRecruitingGrading(
       );
     return skipped("next round coming");
   }
-  const asked = review
-    ? [
-        ...(await roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId })).map(
-          (criterion) => criterion.statement,
-        ),
-        ...(
-          await recruiterWordsSinceFirstRound(deps.prisma, { threadId: thread.id, roleId: role.id })
-        ).map((words) => `In their words: "${words}"`),
-      ]
-    : [];
-  const prompt = recruitingGradePrompt([...people.values()], grader, asked);
+  const [criteria, said] = await Promise.all([
+    roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId }),
+    recruiterWordsSinceFirstRound(deps.prisma, { threadId: thread.id, roleId: role.id }),
+  ]);
+  const prompt = recruitingGradePrompt(
+    [...people.values()],
+    grader,
+    criteria.map((criterion) => criterion.statement),
+    said,
+  );
   // A retry of the same people after a request that never started research is a new request.
   const batch = createHash("sha256")
     .update([String(requests.length), ...people.keys()].join("\n"))

@@ -294,8 +294,8 @@ describe("startRecruitingGrading", () => {
     });
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     const prompt = promptOf(f);
-    expect(prompt).toContain('* In their words: "senior only, 6+ years"');
-    expect(prompt).toContain('* In their words: "no agency people"');
+    expect(prompt).toContain('* "senior only, 6+ years"');
+    expect(prompt).toContain('* "no agency people"');
     expect(prompt).not.toContain("3 of 10 checked");
   });
 
