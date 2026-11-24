@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { JobPublisher } from "@rakazo/adapter-kit";
 import { recruitingGradeStartJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
-import { recruitingBotKey } from "@rakazo/core";
+import { RECRUITING_GRADE_RUBRIC, recruitingBotKey } from "@rakazo/core";
 import type { CalibrationRoundStatus, PrismaClient } from "@rakazo/db";
 import {
   BRIEF_CONFIRMATION_TEXT,
@@ -281,16 +281,8 @@ export function recruitingGradePrompt(
   ].join("\n");
 }
 
-/** How the quality check grades: by the recruiter's requirements and feedback, plus their kept rules. */
-export const SELF_GRADE_RUBRIC = [
-  "How to grade: the recruiter's latest words win over the requirements.",
-  "- Each requirement is met, not_met or unknown by what the profile states. Never judge ethnicity, race or background from a name or photo.",
-  "- Hard requirements and preferences are what the recruiter made them. Strong needs every hard requirement met; one not_met makes Partial at most; a missed preference only lowers the score.",
-  "- A profile silent on a point the recruiter repeated after the first round or turned someone down for is Uncertain at most; silent on anything else, it can still be Promising.",
-  "- Years with a technology or kind of work: add up the dated roles whose description shows that work. The profile need not state the number or repeat the recruiter's wording; a bare skills-list mention with no role describing it is unknown.",
-  "- A required language: the language check's finding on the person's line is its status.",
-  "- The job's own terms (pay, office days, hybrid or remote schedule, benefits) are not requirements on the person: leave them out of requirements_assessment and never lower a grade or name a concern for a profile not showing them. Location is the person's city or area only.",
-].join("\n");
+/** How the quality check grades; the same text the "Reviewer check" skill gives a helper. */
+export const SELF_GRADE_RUBRIC = RECRUITING_GRADE_RUBRIC;
 
 /** The profile links one grading request sent. */
 function sentUrls(prompt: string): Set<string> {

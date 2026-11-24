@@ -9837,13 +9837,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const farAway = Array.isArray(checked.rows)
                     ? checked.rows.length - (people as unknown[]).length
                     : 0;
-                  // People new to the role get the research service's grade once the turn settles.
-                  if ((saved as { newPeople?: unknown }).newPeople)
-                    await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
-                      getLogger().warn("recruiting grade schedule", {
-                        error: String(error),
-                      }),
-                    );
                   // The role's total, so a scale-out stops at its target without counting rows;
                   // the progress line states it so a report never rounds up to the target.
                   const [peopleInResults, scale] = await Promise.all([
