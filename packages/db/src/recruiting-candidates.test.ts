@@ -1890,6 +1890,26 @@ describe("task-backed candidate page proof reads", () => {
   });
 });
 
+describe("saved sources by another key shape", () => {
+  it("reads the role's one person a list row key or bare handle names", async () => {
+    const f = crmFixture();
+    const saved = await f.tx.recruitingCandidate.findUnique();
+    f.tx.recruitingCandidate.findUnique.mockResolvedValueOnce(null as never);
+    const findMany = vi.fn(async (_query: unknown) => [saved]);
+    Object.assign(f.tx.recruitingCandidate, { findMany });
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: f.input.roleId,
+      candidateKey: "autumn:some-handle",
+    });
+    expect(sources.items).toHaveLength(1);
+    expect(findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        OR: [{ candidateKey: "some-handle" }, { candidateKey: { endsWith: "/some-handle" } }],
+      },
+    });
+  });
+});
+
 describe("native CRM write approval target", () => {
   const route = {
     connectorId: "mcp" as const,
