@@ -33,6 +33,12 @@ const MAX_ATTEMPTS = 120;
 export const GRADE_BATCH = 50;
 /** People per batch the quality check grades itself, since it reads each full profile. */
 export const SELF_GRADE_BATCH = 5;
+/**
+ * The Reviewer's batches that run at once. One at a time, 20 people took about two minutes while
+ * the recruiter waited (s45/s46 11-24: one batch of five every ~25 s); a parent agent runs its
+ * subagents in parallel (Claude Code, Pi), so the check takes about one batch's time.
+ */
+export const SELF_GRADE_PARALLEL = 4;
 /** Grading requests the research service works on at once for one conversation. */
 export const GRADE_IN_FLIGHT = 4;
 /** A grading request whose grades never came back stops holding up the next batch after this. */
@@ -322,7 +328,7 @@ export async function startRecruitingGrading(
   // The check is the grader's own work: it waits only on the grader's turns, while teammates keep
   // working in the same conversation (reliability plan S3, one lane per agent).
   const grader = await researchTeammate(deps.prisma, thread);
-  const busy = await deps.prisma.run.findFirst({
+  const busyRun = await deps.prisma.run.findFirst({
     where: {
       threadId: thread.id,
       ...(grader ? { botId: grader.botId } : {}),
@@ -330,6 +336,33 @@ export async function startRecruitingGrading(
     },
     select: { id: true, trigger: true },
   });
+  // The Reviewer's own grading batches run side by side, up to SELF_GRADE_PARALLEL.
+  const grading = new Set<string>();
+  if (grader?.tool === "self" && busyRun?.trigger === ("recruiting_grade" satisfies RunTrigger)) {
+    const [other, batches] = await Promise.all([
+      deps.prisma.run.findFirst({
+        where: {
+          threadId: thread.id,
+          botId: grader.botId,
+          status: { in: BUSY_STATUSES },
+          trigger: { not: "recruiting_grade" satisfies RunTrigger },
+        },
+        select: { id: true },
+      }),
+      deps.prisma.run.findMany({
+        where: {
+          threadId: thread.id,
+          botId: grader.botId,
+          status: { in: BUSY_STATUSES },
+          trigger: "recruiting_grade" satisfies RunTrigger,
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (!other && batches.length < SELF_GRADE_PARALLEL)
+      for (const batch of batches) grading.add(batch.id);
+  }
+  const busy = grading.size ? undefined : busyRun;
   if (busy) {
     // The recruiter waits on a held round, so its check starts within seconds of the turn ending,
     // and the next batch starts within seconds of the batch before it (staging 11-15: half of a
@@ -383,7 +416,8 @@ export async function startRecruitingGrading(
         ).map((effect) => effect.runId)
       : [],
   );
-  const started = (id: string) => researchByRun.has(id) || savedRuns.has(id);
+  // A batch still grading counts as started: its people are waiting, not failed.
+  const started = (id: string) => researchByRun.has(id) || savedRuns.has(id) || grading.has(id);
   // Up to GRADE_IN_FLIGHT batches at once, since one batch takes the research service about half
   // an hour; the wake that saves a batch's grades schedules the next one. A request that never
   // started research holds the next batch for half an hour, so a failing grading turn can't
@@ -444,7 +478,8 @@ export async function startRecruitingGrading(
     const task = researchByRun.get(id);
     return (
       savedRuns.has(id) ||
-      (task !== undefined &&
+      (!grading.has(id) &&
+        task !== undefined &&
         wakes.some((run) => run.clientNonce?.startsWith(`${RESEARCH_WAKE_PREFIX}${task}:`)))
     );
   };
@@ -785,12 +820,21 @@ export async function startRecruitingGrading(
       tx.run.findFirst({ where: { spaceId: thread.spaceId, clientNonce }, select: { id: true } }),
       // Only the grader's own turn holds the check, as above: a lead turn that recorded the
       // round is still running when its check starts (staging 11-16: no retry, 4 min unchecked).
-      tx.run.findFirst({
+      tx.run.findMany({
         where: { threadId: thread.id, botId: grader.botId, status: { in: BUSY_STATUSES } },
-        select: { id: true },
+        select: { trigger: true },
       }),
     ]);
-    if (existing || running) return null;
+    // Only the Reviewer's own batches run beside each other, never beside its other turns.
+    const others = running.some(
+      (run) => run.trigger !== ("recruiting_grade" satisfies RunTrigger),
+    );
+    if (
+      existing ||
+      others ||
+      running.length >= (grader.tool === "self" ? SELF_GRADE_PARALLEL : 1)
+    )
+      return null;
     const task = await tx.task.create({
       data: {
         spaceId: thread.spaceId,

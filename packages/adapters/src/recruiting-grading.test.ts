@@ -23,6 +23,7 @@ const {
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   scheduleRecruitingGrading,
+  SELF_GRADE_PARALLEL,
   startRecruitingGrading,
 } = await import("./recruiting-grading.js");
 
@@ -101,7 +102,7 @@ function fixture(options: {
   const taskCreate = vi.fn(async () => ({ id: "grade-task" }));
   const tx = {
     thread: { updateMany: vi.fn(async () => ({ count: 1 })) },
-    run: { findFirst: vi.fn(async () => null), create: runCreate },
+    run: { findFirst: vi.fn(async () => null), findMany: vi.fn(async () => []), create: runCreate },
     task: { create: taskCreate },
     message: { findFirst: vi.fn(async () => null) },
     steeringMessage: { create: vi.fn(async () => ({ id: "steering" })) },
@@ -320,6 +321,55 @@ describe("startRecruitingGrading", () => {
     ] as never);
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     expect(promptOf(f)).toContain("- picked: https://x.test/in/picked");
+  });
+
+  // s45/s46 11-24: one batch at a time, a held round's 20 people took about two minutes to check.
+  it("starts the Reviewer's next batch beside one still grading, without its people", async () => {
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const grading = {
+      id: "batch-1",
+      createdAt: new Date(now - 10_000),
+      task: { prompt: "- a: https://x.test/in/a" },
+    };
+    const busy = (batches: number, other = false) => {
+      const f = fixture({
+        found: [person("a"), person("b")],
+        rounds: round(["linkedin:/in/a", "linkedin:/in/b"]),
+        requests: [grading],
+      });
+      f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+      f.prisma.run.findFirst.mockImplementation((async ({ where }: { where: object }) =>
+        "trigger" in where
+          ? other
+            ? { id: "lead-turn" }
+            : null
+          : "status" in where
+            ? { id: "batch-1", trigger: "recruiting_grade" }
+            : null) as never);
+      f.prisma.run.findMany.mockImplementation((async ({ where }: { where: object }) =>
+        "status" in where
+          ? Array.from({ length: batches }, (_, i) => ({ id: `batch-${i + 1}` }))
+          : "clientNonce" in where &&
+              (where as { clientNonce: { startsWith: string } }).clientNonce.startsWith ===
+                "recruiting-research-wake:"
+            ? []
+            : [grading]) as never);
+      return f;
+    };
+    const f = busy(1);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(promptOf(f)).toContain("- b: https://x.test/in/b");
+    expect(promptOf(f)).not.toContain("https://x.test/in/a");
+    // Four at once is the limit, and none starts beside the Reviewer's other turns.
+    const full = busy(SELF_GRADE_PARALLEL);
+    await startRecruitingGrading(full.deps, { threadId: "thread" }, now);
+    expect(full.runCreate).not.toHaveBeenCalled();
+    const other = busy(1, true);
+    await startRecruitingGrading(other.deps, { threadId: "thread" }, now);
+    expect(other.runCreate).not.toHaveBeenCalled();
   });
 
   // fosp 11-22 (352978a2): the round was left for a later turn to show and that turn never came.
