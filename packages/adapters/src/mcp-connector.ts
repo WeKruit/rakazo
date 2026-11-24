@@ -94,7 +94,6 @@ import {
   requireQuickSearchBeforeResearch,
   requireRoleForPeopleSearch,
   savedContactLookups,
-  settlePeopleSearch,
 } from "./recruiting-research.js";
 import {
   assertSchedulingCall,
@@ -1270,8 +1269,6 @@ export class McpConnector implements ConnectorProvider {
     /** The session this call used, so a failure closes only that one and not a fresh replacement. */
     let usedSession: McpSession | undefined;
     let calledServer: McpServer | undefined;
-    /** A people search's arguments, which hold its reserved share of the recruiter's number. */
-    let searched: object | undefined;
     try {
       if (call.route.toolName === FIND_EMAILS) {
         yield* this.findContactEmails(call, context);
@@ -1413,9 +1410,7 @@ export class McpConnector implements ConnectorProvider {
         };
         return;
       }
-      let args = await limitPeopleSearch(
-        this.prisma,
-        context,
+      let args = limitPeopleSearch(
         assignment.server,
         call.route.toolName,
         await prepareAgentRun(
@@ -1426,7 +1421,6 @@ export class McpConnector implements ConnectorProvider {
           ownedArgs,
         ),
       );
-      searched = args;
       if (emailScope && call.route.toolName === "list_emails") {
         const campaignId = scopedInstantlyCampaign(args, emailScope.campaignIds);
         const catalog = await session.listTools({ signal: context.signal });
@@ -1616,7 +1610,6 @@ export class McpConnector implements ConnectorProvider {
         usedSession = session;
         material = this.sessions.get(sessionKey)?.material;
       }
-      settlePeopleSearch(searched, result?.isError ? "failed" : "done", result);
       await recordAgentRunCost(
         this.prisma,
         context,
@@ -1716,7 +1709,6 @@ export class McpConnector implements ConnectorProvider {
         ),
       };
     } catch (error) {
-      if (searched) settlePeopleSearch(searched, "failed");
       // A known rate limit leaves the session healthy. Other thrown calls keep the existing
       // reconnect and uncertain-outcome handling for transport or authentication failures.
       const secrets = material ? oauthMaterialSecrets(material) : [];
