@@ -18178,7 +18178,13 @@ async function threadLaneBusy(
       threadId: run.threadId,
       botId: run.botId,
       id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
-      ...(delegated ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } } : {}),
+      ...(delegated
+        ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } }
+        : // The Reviewer's grading batches run side by side; their start caps how many (s49 11-24:
+          // two batches of one round were started together and still ran one after the other).
+          run.trigger === "recruiting_grade"
+          ? { trigger: { not: "recruiting_grade" } }
+          : {}),
       OR: [
         { status: { in: ["leased", "running"] } },
         // A delegated child inherits an active ancestor turn; queued work cannot preempt that turn.
