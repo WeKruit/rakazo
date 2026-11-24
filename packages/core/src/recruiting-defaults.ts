@@ -630,7 +630,7 @@ export const RECRUITING_GRADE_RUBRIC = [
   "- Each requirement is met, not_met or unknown by what the profile states. Never judge ethnicity, race or background from a name or photo.",
   "- Hard requirements and preferences are what the recruiter made them. Strong needs every hard requirement met; one not_met makes Partial at most; a missed preference only lowers the score.",
   "- A profile silent on a point the recruiter repeated after the first round or turned someone down for is Uncertain at most; silent on anything else, it can still be Promising.",
-  "- Years with a technology or kind of work: add up the dated roles whose description shows that work. The profile need not state the number or repeat the recruiter's wording; a bare skills-list mention with no role describing it is unknown.",
+  "- Years and technologies: read the profile as a recruiter would. Years are the dated roles of that kind of work added up; the profile need not state the number. A technology the summary, headline or a role names for a person doing that job is used on the job, which is what \"in production\" or \"hands-on\" asks for: profiles don't use those words, so never require them. It is unknown only when the profile doesn't mention it.",
   "- A required language: the language check's finding on the person's line is its status.",
   "- The job's own terms (pay, office days, hybrid or remote schedule, benefits) are not requirements on the person: leave them out of requirements_assessment and never lower a grade or name a concern for a profile not showing them. Location is the person's city or area only.",
 ].join("\n");
