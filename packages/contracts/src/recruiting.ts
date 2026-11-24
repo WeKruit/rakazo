@@ -1113,6 +1113,7 @@ export const RecruitingGradeRowSchema = z.object({
         requirement: GradeText(500),
         status: z.enum(["met", "not_met", "unknown"]),
         evidence: z.string().max(1000).nullable(),
+        preference: z.boolean().optional(),
       }),
     )
     .min(1)
@@ -1189,7 +1190,26 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
   z.strictObject({
     operation: z.literal("save_grades"),
     expectedRoleRevision: Revision,
-    rows: z.array(RecruitingGradeRowSchema).min(1).max(RECRUITING_GRADE_PAGE_LIMIT),
+    rows: z
+      .array(RecruitingGradeRowSchema)
+      .min(1)
+      .max(RECRUITING_GRADE_PAGE_LIMIT)
+      // fosp 11-23 (76055953): a batch grade kept Promising over a must-have it marked not_met, and
+      // the lead showed that person after the recruiter turned others down for the same point.
+      .superRefine((rows, ctx) => {
+        const missed = rows.flatMap((row) =>
+          row.match_tier === "Strong" || row.match_tier === "Promising"
+            ? row.requirements_assessment
+                .filter((item) => item.status === "not_met" && !item.preference)
+                .map((item) => `${row.name} (${item.requirement})`)
+            : [],
+        );
+        if (missed.length)
+          ctx.addIssue({
+            code: "custom",
+            message: `Not saved: a hard requirement not_met makes Partial at most, but these are graded Strong or Promising: ${missed.join("; ")}. For each, lower the tier, correct the status, or mark the requirement preference: true if it is only a preference, then save all rows again.`,
+          });
+      }),
   }),
   // Recruiter-supplied text/csv artifact saved as one unassessed candidate page; values are column names.
   z.strictObject({
