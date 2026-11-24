@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   completionOutcome,
   completionSummary,
+  overlapOf,
+  overlapSummary,
   profilesIn,
   requestCompletion,
 } from "./request-completion.mjs";
@@ -45,6 +47,21 @@ test("counts only new people shown before the next move, across chats", () => {
   ]);
 });
 
+test("a large ask also counts the new graded fits in Results", () => {
+  const turns = [
+    { ...say(1, 0, 60), records: [{ chat: "Role", saved: 90, fit: 55 }] },
+    { ...say(2, 100, 3), records: [{ chat: "Role", saved: 95, fit: 58 }] },
+  ];
+  // The chat lists the top two and a link; three more are shown for the small ask.
+  const chats = [
+    { messages: [bot(50, `${link("a")} ${link("b")}`), bot(150, link("c"))] },
+  ];
+  assert.deepEqual(
+    requestCompletion(turns, chats).map((row) => row.shown),
+    [55, 1],
+  );
+});
+
 test("outcomes and summary", () => {
   const rows = [
     { asked: 3, shown: 3, seconds: 60 },
@@ -62,5 +79,24 @@ test("outcomes and summary", () => {
     notDelivered: 1,
     p50: 50,
     p90: 50,
+  });
+});
+
+test("overlap of searches and runs left going", () => {
+  const rows = [
+    overlapOf([{ chat: "Role", finds: 30, foundAgain: 6, sameLinkedIn: 1 }, { chat: "Kruit" }]),
+    {
+      ...overlapOf([{ chat: "Other", finds: 10, foundAgain: 0 }]),
+      leftRunning: [{ status: "running" }],
+    },
+    overlapOf([]),
+  ];
+  assert.deepEqual(rows[2], {});
+  assert.deepEqual(overlapSummary(rows), {
+    plays: 3,
+    finds: 40,
+    foundAgain: 6,
+    sameLinkedIn: 1,
+    leftRunning: 1,
   });
 });

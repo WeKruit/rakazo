@@ -19,9 +19,16 @@ export function profilesIn(text) {
   return found;
 }
 
+/** Above this, the chat shows the top people and a link; the rest are counted in Results. */
+export const LISTED_IN_CHAT_MAX = 20;
+
+/** Graded fits across the role chats' Results, as the play read them after a move. */
+const fitIn = (records) => (records ?? []).reduce((sum, record) => sum + (record.fit ?? 0), 0);
+
 /**
  * One row per move that asked for people: asked, how many new people were shown before the next
  * move (a person shown earlier in the play is not new), and the seconds until the last of them.
+ * A large ask counts the new graded fits in Results too, since its chat lists only the top.
  */
 export function requestCompletion(turns, chats) {
   const bot = (chats ?? [])
@@ -48,11 +55,13 @@ export function requestCompletion(turns, chats) {
       }
     }
     const asked = Number(turn.move?.people) || 0;
+    // Graded fits found while this move's work ran: Results after it, less Results before it.
+    const fitGain = fitIn(turn.records) - fitIn(index ? turns[index - 1].records : []);
     if (asked > 0)
       rows.push({
         turn: turn.turn,
         asked,
-        shown,
+        shown: asked > LISTED_IN_CHAT_MAX ? Math.max(shown, fitGain) : shown,
         seconds: lastAt === null ? null : Math.round((lastAt - start) / 1000),
       });
   });
@@ -80,5 +89,28 @@ export function completionSummary(rows) {
     notDelivered: count("not delivered"),
     p50: at(0.5),
     p90: at(0.9),
+  };
+}
+
+/**
+ * How much the play's searches overlapped, from the role chats' Results after the play: finds,
+ * finds of a person the role already held, and extra rows for one LinkedIn profile.
+ */
+export function overlapOf(records) {
+  const roles = (records ?? []).filter((record) => record.finds !== undefined);
+  if (!roles.length) return {};
+  const sum = (key) => roles.reduce((total, record) => total + (record[key] ?? 0), 0);
+  return { finds: sum("finds"), foundAgain: sum("foundAgain"), sameLinkedIn: sum("sameLinkedIn") };
+}
+
+/** Overlap and stuck runs over a version's plays. */
+export function overlapSummary(rows) {
+  const sum = (key) => rows.reduce((total, row) => total + (row[key] ?? 0), 0);
+  return {
+    plays: rows.length,
+    finds: sum("finds"),
+    foundAgain: sum("foundAgain"),
+    sameLinkedIn: sum("sameLinkedIn"),
+    leftRunning: rows.filter((row) => row.leftRunning?.length).length,
   };
 }

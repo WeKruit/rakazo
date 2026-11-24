@@ -483,6 +483,27 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "big-ask-split",
+    mechanisms: ["long-task", "state-claims"],
+    paid: true,
+    title: "一次要 60 个人：自己拆开做完，不重复，中途报进度",
+    area: "search",
+    source:
+      "11-24 user: 「我给他说找200，那他应该可以自己divide 任务，并且assign subagent完成」 (60 keeps the paid test small)",
+    chinese: true,
+    maxTurns: 6,
+    waitMs: 30 * 60_000,
+    persona: `${AGENCY_RECRUITER} You need a long list for a client and don't want to ask five times.`,
+    facts: () =>
+      "The role: Senior Backend Engineer (Go or Java), Singapore on site, 5+ years, has built payment or trading systems at scale, base SGD 120k–170k. Ask for 60 people in one message; at most 60 in all. Do not approve any send.",
+    goals: [
+      "Give Kruit the role and ask for 60 people in one message.",
+      "Wait; if nothing changes for a long time, ask once where it is.",
+      "Check it ends with the 60 (or says plainly how many it found and why it is short), with no one listed twice.",
+      "Open the role's Results page and check the count matches what Kruit said.",
+    ],
+  },
+  {
     name: "template-sign-with-my-name",
     mechanisms: ["email-content"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
