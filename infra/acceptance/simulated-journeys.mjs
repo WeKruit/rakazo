@@ -406,7 +406,7 @@ export const JOURNEYS = [
     facts: (_recipients, tag) =>
       `The role is named 「测试固定 · 数据工程师 6 · ${tag}」: Senior Data Engineer, Shanghai, hybrid 3 days in office, 5+ years building batch and streaming pipelines (Spark or Flink), data warehouse modelling, Mandarin and working English, base 500k–700k RMB. Do not approve any send. Keep any search small (10 people per round, 20 in all).`,
     goals: [
-      "Give Kruit the role under that exact name in one message and ask it to find people.",
+      "Give Kruit the role under that exact name with all its details in one message and ask it to find people.",
       "When the first people show, tell Kruit which two or three are not a fit and why, in one short message.",
       "Check Kruit says plainly what it changed for the next people, without asking you to rate everyone.",
       "Ask for a few more people and check none of the rejected ones come back and the new ones follow your feedback.",
@@ -431,7 +431,7 @@ export const JOURNEYS = [
     facts: (_recipients, tag) =>
       `The role is named 「测试固定 · 支付风控数据 · ${tag}」: Senior Data Engineer for a payments company, Shanghai, 5+ years, must have built real-time risk, fraud or payment data pipelines at a payments, fintech, bank or e-commerce payments team (Spark or Flink is how, not the point). Ad-tech, games or generic BI work does not count. Base 500k–700k RMB. Do not approve any send. Keep any search small (10 people per round, 20 in all).`,
     goals: [
-      "Give Kruit the role under that exact name in one message and ask it to find people.",
+      "Give Kruit the role under that exact name with all its details in one message and ask it to find people.",
       "When the first people show, pick one or two whose company or work is outside payments/risk (from what Kruit actually shows) and say why in one short message; ask for more who actually built risk or payment pipelines.",
       "Check each new person's company and what they built fit payments/risk, not just the Spark or Flink keyword, and that Kruit says plainly what it changed.",
       "If Kruit can't find enough, expect it to say how many fit and ask whether that's enough or what to loosen, instead of padding the list or going quiet.",
