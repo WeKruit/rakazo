@@ -45,6 +45,21 @@ test("counts only new people shown before the next move, across chats", () => {
   ]);
 });
 
+test("a large ask also counts the new graded fits in Results", () => {
+  const turns = [
+    { ...say(1, 0, 60), records: [{ chat: "Role", saved: 90, fit: 55 }] },
+    { ...say(2, 100, 3), records: [{ chat: "Role", saved: 95, fit: 58 }] },
+  ];
+  // The chat lists the top two and a link; three more are shown for the small ask.
+  const chats = [
+    { messages: [bot(50, `${link("a")} ${link("b")}`), bot(150, link("c"))] },
+  ];
+  assert.deepEqual(
+    requestCompletion(turns, chats).map((row) => row.shown),
+    [55, 1],
+  );
+});
+
 test("outcomes and summary", () => {
   const rows = [
     { asked: 3, shown: 3, seconds: 60 },

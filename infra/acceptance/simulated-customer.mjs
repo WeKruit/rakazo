@@ -349,7 +349,7 @@ async function resultsPage(rpc, group) {
   if (!page) return null;
   const roleId = (await rpc("recruiting/getWorkspace", { threadId }).catch(() => null))?.role?.id;
   if (!roleId) return { saved: page.total };
-  const marked = { passed: [], onHold: [] };
+  const marked = { passed: [], onHold: [], fit: 0 };
   let cursor;
   // The page's own read, 200 at a time; a play's role holds a few hundred people at most.
   for (let read = 0; read < 5; read++) {
@@ -361,6 +361,7 @@ async function resultsPage(rpc, group) {
     if (!list) return { saved: page.total };
     for (const person of list.items) {
       const name = person.name ?? person.candidateKey;
+      if (["Strong", "Promising"].includes(person.match?.tier)) marked.fit += 1;
       if (person.decision === "hold") marked.onHold.push(name);
       else if (
         person.decision === "pass" ||
@@ -374,7 +375,7 @@ async function resultsPage(rpc, group) {
   return { saved: page.total, ...marked };
 }
 const CAMPAIGN_CODES =
-  "saved: people the role chat has stored (its Results count); passed / onHold: the people its Results page marks Passed (不合适, not a fit) or On hold; otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
+  "saved: people the role chat has stored (its Results count); fit: how many of them the grader rated Strong or Promising; passed / onHold: the people its Results page marks Passed (不合适, not a fit) or On hold; otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
 
 // What the recruiter can read: messages with text, in chats they wrote in or were answered in.
 const visible = (chats) =>
