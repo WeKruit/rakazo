@@ -222,6 +222,7 @@ const SAVED_PROFILE_FIELDS: Record<string, number> = {
   "Current title": 120,
   "Current company": 120,
   Location: 80,
+  "Why recommended": 400,
   Snippet: 600,
   Experience: 2500,
   Education: 500,

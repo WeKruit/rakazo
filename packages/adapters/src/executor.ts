@@ -13899,6 +13899,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 enableHighlights: true,
                 highlightsMaxCharacters: 900,
                 highlightsQuery: `concrete evidence of: ${query}`,
+                // The same request also says why each person fits, saved as its own column.
+                enableSummary: true,
+                summaryQuery: `In one sentence, why this person fits: ${query}`,
                 ...(languages.length && index < 2
                   ? { includeText: [languages[index] ?? languages[0]] }
                   : {}),
