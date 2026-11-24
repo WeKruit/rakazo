@@ -2319,8 +2319,15 @@ async function createSubagent(
 
   // A helper's result goes to the agent that started it, so it has no line to the user: its
   // progress notes were posted in the chat, in English in a Chinese conversation (s64, 11-24).
+  // A helper given its own tool list, like a named agent's, gets only those: graders handed the
+  // lead's whole set ran searches and recorded a round from the recruiter's words (s67, 11-24).
+  const own =
+    Array.isArray(args.tools) && args.tools.length ? new Set(args.tools.map(String)) : null;
   const childDefs = host.request.tools.filter(
-    (tool) => !DELEGATION_TOOL_NAMES.has(tool.name) && tool.name !== "message_user",
+    (tool) =>
+      !DELEGATION_TOOL_NAMES.has(tool.name) &&
+      tool.name !== "message_user" &&
+      (!own || own.has(tool.name)),
   );
   const nestedHost: ToolHost = {
     ...host,
