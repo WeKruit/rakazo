@@ -632,6 +632,7 @@ import {
 } from "./recruiting-feedback.js";
 import { FULL_PROFILE_READS, withRequirementEvidence } from "./recruiting-full-profile.js";
 import {
+  correctionNeedsCheck,
   GRADE_TOOL_CALL_STOP,
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
@@ -10679,7 +10680,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ? await nextRoundHeld(deps.prisma, {
                           threadId: run.threadId,
                           roleId: thread.activeRecruitingRoleId,
-                        }).catch(() => false)
+                        })
+                          .then(
+                            async (held) =>
+                              held ||
+                              (researchInput.data.operation === "calibration_round" &&
+                                researchInput.data.corrects === true &&
+                                (await correctionNeedsCheck(deps.prisma, {
+                                  threadId: run.threadId,
+                                  roleId: thread.activeRecruitingRoleId!,
+                                  candidateKeys:
+                                    researchInput.data.candidateKeys.map(savedCandidateKeyForm),
+                                }))),
+                          )
+                          .catch(() => false)
                       : false,
                   },
                   researchInput.data,

@@ -201,6 +201,7 @@ function fixture(options: {
     },
     externalEffect: {
       findMany: vi.fn(async () => []),
+      count: vi.fn(async () => 0),
       findUnique: vi.fn(async () => ({ request: { corrects: options.corrects } })),
     },
     $transaction: vi.fn(async (callback: (client: unknown) => Promise<unknown>) => callback(tx)),
@@ -248,7 +249,9 @@ describe("startRecruitingGrading", () => {
       found: [
         {
           ...person("flink"),
-          report: { fields: [{ label: "Snippet", value: "Apache Flink Contributor,\n streaming" }] },
+          report: {
+            fields: [{ label: "Snippet", value: "Apache Flink Contributor,\n streaming" }],
+          },
         },
       ],
       rounds: round(["linkedin:/in/flink"]),
@@ -260,7 +263,10 @@ describe("startRecruitingGrading", () => {
     f.prisma.externalEffect.findMany.mockResolvedValue([
       {
         result: {
-          languageLevels: { requirement: "Mandarin", levels: { "linkedin:/in/flink": "confirmed" } },
+          languageLevels: {
+            requirement: "Mandarin",
+            levels: { "linkedin:/in/flink": "confirmed" },
+          },
         },
       },
     ] as never);
@@ -1269,5 +1275,30 @@ describe("gradingTools", () => {
       "connectors_search_tools",
       "connectors_execute_tool",
     ]);
+  });
+});
+
+describe("askProgress", () => {
+  // s45 fosp2 11-24: asked for 4, the lead showed 2 and stopped without saying what kept people out.
+  it("counts the searches since the recruiter's message and the requirement most people miss", async () => {
+    const { askProgress } = await import("./recruiting-grading.js");
+    const grades = [
+      { match_tier: "Uncertain", unknown: ["language: Mandarin", "work_mode"] },
+      { match_tier: "Partial", not_met: ["language: Mandarin"], unknown: ["language: Mandarin"] },
+      { match_tier: "Partial", not_met: ["years: 6+"] },
+      // A fit doesn't count against anything it doesn't show.
+      { match_tier: "Promising", unknown: ["work_mode"] },
+    ];
+    const prisma = {
+      message: { findFirst: vi.fn(async () => ({ createdAt: new Date(now) })) },
+      externalEffect: { count: vi.fn(async () => 2) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => grades.map((matchFields) => ({ matchFields }))),
+      },
+    } as unknown as PrismaClient;
+    await expect(askProgress(prisma, { threadId: "thread", roleId: "role" })).resolves.toEqual({
+      searches: 2,
+      blocker: { requirement: "language: Mandarin", people: 2 },
+    });
   });
 });

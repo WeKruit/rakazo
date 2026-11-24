@@ -685,6 +685,11 @@ export async function startRecruitingGrading(
           candidateKeys: keys,
         });
         const replacing = new Map(replacements.map((person) => [person.key, person]));
+        const progress = await askProgress(deps.prisma, {
+          threadId: thread.id,
+          roleId: role.id,
+          since: early ? feedbackAt : review.since,
+        });
         const prompt = roundReviewPrompt(
           review.round.round,
           size,
@@ -700,6 +705,7 @@ export async function startRecruitingGrading(
               inRound: roundKeys.includes(key),
             };
           }),
+          { ...progress, fit: Math.min(size, placeable(roundKeys, review.grades) + fits) },
         );
         const recorder = await deps.prisma.externalEffect.findUnique({
           where: { id: review.round.effectId },
@@ -826,14 +832,8 @@ export async function startRecruitingGrading(
       }),
     ]);
     // Only the Reviewer's own batches run beside each other, never beside its other turns.
-    const others = running.some(
-      (run) => run.trigger !== ("recruiting_grade" satisfies RunTrigger),
-    );
-    if (
-      existing ||
-      others ||
-      running.length >= (grader.tool === "self" ? SELF_GRADE_PARALLEL : 1)
-    )
+    const others = running.some((run) => run.trigger !== ("recruiting_grade" satisfies RunTrigger));
+    if (existing || others || running.length >= (grader.tool === "self" ? SELF_GRADE_PARALLEL : 1))
       return null;
     const task = await tx.task.create({
       data: {
@@ -1288,6 +1288,41 @@ export async function nextRoundHeld(
 }
 
 /**
+ * Whether a checked round the lead records again holds people the Reviewer has not checked since
+ * the recruiter's feedback: the top-up search's people. The round is then held once more and the
+ * same turn waits for their check, so only the Reviewer judges who is shown (the approved loop,
+ * 11-24: s45/s46 shown top-ups were graded by the search alone).
+ */
+export async function correctionNeedsCheck(
+  prisma: PrismaClient,
+  input: { threadId: string; roleId: string; candidateKeys: readonly string[] },
+): Promise<boolean> {
+  const state = await roundState(prisma, input.roleId);
+  if (state?.status !== "checked" || !(await hasRoundReviewer(prisma, input.threadId)))
+    return false;
+  const review = await roundUnderReview(prisma, input.roleId, true, Date.now(), input.threadId);
+  if (!review) return false;
+  const graded = await prisma.recruitingCandidateOccurrence.findMany({
+    where: {
+      roleId: input.roleId,
+      candidateKey: { in: [...input.candidateKeys] },
+      page: {
+        ...(review.since ? { observedAt: { gt: review.since } } : {}),
+        effect: {
+          OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
+            request: { path: ["operation"], equals: operation },
+          })),
+        },
+      },
+    },
+    distinct: ["candidateKey"],
+    select: { candidateKey: true },
+  });
+  const checked = new Set(graded.map((row) => row.candidateKey));
+  return input.candidateKeys.some((key) => !checked.has(key));
+}
+
+/**
  * Whether a round this run lists must stay out of chat: it would be held for the check, or the
  * round before it is still unshown, so recording it is refused. Staging 11-16: six such refused
  * attempts streamed their lists, and the recruiter saw the same people again and again.
@@ -1474,6 +1509,90 @@ function placeable(
   }).length;
 }
 
+/** Searches for one ask before the lead records who fits and asks (the recruiter's rule 4). */
+export const ASK_SEARCH_LIMIT = 3;
+
+/** Where the recruiter's latest ask stands, from the records. */
+export type AskProgress = {
+  asked: number;
+  fit: number;
+  /** People searches run since the recruiter's latest message. */
+  searches: number;
+  /** The requirement that keeps the most checked people out, and how many. */
+  blocker?: { requirement: string; people: number };
+};
+
+/**
+ * The records behind an ask's progress: the searches since the recruiter's latest message and the
+ * requirement most checked-but-unfit people miss or don't show. Every result the lead gets while
+ * it works on the ask carries these numbers, as a parent agent's todo list does (Claude Code), so
+ * the lead never counts from memory (s45 fosp2 11-24: asked for 4, showed 2 and stopped silent).
+ */
+export async function askProgress(
+  prisma: PrismaClient,
+  input: { threadId: string; roleId: string; since?: Date },
+): Promise<Omit<AskProgress, "asked" | "fit">> {
+  const said = await prisma.message.findFirst({
+    where: { threadId: input.threadId, role: "user" },
+    orderBy: { seq: "desc" },
+    select: { createdAt: true },
+  });
+  const [searches, graded] = await Promise.all([
+    said
+      ? prisma.externalEffect.count({
+          where: {
+            run: { threadId: input.threadId },
+            kind: { endsWith: "__agent_run" },
+            createdAt: { gt: said.createdAt },
+          },
+        })
+      : 0,
+    prisma.recruitingCandidateOccurrence.findMany({
+      where: {
+        roleId: input.roleId,
+        page: {
+          ...(input.since ? { observedAt: { gt: input.since } } : {}),
+          effect: {
+            OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
+              request: { path: ["operation"], equals: operation },
+            })),
+          },
+        },
+      },
+      orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+      distinct: ["candidateKey"],
+      select: { matchFields: true },
+    }),
+  ]);
+  const counts = new Map<string, { requirement: string; people: number }>();
+  for (const row of graded) {
+    const fields = row.matchFields as {
+      match_tier?: unknown;
+      unknown?: unknown;
+      not_met?: unknown;
+    };
+    if (typeof fields?.match_tier === "string" && REPLACEMENT_TIERS.includes(fields.match_tier))
+      continue;
+    const missed = [fields?.not_met, fields?.unknown].flatMap((list) =>
+      Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : [],
+    );
+    for (const requirement of new Set(missed)) {
+      const key = requirement.split(":")[0]!.trim().toLowerCase();
+      const count = counts.get(key) ?? { requirement, people: 0 };
+      count.people += 1;
+      counts.set(key, count);
+    }
+  }
+  const blocker = [...counts.values()].sort((a, b) => b.people - a.people)[0];
+  return { searches, ...(blocker ? { blocker } : {}) };
+}
+
+/** One line of an ask's progress for the lead. */
+export function askProgressLine(progress: AskProgress): string {
+  const missing = Math.max(0, progress.asked - progress.fit);
+  return `Where this ask stands: asked ${progress.asked}, fit ${progress.fit}, missing ${missing}, searched ${progress.searches} of ${ASK_SEARCH_LIMIT} times${progress.blocker ? `; most checked people are out on: ${progress.blocker.requirement} (${progress.blocker.people})` : ""}.`;
+}
+
 type CheckedPerson = {
   key: string;
   name: string;
@@ -1489,7 +1608,13 @@ type CheckedPerson = {
  * The checked round handed back to the lead, which picks whom to show from the Reviewer's grades
  * itself. `size` is how many it recorded, i.e. read from the recruiter's words.
  */
-export function roundReviewPrompt(round: number, size: number, people: readonly CheckedPerson[]) {
+export function roundReviewPrompt(
+  round: number,
+  size: number,
+  people: readonly CheckedPerson[],
+  progress?: Omit<AskProgress, "asked">,
+) {
+  const searchedOut = (progress?.searches ?? 0) >= ASK_SEARCH_LIMIT;
   const line = (person: CheckedPerson) => {
     const grade = [person.tier, person.score].filter((part) => part !== undefined).join(" ");
     const unknown = person.unknown?.length
@@ -1499,11 +1624,17 @@ export function roundReviewPrompt(round: number, size: number, people: readonly 
   };
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
+    ...(progress ? [askProgressLine({ ...progress, asked: size })] : []),
     round === 1
       ? // The first ten come straight from the JD (the recruiter's rule 11-22): checked people who
         // miss no hard requirement, those the profile can't confirm marked with what it doesn't show.
-        `Pick as many as the recruiter asked for (you recorded ${size}), best grade first: Strong, Promising, then Uncertain, each Uncertain with what their profile doesn't show; never someone graded Partial. If fewer than that are left, first search for more: one agent_run with effort "low" and a query starting "Find N more people" (N five times the number missing, at least 10 and at most 20, since most people a search returns fail the check and a run costs the same) naming every requirement; it skips everyone already in Results. Then record them.`
-      : `Pick as many as the recruiter asked for this round (you recorded ${size}), best grade first, the round's own people before others of the same grade. Show only people graded Strong or Promising, unless the recruiter has said to loosen or accept less: then Uncertain too, each with what their profile doesn't show. If fewer fit, first search for more: one agent_run with effort "low" and a query starting "Find N more people" (N five times the number missing, at least 10 and at most 20, since most people a search returns fail the check and a run costs the same) naming every requirement and the recruiter's feedback; it skips everyone already in Results, and the people it grades count like the checked ones. Search at most three times for this request; then record those who fit and in the same reply say how many short of the ask it is and which requirement rules out the most, and ask whether they are enough or to loosen that one.`,
+        `Pick as many as the recruiter asked for (you recorded ${size}), best grade first: Strong, Promising, then Uncertain, each Uncertain with what their profile doesn't show; never someone graded Partial. If fewer than that are left, first search for more: one agent_run with effort "low" and a query starting "Find N more people" (N five times the number missing, at least 10 and at most 20, since most people a search returns fail the check and a run costs the same) naming every requirement; it skips everyone already in Results. Then record the round again with them: the Reviewer checks the new ones in the same turn.`
+      : [
+          `Pick as many as the recruiter asked for this round (you recorded ${size}), best grade first, the round's own people before others of the same grade. Show only people graded Strong or Promising, unless the recruiter has said to loosen or accept less: then Uncertain too, each with what their profile doesn't show.`,
+          searchedOut
+            ? "You have searched three times for this request, so don't search again: record those who fit now, and in the same reply say how many short of the ask it is and which requirement rules out the most, and ask whether they are enough or to loosen that one."
+            : `If fewer fit, first search for more: one agent_run with effort "low" and a query starting "Find N more people" (N five times the number missing, at least 10 and at most 20, since most people a search returns fail the check and a run costs the same) naming every requirement and the recruiter's feedback; it skips everyone already in Results. Then record the round again with the people who fit and the new people: the Reviewer checks the new ones in the same turn. Search at most three times for this request; then record those who fit and in the same reply say how many short of the ask it is and which requirement rules out the most, and ask whether they are enough or to loosen that one.`,
+        ].join(" "),
     // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
     // s38 11-24: the lead asked with a card instead of recording, and the checked round was never shown.
     "When most of your picks' profiles don't show the same requirement, record the round first, then ask in one line in the same reply whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
