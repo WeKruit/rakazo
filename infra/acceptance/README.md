@@ -28,7 +28,8 @@ Release gate: `smoke.mjs`, `regression.mjs`, `home-load.mjs`, `ui-regressions.mj
 (`ui-regressions-checks.mjs`), `card-e2e.mjs`, `card-deadlines.mjs`, `restart-test-app.mjs`.
 
 Conversations and judging: `simulated-customer.mjs` (the one LLM-driven customer; journeys in
-`simulated-journeys.mjs`, browser in `simulated-ui.mjs`), `real-user.mjs` (scripted scenarios in
+`simulated-journeys.mjs`, browser in `simulated-ui.mjs`, per-request completion of asks for
+people in `request-completion.mjs`), `real-user.mjs` (scripted scenarios in
 `real-user-scenarios.mjs`, checks in `real-user-checks.mjs`), `real-user-session.mjs` (shared client),
 `replay-messages.mjs`, `playtest/` (instruction scoring loop, see its README).
 

@@ -52,6 +52,11 @@ import {
   unfollowAll,
   watchFrom,
 } from "./real-user-session.mjs";
+import {
+  completionOutcome,
+  completionSummary,
+  requestCompletion,
+} from "./request-completion.mjs";
 import { PERSONAS, JOURNEYS as WRITTEN } from "./simulated-journeys.mjs";
 
 const BLOCKS = new Set(WRITTEN.filter((journey) => journey.blocks).map((journey) => journey.name));
@@ -423,7 +428,7 @@ async function replyAfter(journey, rpc, since, quick = false) {
 }
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone), but make each message mean what your goal means: if a stranger could read it as a different question, reword it. Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
-{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button; for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
+{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button; for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "people": <how many new people this message asks Kruit to find or show now: "find 10" is 10, "swap these two" is 2, a first search with no number is 10; 0 when it asks for none>, "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
 Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
 // With --ui the recruiter works in the browser and can also open pages and press buttons.
 const UI_RULES = `${SIMULATOR_RULES}
@@ -919,6 +924,7 @@ const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the cust
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
 - truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no", and so is saying people were found, added or saved for a role when its "saved" count after the reply is lower. The records hold only the campaigns the test could read: when a claim is about a campaign, role or person missing from them, it is "unknown", never "no"; a candidate name you cannot find in the records is not "invented" (saved search results are not in the records). Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send can take up to about 15 minutes to go out (a healthy mailbox started in about two on staging): within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
 - issues: short labels for what went wrong, from: dead end, refused, lecture, repeat (Kruit says the same thing again unprompted or posts a message twice; answering a new or overlapping question with the same fact is not a repeat; a list posted once in the role's own chat and copied once into Kruit's chat, where the recruiter asked, is one showing, and only the same thing twice within one chat is a repeat), wrong language (Kruit's own words not in the recruiter's language; an email or template written for candidates is meant to be English and is never wrong language), false claim, internal jargon (anything in Kruit's own words a recruiter would not understand or should not see: a supplier or service name such as Exa, Instantly, FullEnrich, ContactOut, Modal or Supabase; an internal helper's name such as Sourcer, Reviewer, Main or a sub-agent; internal mechanics such as a handoff, queue, worker, session, retry, timeout, tool, task or record ID, or a gate code. Gmail, Calendar, LinkedIn, the app's own pages and the role's own chat by its role name are the recruiter's words, and quoted candidate profiles are not Kruit's own words), fake block (Kruit hands the work back or stalls without a result when it could act: "want me to…?"/"要不要我…？" about something the recruiter already asked for, "I couldn't check"/"我查不了" without saying what it tried, or "I've asked the team to check"/"已让团队核实" with no result later in the conversation; a confirmation before an outside send and a plain "cannot" for something it has no way to do are not fake blocks), slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), broken email (an email or template Kruit offers as ready contains a question to the recruiter, a "[...]" fill-in, or a sign-off with no name), did not act, asked again (only when Kruit actually asks a question or shows a card that asks about, or asks to confirm, something the recruiter's JD or messages already stated: location, work mode or commute when a city and mode are given, a stated number of years, including asking for a cap on it, or a language requirement when nothing implies a second language; a reply that asks nothing is never asked again; quote where the recruiter said it, and if you cannot, it is not asked again), screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
+- gap: only for a move that asked for people and got fewer new people than asked (the move says both numbers): "said" when Kruit said how many are missing, or that none fit, and why, and asked what to change or whether to go on; else "not said". null for every other move.
 - Check every move against the records and against what the page showed after Kruit's reply ("screen"): a claim the screen contradicts (a count, a status, "saved", "sent", a place to click that is not there) is truthful "no". Do not give the benefit of the doubt: an answer that is only "I'll check" or "on it" with nothing after it is "did not act".
 A new role searches first (the product's order): its first people come straight from the JD as written, and at most one short question about something the recruiter left open comes beside them, never before them. Opening the role and saying its team is searching counts as answered when the role chat then shows that search; no question is expected, a question about something already said is "asked again", and a second question is "wordy". When the customer asks for something else (a template, an email), doing it is the right move and no role question is expected.
 What goes out is what was on the card the customer approved and what the records show, never a card the customer denied: a denied card's email was not queued or sent, so a reply that describes the approved email truthfully is "yes" even when a denied card said otherwise. Two send cards with different emails shown at once is its own problem ("other"), not a false claim.
@@ -927,13 +933,20 @@ When the customer used the browser, a move may also show what a page displayed (
 Quote what each fault breaks. A correctness fault (false claim, asked again, broken email, did not act, a candidate who misses a requirement) needs, in the note, the exact sentence it breaks, quoted from these rules, the recruiter's messages or the JD; if you cannot quote one, it is not a fault and costs nothing. A candidate requirement is only something the JD or the recruiter says the person must have or be (skills, years, the place they must work from, a language). Terms the employer offers, such as the pay range, office days, benefits or the start date, are never candidate requirements: a person or list that does not show them misses nothing. Each fake block costs at least 3 points of the score.
 Judge an email or template only against what the customer actually told Kruit in the conversation: a draft without details the customer never gave (a role they only named, a salary they never said) is the honest result, not a fault and not a lower score.
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Write each move's note first, then its verdicts: answered, truthful and issues must agree with the note, so a label the note says does not apply is left out. Answer with one JSON object and nothing else:
-{"turns": [{"turn": n, "note": "<one line>", "answered": true|false, "truthful": "yes"|"no"|"unknown", "issues": ["..."]}], "goals": [{"goal": "...", "met": true|false, "why": "..."}], "score": 0-10, "verdict": "...", "problems": ["..."]}`;
+{"turns": [{"turn": n, "note": "<one line>", "answered": true|false, "truthful": "yes"|"no"|"unknown", "issues": ["..."], "gap": "said"|"not said"|null}], "goals": [{"goal": "...", "met": true|false, "why": "..."}], "score": 0-10, "verdict": "...", "problems": ["..."]}`;
 
-async function judge(journey, result) {
+/** What a move asked for and got, so the judge reads "gap" against the counts. */
+const askedLine = (requests, turn) => {
+  const request = requests.find((item) => item.turn === turn.turn);
+  return request
+    ? ` (asked for ${request.asked} new people; new people shown before the next move: ${request.shown})`
+    : "";
+};
+async function judge(journey, result, requests = []) {
   const moves = result.turns
     .map(
       (turn) =>
-        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
+        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
     )
     .join("\n");
   const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? `This account is a test fixture that earlier plays used too: on a page, roles, campaigns, totals and messages from those plays (older or same-named entries) are the test's leftovers, not Kruit's fault.${result.accountName ? ` The account's own name is "${result.accountName}": an email signed with it, or with the sending mailbox's name, is signed by the sender, not a placeholder.` : ""}\n\n` : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
@@ -968,6 +981,7 @@ function majority(readings) {
             ? "unknown"
             : turn.truthful,
         issues,
+        gap: votes((item) => item.gap === "said") ? "said" : turn.gap ? "not said" : null,
       };
     }),
     goals: (median.goals ?? []).map((goal, index) => ({
@@ -1065,9 +1079,11 @@ async function runOne(journey, sample, owner, mailbox) {
   let result;
   let verdict;
   let error;
+  let requests = [];
   try {
     result = await play(journey, label, owner, mailbox, out);
-    verdict = await judge(journey, result);
+    requests = requestCompletion(result.turns, result.chats);
+    verdict = await judge(journey, result, requests);
   } catch (caught) {
     error = caught;
     result ??= caught.partial;
@@ -1076,6 +1092,12 @@ async function runOne(journey, sample, owner, mailbox) {
     verdict,
     result,
   );
+  // Each request for people, with whether its people came (request-completion.mjs).
+  for (const request of requests)
+    request.outcome = completionOutcome(
+      request,
+      verdict?.turns?.find((turn) => turn.turn === request.turn)?.gap,
+    );
   const row = {
     suite: "simulated",
     scenario: journey.name,
@@ -1100,6 +1122,7 @@ async function runOne(journey, sample, owner, mailbox) {
     ...(verdict ? { verdict: verdict.verdict } : {}),
     ...(notRun ? { infra: true, notRun: true } : {}),
     ...(slowStart.length ? { slowStart } : {}),
+    ...(requests.length && verdict ? { requests } : {}),
   };
   fs.writeFileSync(
     path.join(out, "journey.json"),
@@ -1435,11 +1458,19 @@ const passLine = (subset) =>
     ranRows.filter((row) => row.pass && subset.some((item) => item.name === row.scenario)).length,
     ranRows.filter((row) => subset.some((item) => item.name === row.scenario)).length,
   )} · pass^k ${rate(subset.filter((row) => row.status === "通过").length, subset.length)}`;
+// Requests for people that ended with the people, a shortfall said plainly, or nothing.
+const completion = completionSummary(ranRows.flatMap((row) => row.requests ?? []));
 const summary = [
   `blocking: ${blocking.length ? `yes (${blocking.map((row) => row.name).join(", ")})` : "no"}`,
   "",
   `回归集（卡发布）：${passLine(decided.filter((row) => row.blocks))}；能力集：${passLine(decided.filter((row) => !row.blocks))}`,
   "",
+  ...(completion.requests
+    ? [
+        `要人完成率：${completion.requests} 次要人，给足 ${rate(completion.delivered, completion.requests)}，说明缺口 ${rate(completion.stated, completion.requests)}，没交付 ${rate(completion.notDelivered, completion.requests)}；出名单 p50 ${completion.p50 ?? "-"} 秒，p90 ${completion.p90 ?? "-"} 秒`,
+        "",
+      ]
+    : []),
   `按机制：${[...new Set(JOURNEYS.flatMap((journey) => journey.mechanisms ?? []))]
     .map((mechanism) => [
       mechanism,
