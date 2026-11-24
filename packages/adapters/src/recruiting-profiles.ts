@@ -369,8 +369,11 @@ function experienceText(jobs: readonly SearchJob[]): string | undefined {
   return lines.length ? lines.join("\n") : undefined;
 }
 
-const SNIPPET_LENGTH = 300;
-const WHY_RECOMMENDED_LENGTH = 400;
+// The search is asked for up to 900 characters of evidence per person; the saved profile keeps
+// all of it. Cut to 300, the check found "Spark in production not shown" on people whose
+// evidence said so, and re-read the raw search page for the rest (s65, 11-24).
+const SNIPPET_LENGTH = 900;
+const WHY_RECOMMENDED_LENGTH = 600;
 
 /** Plain profile prose: no headings, links or counters, cut to a short passage. */
 function snippetOf(text: string): string | undefined {
