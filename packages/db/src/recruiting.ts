@@ -12086,6 +12086,26 @@ export async function executeNativeRecruitingShortlist(
   });
 }
 
+/**
+ * The role's one saved person a key in another shape names: a list row's "autumn:<key>" or a
+ * LinkedIn handle without its prefix. A play 11-24: "autumn:<handle>" was refused, the agent fell
+ * back to the list's thin row and told the recruiter the profile showed no evidence.
+ */
+async function candidateByOtherKeyShape(
+  tx: Pick<Tx, "recruitingCandidate">,
+  roleId: string,
+  given: string,
+) {
+  const key = given.replace(/^autumn:/, "");
+  const handle = key.split("/").pop();
+  if (!handle) return null;
+  const near = await tx.recruitingCandidate.findMany({
+    where: { roleId, OR: [{ candidateKey: key }, { candidateKey: { endsWith: `/${handle}` } }] },
+    take: 2,
+  });
+  return near.length === 1 ? (near[0] ?? null) : null;
+}
+
 export async function listRecruitingCandidateSources(
   prisma: PrismaClient,
   actor: Actor,
@@ -12096,9 +12116,10 @@ export async function listRecruitingCandidateSources(
   const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
-      const candidate = await tx.recruitingCandidate.findUnique({
-        where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
-      });
+      const candidate =
+        (await tx.recruitingCandidate.findUnique({
+          where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
+        })) ?? (await candidateByOtherKeyShape(tx, role.id, input.candidateKey));
       if (!candidate) throw new IsolationError();
       const scope = candidateCursorScope({
         roleId: role.id,
@@ -12313,14 +12334,7 @@ export async function saveRecruitingCalibrationRound(
       where: { roleId: role.id },
       orderBy: { round: "desc" },
     });
-    const repeated =
-      previous &&
-      (await calibrationRoundRepeats(
-        tx,
-        actor,
-        role.id,
-        keys,
-      ));
+    const repeated = previous && (await calibrationRoundRepeats(tx, actor, role.id, keys));
     if (repeated?.repeats.length)
       throw new RecruitingCalibrationRoundError(
         `Round ${repeated.round + 1} must show only people the recruiter has not seen, but ${repeated.repeats.join(", ")} ${repeated.repeats.length === 1 ? "was" : "were"} already shown in an earlier round or turned down. Replace them with saved people no round has shown (recruiting_candidates list) or people from a new quick search, and record the round again.`,
