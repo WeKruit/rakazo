@@ -1567,10 +1567,10 @@ describe("waitForDelegatedAnswer", () => {
     const round = {
       message: {
         findFirst: vi.fn(async ({ where }: { where: { role: string } }) =>
-          where.role === "bot" ? { id: "round" } : null,
+          where.role === "bot" ? { blocks: [{ kind: "text", text: "本轮 1 人：…" }] } : null,
         ),
       },
     } as unknown as PrismaClient;
-    expect(await wait(round)).toEqual({ roundShown: true });
+    expect(await wait(round)).toEqual({ roundShown: "本轮 1 人：…" });
   });
 });

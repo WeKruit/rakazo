@@ -777,6 +777,12 @@ export async function showRoundWhereAskedNow(
   await showRoundWhereAsked(deps, run, root, `round:${roundId}`, text);
 }
 
+/** The text of the round as posted where it was asked for. */
+const shownText = (message: { blocks: unknown }) =>
+  (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
+    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+    .join("\n");
+
 export const DELEGATED_ANSWER_WAIT_MS = 4 * 60_000;
 const DELEGATED_ANSWER_POLL_MS = 3_000;
 
@@ -801,7 +807,7 @@ export async function waitForDelegatedAnswer(
     pollMs?: number;
     userMessageWaiting?: () => Promise<boolean>;
   },
-): Promise<{ answer?: string; roundShown?: true } | undefined> {
+): Promise<{ answer?: string; roundShown?: string } | undefined> {
   const deadline = Date.now() + (input.timeoutMs ?? DELEGATED_ANSWER_WAIT_MS);
   for (;;) {
     const [returned, round] = await Promise.all([
@@ -831,7 +837,8 @@ export async function waitForDelegatedAnswer(
           createdAt: { gte: input.since },
           clientNonce: { startsWith: "delegated-round:" },
         },
-        select: { id: true },
+        orderBy: { seq: "desc" },
+        select: { blocks: true },
       }),
     ]);
     if (returned) {
@@ -860,8 +867,8 @@ export async function waitForDelegatedAnswer(
       const answer = botMessageContext(
         Array.isArray(returned.blocks) ? (returned.blocks as MessageBlock[]) : [],
       )?.text;
-      if (taken && answer) return { answer, ...(round ? { roundShown: true as const } : {}) };
-    } else if (round) return { roundShown: true };
+      if (taken && answer) return { answer, ...(round ? { roundShown: shownText(round) } : {}) };
+    } else if (round) return { roundShown: shownText(round) };
     if (
       Date.now() >= deadline ||
       input.signal.aborted ||
@@ -876,7 +883,9 @@ export async function waitForDelegatedAnswer(
 }
 
 /** Model-facing fields for delegate_to_role once its wait ends. */
-export function delegatedAnswerResult(waited: { answer?: string; roundShown?: true } | undefined) {
+export function delegatedAnswerResult(
+  waited: { answer?: string; roundShown?: string } | undefined,
+) {
   if (waited?.answer)
     return {
       answer: waited.answer,
@@ -884,8 +893,10 @@ export function delegatedAnswerResult(waited: { answer?: string; roundShown?: tr
     };
   // fosp 11-23 (s27): told only not to retell the round, Kruit said nothing, so 「收到，马上处理。」
   // stood as its answer and "下一批照这个改" went without a word on what changed.
+  // fosp 11-24 (s72): knowing only that a round was posted, Kruit said no replacement existed.
   if (waited?.roundShown)
     return {
+      shown: waited.roundShown,
       note: `${ROUND_SHOWN_ABOVE} Answer whatever else the recruiter asked in this message, such as what changed in the search, in one line.`,
     };
   return {
