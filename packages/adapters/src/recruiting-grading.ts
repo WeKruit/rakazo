@@ -598,12 +598,15 @@ export async function startRecruitingGrading(
         role.id,
         Math.max(0, size - placeable(roundKeys, review.grades)),
         early ? feedbackAt : review.since,
+        // Uncertain people too, after the fits: the lead shows them only once the recruiter loosens.
+        [...REPLACEMENT_TIERS, "Uncertain"],
       );
+      const fits = replacements.filter((person) => REPLACEMENT_TIERS.includes(person.tier)).length;
       // fosp 11-20 (4eb42c98): "再来5个" came back with 2 while ten saved people no round had shown
       // were never graded, so none could fill a place. A short round first has those people
       // checked, once each, then shows.
       const unshown =
-        placeable(roundKeys, review.grades) + replacements.length < size && grader?.tool === "self"
+        placeable(roundKeys, review.grades) + fits < size && grader?.tool === "self"
           ? await unshownUngraded(deps.prisma, role.id, found, review.since)
           : [];
       if (unshown.some((row) => waiting.has(row.linkedinUrl))) return skipped("filling round");
