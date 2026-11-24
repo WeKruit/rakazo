@@ -34,7 +34,7 @@ const MAX_ATTEMPTS = 120;
 /** People per grading request. */
 export const GRADE_BATCH = 50;
 /** People per batch the quality check grades itself, since it reads each full profile. */
-export const SELF_GRADE_BATCH = 10;
+export const SELF_GRADE_BATCH = 5;
 /** Grading requests the research service works on at once for one conversation. */
 export const GRADE_IN_FLIGHT = 4;
 /** A grading request whose grades never came back stops holding up the next batch after this. */
@@ -216,7 +216,7 @@ export function recruitingGradePrompt(
   const list = [
     ...(asked.length
       ? [
-          "The recruiter also asked for these; grade each as a hard requirement (someone like the people they turned down is not_met), except the job's own terms (pay, office days, benefits), which are about the job, not the person:",
+          "What the recruiter has said about this search:",
           ...asked.map((statement) => `* ${statement}`),
           "",
         ]
@@ -231,7 +231,7 @@ export function recruitingGradePrompt(
       `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements. You grade them yourself, from each person's full public profile.`,
       `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge from what each page shows and what the search said of them below; a public page often shows less than the search did. When a page can't be read, use the person's saved profile from recruiting_candidates.`,
       SELF_GRADE_RUBRIC,
-      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, match_score 0 to 100, match_tier, one short fit reason, a concern only for what is not met, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown, each preference marked preference: true. Evidence is at most six profile words, and only for not_met or a met that isn't plain from the title; leave it empty for unknown. Leave out title, company, location and education, which Results already holds: the recruiter is waiting on this. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
+      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, match_score 0 to 100, match_tier, one short fit reason, a concern only for what is not met, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown. Evidence is at most six profile words, and only for not_met or a met that isn't plain from the title; leave it empty for unknown. Leave out title, company, location and education, which Results already holds: the recruiter is waiting on this. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
       "",
       ...list,
     ].join("\n");
@@ -255,17 +255,15 @@ export function recruitingGradePrompt(
 /** Characters of each profile the quality check reads; the education section must fit. */
 const SELF_GRADE_PAGE_CHARS = 15_000;
 
-/** How the quality check decides each requirement, so every grade follows the same rules. */
+/** How the quality check grades: by the recruiter's requirements and feedback, plus their kept rules. */
 export const SELF_GRADE_RUBRIC = [
-  "How to grade each requirement:",
-  "- met: the profile clearly shows it; quote its words as evidence.",
-  "- not_met: the profile shows the opposite (located elsewhere, clearly fewer years, only worked at the school, a different field).",
-  "- unknown: the profile is silent or too vague. Never assume, and never judge ethnicity, race or background from a name or photo: only what the profile states counts.",
-  "- The job's own terms (pay range, office days or hybrid schedule, benefits) are what the job offers, not something a profile shows: leave them out of requirements_assessment, and they never lower a tier. The person's side of them still counts: a hybrid job needs someone living within a commute.",
-  "- Years of experience: add up the dated roles that match the requirement, counting overlapping roles once; a stated total in the person's own summary counts too.",
-  "- Location: the current location; a nearby commuting area counts.",
-  "- A required language: when a person's line gives the language check's finding, that is the requirement's status (confirmed or strong: met; no sign: not_met; unknown: unknown). Don't judge the language again yourself.",
-  "Score and tier: Strong needs every hard requirement met, and a preference never keeps anyone from Strong (note a missed one in concerns); any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong, and a point the recruiter turned someone down for that the profile doesn't show makes Uncertain at most. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
+  "Grade each person against the role's requirements and everything the recruiter has said, feedback included; their latest words win.",
+  "- Each requirement is met, not_met or unknown by what the profile states. Never judge ethnicity, race or background from a name or photo.",
+  "- Hard requirements and preferences are what the recruiter made them. Strong needs every hard requirement met; one not_met makes Partial at most; a missed preference only lowers the score.",
+  "- A profile silent on a point the recruiter stressed is Uncertain at most; silent on anything else, it can still be Promising.",
+  "- Years: count the dated roles that match.",
+  "- A required language: the language check's finding on the person's line is its status.",
+  "- The job's own terms (pay, office days, benefits) are not requirements on the person.",
 ].join("\n");
 
 /** The profile links one grading request sent. */
@@ -1404,21 +1402,9 @@ function gradeUnknown(fields: unknown): string[] | undefined {
   return Array.isArray(unknown) ? unknown.filter((item) => typeof item === "string") : undefined;
 }
 
-/** An Uncertain grade scored under this saw too little of the profile to take a round's place. */
-const SEEN_TOO_LITTLE_SCORE = 50;
-
-/**
- * The tier a grade fills a round's place with. fr 11-21 (b3671ce9): two people graded Uncertain at
- * 15 ("the profile details available here do not establish role fit") filled round 3's last places,
- * and the recruiter found no Spark or Kafka on either after being told the round was checked.
- */
-export function placeTier(fields: unknown): unknown {
-  const grade = fields as { match_tier?: unknown; match_score?: unknown } | null;
-  return grade?.match_tier === "Uncertain" &&
-    typeof grade.match_score === "number" &&
-    grade.match_score < SEEN_TOO_LITTLE_SCORE
-    ? "Unseen"
-    : grade?.match_tier;
+/** A saved grade's tier. */
+function placeTier(fields: unknown): unknown {
+  return (fields as { match_tier?: unknown } | null)?.match_tier;
 }
 
 /** Checked people from Results who may fill a round's open places, best first. */
@@ -1462,7 +1448,7 @@ export function roundReviewPrompt(round: number, size: number, people: readonly 
   };
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet. Show it now: record calibration_round with corrects: true and the people you pick from the checked people below, best first.`,
-    `Pick as many as the recruiter asked for this round (you recorded ${size}): Strong first, then Promising, the round's own people before others of the same grade; the Reviewer's grade already weighs what the recruiter stressed, so never pick someone graded Uncertain or Partial unless the recruiter has said in this conversation to loosen or accept less: then Uncertain comes next, each with what their profile doesn't show. If fewer fit, record those and in the same reply ask whether they are enough or which one point they named to loosen, and search no more until they answer.`,
+    `Pick as many as the recruiter asked for this round (you recorded ${size}), best grade first, the round's own people before others of the same grade. Show only people graded Strong or Promising, unless the recruiter has said to loosen or accept less: then Uncertain too, each with what their profile doesn't show. If fewer fit, record those and in the same reply ask whether they are enough or which one point to loosen, and search no more until they answer.`,
     // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
     "When most of your picks' profiles don't show the same requirement, ask in one line beside the list whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
     "",

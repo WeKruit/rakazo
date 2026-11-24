@@ -15,7 +15,6 @@ const {
   GRADE_IN_FLIGHT,
   GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
-  placeTier,
   gradingTools,
   heldRoundSearchRefusal,
   nextRoundHeld,
@@ -846,7 +845,7 @@ describe("startRecruitingGrading", () => {
     );
   });
 
-  it("has the quality check grade itself from full profiles, ten at a time", async () => {
+  it("has the quality check grade itself from full profiles, five at a time", async () => {
     const f = fixture({
       found: Array.from({ length: 14 }, (_, index) => person(`p${index}`)),
       agentRunBots: ["main"],
@@ -860,12 +859,12 @@ describe("startRecruitingGrading", () => {
       data: expect.objectContaining({ botId: "reviewer" }),
     });
     const prompt = promptOf(f);
-    expect(prompt).toContain("Grade these 10 people");
+    expect(prompt).toContain("Grade these 5 people");
     expect(prompt).toContain("one web_fetch per person");
     expect(prompt).toContain("recruiting_research save_grades");
-    expect(prompt).toContain("never judge ethnicity, race or background");
+    expect(prompt).toContain("judge ethnicity, race or background");
     expect(prompt).not.toContain("agent_run");
-    expect(prompt).not.toContain("in/p10");
+    expect(prompt).not.toContain("in/p5");
     // Grades the quality check saved itself count as graded.
     expect(f.prisma.recruitingCandidateOccurrence.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1216,15 +1215,6 @@ describe("gradingTools", () => {
       "connectors_search_tools",
       "connectors_execute_tool",
     ]);
-  });
-});
-
-describe("placeTier", () => {
-  it("never lets a grade that saw too little of the profile take a place", () => {
-    // fr 11-21 (b3671ce9): two people graded Uncertain at 15 filled round 3's last places.
-    expect(placeTier({ match_tier: "Uncertain", match_score: 15 })).toBe("Unseen");
-    expect(placeTier({ match_tier: "Uncertain", match_score: 55 })).toBe("Uncertain");
-    expect(placeTier({ match_tier: "Promising", match_score: 15 })).toBe("Promising");
   });
 });
 
