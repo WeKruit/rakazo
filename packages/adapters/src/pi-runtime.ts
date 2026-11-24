@@ -2317,7 +2317,11 @@ async function createSubagent(
   }
   const subagentModel = modelForCompletion(selectedModel.model, requestModel.maxTokens);
 
-  const childDefs = host.request.tools.filter((tool) => !DELEGATION_TOOL_NAMES.has(tool.name));
+  // A helper's result goes to the agent that started it, so it has no line to the user: its
+  // progress notes were posted in the chat, in English in a Chinese conversation (s64, 11-24).
+  const childDefs = host.request.tools.filter(
+    (tool) => !DELEGATION_TOOL_NAMES.has(tool.name) && tool.name !== "message_user",
+  );
   const nestedHost: ToolHost = {
     ...host,
     activeModel: {
