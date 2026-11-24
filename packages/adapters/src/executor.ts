@@ -5088,10 +5088,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !roleId ||
             !call.name.endsWith("recruiting_research") ||
             call.args.operation !== "calibration_round" ||
-            !Array.isArray(call.args.candidateKeys) ||
-            // A correction may name only the people it swaps in; streaming it showed "1 person
-            // this round" before the full ten replaced it (staging 11-15). It shows once, recorded.
-            call.args.corrects === true
+            !Array.isArray(call.args.candidateKeys)
           )
             return;
           // The last key may still be cut mid-word; the list leaves it out until it names one person.
@@ -6078,8 +6075,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               state &&
               (state.status === "checking" ||
-                (state.status === "checked" &&
-                  (state.ownerBotId !== run.botId || args.corrects !== true)))
+                (state.status === "checked" && state.ownerBotId !== run.botId))
             )
               return {
                 error: `Not recorded: round ${state.round} is waiting for the Reviewer's check and is shown here once checked, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
@@ -6310,7 +6306,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // checked round's people were graded from full profiles and are shown as picked.
           const showingChecked =
             researchInput?.data?.operation === "calibration_round" &&
-            researchInput.data.corrects === true &&
             thread.activeRecruitingRoleId !== null &&
             (await roundState(deps.prisma, thread.activeRecruitingRoleId).catch(() => null))
               ?.status === "checked";

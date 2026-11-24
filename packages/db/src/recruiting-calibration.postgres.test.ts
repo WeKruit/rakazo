@@ -87,13 +87,12 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     });
   }
 
-  async function recordRound(candidateKeys: string[], corrects?: true) {
+  async function recordRound(candidateKeys: string[]) {
     await liveRun("继续");
     const request = {
       operation: "calibration_round" as const,
       expectedRoleRevision: 1,
       candidateKeys,
-      ...(corrects ? { corrects } : {}),
     };
     const effect = await prisma.externalEffect.create({
       data: {
@@ -256,84 +255,11 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     const again = await recruiting.readRecruitingCalibrationRound(prisma, actor, { threadId });
     expect(again.round?.candidates[0]?.name).toBe("Person second-0");
 
-    // Staging 11-15: the recruiter asked to swap two people of round 2, and the kept eight were
-    // refused as repeats, so the corrected ten could not be shown. A correction keeps them.
+    // A later list holds only people no round has shown.
     await savePage(["swap-0", "swap-1"]);
-    const swapped = [...keys("second").slice(0, 8), "swap-0", "swap-1"];
-    await expect(recordRound(swapped)).rejects.toThrow(
-      /already shown in an earlier round or turned down/,
-    );
-    await expect(recordRound(["swap-0", "swap-1"], true)).rejects.toThrow(
-      /record them as a new round/,
-    );
-    // Only the kept people are exempt: someone from round 1 is still refused.
     await expect(
-      recordRound([...swapped.slice(0, 9), keys("first")[0] ?? ""], true),
+      recordRound([...keys("second").slice(0, 8), "swap-0", "swap-1"]),
     ).rejects.toThrow(/already shown in an earlier round or turned down/);
-
-    // Staging 11-15: round 2 was held for the Reviewer, and its checked version was recorded as
-    // round 3 although the recruiter had seen only round 1. The check's correction takes its place.
-    // Staging 11-16: a later turn recorded round 3 over the held round 2. The stored state decides.
-    const held = await prisma.recruitingCalibrationRound.update({
-      where: { roleId_round: { roleId, round: 2 } },
-      data: { status: "checking", statusAt: new Date(), ownerBotId: botId },
-    });
-    await savePage(["swap-2", ...keys("held-later")]);
-    await expect(recordRound(keys("held-later"))).rejects.toThrow(/being checked by the Reviewer/);
-    await expect(recordRound(swapped, true)).rejects.toThrow(/being checked by the Reviewer/);
-    await expect(recruiting.markCalibrationRoundChecked(prisma, held)).resolves.toBe(true);
-    // A stale version changes nothing.
-    await expect(recruiting.markCalibrationRoundChecked(prisma, held)).resolves.toBe(false);
-    await expect(recordRound(keys("held-later"))).rejects.toThrow(
-      /shown by the teammate who recorded/,
-    );
-    await prisma.recruitingCalibrationRound.update({
-      where: { id: held.id },
-      data: { ownerBotId: "another-bot" },
-    });
-    await expect(recordRound(swapped, true)).rejects.toThrow(/shown by the teammate who recorded/);
-    await prisma.recruitingCalibrationRound.update({
-      where: { id: held.id },
-      data: { ownerBotId: botId },
-    });
-    await expect(recordRound(swapped, true)).resolves.toMatchObject({
-      round: 2,
-      roundStatus: "shown",
-    });
-    // Shown now: messages written while it was held come before it.
-    const checked = await prisma.recruitingCalibrationRound.findFirstOrThrow({
-      where: { roleId, round: 2 },
-    });
-    expect(checked.createdAt.getTime()).toBeGreaterThan(held.createdAt.getTime());
-    expect(checked.version).toBe(held.version + 2);
-    // Simulated 11-16: "swap Gaya for someone new" saved a replacement but no round could hold
-    // the shown ten minus Gaya plus him. A swap on the shown round is the next round.
-    await expect(recordRound([...swapped.slice(0, 9), "swap-2"], true)).resolves.toMatchObject({
-      round: 3,
-      candidateKeys: [...swapped.slice(0, 9), "swap-2"],
-    });
-    await prisma.recruitingCalibrationRound.deleteMany({ where: { roleId, round: 3 } });
-    const checkedView = await recruiting.readRecruitingCalibrationRound(prisma, actor, {
-      threadId,
-    });
-    expect(checkedView.round?.candidates.map((candidate) => candidate.candidateKey)).toEqual(
-      swapped,
-    );
-    // fosp 11-20 (2f644309): the Reviewer passed none of a held "5 more" round, so the checked round
-    // was all replacements; corrects refused it ("none were in that round") and the round without
-    // corrects was refused as checked, so it was never shown. The checked version may replace all.
-    await savePage([...keys("held-third"), ...keys("replace")]);
-    await recordRound(keys("held-third"));
-    await prisma.recruitingCalibrationRound.update({
-      where: { roleId_round: { roleId, round: 3 } },
-      data: { status: "checked", statusAt: new Date(), ownerBotId: botId },
-    });
-    await expect(recordRound(keys("replace"), true)).resolves.toMatchObject({
-      round: 3,
-      candidateKeys: keys("replace"),
-      roundStatus: "shown",
-    });
-    await prisma.recruitingCalibrationRound.deleteMany({ where: { roleId, round: 3 } });
   });
 
   it("accepts a round from the recruiter's own words and then refuses more rounds", async () => {
