@@ -272,7 +272,7 @@ describe("startRecruitingGrading", () => {
     ] as never);
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     expect(promptOf(f)).toContain(
-      '- flink: https://x.test/in/flink\n  The search that found them said: "Apache Flink Contributor, streaming"\n  The language check found: Mandarin: confirmed',
+      "- flink: https://x.test/in/flink\n  Saved profile: Snippet: Apache Flink Contributor, streaming\n  The language check found: Mandarin: confirmed",
     );
   });
 
@@ -920,7 +920,7 @@ describe("startRecruitingGrading", () => {
     });
     const prompt = promptOf(f);
     expect(prompt).toContain("Grade these 5 people");
-    expect(prompt).toContain("one web_fetch per person");
+    expect(prompt).toContain("open no page");
     expect(prompt).toContain("recruiting_research save_grades");
     expect(prompt).toContain("judge ethnicity, race or background");
     expect(prompt).not.toContain("agent_run");
@@ -1191,10 +1191,10 @@ describe("gradingToolRefusal", () => {
     ).toBeUndefined();
   });
 
-  it("lets the quality check read profiles and save its own grades", () => {
+  it("lets the quality check save its own grades and open no page", () => {
     expect(
       gradingToolRefusal("web_fetch", { url: "https://www.linkedin.com/in/a" }, start),
-    ).toBeUndefined();
+    ).toMatch(/saved profile/i);
     expect(
       gradingToolRefusal("recruiting_research", { operation: "save_grades" }, start),
     ).toBeUndefined();
@@ -1275,66 +1275,5 @@ describe("gradingTools", () => {
       "connectors_search_tools",
       "connectors_execute_tool",
     ]);
-  });
-});
-
-describe("askProgress", () => {
-  // s45 fosp2 11-24: asked for 4, the lead showed 2 and stopped without saying what kept people out.
-  it("counts the searches since the recruiter's message and the requirement most people miss", async () => {
-    const { askProgress } = await import("./recruiting-grading.js");
-    const grades = [
-      { match_tier: "Uncertain", unknown: ["language: Mandarin", "work_mode"] },
-      { match_tier: "Partial", not_met: ["language: Mandarin"], unknown: ["language: Mandarin"] },
-      { match_tier: "Partial", not_met: ["years: 6+"] },
-      // A fit doesn't count against anything it doesn't show.
-      { match_tier: "Promising", unknown: ["work_mode"] },
-    ];
-    const prisma = {
-      message: { findFirst: vi.fn(async () => ({ createdAt: new Date(now) })) },
-      externalEffect: { count: vi.fn(async () => 2) },
-      recruitingCandidateOccurrence: {
-        findMany: vi.fn(async () => grades.map((matchFields) => ({ matchFields }))),
-      },
-    } as unknown as PrismaClient;
-    await expect(askProgress(prisma, { threadId: "thread", roleId: "role" })).resolves.toEqual({
-      searches: 2,
-      blocker: { requirement: "language: Mandarin", people: 2 },
-    });
-  });
-});
-
-describe("unfinishedAskNote", () => {
-  const roundRow = (status: string, ownerBotId = "lead") => ({
-    id: "round",
-    round: 2,
-    candidateKeys: [],
-    approvedAt: null,
-    status,
-    statusAt: new Date(),
-    ownerBotId,
-    version: 1,
-  });
-  const prismaWith = (row: unknown) =>
-    ({
-      recruitingCalibrationRound: { findFirst: vi.fn(async () => row) },
-    }) as unknown as PrismaClient;
-  // s43 fr1 11-24: the lead graded 37 people itself and ended its turn with no list.
-  it("sends a lead turn back when it would end with a checked round unshown or people unrecorded", async () => {
-    const { unfinishedAskNote } = await import("./recruiting-grading.js");
-    const input = { roleId: "role", botId: "lead", searchedSinceRound: false };
-    expect(await unfinishedAskNote(prismaWith(roundRow("checked")), input)).toContain(
-      "round 2 is in",
-    );
-    // Someone else's checked round is theirs to show.
-    expect(
-      await unfinishedAskNote(prismaWith(roundRow("checked", "other")), input),
-    ).toBeUndefined();
-    expect(await unfinishedAskNote(prismaWith(roundRow("shown")), input)).toBeUndefined();
-    expect(
-      await unfinishedAskNote(prismaWith(roundRow("shown")), {
-        ...input,
-        searchedSinceRound: true,
-      }),
-    ).toContain("recorded no round");
   });
 });
