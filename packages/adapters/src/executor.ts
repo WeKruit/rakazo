@@ -581,7 +581,7 @@ import {
   modelAcceptsImageInput,
   modelIdSupportsImages,
 } from "./model-vision.js";
-import { askAfterPeopleTarget, peopleTargetFrom, requestedPeopleTarget } from "./people-target.js";
+import { peopleTargetFrom, requestedPeopleTarget } from "./people-target.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
@@ -5252,15 +5252,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ({ result }) => !(result && typeof result === "object" && "error" in result),
           );
         };
-        /** The role this conversation works on now, which this run may have just saved. */
-        const currentRoleId = async () =>
-          thread.activeRecruitingRoleId ??
-          (
-            await deps.prisma.thread
-              .findUnique({ where: { id: thread.id }, select: { activeRecruitingRoleId: true } })
-              .catch(() => null)
-          )?.activeRecruitingRoleId ??
-          undefined;
         /** The server's short report of work the model left unreported. */
         const turnReportFor = async (work: readonly TurnWork[]) => {
           const roleId = (
@@ -14902,25 +14893,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     }
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
-                    // A number of people the recruiter asked for decides the next step: no card.
-                    // Newest first; a role opened from Kruit's chat starts with a copy of their words.
-                    const askedFor = [...recruiterTexts, ...roleStartTexts]
-                      .map(requestedPeopleTarget)
-                      .find(Boolean);
-                    // Read now: a role saved during this run is not on the thread loaded at its start.
-                    const roleNow = askedFor ? await currentRoleId() : undefined;
-                    if (askedFor && roleNow) {
-                      const saved = (
-                        await readRecruitingPlaybookStep(deps.prisma, roleNow).catch(() => null)
-                      )?.savedCandidates;
-                      // Below the number, only after a round: intake questions come before any search.
-                      const round = Boolean(await roundRecordedThisRun());
-                      const instead =
-                        saved !== undefined && (saved >= askedFor || round)
-                          ? askAfterPeopleTarget(askedFor, saved, round)
-                          : undefined;
-                      if (instead) return { instead };
-                    }
                     // A run that recorded a round asks the next-step choice, which is asked anew each round,
                     // unless the recruiter already wrote their next step after the ten appeared: then it
                     // acts on that first, and may ask its own question after reporting what it did.

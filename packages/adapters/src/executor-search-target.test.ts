@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { peopleTargetFrom, requestedPeopleTarget } from "./executor.js";
-import { askAfterPeopleTarget } from "./people-target.js";
 
 describe("requested people target", () => {
   it.each([
@@ -51,21 +50,5 @@ describe("requested people target", () => {
     ["再来5个，上海的", 10, 15],
   ])("%s with %s saved → %s", (text, before, target) => {
     expect(peopleTargetFrom(text, before)).toBe(target);
-  });
-});
-
-describe("a number the recruiter asked for", () => {
-  // Long-search-finishes 11-15: "find 20, tell me when done" with 64 saved still asked
-  // "report, or 20 more?".
-  it("reports instead of asking once the role holds it, and keeps going below it", () => {
-    expect(askAfterPeopleTarget(20, 64)).toMatch(/request is done/);
-    expect(askAfterPeopleTarget(20, 20)).toMatch(/request is done/);
-    expect(askAfterPeopleTarget(20, 10)).toMatch(/keep searching toward 20 without asking/);
-    expect(askAfterPeopleTarget(undefined, 64)).toBeUndefined();
-    expect(askAfterPeopleTarget(20, undefined)).toBeUndefined();
-    // fosp 11-20: "再来5个" was shown, then the turn reported the 48 people Results holds.
-    expect(askAfterPeopleTarget(5, 48, true)).toMatch(/empty reply/);
-    expect(askAfterPeopleTarget(5, 48, true)).not.toMatch(/48/);
-    expect(askAfterPeopleTarget(50, 30, true)).toMatch(/keep searching toward 50/);
   });
 });
