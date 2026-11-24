@@ -55,6 +55,9 @@ import {
 import {
   completionOutcome,
   completionSummary,
+  overlapOf,
+  overlapSummary,
+  profilesIn,
   requestCompletion,
 } from "./request-completion.mjs";
 import { PERSONAS, JOURNEYS as WRITTEN } from "./simulated-journeys.mjs";
@@ -350,6 +353,8 @@ async function resultsPage(rpc, group) {
   const roleId = (await rpc("recruiting/getWorkspace", { threadId }).catch(() => null))?.role?.id;
   if (!roleId) return { saved: page.total };
   const marked = { passed: [], onHold: [], fit: 0 };
+  // Overlapping searches: finds of people already in the role, and two rows for one LinkedIn.
+  const linkedIn = new Set();
   let cursor;
   // The page's own read, 200 at a time; a play's role holds a few hundred people at most.
   for (let read = 0; read < 5; read++) {
@@ -359,8 +364,13 @@ async function resultsPage(rpc, group) {
       ...(cursor ? { cursor } : {}),
     }).catch(() => null);
     if (!list) return { saved: page.total };
+    marked.finds ??= list.counts.sourceRows;
+    marked.foundAgain ??= list.counts.sourceRows - list.counts.candidates;
     for (const person of list.items) {
       const name = person.name ?? person.candidateKey;
+      for (const handle of profilesIn(person.linkedinUrl ?? ""))
+        if (linkedIn.has(handle)) marked.sameLinkedIn = (marked.sameLinkedIn ?? 0) + 1;
+        else linkedIn.add(handle);
       if (["Strong", "Promising"].includes(person.match?.tier)) marked.fit += 1;
       if (person.decision === "hold") marked.onHold.push(name);
       else if (
@@ -374,8 +384,27 @@ async function resultsPage(rpc, group) {
   }
   return { saved: page.total, ...marked };
 }
+/**
+ * Work still going in the chats this play used after its last wait: a run that is neither done
+ * nor waiting for the recruiter is stuck or unfinished (a deadlock shows up here), with its age.
+ */
+async function runsLeft(rpc, since) {
+  const left = [];
+  for (const group of await activeGroupsOf(rpc)) {
+    if (!(await messagesOf(rpc, group.id)).some((m) => Date.parse(m.createdAt) >= since)) continue;
+    const snapshot = await rpc("threads/get", { groupId: group.id }).catch(() => null);
+    for (const run of snapshot?.activeRuns ?? [])
+      if (run.status !== "waiting_input")
+        left.push({
+          chat: group.name,
+          status: run.status,
+          minutes: Math.round((Date.now() - Date.parse(run.startedAt ?? run.createdAt)) / 60000),
+        });
+  }
+  return left;
+}
 const CAMPAIGN_CODES =
-  "saved: people the role chat has stored (its Results count); fit: how many of them the grader rated Strong or Promising; passed / onHold: the people its Results page marks Passed (不合适, not a fit) or On hold; otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
+  "saved: people the role chat has stored (its Results count); finds: times the searches returned a person; foundAgain: finds of a person the role already held; sameLinkedIn: extra rows for a LinkedIn profile already listed; fit: how many of them the grader rated Strong or Promising; passed / onHold: the people its Results page marks Passed (不合适, not a fit) or On hold; otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
 
 // What the recruiter can read: messages with text, in chats they wrote in or were answered in.
 const visible = (chats) =>
@@ -788,6 +817,7 @@ async function play(journey, label, owner, mailbox, out) {
     }
     return {
       turns,
+      leftRunning: await runsLeft(rpc, startedAt),
       accountName: journey.account ? await user.name().catch(() => null) : ACCOUNT_NAME,
       chats: await transcripts(rpc, startedAt, journey.chinese),
       records: await records(rpc, startedAt, before),
@@ -1124,6 +1154,8 @@ async function runOne(journey, sample, owner, mailbox) {
     ...(notRun ? { infra: true, notRun: true } : {}),
     ...(slowStart.length ? { slowStart } : {}),
     ...(requests.length && verdict ? { requests } : {}),
+    ...(result?.leftRunning?.length ? { leftRunning: result.leftRunning } : {}),
+    ...overlapOf(result?.records),
   };
   fs.writeFileSync(
     path.join(out, "journey.json"),
@@ -1141,6 +1173,15 @@ async function runOne(journey, sample, owner, mailbox) {
       ? ["## 目标", ...verdict.goals.map((g) => `- ${g.met ? "✓" : "✗"} ${g.goal}：${g.why}`), ""]
       : []),
     ...(checks.length ? ["## 规则检查", ...checks.map((c) => `- ${c}`), ""] : []),
+    ...(row.leftRunning
+      ? [
+          `玩完还在跑：${row.leftRunning.map((r) => `${r.chat} ${r.status} ${r.minutes} 分钟`).join("；")}`,
+          "",
+        ]
+      : []),
+    ...(row.finds
+      ? [`重复找到：${row.foundAgain}/${row.finds}，同一 LinkedIn 两行 ${row.sameLinkedIn} 次`, ""]
+      : []),
     ...(slowStart.length
       ? [
           `## 首次回复超过 ${SLOW_START_SECONDS} 秒（暂不挡发布）`,
@@ -1459,6 +1500,7 @@ const passLine = (subset) =>
     ranRows.filter((row) => row.pass && subset.some((item) => item.name === row.scenario)).length,
     ranRows.filter((row) => subset.some((item) => item.name === row.scenario)).length,
   )} · pass^k ${rate(subset.filter((row) => row.status === "通过").length, subset.length)}`;
+const overlap = overlapSummary(ranRows);
 // Requests for people that ended with the people, a shortfall said plainly, or nothing.
 const completion = completionSummary(ranRows.flatMap((row) => row.requests ?? []));
 const summary = [
@@ -1469,6 +1511,7 @@ const summary = [
   ...(completion.requests
     ? [
         `要人完成率：${completion.requests} 次要人，给足 ${rate(completion.delivered, completion.requests)}，说明缺口 ${rate(completion.stated, completion.requests)}，没交付 ${rate(completion.notDelivered, completion.requests)}；出名单 p50 ${completion.p50 ?? "-"} 秒，p90 ${completion.p90 ?? "-"} 秒`,
+        `重复和卡住：找到的人里重复找到 ${rate(overlap.foundAgain, overlap.finds)}，同一 LinkedIn 两行 ${overlap.sameLinkedIn} 次；玩完还在跑 ${overlap.leftRunning}/${overlap.plays} 次`,
         "",
       ]
     : []),

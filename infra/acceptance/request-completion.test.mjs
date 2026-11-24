@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   completionOutcome,
   completionSummary,
+  overlapOf,
+  overlapSummary,
   profilesIn,
   requestCompletion,
 } from "./request-completion.mjs";
@@ -77,5 +79,24 @@ test("outcomes and summary", () => {
     notDelivered: 1,
     p50: 50,
     p90: 50,
+  });
+});
+
+test("overlap of searches and runs left going", () => {
+  const rows = [
+    overlapOf([{ chat: "Role", finds: 30, foundAgain: 6, sameLinkedIn: 1 }, { chat: "Kruit" }]),
+    {
+      ...overlapOf([{ chat: "Other", finds: 10, foundAgain: 0 }]),
+      leftRunning: [{ status: "running" }],
+    },
+    overlapOf([]),
+  ];
+  assert.deepEqual(rows[2], {});
+  assert.deepEqual(overlapSummary(rows), {
+    plays: 3,
+    finds: 40,
+    foundAgain: 6,
+    sameLinkedIn: 1,
+    leftRunning: 1,
   });
 });

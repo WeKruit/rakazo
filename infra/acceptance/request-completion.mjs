@@ -91,3 +91,26 @@ export function completionSummary(rows) {
     p90: at(0.9),
   };
 }
+
+/**
+ * How much the play's searches overlapped, from the role chats' Results after the play: finds,
+ * finds of a person the role already held, and extra rows for one LinkedIn profile.
+ */
+export function overlapOf(records) {
+  const roles = (records ?? []).filter((record) => record.finds !== undefined);
+  if (!roles.length) return {};
+  const sum = (key) => roles.reduce((total, record) => total + (record[key] ?? 0), 0);
+  return { finds: sum("finds"), foundAgain: sum("foundAgain"), sameLinkedIn: sum("sameLinkedIn") };
+}
+
+/** Overlap and stuck runs over a version's plays. */
+export function overlapSummary(rows) {
+  const sum = (key) => rows.reduce((total, row) => total + (row[key] ?? 0), 0);
+  return {
+    plays: rows.length,
+    finds: sum("finds"),
+    foundAgain: sum("foundAgain"),
+    sameLinkedIn: sum("sameLinkedIn"),
+    leftRunning: rows.filter((row) => row.leftRunning?.length).length,
+  };
+}
