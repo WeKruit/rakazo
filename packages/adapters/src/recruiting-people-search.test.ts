@@ -126,24 +126,6 @@ describe("saveRecruitingPeopleSearch", () => {
     expect(saved()).toEqual(["second"]);
   });
 
-  it("saves no more new people than the recruiter's number leaves room for", async () => {
-    // Long-search-finishes 11-20 (dc97b5bc): "最多20个" saved 25. With 19 held, one more fits;
-    // someone already held is saved again whatever the number.
-    db.listRunToolResults.mockResolvedValue([
-      call("search-3", 7, "third"),
-      call("search-2", 5, "second"),
-      call("search-1", 1, "first"),
-    ]);
-    const held = ["first", ...Array.from({ length: 18 }, (_, i) => `held-${i}`)];
-    await saveRecruitingPeopleSearch(
-      deps(null, [], { asked: "Senior SRE in Austin, at most 20", held }),
-      trusted,
-      {} as never,
-      context,
-    );
-    expect(saved()).toEqual(["first", "second"]);
-  });
-
   it("saves just the one search that returned when the server saves it as it returns", async () => {
     await saveRecruitingPeopleSearch(deps(null), trusted, {} as never, context, "search-2");
     expect(saved()).toEqual(["second"]);

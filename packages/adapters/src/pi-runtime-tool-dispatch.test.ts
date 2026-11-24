@@ -557,11 +557,10 @@ describe("Pi connector tool dispatch", () => {
     }
     const remember = fakeAgentState.tools.find((tool) => tool.name === "remember")!;
     const edit = { find: "Reply in English", replace: "Reply in Chinese" };
-    expect(remember.prepareArguments!({ edit, expectedRevision: 2 })).toMatchObject({
-      edit,
-      path: "MEMORY.md",
-      expectedRevision: 2,
-    });
+    const prepared = remember.prepareArguments!({ edit, expectedRevision: 2 });
+    expect(prepared).toMatchObject({ edit, path: "MEMORY.md", expectedRevision: 2 });
+    // Branch plays 11-24: an undefined content made the save's key fail, so every edit failed.
+    expect("content" in prepared).toBe(false);
   });
 
   it("rewrites a preference citation written in another tool's shape", async () => {

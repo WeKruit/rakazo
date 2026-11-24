@@ -61,7 +61,6 @@ import { readActorArtifact } from "./artifact-read.js";
 import { productEmailSends, productSendsNote } from "./product-sends.js";
 import {
   isPeopleSearchEndpoint,
-  linkedinPersonKey,
   peopleFromSearch,
   prepareRecruitingProfileRows,
 } from "./recruiting-profiles.js";
@@ -69,8 +68,6 @@ import {
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
   lookedUpContactEmails,
-  PEOPLE_TARGET_MET,
-  peopleRoomForRun,
 } from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_BACKGROUND_NOTICE,
@@ -1118,45 +1115,6 @@ export async function saveRecruitingPeopleSearch(
     throw new RecruitingPeopleSearchError(
       "No people with a name and LinkedIn profile came back from a profile-data search in this run. Run the people search with the connected profile-data connector first, then save.",
     );
-  // Long-search-finishes 11-20 (dc97b5bc): "最多20个" held 18, and later searches and an agent
-  // run returned more than their share, so 25 were saved. New people stop at the number.
-  const cap = await peopleRoomForRun(deps.prisma, {
-    ...trusted.actor,
-    runId: trusted.runId,
-  });
-  if (cap) {
-    const keys = rows.map((entry) =>
-      linkedinPersonKey(String(entry.row.linkedin_url)),
-    );
-    const held = new Set(
-      (
-        await deps.prisma.recruitingCandidate.findMany({
-          where: {
-            roleId: cap.roleId,
-            candidateKey: {
-              in: keys.filter((key): key is string => key !== null),
-            },
-          },
-          select: { candidateKey: true },
-        })
-      ).map((candidate) => candidate.candidateKey),
-    );
-    let room = cap.room;
-    const kept = rows.filter((_, index) => {
-      const key = keys[index];
-      if (key && held.has(key)) return true;
-      return room-- > 0;
-    });
-    if (!kept.length) throw new RecruitingPeopleSearchError(PEOPLE_TARGET_MET);
-    if (kept.length < rows.length) {
-      truncated = true;
-      rows.splice(
-        0,
-        rows.length,
-        ...kept.map((entry, rowIndex) => ({ ...entry, rowIndex })),
-      );
-    }
-  }
   const normalized = prepareRecruitingProfileRows(
     rows.map((entry) => entry.row),
   );

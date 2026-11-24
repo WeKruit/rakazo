@@ -12347,39 +12347,13 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         "The recruiter already approved the calibration. Continue with finding more people instead of another calibration round.",
       );
-    // A correction keeps the people of the latest round the recruiter did not turn down and
-    // swaps in new ones; it is recorded as the next round so the swapped-out people stay seen.
-    const kept = new Set(
-      input.corrects ? keys.filter((key) => previous?.candidateKeys.includes(key)) : [],
-    );
-    // The checked version of a held round may replace all of it: the recruiter never saw it.
-    if (
-      input.corrects &&
-      !kept.size &&
-      (!previous || calibrationRoundStatus(previous) !== "checked")
-    )
-      throw new RecruitingCalibrationRoundError(
-        `corrects is for swapping some people of round ${previous?.round ?? 1} after the recruiter's feedback: keep the ones they did not turn down and add the replacements. None of these people were in that round, so record them as a new round without corrects.`,
-      );
-    // A swap keeps only the people the recruiter did not turn down.
-    if (kept.size) {
-      const seen = await readRecruiterSeen(tx, actor, {
-        roleId: role.id,
-        candidateKeys: [...kept],
-      });
-      const turnedDown = [...kept].filter((key) => seen.people.get(key)?.verdict === "not_fit");
-      if (turnedDown.length)
-        throw new RecruitingCalibrationRoundError(
-          `The recruiter turned down ${turnedDown.join(", ")}, so a corrected round never keeps them: replace them with new people who fit, or leave the places short.`,
-        );
-    }
     const repeated =
       previous &&
       (await calibrationRoundRepeats(
         tx,
         actor,
         role.id,
-        keys.filter((key) => !kept.has(key)),
+        keys,
       ));
     if (repeated?.repeats.length)
       throw new RecruitingCalibrationRoundError(
@@ -12396,12 +12370,10 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         `Not recorded: round ${previous.round} is being checked by the Reviewer and is shown here once checked, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
       );
-    if (previous && state === "checked" && (!input.corrects || run.botId !== previous.ownerBotId))
+    if (previous && state === "checked" && run.botId !== previous.ownerBotId)
       throw new RecruitingCalibrationRoundError(
         `Not recorded: round ${previous.round} is checked and is shown by the teammate who recorded it, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
       );
-    // A swap within the shown round is recorded as the next round: the others kept, the swapped-out
-    // people stay seen.
     const now = new Date();
     let round: { round: number; candidateKeys: string[]; status: string };
     if (previous && state === "checked") {

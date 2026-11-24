@@ -637,13 +637,9 @@ import {
   gradingToolRefusal,
   gradingTools,
   heldRoundPeople,
-  nextRoundHeld,
-  ROUND_HELD_NEXT_STEP,
   roundAwaitingReview,
   roundListHeld,
   roundState,
-  scheduleRecruitingGrading,
-  waitForRoundCheck,
 } from "./recruiting-grading.js";
 import {
   languageFilters,
@@ -678,7 +674,7 @@ import {
   roundPeopleNamed,
 } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
-import { lookedUpContacts, mcpObject, peopleRoomForRequest } from "./recruiting-research.js";
+import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_DIRECT_NOTICE,
   trackDirectRecruitingResearch,
@@ -4816,7 +4812,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Recruiter messages whose round acceptance was questioned once because they name people of the round.
         const approvalAsked = new Set<string>();
         // Messages already told that a round shown after them answers them.
-        const shownRoundAsked = new Set<string>();
         /**
          * Picked people whose saved location names only a country or a state, and those whose
          * location shares no place with where the rest of the picks are.
@@ -4891,8 +4886,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           | undefined;
         // A round after the recruiter's feedback is shown only once the Reviewer has checked it.
         let roundHeldThisTurn: Promise<boolean> | undefined;
-        // A round recorded and held this turn: the turn's own reply says only that it is coming.
-        let roundHeldRecorded = false;
         // A round an earlier turn held is still waiting for the Reviewer's check: this turn lists
         // none of its people either. Staging 11-15: the recruiter's follow-ups started a turn
         // before the check, which wrote round 2 out; the checked round then swapped three of them.
@@ -5095,10 +5088,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !roleId ||
             !call.name.endsWith("recruiting_research") ||
             call.args.operation !== "calibration_round" ||
-            !Array.isArray(call.args.candidateKeys) ||
-            // A correction may name only the people it swaps in; streaming it showed "1 person
-            // this round" before the full ten replaced it (staging 11-15). It shows once, recorded.
-            call.args.corrects === true
+            !Array.isArray(call.args.candidateKeys)
           )
             return;
           // The last key may still be cut mid-word; the list leaves it out until it names one person.
@@ -6077,8 +6067,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
-            thread.activeRecruitingRoleId &&
-            !roundHeldRecorded
+            thread.activeRecruitingRoleId
           ) {
             const state = await roundState(deps.prisma, thread.activeRecruitingRoleId).catch(
               () => null,
@@ -6086,44 +6075,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               state &&
               (state.status === "checking" ||
-                (state.status === "checked" &&
-                  (state.ownerBotId !== run.botId || args.corrects !== true)))
+                (state.status === "checked" && state.ownerBotId !== run.botId))
             )
               return {
                 error: `Not recorded: round ${state.round} is waiting for the Reviewer's check and is shown here once checked, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
               };
-            // Staging 11-15: "just get me the next ten" waited behind the turn that showed round 2,
-            // then ran as a new request and built round 3. Asked once per message.
-            if (
-              state?.status === "shown" &&
-              state.round >= 2 &&
-              recruitingSourceMessageId &&
-              !shownRoundAsked.has(recruitingSourceMessageId)
-            ) {
-              shownRoundAsked.add(recruitingSourceMessageId);
-              const [source, latest] = await Promise.all([
-                deps.prisma.message.findUnique({
-                  where: { id: recruitingSourceMessageId },
-                  select: { createdAt: true },
-                }),
-                deps.prisma.recruitingCalibrationRound.findUnique({
-                  where: { id: state.id },
-                  select: { createdAt: true },
-                }),
-              ]);
-              if (
-                source &&
-                latest &&
-                latest.createdAt > source.createdAt &&
-                // fosp 11-22 (df2c09cb): this turn showed the checked round 2, which "再补4个"
-                // (written while it was held) asked for, then recorded round 3 for the same words.
-                // Only swapping people within the shown round is not another round.
-                args.corrects !== true
-              )
-                return {
-                  error: `Not recorded yet: round ${state.round} was shown after this message was written, so it is the round the message asks for. Unless the message asks for something round ${state.round} does not do, record nothing and end the turn with one short line pointing to round ${state.round} above. If it does ask for more, call calibration_round again.`,
-                };
-            }
           }
           if (
             name === "recruiting_research" &&
@@ -6350,7 +6306,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // checked round's people were graded from full profiles and are shown as picked.
           const showingChecked =
             researchInput?.data?.operation === "calibration_round" &&
-            researchInput.data.corrects === true &&
             thread.activeRecruitingRoleId !== null &&
             (await roundState(deps.prisma, thread.activeRecruitingRoleId).catch(() => null))
               ?.status === "checked";
@@ -9837,13 +9792,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const farAway = Array.isArray(checked.rows)
                     ? checked.rows.length - (people as unknown[]).length
                     : 0;
-                  // People new to the role get the research service's grade once the turn settles.
-                  if ((saved as { newPeople?: unknown }).newPeople)
-                    await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
-                      getLogger().warn("recruiting grade schedule", {
-                        error: String(error),
-                      }),
-                    );
                   // The role's total, so a scale-out stops at its target without counting rows;
                   // the progress line states it so a report never rounds up to the target.
                   const [peopleInResults, scale] = await Promise.all([
@@ -10674,13 +10622,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     leaseFence: fence,
                     effectId: applied.effect.id,
                     effectRequest: applied.effect.request,
-                    // Read now, not from earlier in the turn: another turn may have shown a round.
-                    holdForCheck: thread.activeRecruitingRoleId
-                      ? await nextRoundHeld(deps.prisma, {
-                          threadId: run.threadId,
-                          roleId: thread.activeRecruitingRoleId,
-                        }).catch(() => false)
-                      : false,
                   },
                   researchInput.data,
                 );
@@ -10691,38 +10632,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   candidateKeys?: unknown;
                   round?: unknown;
                 } | null;
-                // After the recruiter's feedback the Reviewer checks the round before it is shown.
-                const held =
-                  (recorded as { roundStatus?: unknown } | null)?.roundStatus === "checking";
-                if (held) {
-                  roundHeldRecorded = true;
-                  // fosp 11-22 (352978a2): the round was left for a later turn to show, and that
-                  // turn never started. This turn waits for the check and shows the round itself.
-                  const checked = await waitForRoundCheck(deps, {
-                    threadId: thread.id,
-                    runId,
-                    signal: context.signal,
-                    userMessageWaiting: () =>
-                      hasUnclaimedSteering(deps.prisma, {
-                        threadId: run.threadId,
-                        botId: bot.id,
-                        runId: run.id,
-                      }),
-                  }).catch((error) => {
-                    getLogger().warn("recruiting round check wait", { error: String(error) });
-                    return undefined;
-                  });
-                  if (checked) {
-                    roundHeldRecorded = false;
-                    return { ...(round as object), roundStatus: "checked", next: checked };
-                  }
-                  // No settle wait: the check goes on after this turn ends.
-                  await scheduleRecruitingGrading(deps.jobs, thread.id, Date.now(), 0).catch(
-                    (error) =>
-                      getLogger().warn("recruiting grade schedule", { error: String(error) }),
-                  );
-                  return { ...(round as object), next: ROUND_HELD_NEXT_STEP };
-                }
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
                   // A stuck save never holds the turn: the model's own brief save and the
                   // next-step card wait for this one.
@@ -13850,16 +13759,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             words,
           );
           const place = localRolePlace([...planned.data.queries, ...words]);
-          // The searches run together, so they share what the recruiter's number still allows.
-          const roleNow = await currentRoleId();
-          const room = roleNow
-            ? await peopleRoomForRequest(deps.prisma, roleNow, thread.id)
-            : undefined;
-          const searchCount = planned.data.queries.length;
-          const perSearch = Math.max(
-            1,
-            Math.min(10, Math.ceil((room ?? 10 * searchCount) / searchCount)),
-          );
+          const perSearch = 10;
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
               searchTool,
@@ -14852,20 +14752,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // staging 11-16, the save step spent 3.1k reasoning tokens (28 s) on ten grades.
         if (run.trigger === "recruiting_grade" && runModel.thinkingLevel !== "off")
           runModel = { ...runModel, thinkingLevel: "low" };
-        // The same holds for the lead's turn on a round the Reviewer will check before it is
-        // shown: its pick is checked and corrected anyway. Staging 11-16, the round-writing step
-        // spent 6.5k reasoning tokens (56 s) while the recruiter waited for round 2.
-        else if (
-          effortMode !== "deep" &&
-          runModel.thinkingLevel !== "off" &&
-          runModel.thinkingLevel !== "minimal" &&
-          thread.activeRecruitingRoleId &&
-          (await nextRoundHeld(deps.prisma, {
-            threadId: run.threadId,
-            roleId: thread.activeRecruitingRoleId,
-          }).catch(() => false))
-        )
-          runModel = { ...runModel, thinkingLevel: "low" };
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
         // step only says what it is doing and starts its reads, so it runs at low thinking too.
@@ -15231,7 +15117,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         // A held round's check runs in this conversation once this turn ends, so
                         // newer messages start the next turn instead of keeping this one open.
                         // Staging 11-15: two steered follow-ups held the turn for six minutes.
-                        if (roundHeldRecorded || (await roundAwaitingCheck()) !== null) return [];
+                        if ((await roundAwaitingCheck()) !== null) return [];
                         const steering = await deps.events.claimSteering({
                           threadId: thread.id,
                           botId: bot.id,

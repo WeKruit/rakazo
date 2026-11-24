@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { JobPublisher } from "@rakazo/adapter-kit";
 import { recruitingGradeStartJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
-import { recruitingBotKey } from "@rakazo/core";
+import { RECRUITING_GRADE_RUBRIC, recruitingBotKey } from "@rakazo/core";
 import type { CalibrationRoundStatus, PrismaClient } from "@rakazo/db";
 import {
   BRIEF_CONFIRMATION_TEXT,
@@ -14,7 +14,6 @@ import {
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { sleep } from "./background-wait.js";
 import { languageFindings } from "./recruiting-language.js";
 import { recruiterWordsSinceFirstRound, roundCriteria } from "./recruiting-round-check.js";
 import { recruitingRoundPeople } from "./turn-end-guard.js";
@@ -281,16 +280,8 @@ export function recruitingGradePrompt(
   ].join("\n");
 }
 
-/** How the quality check grades: by the recruiter's requirements and feedback, plus their kept rules. */
-export const SELF_GRADE_RUBRIC = [
-  "How to grade: the recruiter's latest words win over the requirements.",
-  "- Each requirement is met, not_met or unknown by what the profile states. Never judge ethnicity, race or background from a name or photo.",
-  "- Hard requirements and preferences are what the recruiter made them. Strong needs every hard requirement met; one not_met makes Partial at most; a missed preference only lowers the score.",
-  "- A profile silent on a point the recruiter repeated after the first round or turned someone down for is Uncertain at most; silent on anything else, it can still be Promising.",
-  "- Years with a technology or kind of work: add up the dated roles whose description shows that work. The profile need not state the number or repeat the recruiter's wording; a bare skills-list mention with no role describing it is unknown.",
-  "- A required language: the language check's finding on the person's line is its status.",
-  "- The job's own terms (pay, office days, hybrid or remote schedule, benefits) are not requirements on the person: leave them out of requirements_assessment and never lower a grade or name a concern for a profile not showing them. Location is the person's city or area only.",
-].join("\n");
+/** How the quality check grades; the same text the "Reviewer check" skill gives a helper. */
+export const SELF_GRADE_RUBRIC = RECRUITING_GRADE_RUBRIC;
 
 /** The profile links one grading request sent. */
 function sentUrls(prompt: string): Set<string> {
@@ -300,6 +291,10 @@ function sentUrls(prompt: string): Set<string> {
     if (url) urls.add(url);
   }
   return urls;
+}
+
+function reviewerOnTeam(grader: GradingService | null): boolean {
+  return grader?.tool === "self";
 }
 
 /** A person whose grade did not come back from two requests is not sent again. */
@@ -342,6 +337,9 @@ export async function startRecruitingGrading(
   // The check is the grader's own work: it waits only on the grader's turns, while teammates keep
   // working in the same conversation (reliability plan S3, one lane per agent).
   const grader = await researchTeammate(deps.prisma, thread);
+  // With a Reviewer on the team, the lead's "Reviewer check" helpers grade people inside the
+  // lead's own turn; nothing is graded or held from here.
+  if (reviewerOnTeam(grader)) return skipped("checked by the lead's helpers");
   const busyRun = await deps.prisma.run.findFirst({
     where: {
       threadId: thread.id,
@@ -1282,20 +1280,6 @@ export async function roundState(
 }
 
 /**
- * Whether the round this run would record waits for the Reviewer: no round is waiting already, and
- * the team has the Reviewer. Nothing of such a round is shown in chat before the check.
- */
-export async function nextRoundHeld(
-  prisma: PrismaClient,
-  input: { threadId: string; roleId: string },
-): Promise<boolean> {
-  // The first ten too: the playbook shows ten people the Reviewer passed (fr 11-24: round 1 was
-  // shown before its check and listed a recent graduate and someone with no Kafka).
-  const state = await roundState(prisma, input.roleId);
-  return (!state || state.status === "shown") && (await hasRoundReviewer(prisma, input.threadId));
-}
-
-/**
  * Whether a round this run lists must stay out of chat: it would be held for the check, or the
  * round before it is still unshown, so recording it is refused. Staging 11-16: six such refused
  * attempts streamed their lists, and the recruiter saw the same people again and again.
@@ -1305,8 +1289,7 @@ export async function roundListHeld(
   input: { threadId: string; roleId: string },
 ): Promise<boolean> {
   const state = await roundState(prisma, input.roleId);
-  if (state && state.status !== "shown") return true;
-  return hasRoundReviewer(prisma, input.threadId);
+  return !!state && state.status !== "shown";
 }
 
 /**
@@ -1321,15 +1304,6 @@ export async function roundAwaitingReview(
 ): Promise<number | null> {
   const state = await roundState(prisma, input.roleId, now);
   return state && state.status !== "shown" ? state.round : null;
-}
-
-/** Whether this conversation's team has the Reviewer, who checks a held round. */
-export async function hasRoundReviewer(prisma: PrismaClient, threadId: string): Promise<boolean> {
-  const thread = await prisma.thread.findUnique({
-    where: { id: threadId },
-    select: { spaceId: true, userId: true, botId: true, groupId: true },
-  });
-  return !!thread && (await researchTeammate(prisma, thread))?.tool === "self";
 }
 
 /** The lead's turn that shows a held round once the Reviewer has checked it, swapping misfits first. */
@@ -1607,10 +1581,6 @@ async function researchTeammate(
   return null;
 }
 
-/** What the team does after recording a round that waits for the Reviewer. */
-export const ROUND_HELD_NEXT_STEP =
-  "Recorded, not shown yet: after the recruiter's feedback the Reviewer first checks each of these people's full profile against it (about three minutes), and the checked round is shown in this chat then, with the next-step card. Save the brief as after any round (one recruiting_role update with brief.fields only), then end the turn with one short line in the recruiter's language saying the checked people come in a few minutes. Don't list anyone, ask nothing and show no card.";
-
 /** The people of the round waiting for the Reviewer's check, or null when no round waits. */
 export async function heldRoundPeople(
   prisma: PrismaClient,
@@ -1630,38 +1600,3 @@ export async function heldRoundPeople(
   });
 }
 
-/** How long the turn that recorded a held round waits for its check before ending without it. */
-export const ROUND_CHECK_WAIT_MS = 4 * 60_000;
-const ROUND_CHECK_POLL_MS = 3_000;
-
-/**
- * Waits, within the turn that recorded a held round, for the Reviewer's check of it, and returns
- * the checked round for that turn to show. Undefined when the wait ends first (a new message, the
- * turn stopping, or the time limit): the check then goes on and a later turn shows the round.
- */
-export async function waitForRoundCheck(
-  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
-  input: {
-    threadId: string;
-    runId: string;
-    signal: AbortSignal;
-    timeoutMs?: number;
-    pollMs?: number;
-    userMessageWaiting?: () => Promise<boolean>;
-  },
-): Promise<string | undefined> {
-  const deadline = Date.now() + (input.timeoutMs ?? ROUND_CHECK_WAIT_MS);
-  for (;;) {
-    const result = await startRecruitingGrading(deps, { threadId: input.threadId }, Date.now(), {
-      runId: input.runId,
-    });
-    if (result?.checkedRound) return result.checkedRound;
-    if (
-      Date.now() >= deadline ||
-      input.signal.aborted ||
-      (await input.userMessageWaiting?.().catch(() => false))
-    )
-      return undefined;
-    await sleep(Math.min(input.pollMs ?? ROUND_CHECK_POLL_MS, deadline - Date.now()), input.signal);
-  }
-}

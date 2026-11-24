@@ -1136,17 +1136,11 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
             message: `Each person appears once in a round. Repeated: ${[...new Set(repeated)].join(", ")}. Replace each repeat with another saved person's exact candidateKey.`,
           });
       }),
-    corrects: z
-      .literal(true)
-      .optional()
-      .describe(
-        "A swap within the latest round: candidateKeys are its people who stay, in order, with the replacements.",
-      ),
     checks: z
       .record(RecruitingId, z.record(RecruitingId, z.enum(["shown", "unknown", "fails"])))
       .optional()
       .describe(
-        'Optional. candidateKey → { requirementId → verdict } on the role\'s requirements (the brief fields in the recruiter\'s words, the hard criteria and the reasons they turned people down): "shown" when the person\'s row shows it, "unknown" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), "fails" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round\'s "not verified" notes are written from the unknown verdicts. Leave checks out of a round the Reviewer checks (after the recruiter\'s feedback, and its corrected version): its grades from full profiles stand for them.',
+        'Optional. candidateKey → { requirementId → verdict } on the role\'s requirements (the brief fields in the recruiter\'s words, the hard criteria and the reasons they turned people down): "shown" when the person\'s row shows it, "unknown" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), "fails" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round\'s "not verified" notes are written from the unknown verdicts.',
       ),
     unverified: z
       .record(

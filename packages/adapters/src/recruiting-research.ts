@@ -5,7 +5,6 @@ import type {
   RecruitingCandidateSource,
   RecruitingResearchObservation,
 } from "@rakazo/contracts";
-import { RECRUITING_CALIBRATION_ROUND_SIZE } from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
@@ -16,7 +15,6 @@ import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
 import {
   IsolationError,
-  listRecruitingPeopleFoundSince,
   listRecruitingResearch,
   listRunToolResults,
   Prisma,
@@ -24,8 +22,6 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
-import { handedInRecruiterWords } from "./global-role-writes.js";
-import { peopleTargetFrom } from "./people-target.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 import { runningSearchFor } from "./work-estimate.js";
@@ -408,109 +404,6 @@ async function requireDeeperSearchBudget(
  */
 export const PEOPLE_SEARCH_MAX_RESULTS = 10;
 
-/**
- * The recruiter's own words in a message of a role's conversation: their text, or the words the
- * main chat handed in for them, never the brief after them or a teammate's report. Staging 11-20
- * (387caac4): a brief's "不联系候选人" hid "再找10个", and the role's first "先找10个" refused
- * every search.
- */
-function recruiterText(block: Record<string, unknown> | undefined): string {
-  const text = typeof block?.text === "string" ? block.text : "";
-  if (block?.kind !== "bot_message_received") return text;
-  return handedInRecruiterWords(text) ?? "";
-}
-
-/**
- * How many more people the recruiter's latest number allows this role, or undefined when no
- * recent message of theirs names one. Long-search-finishes 11-15: "找20个人，找完告诉我" saved 41,
- * because every search was capped but nothing held the request's total.
- */
-export async function peopleRoomForRequest(
-  prisma: Pick<
-    PrismaClient,
-    | "message"
-    | "recruitingCandidate"
-    | "recruitingCandidateOccurrence"
-    | "recruitingCalibrationRound"
-  >,
-  roleId: string,
-  threadId: string,
-): Promise<number | undefined> {
-  // A round shown for feedback is followed by another round, and a round itself shows the
-  // number asked. Its four overlapping searches are how the ten are picked: branch 80ab9951,
-  // the cap counted each in flight as ten, so three were refused and the round never came.
-  const [round, messages] = await Promise.all([
-    prisma.recruitingCalibrationRound.findFirst({
-      where: { roleId },
-      orderBy: { round: "desc" },
-      select: { approvedAt: true },
-    }),
-    prisma.message.findMany({
-      where: { threadId, role: "user" },
-      orderBy: { seq: "desc" },
-      take: 10,
-      select: { createdAt: true, blocks: true },
-    }),
-  ]);
-  const heldBefore = async (at: Date) =>
-    (
-      await prisma.recruitingCandidateOccurrence.findMany({
-        where: { roleId, page: { observedAt: { lt: at } } },
-        distinct: ["candidateKey"],
-        select: { candidateKey: true },
-      })
-    ).map((row) => row.candidateKey);
-  let newerAsk: Date | undefined;
-  for (const message of messages) {
-    const text = (Array.isArray(message.blocks) ? message.blocks : [])
-      .map((block) => recruiterText(record(block)))
-      .join(" ");
-    if (!text.trim()) continue;
-    const asked = peopleTargetFrom(text, 0);
-    if (!asked) {
-      newerAsk ??= message.createdAt;
-      continue;
-    }
-    // Long-search 11-23 (s31, stage too): "找20个，最多20" showed its first ten as a round, and
-    // with that round unanswered the searches went on uncapped, saving 21 to 39. Only a round's
-    // own number goes uncapped while a round waits; a larger number still caps the role.
-    if (round && !round.approvedAt && asked <= RECRUITING_CALIBRATION_ROUND_SIZE) return undefined;
-    // Staging 11-15: someone found again after the message is not new, so "继续找 10 位" on a
-    // role of 24 read as a total of 10 while the approve result said 34.
-    const [total, since, before] = await Promise.all([
-      prisma.recruitingCandidate.count({ where: { roleId } }),
-      listRecruitingPeopleFoundSince(prisma, { roleId, since: message.createdAt }),
-      heldBefore(message.createdAt),
-    ]);
-    const seen = new Set(before);
-    const fresh = since.filter((key) => !seen.has(key)).length;
-    // The first ten on a new role are the round the recruiter sees, picked from overlapping
-    // searches: branch 72b51e70, "先找10个" had two of its three first searches refused as in
-    // flight. Until the role holds them, those searches are not capped by the ten.
-    // Branch caa476af: two searches saved 14, only 9 fit, and the rest were refused, so the first
-    // round showed 9. It may hold twice the number asked before it is capped at that.
-    const firstRound = !round && total === fresh && asked <= RECRUITING_CALIBRATION_ROUND_SIZE;
-    if (firstRound && total < 2 * asked) return undefined;
-    const target = firstRound
-      ? 2 * asked
-      : (peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0);
-    // Staging 11-20 (44c1ad44): "先找10个人" was met, then a numberless ask was refused as
-    // done, twice. A message written once the number was reached is a new request, whatever its
-    // wording; with no number of its own it is one round (branch e57f71af: left uncapped,
-    // "下一批按这个调" saved 25 more).
-    if (newerAsk) {
-      const held = (await heldBefore(newerAsk)).length;
-      if (held >= target) return Math.max(0, held + RECRUITING_CALIBRATION_ROUND_SIZE - total);
-    }
-    return Math.max(0, target - total);
-  }
-  return undefined;
-}
-
-/** Model-facing: a search refused because the role already holds the number asked for. */
-export const PEOPLE_TARGET_MET =
-  "Not searched: the role already holds the number of people the recruiter asked for. Do not search again. If people saved since the last round have not been shown to the recruiter, show the ones that fit as this round (record them with calibration_round); otherwise tell them in one short message, in their language, how many people this role holds and that the search is finished.";
-
 /** The conversation and role a run works in. */
 async function runRole(
   prisma: PrismaClient,
@@ -522,21 +415,6 @@ async function runRole(
         select: { threadId: true, thread: { select: { activeRecruitingRoleId: true } } },
       })
     : null;
-}
-
-/**
- * The role a run saves people to and how many more the recruiter's number lets it take, or
- * undefined when no number caps it. The save holds the cap, since every search path ends there.
- */
-export async function peopleRoomForRun(
-  prisma: PrismaClient,
-  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
-): Promise<{ roleId: string; room: number } | undefined> {
-  const run = await runRole(prisma, actor);
-  const roleId = run?.thread.activeRecruitingRoleId;
-  if (!run || !roleId) return undefined;
-  const room = await peopleRoomForRequest(prisma, roleId, run.threadId);
-  return room === undefined ? undefined : { roleId, room };
 }
 
 /** Model-facing: a people search in the main chat, whose people would have nowhere to go. */
@@ -582,19 +460,12 @@ export async function requireRoleForPeopleSearch(
     throw new IsolationError(PEOPLE_SEARCH_NEEDS_SAVED_ROLE);
 }
 
-/**
- * A quick people search asks for at most ten people, however the agent or a plan sized it, and
- * never for more than the recruiter's number still allows.
- */
-export async function limitPeopleSearch(
-  prisma: PrismaClient,
-  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+/** A quick people search asks for at most ten people, however the agent or a plan sized it. */
+export function limitPeopleSearch(
   server: Pick<McpServer, "transport" | "endpoint">,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  // Staging acd31504: the plain web search was used for people, ran uncapped five times, and
-  // save_search put 30 of them in Results for "最多20个". Its people count like the people search's.
+): Record<string, unknown> {
   const plain = toolName === "web_search_exa";
   if (
     !(plain || (toolName === "web_search_advanced_exa" && args.category === "people")) ||
@@ -603,94 +474,12 @@ export async function limitPeopleSearch(
     new URL(server.endpoint).host !== "mcp.exa.ai"
   )
     return args;
-  const run = await runRole(prisma, actor);
-  const roleId = run?.thread.activeRecruitingRoleId;
-  const room = roleId ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
   const asked = Number(args.numResults);
   const wanted = Math.min(
     Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : PEOPLE_SEARCH_MAX_RESULTS,
     PEOPLE_SEARCH_MAX_RESULTS,
   );
-  if (room === undefined || !roleId) return plain ? args : { ...args, numResults: wanted };
-  const { granted, entry } = takePeople(roleId, room, wanted, true);
-  if (granted <= 0) throw new IsolationError(room > 0 ? PEOPLE_SEARCH_BUSY : PEOPLE_TARGET_MET);
-  const limited = { ...args, numResults: granted };
-  if (entry) reservationOf.set(limited, { roleId, entry });
-  return limited;
-}
-
-/**
- * People asked for by searches still running. Four searches sent together all saw an empty role
- * and each asked for ten (staging 808f4f31: 29 saved for 20). A reservation lasts while its
- * search runs; a failed search gives it back at once (staging 7b5230e4: failed searches held the
- * 20 and the role stayed at 0).
- */
-const PEOPLE_RESERVATION_MS = 3 * 60 * 1000;
-/** An agent run searches longer; it holds its people until it finishes or this runs out. */
-const AGENT_RUN_HOLD_MS = 10 * 60 * 1000;
-type PeopleReservation = { people: number; until: number };
-type HeldPeople = { roleId: string; entry: PeopleReservation };
-const peopleReserved = new Map<string, PeopleReservation[]>();
-const reservationOf = new WeakMap<object, HeldPeople>();
-/** Agent runs still searching at the provider, by run id, until a read shows them finished. */
-const heldByAgentRun = new Map<string, HeldPeople>();
-const STILL_SEARCHING = new Set(["running", "pending", "queued", "in_progress"]);
-
-/** Model-facing: the recruiter's number is taken by searches still running for this role. */
-export const PEOPLE_SEARCH_BUSY =
-  "Not searched: searches already running for this role cover the rest of the number the recruiter asked for. Do not search again now: wait for their people, which are saved to Results automatically; you are woken when a running agent run finishes.";
-
-/**
- * The room left once people asked for by running searches are counted; with `reserve`, take up
- * to `wanted` of it. Synchronous, so searches sent together share it.
- */
-function takePeople(
-  roleId: string,
-  room: number,
-  wanted: number,
-  reserve: boolean,
-  holdMs = PEOPLE_RESERVATION_MS,
-): { granted: number; entry?: PeopleReservation } {
-  const entries = (peopleReserved.get(roleId) ?? []).filter((entry) => entry.until > Date.now());
-  const pending = entries.reduce((sum, entry) => sum + entry.people, 0);
-  const granted = Math.max(0, Math.min(wanted, room - pending));
-  const entry = reserve && granted ? { people: granted, until: Date.now() + holdMs } : undefined;
-  if (entry) entries.push(entry);
-  if (entries.length) peopleReserved.set(roleId, entries);
-  else peopleReserved.delete(roleId);
-  return { granted, entry };
-}
-
-/**
- * A people search answered: its reservation is given back, since a finished search's people are
- * saved before anyone reads its result (staging 14d33ed1: a 30 s hold on a search that found
- * people already in Results refused the next one, and 13 of 20 were left). An agent run still
- * searching keeps it until a later read of that run shows it finished.
- */
-export function settlePeopleSearch(
-  args: object | undefined,
-  outcome: "failed" | "done",
-  result?: unknown,
-): void {
-  if (!args) return;
-  const body = mcpObject(result);
-  const runId = typeof body?.id === "string" ? body.id : undefined;
-  const searching = runId !== undefined && STILL_SEARCHING.has(String(body?.status));
-  const named = (args as { runId?: unknown }).runId;
-  const held =
-    reservationOf.get(args) ?? (typeof named === "string" ? heldByAgentRun.get(named) : undefined);
-  if (!held) return;
-  reservationOf.delete(args);
-  if (outcome === "done" && searching && runId) {
-    heldByAgentRun.set(runId, held);
-    return;
-  }
-  // A failed read of a run says nothing about the run itself.
-  if (typeof named === "string" && outcome === "failed") return;
-  if (typeof named === "string") heldByAgentRun.delete(named);
-  const left = (peopleReserved.get(held.roleId) ?? []).filter((entry) => entry !== held.entry);
-  if (left.length) peopleReserved.set(held.roleId, left);
-  else peopleReserved.delete(held.roleId);
+  return plain ? args : { ...args, numResults: wanted };
 }
 
 /** Most saved people sent as one agent run's exclusion list. */
@@ -770,7 +559,6 @@ export async function prepareAgentRun(
       `Not started: agent run ${running} is still searching for this role. Do not start another search: call agent_run with runId "${running}" to collect it, or end the turn; you are woken when it finishes.`,
     );
   if (metered) await requireDeeperSearchBudget(prisma, roleId, run?.threadId);
-  const allowed = run ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
   const saved = await prisma.recruitingCandidate.findMany({
     where: { roleId, role: { id: roleId, spaceId: actor.spaceId, userId: actor.userId } },
     select: { candidateKey: true },
@@ -786,27 +574,6 @@ export async function prepareAgentRun(
   const ready = exclusion.length
     ? { ...prepared, input: { ...input, exclusion: [...given, ...exclusion] } }
     : prepared;
-  if (allowed === undefined) return ready;
-  // A run holds the people it may return while it searches (staging 71a2cac2: a run and quick
-  // searches sent together each filled the 20, and 29 were saved). Nothing awaits after this.
-  const { granted: room, entry } = takePeople(
-    roleId,
-    allowed,
-    AGENT_RUN_MAX_PEOPLE,
-    true,
-    AGENT_RUN_HOLD_MS,
-  );
-  if (room <= 0) throw new IsolationError(allowed > 0 ? PEOPLE_SEARCH_BUSY : PEOPLE_TARGET_MET);
-  // The default schema caps the people a run returns; it never returns past the recruiter's number.
-  if (room < AGENT_RUN_MAX_PEOPLE && ready.outputSchema === AGENT_RUN_PEOPLE_SCHEMA)
-    ready.outputSchema = {
-      ...AGENT_RUN_PEOPLE_SCHEMA,
-      properties: {
-        ...AGENT_RUN_PEOPLE_SCHEMA.properties,
-        people: { ...AGENT_RUN_PEOPLE_SCHEMA.properties.people, maxItems: room },
-      },
-    };
-  if (entry) reservationOf.set(ready, { roleId, entry });
   return ready;
 }
 
