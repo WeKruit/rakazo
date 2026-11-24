@@ -39,7 +39,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
 import { readRecruitingAccountView } from "./recruiting-account.js";
-import { languageFindings } from "./recruiting-language.js";
+import { savedLanguageLevels } from "./recruiting-language.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import {
   bestLookedUpEmail,
@@ -705,19 +705,18 @@ export async function executeRecruitingCandidatesTool(
     reportReadMs = Math.round(performance.now() - reportsStarted);
     // The language check's finding on this person, saved with the search that found them, stands
     // for the required language: whoever grades takes it as given instead of judging it again.
-    const searches = await deps.prisma.recruitingCandidateOccurrence.findMany({
-      where: { roleId: sourceRoleId, candidateKey: query.candidateKey },
-      orderBy: { page: { observedAt: "asc" } },
-      select: { page: { select: { effect: { select: { result: true } } } } },
-    });
-    const language = languageFindings(searches.map((row) => row.page.effect?.result)).get(
-      query.candidateKey,
-    );
+    const language = (
+      await savedLanguageLevels(deps.prisma, sourceRoleId, [query.candidateKey])
+    ).get(query.candidateKey);
     succeeded = true;
     return {
       ...result,
       items,
-      ...(language ? { requiredLanguage: `${language} (the language check's finding)` } : {}),
+      ...(language
+        ? {
+            requiredLanguage: `${language.requirement}: ${language.level} (the language check's finding)`,
+          }
+        : {}),
     };
   } finally {
     getLogger().info("recruiting.candidates.read.timing", {

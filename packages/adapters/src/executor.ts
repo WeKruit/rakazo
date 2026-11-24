@@ -643,6 +643,7 @@ import {
   requiredLanguage,
   saveLanguageLevels,
   roundByLanguage,
+  savedLanguageLevels,
   statedLanguageRequirement,
   withRequiredLanguage,
 } from "./recruiting-language.js";
@@ -6071,8 +6072,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : new Map<string, string>();
             const levels = new Map<string, LanguageSignal>();
             const notes: Record<string, string> = {};
+            // People an earlier turn's search found keep the finding saved with that search.
+            const saved = thread.activeRecruitingRoleId
+              ? await savedLanguageLevels(
+                  deps.prisma,
+                  thread.activeRecruitingRoleId,
+                  keys.map(savedCandidateKeyForm),
+                ).catch(() => undefined)
+              : undefined;
             for (const key of keys) {
-              const level = languageLevels.get(savedCandidateKeyForm(key));
+              const level =
+                languageLevels.get(savedCandidateKeyForm(key)) ??
+                saved?.get(savedCandidateKeyForm(key))?.level;
               if (level) levels.set(key, level);
               const note = given.get(savedCandidateKeyForm(key));
               if (note) notes[key] = note;
