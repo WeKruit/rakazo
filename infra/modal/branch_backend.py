@@ -160,6 +160,11 @@ def model_call(sandbox_id):
     return 0
 
 
+FAILED_STEPS = """select count(*), payload->>'name', left(regexp_replace(payload->>'error', '\\s+', ' ', 'g'), 160)
+from events where type = 'agent.tool.completed' and coalesce(payload->>'error', '') <> ''
+group by 2, 3 order by 1 desc"""
+
+
 def main(argv):
     import modal
     split = argv.index("--") if "--" in argv else len(argv)
@@ -228,6 +233,13 @@ def main(argv):
         dump_path = log_path.with_suffix(".dump")
         dump = sandbox.exec("bash", "-c", f"pg_dump -Fc {DATABASE_URL}", text=False)
         dump_path.write_bytes(dump.stdout.read())
+        # Every step that failed in the plays, counted by tool and reason, beside the play reports.
+        failed = sandbox.exec("psql", DATABASE_URL, "-At", "-F", " | ", "-c", FAILED_STEPS).stdout.read().strip()
+        print(f"failed steps (count | tool | reason):\n{failed or 'none'}", flush=True)
+        if "--out" in plays:
+            out = Path(plays[plays.index("--out") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "failed-steps.txt").write_text(f"count | tool | reason\n{failed or 'none'}\n")
         print(f"plays finished in {round((time.time() - started) / 60)} min, exit {code}; backend log {log_path},"
               f" database {dump_path} (pg_restore it to inspect)", flush=True)
         return code
