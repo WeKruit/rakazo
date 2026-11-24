@@ -636,7 +636,6 @@ import {
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
   gradingTools,
-  hasRoundReviewer,
   heldRoundPeople,
   nextRoundHeld,
   ROUND_HELD_NEXT_STEP,
@@ -6355,14 +6354,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             thread.activeRecruitingRoleId !== null &&
             (await roundState(deps.prisma, thread.activeRecruitingRoleId).catch(() => null))
               ?.status === "checked";
-          // The Reviewer grades every round's people against the role's location from full
-          // profiles, so these row checks apply only to a team without it (s42 11-24: with no
-          // location given, picks 50 miles from each other were refused as outside the scope).
           if (
             researchInput?.data?.operation === "calibration_round" &&
             thread.activeRecruitingRoleId &&
-            !showingChecked &&
-            !(await hasRoundReviewer(deps.prisma, thread.id).catch(() => false))
+            !showingChecked
           ) {
             const { regionOnly, outliers, beyond, place } = await locationSlips(
               thread.activeRecruitingRoleId,
