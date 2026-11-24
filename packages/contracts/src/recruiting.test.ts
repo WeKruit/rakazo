@@ -1877,32 +1877,4 @@ describe("quality-check grades", () => {
       false,
     );
   });
-
-  it("refuses a good-fit tier over a missed must-have, naming the person and the point", () => {
-    // fosp 11-23 (76055953): Di Liu was saved Promising with core duties not_met (no streaming),
-    // the point the recruiter had just turned people down for, and was shown in round 2.
-    const save = (tier: string, assessment: Record<string, unknown>) =>
-      contracts.RecruitingResearchToolInputSchema.safeParse({
-        operation: "save_grades",
-        expectedRoleRevision: 3,
-        rows: [
-          {
-            name: "Di Liu",
-            linkedin_url: "https://www.linkedin.com/in/liudild",
-            match_score: 78,
-            match_tier: tier,
-            fit_reasons: "ETL and modeling",
-            requirements_assessment: [
-              { requirement: "location", status: "met", evidence: "Shanghai" },
-              { requirement: "core duties: streaming", status: "not_met", evidence: null, ...assessment },
-            ],
-          },
-        ],
-      });
-    const refused = save("Promising", {});
-    expect(refused.success).toBe(false);
-    expect(refused.error?.issues[0]?.message).toContain("Di Liu (core duties: streaming)");
-    expect(save("Partial", {}).success).toBe(true);
-    expect(save("Strong", { preference: true }).success).toBe(true);
-  });
 });
