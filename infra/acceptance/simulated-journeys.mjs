@@ -414,6 +414,31 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "five-asks-one-role",
+    // Each play opens its own role, so one play's rejects and passes never seed the next.
+    leftover: /^测试固定 · 数据工程师 7 · \d{4,5}/,
+    mechanisms: ["long-task"],
+    paid: true,
+    title: "一个岗位连着要五次人，每次都要真的给到",
+    area: "search",
+    source:
+      "11-24 user: 「找一半停下来…这个是最大的问题」; post-#1708 records: 15% of requests for people ended with no list (audit/long-task-completion-plan-20261124.md)",
+    account: "batch",
+    chinese: true,
+    maxTurns: 10,
+    waitMs: 12 * 60_000,
+    persona: `${AGENCY_RECRUITER} You keep asking for more people on one role and expect each ask to end with the people, or a plain word on how many are missing and why.`,
+    facts: (_recipients, tag) =>
+      `The role is named 「测试固定 · 数据工程师 7 · ${tag}」: Senior Data Engineer, Shanghai, hybrid 3 days in office, 5+ years building batch and streaming pipelines (Spark or Flink), data warehouse modelling, Mandarin and working English, base 500k–700k RMB. Do not approve any send. Ask for at most 30 people in all.`,
+    goals: [
+      "Give Kruit the role under that exact name with all its details in one message and ask for the first 10 people.",
+      "Turn down two of the people it showed, saying why in one line, and ask for 5 more.",
+      "Ask for 5 more again, without changing anything.",
+      "Pick two of the newest people, say why they don't fit, and ask Kruit to swap them for two others.",
+      "Ask for 5 last people. Whenever Kruit gives fewer than you asked, check it said how many are missing and why; if it went quiet or only promised, push back once.",
+    ],
+  },
+  {
     name: "industry-and-what-they-built",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
     leftover: /^测试固定 · 支付风控数据 · \d{4,5}/,
