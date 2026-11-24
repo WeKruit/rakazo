@@ -665,6 +665,12 @@ describe("startRecruitingGrading", () => {
     };
     await expect(next("shown")).resolves.toBe(true);
     await expect(next("checked")).resolves.toBe(false);
+    // The first ten wait for the check too (fr 11-24: round 1 was shown before it).
+    const first = fixture({ rounds: [] });
+    first.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    await expect(
+      nextRoundHeld(first.deps.prisma, { threadId: "thread", roleId: "role" }),
+    ).resolves.toBe(true);
     // Staging 11-16: attempts made while a round was unshown streamed their lists, then were
     // refused, so the recruiter saw the same people again. Nothing of them is listed.
     const listed = (status: string) => {
