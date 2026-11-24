@@ -16,14 +16,12 @@ const {
   GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
   gradingTools,
-  heldRoundSearchRefusal,
   nextRoundHeld,
   roundAwaitingReview,
   roundListHeld,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
-  ROUND_HELD_SEARCH_REFUSAL,
   scheduleRecruitingGrading,
   startRecruitingGrading,
 } = await import("./recruiting-grading.js");
@@ -1215,84 +1213,5 @@ describe("gradingTools", () => {
       "connectors_search_tools",
       "connectors_execute_tool",
     ]);
-  });
-});
-
-describe("heldRoundSearchRefusal", () => {
-  const prismaWith = (round: Record<string, unknown> | null) =>
-    ({
-      recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
-    }) as never;
-  const held = (status: string, ownerBotId = "lead") => ({
-    id: "r2",
-    round: 2,
-    candidateKeys: [],
-    approvedAt: null,
-    status,
-    statusAt: new Date(),
-    ownerBotId,
-    version: 1,
-  });
-
-  it("refuses a search in a later turn while an earlier turn's round waits for the check", async () => {
-    // Staging 11-16 (982a0ac9): "still waiting" started a new lead turn that searched again while
-    // round 2 was being checked, and the checked round was steered into that busy turn.
-    const refusal = await heldRoundSearchRefusal(prismaWith(held("checking")), {
-      roleId: "role",
-      botId: "lead",
-      recordedThisTurn: false,
-    });
-    expect(refusal).toContain("Not run");
-  });
-
-  it("lets a search run when the latest round is shown, and in the owner's turn showing it", async () => {
-    const shown = { roleId: "role", botId: "lead", recordedThisTurn: false };
-    expect(await heldRoundSearchRefusal(prismaWith(held("shown")), shown)).toBeNull();
-    expect(await heldRoundSearchRefusal(prismaWith(null), shown)).toBeNull();
-    expect(await heldRoundSearchRefusal(prismaWith(held("checked")), shown)).toBeNull();
-    expect(
-      await heldRoundSearchRefusal(prismaWith(held("checked", "other")), shown),
-    ).not.toBeNull();
-  });
-
-  it("refuses a search for a request that a round shown since then answers", async () => {
-    // fosp 11-21 (a0e844e4): round 2 was shown at the 5 of "再来5个", then the lead's turn for
-    // "再来5个" ran another round of 9.
-    const shownAt = new Date("2026-11-21T02:57:09Z");
-    const round = { ...held("shown"), candidateKeys: ["a", "b", "c", "d", "e"], statusAt: shownAt };
-    const handIn = (text: string, createdAt: Date) => ({
-      role: "user",
-      createdAt,
-      blocks: [
-        {
-          kind: "bot_message_received",
-          text: `The recruiter wrote, word for word:\n"${text}"\n\nKruit's note: more people`,
-        },
-      ],
-    });
-    const prisma = (message: unknown) =>
-      ({
-        recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
-        message: { findUnique: vi.fn(async () => message) },
-      }) as never;
-    const input = { roleId: "role", botId: "lead", recordedThisTurn: false, sourceMessageId: "m" };
-    const before = new Date("2026-11-21T02:56:01Z");
-    expect(await heldRoundSearchRefusal(prisma(handIn("再来5个", before)), input)).toContain(
-      "already gives",
-    );
-    // Asked after the round was shown, or for more than it showed: the search runs.
-    const after = new Date("2026-11-21T02:58:00Z");
-    expect(await heldRoundSearchRefusal(prisma(handIn("再来5个", after)), input)).toBeNull();
-    expect(await heldRoundSearchRefusal(prisma(handIn("再来20个", before)), input)).toBeNull();
-  });
-
-  it("refuses after this turn recorded the held round, whatever the stored state", async () => {
-    expect(
-      await heldRoundSearchRefusal(prismaWith(null), {
-        roleId: undefined,
-        botId: "lead",
-        recordedThisTurn: true,
-      }),
-    ).toBe(ROUND_HELD_SEARCH_REFUSAL);
   });
 });

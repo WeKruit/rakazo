@@ -499,7 +499,6 @@ import {
 import {
   globalRoleWriteRefusal,
   otherRoleWriteRefusal,
-  PEOPLE_SEARCH_TOOLS,
   roleRequestMessage,
 } from "./global-role-writes.js";
 import {
@@ -638,7 +637,6 @@ import {
   gradingToolRefusal,
   gradingTools,
   heldRoundPeople,
-  heldRoundSearchRefusal,
   nextRoundHeld,
   ROUND_HELD_NEXT_STEP,
   roundAwaitingReview,
@@ -646,7 +644,6 @@ import {
   roundState,
   scheduleRecruitingGrading,
   waitForRoundCheck,
-  ROUND_HELD_SEARCH_REFUSAL,
 } from "./recruiting-grading.js";
 import {
   languageFilters,
@@ -7637,22 +7634,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             readExternalText: runReadExternalText,
           });
           if (memoryRefusal) return { error: memoryRefusal };
-          // Feedback-round 11-15: after recording the held round 2, the lead kept searching for
-          // "the next 10" for another minute, and the Reviewer's check waited for its turn to end.
-          if (
-            connectorCall.route?.connectorId === "mcp" &&
-            PEOPLE_SEARCH_TOOLS.has(connectorCall.route.toolName) &&
-            run.trigger !== "recruiting_grade" &&
-            !thread.groupId?.startsWith("recruiting-global-")
-          ) {
-            const held = await heldRoundSearchRefusal(deps.prisma, {
-              roleId: thread.activeRecruitingRoleId,
-              botId: run.botId,
-              recordedThisTurn: roundHeldRecorded,
-              sourceMessageId: run.sourceMessageId,
-            }).catch(() => (roundHeldRecorded ? ROUND_HELD_SEARCH_REFUSAL : null));
-            if (held) return { error: held };
-          }
           if (
             connectorCall.route?.connectorId === "mcp" &&
             thread.groupId?.startsWith("recruiting-global-")
