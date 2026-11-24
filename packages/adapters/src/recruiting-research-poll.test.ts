@@ -240,12 +240,6 @@ describe("pollRecruitingResearch", () => {
     expect(prompt.data.prompt).toContain("do not ask anything");
     expect(prompt.data.prompt).not.toContain("question card");
     expect(prompt.data.prompt).not.toContain("short line");
-    expect(done.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "recruiting_grade.start",
-        payload: { threadId: "thread" },
-      }),
-    );
   });
 
   it("ignores a research that finishes after the conversation was stopped", async () => {

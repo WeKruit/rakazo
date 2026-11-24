@@ -150,7 +150,7 @@ import {
   listRecruitingSavedProfiles,
   mergeRecruitingProfileFacts,
 } from "./recruiting-saved-profiles.js";
-import { readRecruiterSeen, readRecruiterVerdicts } from "./recruiting-search-quality.js";
+import { readRecruiterVerdicts } from "./recruiting-search-quality.js";
 import { IsolationError, scoped } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -8777,8 +8777,6 @@ function scoreCellPart(fields: Prisma.Sql, part: "plain" | "fraction") {
 
 /** Nonce prefix of the run that grades a conversation's people already saved in Results. */
 export const RECRUITING_GRADE_NONCE_PREFIX = "recruiting-grade:";
-/** Run nonce of the lead's turn after the Reviewer has checked a round the recruiter has not seen. */
-export const RECRUITING_ROUND_REVIEW_NONCE_PREFIX = "recruiting-round-review:";
 
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
 export function candidateIndexQuery(
@@ -12214,40 +12212,12 @@ type CalibrationRoundInput = Extract<
  * be new: returned after the previous round and never shown before (the playbook's
  * "exclude everyone already seen").
  */
-/** How long a round waits for its check before it counts as shown, so a lost check never wedges it. */
-export const CALIBRATION_ROUND_CHECK_HOLD_MS = 15 * 60_000;
-
-export type CalibrationRoundStatus = "checking" | "checked" | "shown";
-
-/** A round's stored state; a check that never ended no longer holds the round. */
-export function calibrationRoundStatus(
-  round: { status: string; statusAt: Date },
-  now = Date.now(),
-): CalibrationRoundStatus {
-  if (round.status !== "checking" && round.status !== "checked") return "shown";
-  return now - round.statusAt.getTime() > CALIBRATION_ROUND_CHECK_HOLD_MS ? "shown" : round.status;
-}
-
-/** The Reviewer's grades of a checking round are all in: its owner may now show it. */
-export async function markCalibrationRoundChecked(
-  prisma: Pick<PrismaClient, "recruitingCalibrationRound">,
-  round: { id: string; version: number },
-): Promise<boolean> {
-  const changed = await prisma.recruitingCalibrationRound.updateMany({
-    where: { id: round.id, version: round.version, status: "checking" },
-    data: { status: "checked", statusAt: new Date(), version: { increment: 1 } },
-  });
-  return changed.count > 0;
-}
-
 export async function saveRecruitingCalibrationRound(
   prisma: PrismaClient,
   actor: Actor,
   trusted: ResearchLease & {
     effectId: string;
     effectRequest: unknown;
-    /** The round waits for the Reviewer's check before it is shown (the team has the Reviewer). */
-    holdForCheck?: boolean;
   },
   raw: CalibrationRoundInput,
 ) {
@@ -12359,52 +12329,18 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         `Round ${repeated.round + 1} must show only people the recruiter has not seen, but ${repeated.repeats.join(", ")} ${repeated.repeats.length === 1 ? "was" : "were"} already shown in an earlier round or turned down. Replace them with saved people no round has shown (recruiting_candidates list) or people from a new quick search, and record the round again.`,
       );
-    // The checked version of a round held for the Reviewer takes that round's place: the recruiter
-    // never saw the held list, so it is not a round of its own. Staging 11-15: the checked round 2
-    // was labelled round 3 after the recruiter had seen only round 1. It is shown now, so it dates
-    // from now: what the recruiter wrote while it was held came before it, not after.
-    // The round's state is stored and only its owner shows it once checked (staging 11-16: a later
-    // turn recorded round 3 over a held round 2, which was never shown).
-    const state = previous ? calibrationRoundStatus(previous) : "shown";
-    if (previous && state === "checking")
-      throw new RecruitingCalibrationRoundError(
-        `Not recorded: round ${previous.round} is being checked by the Reviewer and is shown here once checked, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
-      );
-    if (previous && state === "checked" && run.botId !== previous.ownerBotId)
-      throw new RecruitingCalibrationRoundError(
-        `Not recorded: round ${previous.round} is checked and is shown by the teammate who recorded it, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
-      );
     const now = new Date();
-    let round: { round: number; candidateKeys: string[]; status: string };
-    if (previous && state === "checked") {
-      const shown = await tx.recruitingCalibrationRound.updateMany({
-        where: { id: previous.id, version: previous.version },
-        data: {
-          candidateKeys: [...keys],
-          effectId: saving.id,
-          createdAt: now,
-          status: "shown",
-          statusAt: now,
-          version: { increment: 1 },
-        },
-      });
-      if (!shown.count)
-        throw new RecruitingCalibrationRoundError(
-          `Not recorded: round ${previous.round} changed while this was recorded. Read it again and record it once more if it still needs showing.`,
-        );
-      round = { round: previous.round, candidateKeys: [...keys], status: "shown" };
-    } else
-      round = await tx.recruitingCalibrationRound.create({
-        data: {
-          roleId: role.id,
-          round: (previous?.round ?? 0) + 1,
-          candidateKeys: [...keys],
-          effectId: saving.id,
-          status: trusted.holdForCheck ? "checking" : "shown",
-          ownerBotId: run.botId,
-          statusAt: now,
-        },
-      });
+    const round = await tx.recruitingCalibrationRound.create({
+      data: {
+        roleId: role.id,
+        round: (previous?.round ?? 0) + 1,
+        candidateKeys: [...keys],
+        effectId: saving.id,
+        status: "shown",
+        ownerBotId: run.botId,
+        statusAt: now,
+      },
+    });
     await advanceRecruitingPlaybookStage(tx, role.id, "feedback");
     const result = {
       status: "saved",

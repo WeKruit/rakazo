@@ -13,7 +13,6 @@ import { getLogger } from "@rakazo/logging";
 import {
   NOT_GRADING_TASK,
   RECRUITING_GRADE_NONCE_PREFIX,
-  scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import { classifyRecruitingResearchResult, mcpObject } from "./recruiting-research.js";
 import { finishWorkEstimate, SHORTFALL_RULE, wakeForResearchCountdown } from "./work-estimate.js";
@@ -422,11 +421,6 @@ export async function pollRecruitingResearch(
   await deps.jobs.enqueue(runContinueJob(wakeRunId)).catch(() => {
     getLogger().warn("recruiting research wake deferred to reconciliation");
   });
-  // The next people without a grade follow once this batch's grades are saved.
-  if (grading)
-    await scheduleRecruitingGrading(deps.jobs, run.threadId).catch((error) =>
-      getLogger().warn("recruiting grade schedule", { error: String(error) }),
-    );
 }
 
 /**

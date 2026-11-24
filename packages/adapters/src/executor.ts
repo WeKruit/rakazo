@@ -636,10 +636,6 @@ import {
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
   gradingTools,
-  heldRoundPeople,
-  roundAwaitingReview,
-  roundListHeld,
-  roundState,
 } from "./recruiting-grading.js";
 import {
   languageFilters,
@@ -4790,8 +4786,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
         // People searches this run sent, so a short round can ask once two sets came back short.
         let peopleSearchesRun = 0;
-        // New people-search agent runs this turn started before its round was recorded.
-        let agentRunsBeforeRound = 0;
         // Full profile pages the first round's searches may still read for a required language.
         const fullProfileReads = { left: FULL_PROFILE_READS };
         const profilePages = new Map<string, string>();
@@ -4884,27 +4878,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               posting: Promise<unknown>;
             }
           | undefined;
-        // A round after the recruiter's feedback is shown only once the Reviewer has checked it.
-        let roundHeldThisTurn: Promise<boolean> | undefined;
-        // A round an earlier turn held is still waiting for the Reviewer's check: this turn lists
-        // none of its people either. Staging 11-15: the recruiter's follow-ups started a turn
-        // before the check, which wrote round 2 out; the checked round then swapped three of them.
-        // Read when used, since another turn may hold a round while this one runs (staging 11-15:
-        // the opening turn took the feedback, a teammate's turn held round 2, and the opening
-        // turn's reply then summarized round 2's grades).
-        const roundAwaitingCheck = async () => {
-          const roleId = thread.activeRecruitingRoleId;
-          if (!roleId || isBackgroundRunTrigger(run.trigger)) return null;
-          // The owner's turn that shows a checked round lists its people.
-          const state = await roundState(deps.prisma, roleId).catch(() => null);
-          if (state?.status === "checked" && state.ownerBotId === run.botId) return null;
-          return heldRoundPeople(deps.prisma, { threadId: thread.id, roleId }).catch(() => null);
-        };
-        const roundHeld = (roleId: string) =>
-          (roundHeldThisTurn ??= roundListHeld(deps.prisma, {
-            threadId: run.threadId,
-            roleId,
-          }).catch(() => false));
         let globalListSort: string | undefined;
         // People this turn already listed in Kruit's chat: a later page never lists them again.
         const globalListed = new Set<string>();
@@ -4920,15 +4893,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 returnThreadId: thread.id,
                 roleId,
               })
-            : null;
-        };
-        const globalRoundAwaitingReview = async (roleId: string) => {
-          const role = await deps.prisma.recruitingRole.findFirst({
-            where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
-            select: { sourceThreadId: true },
-          });
-          return role
-            ? roundAwaitingReview(deps.prisma, { threadId: role.sourceThreadId, roleId })
             : null;
         };
         // A plain list of one role's people in Kruit's conversation. A name or
@@ -4962,12 +4926,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // gets no rows to list, only the team's progress; asked to see people meanwhile, it
           // once declined with no time at all, so it says when the round comes.
           const working = await globalTeamProgress(args.roleId);
-          const held = working ? null : await globalRoundAwaitingReview(args.roleId);
-          if (working || held)
+          if (working)
             return {
               items: [],
               total: page?.total,
-              teamWorking: `${working?.note ?? `The team is checking round ${held} before it is shown.`} The next round is shown here once, already checked: never list, name or count people from Results before it comes. Asked to see people now, say in one line that the checked round arrives here in a minute or two; never just decline.`,
+              teamWorking: `${working.note} The next round is shown here once, already checked: never list, name or count people from Results before it comes. Asked to see people now, say in one line that the checked round arrives here in a minute or two; never just decline.`,
             };
           // The agent says when a page is for the recruiter: asked whether the people they turned
           // down are marked, a keyword match posted a page that leaves out every round's people.
@@ -5108,7 +5071,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           stream.shown = named.length;
           stream.posting = stream.posting
             .then(async () => {
-              if (await roundHeld(roleId)) return;
               const text = await recruitingRoundListText(deps.prisma, {
                 chinese: turnLanguage === "zh",
                 threadId: run.threadId,
@@ -5816,8 +5778,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
-          if (name.endsWith("agent_run") && !rawArgs.runId && !(await roundRecordedThisRun()))
-            agentRunsBeforeRound++;
           // Tools that use the role from a job wait for its save; the first question and progress
           // lines do not, so the save never holds them up. The turn still ends after the save.
           if (
@@ -6059,28 +6019,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // One round check for everything the recruiter asked for (brief, criteria and the reasons
           // they turned people down): the agent's verdict on each decides who is in.
-          // Keeping earlier people is for the round the Reviewer checked; after feedback the next
-          // round is new people.
-          // Staging 11-15: with round 2 held for the Reviewer, a later turn recorded round 3 on top
-          // of it, so round 2 was never shown. The round's stored state decides: while it is
-          // checked, only its owner shows it (the save refuses the rest too, after the work).
-          if (
-            name === "recruiting_research" &&
-            args.operation === "calibration_round" &&
-            thread.activeRecruitingRoleId
-          ) {
-            const state = await roundState(deps.prisma, thread.activeRecruitingRoleId).catch(
-              () => null,
-            );
-            if (
-              state &&
-              (state.status === "checking" ||
-                (state.status === "checked" && state.ownerBotId !== run.botId))
-            )
-              return {
-                error: `Not recorded: round ${state.round} is waiting for the Reviewer's check and is shown here once checked, so no other round is recorded now. End the turn with one short line, in the recruiter's language, that the checked round comes in a minute or two.`,
-              };
-          }
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -6271,49 +6209,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
             const stream = roundStream;
             stream.shown = Math.max(stream.shown, keys.length);
-            const held = await roundHeld(roleId);
-            if (!held) {
-              stream.posting = stream.posting.then(() => showRoundList(text));
-              await stream.posting;
-            }
+            stream.posting = stream.posting.then(() => showRoundList(text));
+            await stream.posting;
             firstPicksShown = true;
             const late = lateSearchRows.splice(0);
             return {
               shown: keys.length,
               ...(left ? { notShown: left } : {}),
               // The requirements calibration_round's checks take a verdict on, so it records the
-              // first time. A held round is checked by the Reviewer from full profiles instead:
-              // writing ten people's verdicts took the lead 56 s on staging 11-16.
-              ...(held
-                ? {}
-                : {
-                    checksOn: Object.fromEntries(
-                      (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).map(
-                        (criterion) => [criterion.id, criterion.statement],
-                      ),
-                    ),
-                  }),
+              // first time.
+              checksOn: Object.fromEntries(
+                (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).map(
+                  (criterion) => [criterion.id, criterion.statement],
+                ),
+              ),
               ...(late.length
                 ? {
                     lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
                   }
                 : {}),
-              next: `${held ? "These people are kept for the round; the recruiter sees the round once it is recorded and checked, so never list them in chat." : "These people are in chat now;"} the round is not recorded yet. Next, record the full ten with calibration_round${held ? " (candidateKeys only, without checks: the Reviewer checks each person from their full profile)" : ""}, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
+              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
           }
-          // fr 11-21 (6c40ad1d): the Reviewer's checked round was refused for two people listed only
-          // as "United States"; each new show turn asked again, so the round was never shown. The
-          // checked round's people were graded from full profiles and are shown as picked.
-          const showingChecked =
-            researchInput?.data?.operation === "calibration_round" &&
-            thread.activeRecruitingRoleId !== null &&
-            (await roundState(deps.prisma, thread.activeRecruitingRoleId).catch(() => null))
-              ?.status === "checked";
-          if (
-            researchInput?.data?.operation === "calibration_round" &&
-            thread.activeRecruitingRoleId &&
-            !showingChecked
-          ) {
+          if (researchInput?.data?.operation === "calibration_round" && thread.activeRecruitingRoleId) {
             const { regionOnly, outliers, beyond, place } = await locationSlips(
               thread.activeRecruitingRoleId,
               researchInput.data.candidateKeys,
@@ -10959,33 +10877,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 thread.groupId?.startsWith("recruiting-global-")
                   ? await globalTeamProgress(args.roleId)
                   : null;
-              // Staging 11-15: one second after the team recorded round 2, Kruit read it here and
-              // listed its unchecked ten; the checked round came later with other people.
-              const found = result as {
-                status?: unknown;
-                round?: { round?: unknown; repeats?: unknown; feedbackBeforeThisRound?: unknown };
-              } | null;
-              const held =
-                !shown &&
-                args.operation === "round" &&
-                found?.status === "found" &&
-                typeof args.roleId === "string" &&
-                thread.groupId?.startsWith("recruiting-global-")
-                  ? await globalRoundAwaitingReview(args.roleId)
-                  : null;
-              // feedback-round x5 on 94b302cd: asked "any repeats? did it use my feedback?" while
-              // round 2 was being checked, Kruit said it had asked for a check, 4 runs in 5.
-              if (held && found?.round?.round === held)
-                return finish({
-                  status: "held",
-                  round: held,
-                  repeats: found.round.repeats,
-                  ...(found.round.feedbackBeforeThisRound
-                    ? { feedbackBeforeThisRound: found.round.feedbackBeforeThisRound }
-                    : {}),
-                  teamWorking:
-                    `${progress?.note ?? ""} Round ${held} is being checked and is shown here once, already checked: never list, name or count its people before it comes. Asked to see them now, say in one line that the checked round arrives here in a minute or two. Whether it repeats anyone (repeats) and which of their feedback it was searched with (feedbackBeforeThisRound) are answered now from this result, never by asking the team.`.trim(),
-                });
               return finish(
                 redactConnectorPayload(
                   shown ??
@@ -15114,10 +15005,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   claimSteering: scripted
                     ? undefined
                     : async (seenIds) => {
-                        // A held round's check runs in this conversation once this turn ends, so
-                        // newer messages start the next turn instead of keeping this one open.
-                        // Staging 11-15: two steered follow-ups held the turn for six minutes.
-                        if ((await roundAwaitingCheck()) !== null) return [];
                         const steering = await deps.events.claimSteering({
                           threadId: thread.id,
                           botId: bot.id,

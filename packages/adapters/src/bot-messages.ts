@@ -23,7 +23,6 @@ import { getLogger } from "@rakazo/logging";
 import { sleep } from "./background-wait.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { roundAwaitingReview } from "./recruiting-grading.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
 import { ROLE_START_NONCE } from "./working-state.js";
@@ -561,14 +560,6 @@ export async function teamProgress(
           .then(() => roundListedNotRecorded(prisma, { roleId, after: since.toISOString() }))
           .catch(() => null)
       : null;
-  // Staging 11-15: told round 2 was "already shown in the role's chat" while the Reviewer still
-  // held it, Kruit sent the recruiter to the role, where nothing was shown yet.
-  const held =
-    roleId && recorded
-      ? (await roundAwaitingReview(prisma, { threadId: input.threadId, roleId }).catch(
-          () => null,
-        )) === recorded.round
-      : false;
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
   // fr/fosp 11-20: "found 35 so far, with 43 saved overall" was stale a minute later and read as
@@ -581,10 +572,8 @@ export async function teamProgress(
     // count; the people found so far can be listed, marked as not yet reviewed.
     note: listed
       ? `The next round is being posted right now. Read it with recruiting_candidates round and roleId ${roleId} in a moment and show its people here; never say it is not ready, never mention records, and never send the recruiter to another chat.`
-      : recorded && held
-        ? `Round ${recorded.round} is picked and being checked by the Reviewer; it is shown here once, already checked (${started} on this request). Never list, name or count its people before it comes, never send the recruiter to another chat, and say in one line that the checked round is on its way.`
-        : recorded
-          ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
+      : recorded
+        ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
           : `${working.bot.name} has been working on the recruiter's request for ${started}; the next round comes back here when it is picked. Say in one line that it is being searched and how long it has run; never say it has not started, and give no count of people found or saved: the recruiter counts the people a round shows them.`,
   };
 }
@@ -964,16 +953,6 @@ export async function returnDelegatedTeamOutcome(
   if (
     thread.activeRecruitingRoleId &&
     (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId))
-  )
-    return "later";
-  // Staging 11-15: a team turn ended right after recording round 2, its unchecked ten went back
-  // and were listed, and the checked round never followed. The Reviewer's turn returns it.
-  if (
-    thread.activeRecruitingRoleId &&
-    (await roundAwaitingReview(deps.prisma, {
-      threadId: run.threadId,
-      roleId: thread.activeRecruitingRoleId,
-    }).catch(() => null)) !== null
   )
     return "later";
   // The team's replies since the request, up to the recruiter's next own message there.

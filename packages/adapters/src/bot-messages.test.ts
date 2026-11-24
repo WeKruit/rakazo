@@ -964,48 +964,6 @@ describe("delegating to a role team in another conversation", () => {
     expect(returned).toBeUndefined();
   });
 
-  it("holds the result while the round it made waits for the Reviewer (staging 2026-11-15)", async () => {
-    // A team turn ended right after recording round 2; its unchecked ten went back to Kruit, which
-    // listed them, and the checked round with three people swapped never came back.
-    const harness = team({
-      roleId: "role-1",
-      later: [said("10 people this round:\n\n1. **Hima Y** · Sr Data Engineer")],
-    });
-    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
-    prisma.recruitingCalibrationRound = {
-      findFirst: vi.fn(async () => ({
-        round: 2,
-        createdAt: new Date(Date.now() - 60_000),
-        approvedAt: null,
-        effectId: "effect",
-        status: "checking",
-        statusAt: new Date(Date.now() - 60_000),
-      })),
-      findMany: vi.fn(async () => []),
-    };
-    prisma.externalEffect = {
-      findUnique: vi.fn(async () => ({ run: { clientNonce: null } })),
-      findMany: vi.fn(async () => []),
-    };
-    prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
-    const findUnique = prisma.thread!.findUnique as ((args: unknown) => unknown) | undefined;
-    prisma.thread!.findUnique = vi.fn(async (args: unknown) =>
-      (args as { select?: { groupId?: boolean } }).select?.groupId
-        ? { spaceId: run.spaceId, userId: run.userId, botId: "bot-main", groupId: "g" }
-        : findUnique?.(args),
-    );
-    prisma.chatGroupMember = {
-      findMany: vi.fn(async () => [
-        {
-          botId: "rv",
-          bot: { name: "Reviewer", spawnKey: "recruiting:reviewer", archivedAt: null },
-        },
-      ]),
-    };
-    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    expect(returnedTo(harness)).toEqual([]);
-  });
-
   it("returns no round the recruiter already answered in the role's chat (staging 2026-11-15)", async () => {
     // The role opened from Kruit's chat showed its ten, the recruiter gave feedback right there,
     // and nine minutes later the ten came back to Kruit's chat, which called them the new search.
@@ -1515,52 +1473,6 @@ describe("teamProgress", () => {
     });
     expect(progress?.note).toContain("Round 2 is already recorded");
     expect(progress?.note).not.toContain("comes back here when it is picked");
-  });
-
-  it("says a recorded round still waiting for the Reviewer is being checked (staging 2026-11-15)", async () => {
-    // Told "Round 2 is already recorded and shown in the role's chat", Kruit sent the recruiter to
-    // the role while round 2 was still held for the Reviewer and nothing was shown anywhere.
-    const startedAt = new Date(Date.now() - 3 * 60_000);
-    const prisma = {
-      run: {
-        findFirst: vi.fn(async () => ({ createdAt: startedAt, startedAt, bot: { name: "Lead" } })),
-      },
-      thread: {
-        findUnique: vi.fn(async () => ({
-          spaceId: "s",
-          userId: "u",
-          botId: "lead",
-          groupId: "g",
-        })),
-      },
-      chatGroupMember: {
-        findMany: vi.fn(async () => [
-          {
-            botId: "rv",
-            bot: { name: "Reviewer", spawnKey: "recruiting:reviewer", archivedAt: null },
-          },
-        ]),
-      },
-      externalEffect: { findUnique: vi.fn(async () => ({ run: { clientNonce: null } })) },
-      recruitingCandidateOccurrence: { findMany: vi.fn(async () => [{ candidateKey: "a" }]) },
-      recruitingCalibrationRound: {
-        findFirst: vi.fn(async () => ({
-          round: 2,
-          createdAt: new Date(Date.now() - 60_000),
-          approvedAt: null,
-          effectId: "effect",
-          status: "checking",
-          statusAt: new Date(Date.now() - 60_000),
-        })),
-      },
-    } as unknown as PrismaClient;
-    const progress = await teamProgress(prisma, {
-      threadId: "role-thread",
-      returnThreadId: "global",
-      roleId: "role",
-    });
-    expect(progress?.note).toContain("being checked");
-    expect(progress?.note).not.toContain("shown in the role's chat");
   });
 
   it("counts the turn of a role opened from Kruit's chat as the team working (staging 2026-11-15)", async () => {
