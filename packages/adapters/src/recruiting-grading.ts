@@ -287,9 +287,9 @@ export const SELF_GRADE_RUBRIC = [
   "- Each requirement is met, not_met or unknown by what the profile states. Never judge ethnicity, race or background from a name or photo.",
   "- Hard requirements and preferences are what the recruiter made them. Strong needs every hard requirement met; one not_met makes Partial at most; a missed preference only lowers the score.",
   "- A profile silent on a point the recruiter repeated after the first round or turned someone down for is Uncertain at most; silent on anything else, it can still be Promising.",
-  "- Years: count the dated roles that match.",
+  "- Years with a technology or kind of work: add up the dated roles whose description shows that work. The profile need not state the number or repeat the recruiter's wording; a bare skills-list mention with no role describing it is unknown.",
   "- A required language: the language check's finding on the person's line is its status.",
-  "- The job's own terms (pay, office days, benefits) are not requirements on the person.",
+  "- The job's own terms (pay, office days, hybrid or remote schedule, benefits) are not requirements on the person: leave them out of requirements_assessment and never lower a grade or name a concern for a profile not showing them. Location is the person's city or area only.",
 ].join("\n");
 
 /** The profile links one grading request sent. */
@@ -1512,7 +1512,7 @@ export function roundReviewPrompt(round: number, size: number, people: readonly 
         // miss no hard requirement, those the profile can't confirm marked with what it doesn't show.
         `Pick as many as the recruiter asked for (you recorded ${size}), best grade first: Strong, Promising, then Uncertain, each Uncertain with what their profile doesn't show; never someone graded Partial.`
       : `Pick as many as the recruiter asked for this round (you recorded ${size}), best grade first, the round's own people before others of the same grade. Show only people graded Strong or Promising, unless the recruiter has said to loosen or accept less: then Uncertain too, each with what their profile doesn't show.`,
-    "If fewer fit than asked, follow your short-round rule from where your work.md note says this request stands: the Reviewer checks the new people in the same turn when you record the round again.",
+    `The request is not done while fewer fit than asked: by your short-round rule, search for more now (agent_run, effort "low", "Find N more people", up to three searches for the request, together in one step when you can), then record the round again with those who fit and the new people; the Reviewer checks the new ones in the same turn. Only after the third search record who fits and, in the same reply, say how many are missing, which requirement rules out the most, who would count if it were loosened, and offer to loosen it.`,
     // The recruiter's rule 11-22: a requirement profiles can't show is asked about, not hidden.
     // s38 11-24: the lead asked with a card instead of recording, and the checked round was never shown.
     "When most of your picks' profiles don't show the same requirement, record the round first, then ask in one line in the same reply whether people whose profile doesn't show it should still count, unless you already asked in this conversation.",
