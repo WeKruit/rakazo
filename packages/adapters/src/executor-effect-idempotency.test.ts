@@ -1227,7 +1227,7 @@ describe("questions after the person moved on", () => {
         : null) as unknown as typeof findFirst);
     await f.executor.continueRun(f.runData.id, "worker-1");
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-    const answer = await request.beforeAsk?.("What would you like to do next?", undefined);
+    const answer = await request.beforeAsk?.("What would you like to do next?");
     expect(answer).toEqual({
       instead: expect.stringContaining("找 100 个类似的人"),
     });
@@ -5984,7 +5984,7 @@ describe("native recruiting assessment effect delivery", () => {
   it("never shows a question card in a role team with no role", async () => {
     const f = await roleTeamFirstTurn("greeting-no-card", "你好，你能帮我做什么？");
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-    expect(await request.beforeAsk?.("你想先处理哪项？", undefined)).toEqual({
+    expect(await request.beforeAsk?.("你想先处理哪项？")).toEqual({
       instead: expect.stringContaining("Not asked yet: no role is saved in this chat"),
     });
   });
@@ -5997,7 +5997,7 @@ describe("native recruiting assessment effect delivery", () => {
       "We need a backend engineer for our team, can you help me find people?",
     );
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-    const bounced = await request.beforeAsk?.("Which city?", undefined);
+    const bounced = await request.beforeAsk?.("Which city?");
     expect(bounced).toEqual({
       instead: expect.stringContaining("save it now with recruiting_role create"),
     });
@@ -6014,7 +6014,7 @@ describe("native recruiting assessment effect delivery", () => {
       "recruiting-global-abc",
     );
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-    const bounced = await request.beforeAsk?.("Seattle only, or the metro?", undefined);
+    const bounced = await request.beforeAsk?.("Seattle only, or the metro?");
     expect(bounced).toEqual({
       instead: globalAskBeforeRole(
         "Senior Data Engineer, Seattle. Requirements: 6+ years, Spark, Python.",
@@ -6022,7 +6022,7 @@ describe("native recruiting assessment effect delivery", () => {
     });
     // Staging eval 11-11 (email-no-mailbox-zh): 「那你就直接发啊」 after an email opened a role.
     expect(JSON.stringify(bounced)).toContain("An email, a send, a person");
-    expect(await request.beforeAsk?.("Seattle only, or the metro?", undefined)).toBeUndefined();
+    expect(await request.beforeAsk?.("Seattle only, or the metro?")).toBeUndefined();
   });
 
   // Staging eval 11-11 (mixed-language-ask): a second turn asked the same location question
@@ -6035,7 +6035,7 @@ describe("native recruiting assessment effect delivery", () => {
       "recruiting-global-abc",
     );
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-    await request.beforeAsk?.("地点范围？", undefined);
+    await request.beforeAsk?.("地点范围？");
     vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
       {
         role: "bot",
@@ -6045,7 +6045,7 @@ describe("native recruiting assessment effect delivery", () => {
       },
       { role: "user", botId: null, runId: null, blocks: [{ kind: "text", text: "找人" }] },
     ]) as never);
-    expect(await request.beforeAsk?.("地点范围是哪一种？", undefined)).toEqual({
+    expect(await request.beforeAsk?.("地点范围是哪一种？")).toEqual({
       instead: questionAlreadyWaiting("你希望地点限定为奥斯汀本地吗？"),
     });
   });
