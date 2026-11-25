@@ -145,7 +145,6 @@ import {
   loadRunHumanSources,
   validateRunHumanSourceRows,
 } from "./messages.js";
-import { calibrationRoundRepeats } from "./recruiting-round-repeats.js";
 import {
   listRecruitingSavedProfiles,
   mergeRecruitingProfileFacts,
@@ -12361,11 +12360,6 @@ export async function saveRecruitingCalibrationRound(
       where: { roleId: role.id },
       orderBy: { round: "desc" },
     });
-    const repeated = previous && (await calibrationRoundRepeats(tx, actor, role.id, keys));
-    if (repeated?.repeats.length)
-      throw new RecruitingCalibrationRoundError(
-        `Round ${repeated.round + 1} must show only people the recruiter has not seen, but ${repeated.repeats.join(", ")} ${repeated.repeats.length === 1 ? "was" : "were"} already shown in an earlier round or turned down. Replace them with saved people no round has shown (recruiting_candidates list) or people from a new quick search, and record the round again.`,
-      );
     const now = new Date();
     const round = await tx.recruitingCalibrationRound.create({
       data: {

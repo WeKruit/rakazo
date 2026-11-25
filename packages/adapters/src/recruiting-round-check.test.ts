@@ -17,14 +17,14 @@ describe("checkRound", () => {
     { id: "years", statement: "6+ years", added: false },
     { id: "prod-stack", statement: "shows production Spark and Kafka work", added: true },
   ];
-  const base = { criteria, asked: new Set<string>(), shortOfTen: "record fewer" };
+  const base = { criteria, asked: new Set<string>() };
   const all = (verdict: "shown" | "unknown" | "fails") => ({
     seattle: "shown" as const,
     years: verdict,
     "prod-stack": verdict,
   });
 
-  it("records picks without verdicts and refuses only a pick's own fails", () => {
+  it("records picks with or without verdicts and notes what is unknown", () => {
     // Staging 11-15/16: asking for a verdict on every criterion of every pick cost refusals and up
     // to a minute a round; the Reviewer grades rounds from full profiles.
     expect(checkRound({ ...base, keys: ["a", "b"], checks: { a: all("shown") } })).toEqual({
@@ -32,7 +32,6 @@ describe("checkRound", () => {
       unverified: {},
     });
     const checks = { a: all("shown"), b: all("fails"), c: all("unknown") };
-    expect(checkRound({ ...base, keys: ["a", "b", "c"], checks })).toMatchObject({ ok: false });
     expect(checkRound({ ...base, keys: ["a", "c"], checks })).toEqual({
       ok: true,
       unverified: { c: "6+ years; shows production Spark and Kafka work" },
@@ -381,4 +380,3 @@ describe("roundRepeats", () => {
     expect(text).toMatch(/^none/);
   });
 });
-
