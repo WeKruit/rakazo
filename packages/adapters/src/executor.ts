@@ -4547,10 +4547,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
             )
               return {
-                error: gmailDraftFirstNote(
-                  earlierDraft ? draftLacks(lastRecruiterText, earlierDraft) : [],
-                  gmailDraftRefusals++ > 0,
-                ),
+                error: gmailDraftFirstNote(gmailDraftRefusals++ > 0),
               };
           }
           let leaseLost = false;
@@ -16884,25 +16881,9 @@ export function gmailCardNeedsDraft(
     return false;
   if (earlierDraft === undefined)
     return asksForOutreach(recruiterText) || !/连|\bconnect/i.test(recruiterText);
-  // A send, connect or status ask ("send it via Gmail", "发出去了吗") is about the shown email.
-  if (/发|寄|连|\b(?:send|sent|connect)|[?？吗呢]/i.test(recruiterText)) return false;
-  return draftLacks(recruiterText, earlierDraft).length > 0;
-}
-
-/**
- * Names and numbers the recruiter wrote that the shown email lacks (gate 14d33ed1: a generic first
- * draft does not stand for the email once they gave the role's facts). An address adds none.
- */
-export function draftLacks(recruiterText: string, draft: string): string[] {
-  const shown = draft.toLowerCase();
-  return [
-    ...new Set(recruiterText.replace(/[^\s@，,]+@[^\s@，,]+/g, " ").match(/[a-z]{2,}|\d+/gi) ?? []),
-  ].filter(
-    (fact) =>
-      !new RegExp(
-        /\d/.test(fact) ? `(?<!\\d)${fact}(?!\\d)` : `(?<![a-z])${fact.toLowerCase()}(?![a-z])`,
-      ).test(shown),
-  );
+  // An email is already shown: whether it needs the recruiter's newer facts is the model's call
+  // (one-off-email 11-25: "Hi Wei," was refused as lacking "Zhang", so no card came).
+  return false;
 }
 
 const DRAFT_SUBJECT = /Subject\s*[:：]|主题\s*[:：]/i;
@@ -16912,8 +16893,8 @@ export const connectAnswerFirst = (message: string) =>
   `Not shown yet: the recruiter wrote "${message.trim().slice(0, 300)}" instead of pressing the card. Answer that message first in your reply, in one or two plain lines in their language, then call request_connection again so the card sits under your answer.`;
 
 /** Model-facing: the email is written out in chat before the Gmail connect card is shown. */
-export const gmailDraftFirstNote = (lacking: string[], again: boolean) =>
-  `${again ? "Still not shown: no email was written since the last call. " : "Not shown yet: "}${lacking.length ? `the email shown earlier lacks what the recruiter just gave (${lacking.slice(0, 8).join(", ")}). ` : ""}Write the full ${lacking.length ? "revised " : ""}email (Subject: and body) as text in your reply now, before any other tool call, so the recruiter sees it above the card; then call request_connection again.`;
+export const gmailDraftFirstNote = (again: boolean) =>
+  `${again ? "Still not shown: no email was written since the last call. " : "Not shown yet: "}Write the full email (Subject: and body) as text in your reply now, before any other tool call, so the recruiter sees it above the card; then call request_connection again.`;
 
 export function runPromotesMidTurnNarration(trigger: string): boolean {
   return trigger !== "routine" && !isBackgroundRunTrigger(trigger);
