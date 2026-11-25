@@ -13591,12 +13591,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         turnLanguage = recruiterTexts.some((text) => textLanguage(text))
           ? recruiterLanguage(recruiterTexts)
           : // A role conversation opened by a handoff holds only Kruit's brief, or a copy of the
-            // recruiter's message: that copy is their language, else their messages anywhere in
-            // the account. Gate 3a58e286 (memory-after-role): an English JD's round came in
-            // Chinese because the account's newest message, asked after it, was Chinese.
-            roleStartTexts.some((text) => textLanguage(text))
-            ? recruiterLanguage(roleStartTexts)
-            : ((await workingState)?.language ?? recruiterLanguage(roleStartTexts));
+            // recruiter's message. Their newest message with a clear language, in any of their
+            // conversations, decides (an English JD, then 「继续吧」 in Kruit's chat, is Chinese);
+            // the copied message decides only when they have written nothing else.
+            ((await workingState)?.language ?? recruiterLanguage(roleStartTexts));
         // The account's saved roles, read once a turn picks a role, for what the recruiter names.
         let savedRoleList: Promise<SavedRole[]> | undefined;
         const savedRoles = () =>
