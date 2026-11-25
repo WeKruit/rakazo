@@ -25,7 +25,7 @@ import {
   PORTABLE_TRANSFER_BATCH_BYTES,
   shouldSkipPortableWorkspaceFile,
 } from "./computer-workspace.js";
-import { LinuxDesktop, PREPARE_LINUX_DESKTOP } from "./linux-desktop.js";
+import { LinuxDesktop, PREPARE_LINUX_BASE, PREPARE_LINUX_DESKTOP } from "./linux-desktop.js";
 import { sandboxCommandArgv } from "./sandbox-command-environment.js";
 
 const E2B_WORKSPACE = "/home/user/rakazo-home";
@@ -108,6 +108,7 @@ export class E2BSandboxProvider implements SandboxProvider {
     },
     screenUrl: async (computer, port) =>
       `https://${(await this.box(computer)).getHost(port)}/vnc.html`,
+    installDesktop: PREPARE_LINUX_DESKTOP,
   });
   private readonly boxes = new Map<string, Sandbox>();
   private readonly connections = new Map<string, Promise<Sandbox>>();
@@ -219,7 +220,8 @@ export class E2BSandboxProvider implements SandboxProvider {
     const desktop = await this.box(computer);
     const connectedAt = performance.now();
     if (computer.fresh) await desktop.files.makeDir(E2B_WORKSPACE);
-    const result = await this.runSetupCommand(desktop, PREPARE_LINUX_DESKTOP, _context.signal);
+    // Desktop packages wait for the first screen; most runs only use files and the shell.
+    const result = await this.runSetupCommand(desktop, PREPARE_LINUX_BASE, _context.signal);
     getLogger().info("computer.prepare.timing", {
       operationId: _context.operationId,
       runId: _context.runId,

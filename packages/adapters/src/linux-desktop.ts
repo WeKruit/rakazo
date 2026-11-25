@@ -49,10 +49,17 @@ export interface LinuxDesktopHost {
     context: AdapterContext,
   ): Promise<{ code: number; stdout: string; stderr?: string }>;
   screenUrl(computer: ComputerRef, port: number, context: AdapterContext): Promise<string>;
+  /**
+   * Run once per computer before its first screen, when the provider's start leaves the desktop
+   * packages out. A file or shell run then never pays for them (12.8 s of apt on staging E2B).
+   */
+  installDesktop?: string;
 }
 
 /** Provider SDKs supply only command execution, workspace paths, and protected port URLs. */
 export class LinuxDesktop {
+  private readonly installed = new Map<string, Promise<unknown>>();
+
   constructor(private readonly host: LinuxDesktopHost) {}
 
   private async run(computer: ComputerRef, command: string, context: AdapterContext) {
@@ -63,7 +70,24 @@ export class LinuxDesktop {
     return result.stdout;
   }
 
+  private async installDesktop(computer: ComputerRef, context: AdapterContext) {
+    const command = this.host.installDesktop;
+    if (!command) return;
+    const id = computer.providerRef || computer.id;
+    let install = this.installed.get(id);
+    if (!install) {
+      install = this.run(computer, command, context);
+      this.installed.set(id, install);
+      // A failed install is tried again by the next screen instead of failing it for good.
+      install.catch(() => {
+        if (this.installed.get(id) === install) this.installed.delete(id);
+      });
+    }
+    await install;
+  }
+
   private async ensure(computer: ComputerRef, context: AdapterContext) {
+    await this.installDesktop(computer, context);
     const env = await this.host.environment(computer);
     const key = screenSessionKey(context);
     const output = await this.run(
@@ -340,16 +364,32 @@ function focusOrLaunchActionCommand(
   ].join("\n");
 }
 
+/** apt-installs the packages whose commands are missing, so a ready image costs one quick check. */
+function installMissing(pairs: string, desktop: boolean) {
+  return [
+    "set -eu",
+    'missing=""',
+    `for pair in ${pairs}; do command -v "\${pair%%:*}" >/dev/null 2>&1 || missing="$missing \${pair#*:}"; done`,
+    ...(desktop
+      ? [
+          'if ! command -v websockify >/dev/null 2>&1 && [ ! -x /opt/noVNC/utils/websockify/run ]; then missing="$missing websockify"; fi',
+          'if [ ! -d /usr/share/novnc ] && [ ! -d /opt/noVNC ]; then missing="$missing novnc"; fi',
+        ]
+      : []),
+    'if [ -n "$missing" ]; then',
+    '  if [ "$(id -u)" -eq 0 ]; then root=""; else root="sudo -n"; fi',
+    "  $root apt-get update -qq && $root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing",
+    "fi",
+  ].join("\n");
+}
+
+const BASE_TOOLS = "python3:python3 flock:util-linux";
+
+/** What every computer needs before its first command: the agent's code and the screen lock. */
+export const PREPARE_LINUX_BASE = installMissing(BASE_TOOLS, false);
+
 /** Install the same X11 tools in minimal Ubuntu sandboxes, only if their image lacks them. */
-export const PREPARE_LINUX_DESKTOP = [
-  "set -eu",
-  'missing=""',
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion
-  'for pair in python3:python3 flock:util-linux Xvfb:xvfb xdpyinfo:x11-utils x11vnc:x11vnc fluxbox:fluxbox xdotool:xdotool wmctrl:wmctrl scrot:scrot xterm:xterm; do command -v "${pair%%:*}" >/dev/null 2>&1 || missing="$missing ${pair#*:}"; done',
-  'if ! command -v websockify >/dev/null 2>&1 && [ ! -x /opt/noVNC/utils/websockify/run ]; then missing="$missing websockify"; fi',
-  'if [ ! -d /usr/share/novnc ] && [ ! -d /opt/noVNC ]; then missing="$missing novnc"; fi',
-  'if [ -n "$missing" ]; then',
-  '  if [ "$(id -u)" -eq 0 ]; then root=""; else root="sudo -n"; fi',
-  "  $root apt-get update -qq && $root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing",
-  "fi",
-].join("\n");
+export const PREPARE_LINUX_DESKTOP = installMissing(
+  `${BASE_TOOLS} Xvfb:xvfb xdpyinfo:x11-utils x11vnc:x11vnc fluxbox:fluxbox xdotool:xdotool wmctrl:wmctrl scrot:scrot xterm:xterm`,
+  true,
+);
