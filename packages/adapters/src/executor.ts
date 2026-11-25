@@ -13378,7 +13378,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // recruiter's message. Their newest message with a clear language, in any of their
             // conversations, decides (an English JD, then 「继续吧」 in Kruit's chat, is Chinese);
             // the copied message decides only when they have written nothing else.
-            ((await workingState)?.language ?? recruiterLanguage(roleStartTexts));
+            ((await workingState)?.language ??
+            // No working state before the role is saved (gate cc656e26: stopped, then 「继续吧」 in
+            // Kruit's chat, and the role team's progress line was English).
+            (thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
+              ? await recruiterLanguageNow(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId },
+                  thread.id,
+                ).catch(() => recruiterLanguage(roleStartTexts))
+              : recruiterLanguage(roleStartTexts)));
         // The account's saved roles, read once a turn picks a role, for what the recruiter names.
         let savedRoleList: Promise<SavedRole[]> | undefined;
         const savedRoles = () =>
@@ -14458,7 +14467,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         // A teammate relaying the recruiter's newer words into a role team's
                         // running turn: their language comes from the records, not the relay.
                         const relayedLanguage =
-                          hideVendors && !freshHumanSteering && thread.activeRecruitingRoleId
+                          hideVendors &&
+                          !freshHumanSteering &&
+                          (thread.activeRecruitingRoleId ||
+                            thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX))
                             ? await recruiterLanguageNow(
                                 deps.prisma,
                                 { spaceId: run.spaceId, userId: run.userId },
