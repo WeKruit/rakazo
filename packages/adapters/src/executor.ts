@@ -617,6 +617,7 @@ import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   loadRecruitingRunContext,
   RECRUITING_PRESENTATION_INSTRUCTION,
+  RECRUITING_ROUND_RULES,
 } from "./recruiting-context.js";
 import type { RecruitingFeedbackResult } from "./recruiting-feedback.js";
 import {
@@ -13582,6 +13583,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // A role being saved from this message has its own note; "not saved, create it"
                 // beside "being saved, do not create" stopped a first turn (gate 2d92e0d2).
                 jobRole ? undefined : noRoleContext(thread.groupId),
+                // The turn that saves a role also produces its first round, so it carries the
+                // round rules a saved role's context has: without them it ran one or two searches
+                // with no profile evidence and recorded ten unchecked or unknown people.
+                ...(thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
+                  ? RECRUITING_ROUND_RULES
+                  : []),
                 memoryContext.text,
               ]
                 .filter(Boolean)
