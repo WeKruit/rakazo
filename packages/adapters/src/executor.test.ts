@@ -3971,6 +3971,12 @@ describe("gmailCardNeedsDraft", () => {
         "",
       ),
     ).toBe(true);
+    // first-timer-no-gmail 11-25: a question about sending asks for no email, so its card shows.
+    expect(gmailCardNeedsDraft("gmail", "不连邮箱能发候选人邮件吗", "不能。")).toBe(false);
+    expect(gmailCardNeedsDraft("gmail", "Can I email candidates without Gmail?", "No.")).toBe(
+      false,
+    );
+    expect(gmailCardNeedsDraft("gmail", "能帮我给 wei@example.com 写封邮件吗？", "")).toBe(true);
   });
 
   // Gate 14d33ed1 one-off-email: the role details came after a generic first draft, and the card
