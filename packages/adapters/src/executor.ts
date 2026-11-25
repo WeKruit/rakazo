@@ -16874,6 +16874,14 @@ export function gmailCardNeedsDraft(
   if (!/gmail/i.test(String(provider ?? "")) || DRAFT_SUBJECT.test(shown)) return false;
   // One-off-email x5 on ce4a9c24: "直接写" with the role's facts got the card and no email,
   // since the card ends the turn. With no email shown yet, only a plain connect ask skips it.
+  // first-timer-no-gmail 11-25: "不连邮箱能发候选人邮件吗" asks whether, not for an email, so its
+  // card goes under the answer; a question that asks to write one or names whom still waits.
+  if (
+    earlierDraft === undefined &&
+    /[?？吗呢]\s*$/.test(recruiterText.trim()) &&
+    !/写|起草|草拟|\b(?:write|draft)\b|[^\s@]+@[^\s@]+/i.test(recruiterText)
+  )
+    return false;
   if (earlierDraft === undefined)
     return asksForOutreach(recruiterText) || !/连|\bconnect/i.test(recruiterText);
   // A send, connect or status ask ("send it via Gmail", "发出去了吗") is about the shown email.
