@@ -897,7 +897,9 @@ export function delegatedAnswerResult(
   if (waited?.roundShown)
     return {
       shown: waited.roundShown,
-      note: `${ROUND_SHOWN_ABOVE} Answer whatever else the recruiter asked in this message, such as what changed in the search, in one line.`,
+      // fosp 11-25 (s101): with nothing here on where the request stood, Kruit read its memory notes
+      // and told the recruiter about "work.md" and its search tally.
+      note: `${ROUND_SHOWN_ABOVE} The team is still on the request: when this round is fewer than the recruiter asked for, the team shows the rest as its next round or says itself what is missing, so promise no number. Answer whatever else the recruiter asked in this message, such as what changed in the search, in one line from this result and this conversation only, never from memory notes; what neither shows, the team answers in its own next message.`,
     };
   return {
     note: "The team is still working on it; its answer comes back here as a new message. Tell the recruiter in one line what the team is doing now, without promising a time.",
