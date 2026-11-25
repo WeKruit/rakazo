@@ -342,8 +342,8 @@ async function earlierGradingRun(
 }
 
 /**
- * Deeper (metered) searches one recruiter request may run for a role: the recruiter's rule is to
- * relax the bar over at most three tries, then say honestly what was found.
+ * Deeper (metered) searches one recruiter request may run for a role: a spending limit. The
+ * request itself goes on with quick searches and low-effort runs until it is filled.
  */
 export const DEEPER_SEARCH_TRIES = 3;
 const DEEPER_SEARCH_WINDOW_MS = 6 * 60 * 60 * 1000;
@@ -393,7 +393,7 @@ async function requireDeeperSearchBudget(
   });
   if (tries < DEEPER_SEARCH_TRIES) return;
   throw new IsolationError(
-    `This request already ran ${tries} deeper searches for this role, the most one request may use. Do not run another one or reword it. Tell the recruiter, in their language, how many people this role holds now, which requirement rules out the most, and offer to loosen it or widen the area; their next message or a change to the requirements allows new tries.`,
+    `This request already ran ${tries} deeper searches for this role, the most one request may use. Do not run another one or reword it. The request goes on with quick people searches and effort "low" runs, which this limit does not count; the recruiter's next message or a change to the requirements allows new deeper tries.`,
   );
 }
 
