@@ -498,7 +498,7 @@ export async function executeRecruitingCandidatesTool(
             return {
               candidateKey: item.candidateKey,
               name: item.name ?? null,
-              grade: item.ranking?.state === "current" ? item.ranking.grade : null,
+              grade: item.match?.tier ?? item.ranking?.grade ?? null,
               ...(person?.round !== undefined ? { shownInRound: person.round } : {}),
               ...(person?.verdict ? { recruiterVerdict: person.verdict } : {}),
             };

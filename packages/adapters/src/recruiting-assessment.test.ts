@@ -724,6 +724,43 @@ describe("native saved candidate reads", () => {
     expect(result.items[1]).toMatchObject({ latestAssessment: { hardGate: "fail" } });
   });
 
+  // Staging 2d92e0d2 and branch plays 11-25: the brief list took its grade from the ranking, which
+  // only the default sort carries and which a brief change marks outdated, so the lead's
+  // `sort:"tier", brief:true` read returned no grade for anyone it had already had checked.
+  it("gives the saved grade in a brief list whatever the sort or brief revision", async () => {
+    const f = fixture();
+    db.roleId.mockResolvedValueOnce("role");
+    db.candidates.mockResolvedValueOnce({
+      roleId: "role",
+      items: [
+        { candidateKey: "a", name: "A", match: { rank: null, tier: "Strong", score: 90 } },
+        {
+          candidateKey: "b",
+          name: "B",
+          ranking: { source: "reviewer", state: "outdated", grade: "Promising", score: 70 },
+          match: { rank: null, tier: "Promising", score: 70 },
+        },
+        { candidateKey: "c", name: "C", match: { rank: null, tier: null, score: null } },
+      ],
+      total: 3,
+      nextCursor: null,
+    });
+    db.seen.mockResolvedValueOnce({ latestRound: null, people: new Map() });
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list", sort: "tier", brief: true },
+      context,
+    );
+    expect(result).toMatchObject({
+      items: [
+        { candidateKey: "a", grade: "Strong" },
+        { candidateKey: "b", grade: "Promising" },
+        { candidateKey: "c", grade: null },
+      ],
+    });
+  });
+
   // Staging 11-15: "shown in round 2" on the latest round's own people read as nine repeats.
   it("says the latest round's people are in it, not repeats", async () => {
     const f = fixture();
