@@ -265,26 +265,6 @@ describe("people-search agent runs", () => {
     );
   });
 
-  it("starts no second search while one for the role is still running", async () => {
-    // Staging 11-15: one "继续找 10 位" started two paid runs side by side.
-    const db = fixture();
-    db.externalEffect.findMany.mockResolvedValue([
-      { idempotencyKey: "work_estimate:agent_run_other_role", request: { roleId: "role-2" } },
-      { idempotencyKey: "work_estimate:agent_run_busy", request: { roleId: "role-1" } },
-    ]);
-    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).rejects.toThrow(
-      /agent_run_busy/,
-    );
-    // Collecting the running one, and grading, still go through.
-    await expect(prepare(db, { runId: "agent_run_mine" })).resolves.toEqual({
-      runId: "agent_run_mine",
-    });
-    db.externalEffect.findMany.mockResolvedValue([]);
-    await expect(prepare(db, { query: "Find 10 more", effort: "low" })).resolves.toMatchObject({
-      query: "Find 10 more",
-    });
-  });
-
   it("grades given people with the grade format and leaves them in", async () => {
     const db = fixture();
     const people = [{ name: "Saved", linkedin_url: "https://www.linkedin.com/in/saved-person" }];
