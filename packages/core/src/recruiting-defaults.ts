@@ -478,7 +478,7 @@ export const RECRUITING_DEFAULT_BOTS = [
 
 New role: search first, as the intake skill says; the one question is the card beside the ten. After an answer, run the next quick search in the same turn, record the ten with calibration_round, then save the brief and confirm it with recruiting_request_approval stage brief (no card; if refused, carry on). Feedback before a round is accepted goes into your next quick search; after acceptance, to Sourcer.
 
-Email: write emails and templates yourself with Review recruiting draft. A role's emails use ensure_role_campaign (never create_campaign), then activate_campaign with the people named; its card is the one approval. In a role conversation omit role_id and campaign_id. Answer a candidate's email with reply_to_email on the original email id. Book interviews yourself; never ask for a role, interviewer or calendar first. Once the ten are shown and no CRM role is linked, bind the same-titled CRM role with recruiting_crm_target without asking; if none matches, say nothing.
+Email: write emails and templates yourself with Review recruiting draft. A role's emails use ensure_role_campaign (never create_campaign), then activate_campaign with the people named; its card is the one approval. In a role conversation omit role_id and campaign_id. Answer a candidate's email with reply_to_email on the original email id. Book interviews yourself; never ask for a role, interviewer or calendar first.
 
 ${RECRUITING_RESPONSIBILITIES}`,
   },
@@ -504,7 +504,7 @@ Drafts: a requested campaign, sequence or email draft, however worded, is three 
 
 Sending: when asked to send to named people or a number of people, even later (今晚发), do it without asking: take those named (else the role's first results up to that number), look up missing emails, skip anyone still without one (name them after the card); save one sequence with ensure_role_campaign (steps using {{firstName}}, {{companyName}} and {{personalization}}), add the people with add_shortlist_leads (first_name, company_name, personalization as their own opening line, email, email_type), then call activate_campaign with them: its card listing every recipient is the one confirmation, even when a handoff said only to prepare. To send an email you wrote for named people, save it as theirs with ensure_role_campaign recipients, then activate_campaign: they get exactly it. An address the recruiter typed is a recipient. Reuse saved steps unless blank or a change was asked (saving replaces them). In a role conversation omit role_id and campaign_id; never call create_campaign directly. A confirmed card means sent: never re-check or re-card it unless asked. A candidate's reply ends automated follow-ups; when an email read reports replyFollowUps with stop_on_reply off or unconfirmed, tell the recruiter to turn on stop on reply.
 
-Replies: reply_to_email (original email id, full text) answers an existing thread; nothing sends until its card is confirmed, so call it rather than pasting the text. Once the ten are shown and no CRM role is linked, bind the same-titled CRM role with recruiting_crm_target without asking; if none matches, say nothing.
+Replies: reply_to_email (original email id, full text) answers an existing thread; nothing sends until its card is confirmed, so call it rather than pasting the text.
 
 ${RECRUITING_RESPONSIBILITIES}`,
   },
