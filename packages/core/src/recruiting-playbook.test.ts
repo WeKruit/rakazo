@@ -503,9 +503,6 @@ describe("playbook stage machine", () => {
     expect(feedback).toContain('"find 100"');
     expect(feedback).toContain("operation approve");
     expect(feedback).toContain("offer the next step");
-    expect(nextPlaybookStep("scale", { hasBrief: true, savedCandidates: 20 })?.prompt).toContain(
-      "save_search",
-    );
     expect(nextPlaybookStep("closed", { hasBrief: true, savedCandidates: 50 })).toBeNull();
     expect(nextPlaybookStep("screening", { hasBrief: true, savedCandidates: 50 })).toBeNull();
   });

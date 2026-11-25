@@ -242,6 +242,7 @@ import {
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
+  countRecruitingRoleGrades,
   createRecruitingSchedulingPlan,
   createRunHistoryCache,
   createSpaceForMember,
@@ -581,7 +582,6 @@ import {
   modelAcceptsImageInput,
   modelIdSupportsImages,
 } from "./model-vision.js";
-import { askAfterPeopleTarget, peopleTargetFrom, requestedPeopleTarget } from "./people-target.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
@@ -1355,43 +1355,7 @@ export function nearCandidateKey(
 }
 
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
-export { peopleTargetFrom, requestedPeopleTarget, shortQuestion };
-
-/** The recruiter's people target for the scale-out their latest message asked for, with the totals. */
-async function scaleTarget(
-  prisma: Pick<PrismaClient, "thread" | "message" | "recruitingCandidate">,
-  threadId: string,
-): Promise<{ target: number; total: number } | undefined> {
-  const thread = await prisma.thread.findUnique({
-    where: { id: threadId },
-    select: { activeRecruitingRoleId: true },
-  });
-  if (!thread?.activeRecruitingRoleId) return undefined;
-  const latest = await prisma.message.findFirst({
-    where: { threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    select: { blocks: true, createdAt: true },
-  });
-  const said = ((latest?.blocks ?? []) as MessageBlock[])
-    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-    .join("\n");
-  if (!latest || !requestedPeopleTarget(said)) return undefined;
-  const [before, total] = await Promise.all([
-    prisma.recruitingCandidate.count({
-      where: {
-        roleId: thread.activeRecruitingRoleId,
-        occurrences: {
-          some: { page: { observedAt: { lt: latest.createdAt } } },
-        },
-      },
-    }),
-    prisma.recruitingCandidate.count({
-      where: { roleId: thread.activeRecruitingRoleId },
-    }),
-  ]);
-  const target = peopleTargetFrom(said, before);
-  return target ? { target, total } : undefined;
-}
+export { shortQuestion };
 
 /**
  * A handed-in stage used to stay silent for 20-200 s while the specialist read context and ran
@@ -5252,15 +5216,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ({ result }) => !(result && typeof result === "object" && "error" in result),
           );
         };
-        /** The role this conversation works on now, which this run may have just saved. */
-        const currentRoleId = async () =>
-          thread.activeRecruitingRoleId ??
-          (
-            await deps.prisma.thread
-              .findUnique({ where: { id: thread.id }, select: { activeRecruitingRoleId: true } })
-              .catch(() => null)
-          )?.activeRecruitingRoleId ??
-          undefined;
         /** The server's short report of work the model left unreported. */
         const turnReportFor = async (work: readonly TurnWork[]) => {
           const roleId = (
@@ -9694,13 +9649,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const farAway = Array.isArray(checked.rows)
                     ? checked.rows.length - (people as unknown[]).length
                     : 0;
-                  // The role's total, so a scale-out stops at its target without counting rows;
-                  // the progress line states it so a report never rounds up to the target.
-                  const [peopleInResults, scale] = await Promise.all([
+                  // Saved is not fit: the lead counted 60 saved as "60 found" with 36 graded as
+                  // fitting (big-ask play, 11-24), so each search states all three counts.
+                  const [peopleInResults, grades] = await Promise.all([
                     deps.prisma.recruitingCandidate.count({
                       where: { roleId },
                     }),
-                    scaleTarget(deps.prisma, thread.id).catch(() => undefined),
+                    countRecruitingRoleGrades(deps.prisma, roleId),
                   ]);
                   // This search's own yield: how many it added, so a wave that adds few is seen.
                   const added = (saved as { newPeople?: unknown }).newPeople;
@@ -9713,14 +9668,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         }
                       : {}),
                     peopleInResults,
-                    ...(scale
-                      ? {
-                          progress:
-                            peopleInResults >= scale.target
-                              ? `${peopleInResults} people in Results; the target of ${scale.target} is met.`
-                              : `${peopleInResults} of the ${scale.target} target in Results; ${scale.target - peopleInResults} to go. Report this exact count.`,
-                        }
-                      : {}),
+                    gradedStrongOrPromising: grades.fit,
+                    notGradedYet: peopleInResults - grades.checked,
                     people,
                     // People whose profile shows no sign of a required language are in Results
                     // but never offered for the pick.
@@ -10861,10 +10810,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 thread.groupId?.startsWith("recruiting-global-")
                   ? await globalTeamProgress(args.roleId)
                   : null;
+              // A list page carries the role's checked counts: asked how many fit, Kruit paged
+              // 112 rows and could not say (big-ask play, 11-25).
+              const listedRoleId =
+                !shown && args.operation === "list"
+                  ? typeof args.roleId === "string"
+                    ? args.roleId
+                    : thread.activeRecruitingRoleId
+                  : null;
+              const counts = listedRoleId
+                ? await Promise.all([
+                    deps.prisma.recruitingCandidate.count({ where: { roleId: listedRoleId } }),
+                    countRecruitingRoleGrades(deps.prisma, listedRoleId),
+                  ])
+                    .then(([saved, grades]) => ({
+                      gradedStrongOrPromising: grades.fit,
+                      notGradedYet: saved - grades.checked,
+                    }))
+                    .catch(() => ({}))
+                : {};
               return finish(
                 redactConnectorPayload(
                   shown ??
-                    (progress ? { ...(result as object), teamWorking: progress.note } : result),
+                    (progress
+                      ? { ...(result as object), teamWorking: progress.note }
+                      : { ...(result as object), ...counts }),
                   runSecrets,
                 ),
               );
@@ -14902,25 +14872,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     }
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
-                    // A number of people the recruiter asked for decides the next step: no card.
-                    // Newest first; a role opened from Kruit's chat starts with a copy of their words.
-                    const askedFor = [...recruiterTexts, ...roleStartTexts]
-                      .map(requestedPeopleTarget)
-                      .find(Boolean);
-                    // Read now: a role saved during this run is not on the thread loaded at its start.
-                    const roleNow = askedFor ? await currentRoleId() : undefined;
-                    if (askedFor && roleNow) {
-                      const saved = (
-                        await readRecruitingPlaybookStep(deps.prisma, roleNow).catch(() => null)
-                      )?.savedCandidates;
-                      // Below the number, only after a round: intake questions come before any search.
-                      const round = Boolean(await roundRecordedThisRun());
-                      const instead =
-                        saved !== undefined && (saved >= askedFor || round)
-                          ? askAfterPeopleTarget(askedFor, saved, round)
-                          : undefined;
-                      if (instead) return { instead };
-                    }
                     // A run that recorded a round asks the next-step choice, which is asked anew each round,
                     // unless the recruiter already wrote their next step after the ten appeared: then it
                     // acts on that first, and may ask its own question after reporting what it did.

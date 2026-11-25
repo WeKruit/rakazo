@@ -12106,6 +12106,27 @@ async function candidateByOtherKeyShape(
   return near.length === 1 ? (near[0] ?? null) : null;
 }
 
+/** How many of a role's saved people the latest check graded at all, and as fitting. */
+export async function countRecruitingRoleGrades(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  roleId: string,
+): Promise<{ fit: number; checked: number }> {
+  const [row] = await prisma.$queryRaw<{ fit: number; checked: number }[]>(Prisma.sql`
+    SELECT (count(*) FILTER (WHERE g.grade IN ('Strong', 'Promising')))::int AS fit,
+      count(*)::int AS checked
+    FROM (
+      SELECT DISTINCT ON (o."candidateKey") CASE
+        WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
+          THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade
+      FROM "recruiting_candidate_occurrences" o
+      JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId"
+      WHERE o."roleId" = ${roleId} AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'
+      ORDER BY o."candidateKey", p."observedAt" DESC, p."effectId" DESC
+    ) g
+    WHERE g.grade IS NOT NULL`);
+  return row ?? { fit: 0, checked: 0 };
+}
+
 export async function listRecruitingCandidateSources(
   prisma: PrismaClient,
   actor: Actor,
