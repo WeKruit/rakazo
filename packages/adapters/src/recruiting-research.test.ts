@@ -10,6 +10,7 @@ import {
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
+  excludeFoundPeople,
   limitPeopleSearch,
   lookedUpContacts,
   prepareAgentRun,
@@ -263,6 +264,33 @@ describe("people-search agent runs", () => {
     await expect(limit(people, { ...server, endpoint: "https://example.com/mcp" })).resolves.toBe(
       people,
     );
+  });
+
+  it("leaves the role's saved people out of a quick people search", async () => {
+    // Plays of 11-25: 50–80% of each later search's rows were people an earlier one had saved.
+    const db = (roleId: string | null) => ({
+      run: {
+        findFirst: vi.fn(async () => ({
+          threadId: "t",
+          thread: { activeRecruitingRoleId: roleId },
+        })),
+      },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ name: "Saved One" }, { name: " " }, { name: "Saved Two" }]),
+      },
+    });
+    const people = { category: "people", query: "q", excludeText: ["Saved One", "Given"] };
+    await expect(
+      excludeFoundPeople(db("role-1") as never, actor, server, "web_search_advanced_exa", people),
+    ).resolves.toEqual({ ...people, excludeText: ["Saved One", "Given", "Saved Two"] });
+    // No role, another kind of search: sent as asked.
+    await expect(
+      excludeFoundPeople(db(null) as never, actor, server, "web_search_advanced_exa", people),
+    ).resolves.toBe(people);
+    const company = { category: "company", query: "q" };
+    await expect(
+      excludeFoundPeople(db("role-1") as never, actor, server, "web_search_advanced_exa", company),
+    ).resolves.toBe(company);
   });
 
   it("grades given people with the grade format and leaves them in", async () => {
