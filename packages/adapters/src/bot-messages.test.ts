@@ -8,6 +8,7 @@ import {
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
   showDelegatedTeamCard,
+  showRoundPicksWhereAsked,
   showRoundWhereAskedNow,
   teamProgress,
   waitForDelegatedAnswer,
@@ -847,6 +848,42 @@ describe("delegating to a role team in another conversation", () => {
     const again = team({ busy: true, shown: [said(round)] });
     await showRoundWhereAskedNow(again.deps, roleRun, round, "effect-round-2");
     expect(returnedTo(again)).toEqual([]);
+  });
+
+  it("shows a round's first people where it was asked and turns that copy into the round", async () => {
+    // Staging 11-25 (45cf3eb4): the role chat had the first four at 3 min; the chat the recruiter
+    // typed in had nothing until the ten were recorded at 5 min.
+    const picks = "本轮 1 人：\n\n1. **Yijun Y.** · Big Data Engineer · TEMU";
+    const first = team({ busy: true });
+    const firstPrisma = first.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    firstPrisma.message!.findUnique = vi.fn(async () => null);
+    await showRoundPicksWhereAsked(first.deps, roleRun, picks, "message-role-list");
+    expect(first.tx.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          threadId: "thread-global",
+          clientNonce: "delegated-picks:message-role-list",
+          blocks: [{ kind: "text", text: picks }],
+        }),
+      }),
+    );
+    // Recorded: the same copy is rewritten and renamed, so the round is not posted a second time.
+    const round = `${picks}\n2. **Di Liu** · Data Engineer · Shein`;
+    const recorded = team({ busy: true });
+    const prisma = recorded.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    prisma.message!.findUnique = vi.fn(async () => ({ id: "message-copy" }));
+    const update = vi.fn(async () => ({}));
+    prisma.message!.update = update;
+    (recorded.deps.events as unknown as Record<string, unknown>).append = vi.fn(async () => ({}));
+    await showRoundWhereAskedNow(recorded.deps, roleRun, round, "effect-1", "message-role-list");
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "message-copy" },
+      data: {
+        blocks: [{ kind: "text", text: round }],
+        clientNonce: "delegated-round:round:effect-1",
+      },
+    });
+    expect(returnedTo(recorded)).toEqual([]);
   });
 
   it("posts a round once where it was asked, though two requests return it", async () => {

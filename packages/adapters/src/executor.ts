@@ -386,6 +386,7 @@ import {
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
   showDelegatedTeamCard,
+  showRoundPicksWhereAsked,
   showRoundWhereAskedNow,
   teamProgress,
   waitForDelegatedAnswer,
@@ -5916,6 +5917,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             stream.shown = Math.max(stream.shown, keys.length);
             stream.posting = stream.posting.then(() => showRoundList(text));
             await stream.posting;
+            if (stream.messageId)
+              await showRoundPicksWhereAsked(deps, run, text, stream.messageId).catch((error) =>
+                getLogger().warn("round picks not shown where asked", { error: String(error) }),
+              );
             return {
               shown: keys.length,
               // The requirements calibration_round's checks take a verdict on, so it records the
@@ -10193,7 +10198,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       error: String(error),
                     }),
                   );
-                  await showRoundWhereAskedNow(deps, run, text, applied.effect.id).catch((error) =>
+                  await showRoundWhereAskedNow(
+                    deps,
+                    run,
+                    text,
+                    applied.effect.id,
+                    roundStream?.messageId,
+                  ).catch((error) =>
                     getLogger().warn("round not shown where asked", { error: String(error) }),
                   );
                   // The recorded round's list is final. A later round in the same run gets its own
