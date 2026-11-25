@@ -2,6 +2,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { listRecruitingGradedCandidateKeys } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { CriterionVerdict, TextJudge } from "./judge.js";
+import { LANGUAGE_WORDS } from "./recruiting-language.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { roundCriteria } from "./recruiting-round-check.js";
 
@@ -54,6 +55,44 @@ export function criteriaGrade(
   };
 }
 
+const ABOUT_THE_PERSON = (statement: string) =>
+  `Could a person's public professional profile (titles, employers, years, skills, schools, certificates, location, languages) show whether the person meets this requirement? Answer no when it is a term of the job offer (pay, benefits, office days, work mode, start date, visa, head count) rather than something about the person. Requirement: "${statement}"`;
+
+/**
+ * The requirements a profile can be judged on, one fact each: a field holding several ("Shanghai;
+ * hybrid three days") is split, terms of the offer (pay, office days) are left out since no
+ * profile shows them, and so are the required language, which has its own check, and the reasons
+ * people were turned down, which the next search is asked to avoid.
+ */
+async function personRequirements(
+  judge: TextJudge,
+  criteria: readonly { id: string; statement: string }[],
+): Promise<Array<{ id: string; statement: string }>> {
+  const facts = criteria
+    .filter(
+      ({ id, statement }) => !id.startsWith("turned-down:") && !LANGUAGE_WORDS.test(statement),
+    )
+    .flatMap(({ id, statement }) => {
+      const label = /^([^:：]{1,40})[:：]\s*(.+)$/s.exec(statement);
+      const parts = (label?.[2] ?? statement)
+        .split(/[;；]/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      return parts.map((part, index) => ({
+        id: parts.length > 1 ? `${id}#${index + 1}` : id,
+        statement: label ? `${label[1]}: ${part}` : part,
+      }));
+    })
+    .slice(0, 20);
+  if (!facts.length) return [];
+  const about = await judge.yesAll?.(
+    Object.fromEntries(facts.map((fact) => [fact.id, ABOUT_THE_PERSON(fact.statement)])),
+    { requirements: facts.map((fact) => fact.statement) },
+  );
+  // A judge that did not answer leaves every requirement in.
+  return about ? facts.filter((fact) => (about.get(fact.id) ?? 1) >= 0.5) : facts;
+}
+
 function profileState(row: Record<string, unknown>): Record<string, unknown> {
   const { _profile, profile_image_url, email, match_score, match_tier, ...shown } = row;
   const text = JSON.stringify(shown);
@@ -79,10 +118,7 @@ export async function checkPeopleCriteria(
       });
       return;
     }
-    const stated = (await roundCriteria(prisma, role)).map(({ id, statement }) => ({
-      id,
-      statement,
-    }));
+    const stated = await personRequirements(judge, await roundCriteria(prisma, role));
     // A role with nothing saved yet is judged on what the search itself asked for.
     const requirements = stated.length
       ? stated.slice(0, 20)

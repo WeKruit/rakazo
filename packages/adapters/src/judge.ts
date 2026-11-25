@@ -29,6 +29,12 @@ export interface TextJudge {
     rows: readonly LanguageRow[],
     signal?: AbortSignal,
   ): Promise<Map<string, LanguageSignal>>;
+  /** Several yes/no questions about one text in one request: the probability of yes for each. */
+  yesAll?(
+    questions: Readonly<Record<string, string>>,
+    state: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<Map<string, number> | undefined>;
   /**
    * One person's text judged against every requirement in one request: how clearly the text
    * shows each. Undefined when the judge could not answer.
@@ -128,6 +134,34 @@ export function typeSafeJudge(
 ): TextJudge {
   return {
     ...(languageUrl ? { language: languageCheck(languageUrl, apiKey, fetchImpl) } : {}),
+    async yesAll(questions, state, signal) {
+      try {
+        const ids = Object.keys(questions);
+        const timeout = AbortSignal.timeout(CRITERIA_TIMEOUT_MS);
+        const response = await fetchImpl("https://api.typesafe.ai/v1/systemone", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: "jev-latest",
+            state,
+            questions: Object.fromEntries(
+              ids.map((id, index) => [`q${index}`, { type: "noul", instructions: questions[id] }]),
+            ),
+          }),
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+        if (!response.ok) return undefined;
+        const body = (await response.json()) as { answers?: Record<string, { noul?: unknown }> };
+        const answers = new Map<string, number>();
+        for (const [index, id] of ids.entries()) {
+          const p = body.answers?.[`q${index}`]?.noul;
+          if (typeof p === "number" && p >= 0 && p <= 1) answers.set(id, p);
+        }
+        return answers.size ? answers : undefined;
+      } catch {
+        return undefined;
+      }
+    },
     async criteria(state, requirements, signal) {
       try {
         const timeout = AbortSignal.timeout(CRITERIA_TIMEOUT_MS);

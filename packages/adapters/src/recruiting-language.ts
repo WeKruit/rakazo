@@ -4,7 +4,7 @@ import { FULL_PROFILE_WAIT_MS, fullProfilePages } from "./recruiting-full-profil
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 
 /** Languages a brief may require, matched in English or Chinese. */
-const LANGUAGE_WORDS =
+export const LANGUAGE_WORDS =
   /\b(mandarin|chinese|cantonese|spanish|japanese|korean|vietnamese|french|german|portuguese|arabic|hindi|russian|italian|thai|tagalog|bilingual)\b|中文|普通话|國語|国语|粤语|廣東話|广东话|双语|日语|韩语|西班牙语/i;
 
 /**
