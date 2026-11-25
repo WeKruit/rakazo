@@ -9027,7 +9027,13 @@ export function candidateIndexQuery(
         : Prisma.empty
     }
     LEFT JOIN LATERAL (
-      SELECT count(*)::int AS "discoveryCount", min(page."observedAt") AS "firstDiscoveredAt",
+      -- A grade saved for a person is not a search finding them again: with graders saving five
+      -- at a time, half of a role's "found again" count was its own grading (play, 11-25).
+      SELECT (count(*) FILTER (WHERE NOT EXISTS (
+          SELECT 1 FROM "external_effects" graded WHERE graded."id" = page."effectId"
+            AND graded."kind" = 'recruiting_research'
+            AND graded."request"->>'operation' = 'save_grades')))::int AS "discoveryCount",
+        min(page."observedAt") AS "firstDiscoveredAt",
         max(page."observedAt") AS "lastDiscoveredAt"
       FROM "recruiting_candidate_occurrences" o
       JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
