@@ -1623,6 +1623,19 @@ export function requestTitle(text: string): string | null {
 const NO_RECRUITING_ROLE_CONTEXT =
   "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Do what you can yourself, such as a role's campaign with its role_id. Finding or changing a role's people runs in that role's conversation (delegate_to_role), as does work a tool says that conversation is doing now; an interview booking for a person named with an email goes to Scheduling here. To open a new role use start_role when offered.";
 
+/**
+ * A role's own conversation whose role is not saved yet. Staging 11-25: Stop landed between
+ * opening the conversation and saving the role; on "继续吧" its team read the account-wide text
+ * above and told the recruiter the work "needs to happen in the role's conversation".
+ */
+const ROLE_NOT_SAVED_CONTEXT =
+  "This is a role's own conversation and its role is not saved yet. Save it now with recruiting_role create from the recruiter's requirements in this conversation, then carry on with the first round as intake says. Never send the recruiter to another conversation for it.";
+
+const noRoleContext = (groupId: string | null | undefined) =>
+  groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
+    ? ROLE_NOT_SAVED_CONTEXT
+    : NO_RECRUITING_ROLE_CONTEXT;
+
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
   "canvas_read",
@@ -14071,7 +14084,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           redactedRecruitingContext: messagingChannelRun
             ? undefined
             : (initialRecruitingContext?.text ??
-              [NO_RECRUITING_ROLE_CONTEXT, memoryContext.text].filter(Boolean).join("\n\n")),
+              [noRoleContext(thread.groupId), memoryContext.text].filter(Boolean).join("\n\n")),
           redactedMemoryContext: memoryContext.text,
           redactedScratchpadContext: scratchpadContext
             ? redactSecrets(scratchpadContext, runSecrets)
@@ -15026,7 +15039,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             ? unchangedRecruitingContextText
                             : (steeringRecruitingContext?.text ??
                               (currentThread
-                                ? [NO_RECRUITING_ROLE_CONTEXT, memoryContext.text]
+                                ? [noRoleContext(thread.groupId), memoryContext.text]
                                     .filter(Boolean)
                                     .join("\n\n")
                                 : undefined));
