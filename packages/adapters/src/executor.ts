@@ -159,6 +159,7 @@ import {
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
   RECRUITING_INTAKE_SKILL_NAME,
+  REPLY_LANGUAGE_NAME,
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
@@ -4817,6 +4818,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return {
             ...(result as object),
             ...leftOut,
+            // Staging ui check 11-25: asked for any three, a page of three lost one to an earlier
+            // round and the reply stopped at two.
+            ...(shown.length < size && total !== undefined && total > items.length
+              ? {
+                  fewerThanAsked: `Only ${shown.length} of the ${size} asked for are listed. List on now, in this turn: call list again with show true, this result's nextCursor and limit ${size - shown.length}, until ${size} are listed or nothing is left.`,
+                }
+              : {}),
             shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
           };
         };
@@ -10169,6 +10177,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     SAVE_WAIT_MS,
                     () => getLogger().warn("brief save after the round still running", { runId }),
                   );
+                  if (hideVendors)
+                    turnLanguage = await recruiterLanguageNow(
+                      deps.prisma,
+                      { spaceId: run.spaceId, userId: run.userId },
+                      thread.id,
+                    ).catch(() => turnLanguage);
                   const text = await recruitingRoundListText(deps.prisma, {
                     chinese: turnLanguage === "zh",
                     threadId: run.threadId,
@@ -10215,7 +10229,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return round && typeof round === "object" && !Array.isArray(round)
                   ? {
                       ...round,
-                      next: RECRUITING_ROUND_NEXT_STEP,
+                      // Gate 9d632819: the turn began on an English JD, the recruiter went on in
+                      // Chinese in the main chat, and the card after the round was English.
+                      next: hideVendors
+                        ? `${RECRUITING_ROUND_NEXT_STEP} The recruiter now writes in ${REPLY_LANGUAGE_NAME[turnLanguage]}.`
+                        : RECRUITING_ROUND_NEXT_STEP,
                     }
                   : round;
               }
