@@ -481,8 +481,8 @@ export function limitPeopleSearch(
   return plain ? args : { ...args, numResults: wanted };
 }
 
-/** Most saved people one quick search leaves out by name. */
-const QUICK_SEARCH_EXCLUSION_LIMIT = 100;
+/** The search API's excludeText takes at most fifty strings: the newest saved people's names. */
+const QUICK_SEARCH_EXCLUSION_LIMIT = 50;
 
 /**
  * A quick people search leaves out the people already saved in the conversation's role, as an
@@ -521,7 +521,9 @@ export async function excludeFoundPeople(
   const names = [
     ...new Set([...given, ...saved.flatMap(({ name }) => (name?.trim() ? [name.trim()] : []))]),
   ];
-  return names.length ? { ...args, excludeText: names } : args;
+  return names.length
+    ? { ...args, excludeText: names.slice(0, QUICK_SEARCH_EXCLUSION_LIMIT) }
+    : args;
 }
 
 /** Most saved people sent as one agent run's exclusion list. */
