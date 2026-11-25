@@ -186,12 +186,15 @@ const Fit = memo(function Fit({
   sections,
   compact = false,
   grading = false,
+  passedOn = false,
   ranking,
 }: {
   ranking?: DirectoryProfile["ranking"];
   sections: DirectoryProfile["sections"];
   compact?: boolean;
   grading?: boolean;
+  /** The recruiter passed on them: their own word stands over a grade made before a brief change. */
+  passedOn?: boolean;
 }) {
   const { t } = useLingui();
   if (grading && (ranking?.group === "unreviewed" || ranking?.group === "unscored"))
@@ -217,7 +220,9 @@ const Fit = memo(function Fit({
           : ranking?.group === "uncertain"
             ? t`Needs a closer look`
             : ranking?.group === "outdated"
-              ? t`Needs a new review`
+              ? passedOn
+                ? null
+                : t`Needs a new review`
               : ranking?.group === "unreviewed"
                 ? t`Not reviewed yet`
                 : ranking?.group === "unscored"
@@ -670,6 +675,7 @@ export function CandidateDirectory({
                       ranking={profile.ranking}
                       sections={profile.sections}
                       grading={grading}
+                      passedOn={passed(row)}
                       compact
                     />
                   </td>
@@ -742,7 +748,12 @@ export function CandidateDirectory({
                 ) : null}
                 {showFit ? (
                   <div className="mt-4 flex-1 border-t border-border pt-3">
-                    <Fit ranking={profile.ranking} sections={profile.sections} grading={grading} />
+                    <Fit
+                      ranking={profile.ranking}
+                      sections={profile.sections}
+                      grading={grading}
+                      passedOn={passed(row)}
+                    />
                   </div>
                 ) : null}
                 <div className="mt-3">
