@@ -1415,7 +1415,7 @@ export const EARLIER_STEERING =
   "The recruiter sent this earlier in this turn and you already acknowledged it and folded it into the work. Keep following it; do not acknowledge, repeat or restate it.";
 
 export const STEERING_ACK =
-  'The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
+  'The recruiter wrote this while you are working. Deal with it before any other work: a question is answered now with message_user, after only the reads the answer needs, never with a promise to check; anything else gets one line with message_user saying how it changes the work. Then continue the work with it, and never say work has stopped while it is still running. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
 
 /** How often a running turn looks for messages it has not read yet, to answer them at once. */
 export const STEERING_PEEK_MS = 2_500;
