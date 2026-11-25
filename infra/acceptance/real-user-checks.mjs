@@ -135,6 +135,13 @@ export const botText = (message) =>
 // A recruiter asking for a recap or a one-line summary of what changed.
 const RECAP = /一句话|总结|概括|说下改了|改了(什么|啥)|summari[sz]e|\brecap\b|what changed|in one line|tl;?dr/i;
 
+// The product's rule (textLanguage, recruiterWords): the newest message with a clear language
+// counts. A word or two ("allow", "OK") says nothing, and the brief confirmation it posts as the
+// recruiter's is in English whatever they speak.
+const BRIEF_CONFIRMATION = /^Confirm recruiting brief for .+ \(requirements version \d+\)\.$/;
+const clearLanguage = (text) =>
+  !BRIEF_CONFIRMATION.test(text.trim()) &&
+  (/\p{Script=Han}/u.test(text) || (text.match(/[A-Za-z]{2,}/g) ?? []).length >= 3);
 /**
  * `recruiter` is every message the recruiter wrote in any chat (with `at`): the product answers in
  * the language of their newest message wherever they wrote it, so a role chat's reply follows an
@@ -155,10 +162,14 @@ export function conversationChecks(messages, { recruiter } = {}) {
     const newest =
       (recruiter && message.at
         ? recruiter
-            .filter((item) => item.at <= message.at)
+            .filter((item) => item.at <= message.at && clearLanguage(item.text))
             .sort((a, b) => a.at.localeCompare(b.at))
             .at(-1)
-        : undefined) ?? asked;
+        : undefined) ??
+      messages
+        .slice(0, index)
+        .findLast((item) => item.role === "user" && clearLanguage(item.text)) ??
+      asked;
     // The reply follows the language of the recruiter's newest message; a lone "？" has none.
     if (newest && /[\p{Script=Han}A-Za-z]/u.test(newest.text)) {
       const chinese = mostlyChinese(newest.text);
