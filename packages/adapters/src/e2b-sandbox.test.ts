@@ -840,6 +840,35 @@ describe("E2B computer backend", () => {
     );
   });
 
+  it("installs the desktop packages at the first screen, not when the computer starts", async () => {
+    const respond = desktopCommandResponder();
+    const command = vi.fn(
+      async (value: string) => respond(value) ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
+    const desktop = {
+      sandboxId: "fresh-e2b-box",
+      commands: { run: command },
+      getHost: (port: number) => `${port}-desktop.test`,
+      files: { makeDir: vi.fn(async () => true) },
+    } as unknown as Sandbox;
+    const sdk = { connect: vi.fn(async () => desktop) } as unknown as E2BSandboxSdk;
+    const provider = new E2BSandboxProvider("test-key", sdk);
+    const computer = {
+      id: "fresh-e2b-box",
+      providerRef: "fresh-e2b-box",
+      kind: "e2b" as const,
+      botId: "bot",
+    };
+    const installs = () => command.mock.calls.filter(([value]) => value.includes("Xvfb:xvfb"));
+
+    // Staging: a file write on a cold computer spent 12.8 s on apt for a screen it never opened.
+    await provider.prepare(computer, context);
+    expect(installs()).toHaveLength(0);
+    await provider.connectScreen(computer, { view: "stream" }, context);
+    await provider.connectScreen(computer, { view: "stream" }, context);
+    expect(installs()).toHaveLength(1);
+  });
+
   it("prepares a reused computer idempotently", async () => {
     let profilesConfigured = false;
     const command = vi.fn(async (value: string) => {
