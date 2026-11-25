@@ -13796,7 +13796,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           redactedRecruitingContext: messagingChannelRun
             ? undefined
             : (initialRecruitingContext?.text ??
-              [noRoleContext(thread.groupId), memoryContext.text].filter(Boolean).join("\n\n")),
+              [
+                // A role being saved from this message has its own note; "not saved, create it"
+                // beside "being saved, do not create" stopped a first turn (gate 2d92e0d2).
+                jobRole ? undefined : noRoleContext(thread.groupId),
+                memoryContext.text,
+              ]
+                .filter(Boolean)
+                .join("\n\n")),
           redactedMemoryContext: memoryContext.text,
           redactedScratchpadContext: scratchpadContext
             ? redactSecrets(scratchpadContext, runSecrets)
