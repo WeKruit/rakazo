@@ -10810,10 +10810,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 thread.groupId?.startsWith("recruiting-global-")
                   ? await globalTeamProgress(args.roleId)
                   : null;
+              // A list page carries the role's checked counts: asked how many fit, Kruit paged
+              // 112 rows and could not say (big-ask play, 11-25).
+              const listedRoleId =
+                !shown && args.operation === "list"
+                  ? typeof args.roleId === "string"
+                    ? args.roleId
+                    : thread.activeRecruitingRoleId
+                  : null;
+              const counts = listedRoleId
+                ? await Promise.all([
+                    deps.prisma.recruitingCandidate.count({ where: { roleId: listedRoleId } }),
+                    countRecruitingRoleGrades(deps.prisma, listedRoleId),
+                  ])
+                    .then(([saved, grades]) => ({
+                      gradedStrongOrPromising: grades.fit,
+                      notGradedYet: saved - grades.checked,
+                    }))
+                    .catch(() => ({}))
+                : {};
               return finish(
                 redactConnectorPayload(
                   shown ??
-                    (progress ? { ...(result as object), teamWorking: progress.note } : result),
+                    (progress
+                      ? { ...(result as object), teamWorking: progress.note }
+                      : { ...(result as object), ...counts }),
                   runSecrets,
                 ),
               );
