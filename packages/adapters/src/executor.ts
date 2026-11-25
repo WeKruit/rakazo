@@ -5998,7 +5998,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
                   }
                 : {}),
-              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
+              next: "These people are in chat now; the round is not recorded yet. Carry on as the Fill rule says and record the ten with calibration_round, starting with these same people in the same order. Never ask anything or end the turn before calibration_round records the round.",
             };
           }
           const candidateOperation =
