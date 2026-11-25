@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@rakazo/db";
 import { listRecruitingGradedCandidateKeys } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import type { CriterionVerdict, TextJudge } from "./judge.js";
+import type { CriterionQuestion, CriterionVerdict, TextJudge } from "./judge.js";
 import { LANGUAGE_WORDS } from "./recruiting-language.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { roundCriteria } from "./recruiting-round-check.js";
@@ -61,13 +61,20 @@ const ABOUT_THE_PERSON = (statement: string) =>
 /**
  * The requirements a profile can be judged on, one fact each: a field holding several ("Shanghai;
  * hybrid three days") is split, terms of the offer (pay, office days) are left out since no
- * profile shows them, and so are the required language, which has its own check, and the reasons
- * people were turned down, which the next search is asked to avoid.
+ * profile shows them, and so is the required language, which has its own check. Each reason the
+ * recruiter turned people down is asked the other way round: does this profile show it too.
  */
 async function personRequirements(
   judge: TextJudge,
   criteria: readonly { id: string; statement: string }[],
-): Promise<Array<{ id: string; statement: string }>> {
+): Promise<CriterionQuestion[]> {
+  const turnedDown = criteria
+    .filter(({ id }) => id.startsWith("turned-down:"))
+    .map(({ id, statement }) => ({
+      id,
+      statement: statement.replace(/^not what the recruiter turned down:\s*/, ""),
+      avoid: true,
+    }));
   const facts = criteria
     .filter(
       ({ id, statement }) => !id.startsWith("turned-down:") && !LANGUAGE_WORDS.test(statement),
@@ -83,14 +90,17 @@ async function personRequirements(
         statement: label ? `${label[1]}: ${part}` : part,
       }));
     })
-    .slice(0, 20);
-  if (!facts.length) return [];
+    .slice(0, 16);
+  if (!facts.length) return turnedDown;
   const about = await judge.yesAll?.(
     Object.fromEntries(facts.map((fact) => [fact.id, ABOUT_THE_PERSON(fact.statement)])),
     { requirements: facts.map((fact) => fact.statement) },
   );
   // A judge that did not answer leaves every requirement in.
-  return about ? facts.filter((fact) => (about.get(fact.id) ?? 1) >= 0.5) : facts;
+  return [
+    ...(about ? facts.filter((fact) => (about.get(fact.id) ?? 1) >= 0.5) : facts),
+    ...turnedDown,
+  ];
 }
 
 function profileState(row: Record<string, unknown>): Record<string, unknown> {
@@ -121,7 +131,7 @@ export async function checkPeopleCriteria(
     const stated = await personRequirements(judge, await roundCriteria(prisma, role));
     // A role with nothing saved yet is judged on what the search itself asked for.
     const requirements = stated.length
-      ? stated.slice(0, 20)
+      ? stated
       : role.request?.trim()
         ? [{ id: "search-request", statement: role.request.trim().slice(0, 1_000) }]
         : [];

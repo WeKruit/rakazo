@@ -41,10 +41,16 @@ export interface TextJudge {
    */
   criteria?(
     state: Record<string, unknown>,
-    requirements: readonly { id: string; statement: string }[],
+    requirements: readonly CriterionQuestion[],
     signal?: AbortSignal,
   ): Promise<Map<string, CriterionVerdict> | undefined>;
 }
+
+/**
+ * A requirement to look for in a profile, or (avoid) a reason the recruiter turned people down,
+ * which fails a person whose profile shows the same problem.
+ */
+export type CriterionQuestion = { id: string; statement: string; avoid?: boolean };
 
 export const CRITERION_LEVELS = ["strong", "medium", "weak", "absent"] as const;
 /** How clearly a profile shows one requirement, and how likely it is not shown at all. */
@@ -174,11 +180,16 @@ export function typeSafeJudge(
             questions: Object.fromEntries(
               requirements.map((requirement, index) => [
                 `q${index}`,
-                {
-                  type: "choice",
-                  instructions: `Does this person's profile show: ${requirement.statement}?`,
-                  criteria: CRITERION_CHOICES,
-                },
+                requirement.avoid
+                  ? {
+                      type: "noul",
+                      instructions: `The recruiter turned other people down for this reason: "${requirement.statement}". Does this person's profile show the same problem? Answer no when the profile does not show it.`,
+                    }
+                  : {
+                      type: "choice",
+                      instructions: `Does this person's profile show: ${requirement.statement}?`,
+                      criteria: CRITERION_CHOICES,
+                    },
               ]),
             ),
           }),
@@ -188,12 +199,28 @@ export function typeSafeJudge(
         const body = (await response.json()) as {
           answers?: Record<
             string,
-            { choice?: unknown; confidence?: unknown; probabilities?: { absent?: unknown } }
+            {
+              choice?: unknown;
+              confidence?: unknown;
+              probabilities?: { absent?: unknown };
+              noul?: unknown;
+            }
           >;
         };
         const verdicts = new Map<string, CriterionVerdict>();
         for (const [index, requirement] of requirements.entries()) {
           const answer = body.answers?.[`q${index}`];
+          if (requirement.avoid) {
+            // The same problem shown is the requirement not met.
+            const same = answer?.noul;
+            if (typeof same === "number")
+              verdicts.set(requirement.id, {
+                level: same >= 0.5 ? "absent" : "strong",
+                confidence: Math.max(same, 1 - same),
+                absent: same,
+              });
+            continue;
+          }
           const level = CRITERION_LEVELS.find((item) => item === answer?.choice);
           if (!level || typeof answer?.confidence !== "number") continue;
           const absent = answer.probabilities?.absent;

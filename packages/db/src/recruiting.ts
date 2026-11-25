@@ -7894,18 +7894,21 @@ function gradeShown(entry: { row: Record<string, unknown>; check?: unknown }, al
     | {
         match_tier?: unknown;
         match_score?: unknown;
-        criteria?: { statement: string; level: string }[];
+        criteria?: { statement: string; level: string; avoid?: boolean }[];
       }
     | undefined;
   const tier = check?.match_tier ?? entry.row.match_tier;
   if (typeof tier !== "string" || !SEARCH_MATCH_TIERS.has(tier)) return {};
-  const notShown = (check?.criteria ?? [])
-    .filter((item) => item.level === "absent")
+  const failed = (check?.criteria ?? []).filter((item) => item.level === "absent");
+  const notShown = failed.filter((item) => !item.avoid).map((item) => item.statement.slice(0, 80));
+  const turnedDownFor = failed
+    .filter((item) => item.avoid)
     .map((item) => item.statement.slice(0, 80));
   return {
     grade: tier,
     score: check?.match_score ?? entry.row.match_score ?? null,
     ...(notShown.length ? { notShown } : {}),
+    ...(turnedDownFor.length ? { sameAsTurnedDown: turnedDownFor } : {}),
   };
 }
 
