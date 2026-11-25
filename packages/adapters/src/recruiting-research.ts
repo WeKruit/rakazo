@@ -24,7 +24,6 @@ import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
-import { runningSearchFor } from "./work-estimate.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
@@ -553,11 +552,6 @@ export async function prepareAgentRun(
   if (grading) return prepared;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
-  const running = run && (await runningSearchFor(prisma, actor.spaceId, run.threadId, roleId));
-  if (running)
-    throw new IsolationError(
-      `Not started: agent run ${running} is still searching for this role. Do not start another search: call agent_run with runId "${running}" to collect it, or end the turn; you are woken when it finishes.`,
-    );
   if (metered) await requireDeeperSearchBudget(prisma, roleId, run?.threadId);
   const saved = await prisma.recruitingCandidate.findMany({
     where: { roleId, role: { id: roleId, spaceId: actor.spaceId, userId: actor.userId } },
