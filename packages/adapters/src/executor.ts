@@ -1411,7 +1411,7 @@ export const EARLIER_STEERING =
   "The recruiter sent this earlier in this turn and you already acknowledged it and folded it into the work. Keep following it; do not acknowledge, repeat or restate it.";
 
 export const STEERING_ACK =
-  'The recruiter wrote this while you are working. Deal with it before any other work: a question is answered now with message_user, after only the reads the answer needs, never with a promise to check; anything else gets one line with message_user saying how it changes the work. Then continue the work with it, and never say work has stopped while it is still running. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
+  'The recruiter wrote this while you are working. Deal with it before any other work: a question is answered now with message_user, after only the reads the answer needs, never with a promise to check; a request for something else is done in this turn like any request, not only acknowledged; a change to the running work gets one line with message_user saying how it changes it. Then continue the work with it, and never say work has stopped while it is still running. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
 
 /** How often a running turn looks for messages it has not read yet, to answer them at once. */
 export const STEERING_PEEK_MS = 2_500;
@@ -1549,7 +1549,7 @@ export function requestTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Do what you can yourself, such as a role's campaign with its role_id. Finding or changing a role's people runs in that role's conversation (delegate_to_role), as does work a tool says that conversation is doing now; an interview booking for a person named with an email goes to Scheduling here. To open a new role use start_role when offered. A recruiter who asks how to use this or what to do first, or has no JD, gets the first step in words (send the JD, or a job title with a few must-haves), never a question back or a card.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Do what you can yourself, such as a role's campaign with its role_id. Showing a role's saved people is yours (recruiting_candidates list with its roleId, show true); finding new people for a role or changing them runs in that role's conversation (delegate_to_role), as does work a tool says that conversation is doing now; an interview booking for a person named with an email goes to Scheduling here. To open a new role use start_role when offered. A recruiter who asks how to use this or what to do first, or has no JD, gets the first step in words (send the JD, or a job title with a few must-haves), never a question back or a card.";
 
 /**
  * A role's own conversation whose role is not saved yet. Staging 11-25: Stop landed between
