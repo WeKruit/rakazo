@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@rakazo/db";
 import { listRecruitingGradedCandidateKeys } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import type { CriterionVerdict, TextJudge } from "./judge.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { roundCriteria } from "./recruiting-round-check.js";
@@ -71,7 +72,13 @@ export async function checkPeopleCriteria(
 ): Promise<void> {
   try {
     const judge = await judgeSettings?.resolve();
-    if (!judge?.criteria || !entries.length || entries.length > MOST_PEOPLE) return;
+    if (!judge?.criteria || !entries.length || entries.length > MOST_PEOPLE) {
+      getLogger().info("recruiting.criteria.check skipped", {
+        judge: !!judge?.criteria,
+        people: entries.length,
+      });
+      return;
+    }
     const stated = (await roundCriteria(prisma, role)).map(({ id, statement }) => ({
       id,
       statement,
@@ -82,7 +89,10 @@ export async function checkPeopleCriteria(
       : role.request?.trim()
         ? [{ id: "search-request", statement: role.request.trim().slice(0, 1_000) }]
         : [];
-    if (!requirements.length) return;
+    if (!requirements.length) {
+      getLogger().info("recruiting.criteria.check skipped", { requirements: 0 });
+      return;
+    }
     const graded = new Set(await listRecruitingGradedCandidateKeys(prisma, role.roleId));
     const fresh = entries.filter((entry) => {
       const key =
@@ -113,5 +123,14 @@ export async function checkPeopleCriteria(
           };
         }),
       );
-  } catch {}
+    getLogger().info("recruiting.criteria.check", {
+      roleId: role.roleId,
+      requirements: requirements.length,
+      people: entries.length,
+      alreadyGraded: entries.length - fresh.length,
+      checked: entries.filter((entry) => entry.check).length,
+    });
+  } catch (error) {
+    getLogger().warn("recruiting.criteria.check failed", { error: String(error) });
+  }
 }
