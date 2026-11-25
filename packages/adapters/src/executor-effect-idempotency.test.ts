@@ -56,7 +56,6 @@ import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
   continuedCandidateKey,
   createRunExecutor,
-  globalAskBeforeRole,
   jobLinkIn,
   namedCandidateKey,
   nearCandidateKey,
@@ -6003,26 +6002,6 @@ describe("native recruiting assessment effect delivery", () => {
     });
     expect(JSON.stringify(bounced)).toContain("then ask this same question with ask_user");
     expect(request.prompt).toContain("a request to find people for a named role counts");
-  });
-
-  // Staging eval 11-11: Kruit asked a pasted English JD's intake question itself and opened no role.
-  it("checks Kruit's first question once against opening the role instead", async () => {
-    const f = await roleTeamFirstTurn(
-      "global-ask-before-role",
-      "Senior Data Engineer, Seattle. Requirements: 6+ years, Spark, Python.",
-      [],
-      "recruiting-global-abc",
-    );
-    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-    const bounced = await request.beforeAsk?.("Seattle only, or the metro?");
-    expect(bounced).toEqual({
-      instead: globalAskBeforeRole(
-        "Senior Data Engineer, Seattle. Requirements: 6+ years, Spark, Python.",
-      ),
-    });
-    // Staging eval 11-11 (email-no-mailbox-zh): 「那你就直接发啊」 after an email opened a role.
-    expect(JSON.stringify(bounced)).toContain("An email, a send, a person");
-    expect(await request.beforeAsk?.("Seattle only, or the metro?")).toBeUndefined();
   });
 
   // Staging eval 11-11 (mixed-language-ask): a second turn asked the same location question

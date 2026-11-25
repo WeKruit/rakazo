@@ -1128,7 +1128,15 @@ export class McpConnector implements ConnectorProvider {
                 (assignment.allowAllTools ||
                   (assignment.allowedTools as unknown[]).includes(tool.name)) &&
                 (!sharedInstantlyAccount(assignment.server) ||
-                  SHARED_INSTANTLY_REMOTE.includes(tool.name)),
+                  SHARED_INSTANTLY_REMOTE.includes(tool.name)) &&
+                // An agent that runs rounds gets one people search: beside the advanced one the
+                // plain one was picked for first rounds, and its thin profiles graded unknown.
+                !(
+                  tool.name === "web_search_exa" &&
+                  assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
+                  !assignment.allowAllTools &&
+                  (assignment.allowedTools as unknown[]).includes("web_search_advanced_exa")
+                ),
             )
             .map((tool) => ({
               name: `mcp__${assignment.server.slug}__${tool.name}`,
