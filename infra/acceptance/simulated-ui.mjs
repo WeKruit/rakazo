@@ -157,6 +157,21 @@ export async function openUi({ origin, email, password, cookie, chinese, out, mo
         )
         .catch(() => [])
     ).filter((name, index, all) => all.indexOf(name) === index);
+  // Gate 8856cf75 (mobile-first-look): page text leaves out input boxes, so a search box on the
+  // screen read as missing and Kruit's true "you can search" was graded a false claim.
+  const fields = async () =>
+    (
+      await page
+        .locator("main input:visible:not([type=checkbox]):not([type=radio]), main textarea:visible")
+        .evaluateAll((nodes) =>
+          nodes
+            .map((node) =>
+              (node.getAttribute("aria-label") || node.getAttribute("placeholder") || "").trim(),
+            )
+            .filter((name) => name && name.length <= 80),
+        )
+        .catch(() => [])
+    ).filter((name, index, all) => all.indexOf(name) === index);
 
   return {
     page,
@@ -270,6 +285,7 @@ export async function openUi({ origin, email, password, cookie, chinese, out, mo
         url: page.url().replace(origin, ""),
         text: text.length > limit ? `${text.slice(0, limit)}\n…` : text,
         buttons: await buttons(),
+        fields: await fields(),
         ...(loadMs === null ? {} : { loadSeconds: Math.round(loadMs / 100) / 10 }),
         ...(calls?.length ? { calls } : {}),
       };
