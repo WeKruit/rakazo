@@ -2996,11 +2996,25 @@ export async function authorizeRecruitingMemoryCommit(
     // A group note stays inside this conversation; preferences still go through feedback.
     const botNote =
       (request.scope === "bot" && request.botId === run.botId) || request.scope === "group";
+    // A preference's receipt is written by the run that saved the revision, so the lookup goes
+    // through those runs' events instead of every event in the account (3.5 s on a staging
+    // account with 300k events, inside the serializable save; notes took 13 s there).
+    const sourceRunIds = existing
+      ? (
+          await tx.memoryRevision.findMany({
+            where: { documentId: existing.id, sourceRunId: { not: null } },
+            select: { sourceRunId: true },
+            distinct: ["sourceRunId"],
+          })
+        ).flatMap((revision) => (revision.sourceRunId ? [revision.sourceRunId] : []))
+      : [];
     const preferenceDocument =
       existing &&
+      sourceRunIds.length > 0 &&
       (await tx.event.findFirst({
         where: {
           spaceId: actor.spaceId,
+          runId: { in: sourceRunIds },
           type: "memory.revised",
           AND: [
             { payload: { path: ["kind"], equals: "recruiting_preference" } },

@@ -114,6 +114,8 @@ function fixture() {
       findMany: vi.fn(async (_query: unknown) => [source]),
     },
     event: { findMany: vi.fn(async () => []) },
+    // The runs that saved the document's revisions; a preference's receipt is one of their events.
+    memoryRevision: { findMany: vi.fn(async (_query: unknown) => [{ sourceRunId: "earlier-run" }]) },
     steeringMessage: { findMany: vi.fn(async (_query: unknown) => [] as unknown[]) },
     recruitingCandidate: {
       findMany: vi.fn(
@@ -412,6 +414,7 @@ describe("native recruiting memory admission", () => {
     expect(findFirst).toHaveBeenCalledWith({
       where: {
         spaceId: actor.spaceId,
+        runId: { in: ["earlier-run"] },
         type: "memory.revised",
         AND: [
           { payload: { path: ["kind"], equals: "recruiting_preference" } },
