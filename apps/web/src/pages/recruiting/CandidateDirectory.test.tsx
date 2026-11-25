@@ -353,3 +353,33 @@ it("shows the same people in a board grouped only by their recorded states", asy
   expect(view.querySelectorAll("[data-candidate-name]")).toHaveLength(3);
   expect(view.textContent).toContain("Passed");
 });
+
+it("shows the recruiter's pass, not a stale grade's re-review, on people they turned down", async () => {
+  // Staging 2d92e0d2 (fosp): turned-down people graded before a brief change read 需要重新评估.
+  const outdated = {
+    source: "reviewer",
+    state: "outdated",
+    roleRevisionId: "old",
+    sourceEffectId: null,
+    grade: null,
+    score: 80,
+    group: "outdated",
+  } as const;
+  const turnedDown = row("turned-down");
+  turnedDown.autumn!.recruiterVerdict = "not_fit";
+  turnedDown.autumn!.ranking = outdated;
+  const waiting = row("waiting");
+  waiting.autumn!.ranking = outdated;
+  const { view } = await mount(
+    <CandidateDirectory rows={[turnedDown, waiting]} onOpen={vi.fn()} />,
+  );
+  const cells = Object.fromEntries(
+    [...view.querySelectorAll("tbody tr")].map((item) => [
+      item.textContent?.includes("Candidate turned-down") ? "turnedDown" : "waiting",
+      item.textContent ?? "",
+    ]),
+  );
+  expect(cells.turnedDown).toContain("Passed");
+  expect(cells.turnedDown).not.toContain("Needs a new review");
+  expect(cells.waiting).toContain("Needs a new review");
+});
