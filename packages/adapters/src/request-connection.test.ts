@@ -135,7 +135,7 @@ describe("request_connection", () => {
     });
   });
 
-  it("builds a mail card's reason for a send the recruiter asked for, naming the typed address", async () => {
+  it("keeps a mail card's own reason and adds the address the recruiter typed", async () => {
     const f = fixture({ name: "Gmail" });
     const shown = async (reason: string, typed: string) => {
       await requestConnection(f.db, scope, { serverId: "server-1", reason }, f.pause, typed);
@@ -143,14 +143,11 @@ describe("request_connection", () => {
         .connection.reason;
     };
     const send = "邮箱在上面 Wei.Zhang.Test@example.com，直接发吧";
-    const zh = await shown(
-      "连接 Gmail 后，这封已写好的邮件会保留在这里，并出现单独的发送卡片。",
-      send,
+    expect(await shown("邮件还没发出，连上 Gmail 后按发送才会发。", send)).toBe(
+      "邮件还没发出，连上 Gmail 后按发送才会发。 (wei.zhang.test@example.com)",
     );
-    expect(zh).toContain("wei.zhang.test@example.com");
-    expect(zh).not.toContain("这封已写好的邮件");
-    expect(await shown("To send the email above.", send)).toMatch(
-      /^The draft is kept\..*to wei\.zhang\.test@example\.com/,
+    expect(await shown("Not sent yet: to wei.zhang.test@example.com once connected.", send)).toBe(
+      "Not sent yet: to wei.zhang.test@example.com once connected.",
     );
     expect(await shown("用来读取候选人的回复。", "帮我看看有没有人回复")).toBe(
       "用来读取候选人的回复。",
