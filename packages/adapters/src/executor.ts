@@ -132,7 +132,6 @@ import {
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isOpenAskBlock,
-  isRecruitingNextStepCard,
   isRecruitingSpawnKey,
   isSkillFilePath,
   isTerminal,
@@ -233,7 +232,6 @@ import {
   backgroundToolSourceTrigger,
   BRIEF_CONFIRMATION_TEXT,
   bindRecruitingSchedulingOperation,
-  calibrationRoundRepeats,
   campaignSendCardHash,
   canvasOf,
   changeCanvas,
@@ -645,14 +643,6 @@ import {
   statedLanguageRequirement,
   withRequiredLanguage,
 } from "./recruiting-language.js";
-import {
-  beyondCommute,
-  COMMUTE_MILES,
-  isRegionOnlyLocation,
-  localRolePlace,
-  locationOutliers,
-  outsideSearchArea,
-} from "./recruiting-location.js";
 import { statedMustHaveCriteria } from "./recruiting-must-haves.js";
 import {
   executeRecruitingProfilesTool,
@@ -663,11 +653,7 @@ import {
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
-import {
-  checkRound,
-  roundCriteria,
-  roundPeopleNamed,
-} from "./recruiting-round-check.js";
+import { checkRound, roundCriteria } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -681,7 +667,6 @@ import {
   schedulingPlanHash,
   schedulingPlanReview,
 } from "./recruiting-scheduling.js";
-import { MIN_CURRENT_ROLE_MONTHS, shortCurrentTenure } from "./recruiting-tenure.js";
 import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
 import {
   admitRecruitingResearchCall,
@@ -802,13 +787,7 @@ import {
 import { createToolFixMemory, withKnownFix } from "./tool-fixes.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
-import {
-  answeredAsk,
-  answerSearchFilters,
-  intakeAnswers,
-  recruitingRoundListText,
-  recruitingRoundPeople,
-} from "./turn-end-guard.js";
+import { answerSearchFilters, intakeAnswers, recruitingRoundListText } from "./turn-end-guard.js";
 import {
   newRoleNote,
   otherRoleNote,
@@ -1379,9 +1358,6 @@ const WAITING_CARDS_NEW_MESSAGE_NOTE =
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. Each query carries the role's location and must-haves; a required language goes into every query the way profiles list it (for example \"Mandarin\"). They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
-
-const nextStepAlreadyGiven = (reply: string) =>
-  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round unless it also turns some of them down). Once you have acted, report the result in two or three lines as your final reply, without a question.`;
 
 /**
  * Failures that a fresh attempt can clear: a silent or dropped stream, a timeout, an outage, or a
@@ -4724,8 +4700,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let briefBump: { from: number; to: number } | undefined;
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
-        // show_picks put the first people in chat; the turn owes the recorded ten.
-        let firstPicksShown = false;
         // Each person's language level from this turn's searches: the round lists confirmed and
         // strong people first and labels everyone below them.
         const languageLevels = new Map<string, LanguageSignal>();
@@ -4760,16 +4734,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           levels["no sign"] = withoutLanguage;
           getLogger().info("recruiting.language.levels", { roleId, levels });
         };
-        // People searches this run sent, so a short round can ask once two sets came back short.
-        let peopleSearchesRun = 0;
         // Full profile pages the first round's searches may still read for a required language.
         const fullProfileReads = { left: FULL_PROFILE_READS };
         const profilePages = new Map<string, string>();
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
-        // A question bounced once as already answered may be asked again: the reply may have been about something else.
-        const knownAskBounced = new Set<string>();
         // New people the searches planned with the last answer returned. Once the first picks come
         // from them and there are this many, the ten come from them instead of another search.
         let plannedNewPeople = 0;
@@ -4777,75 +4747,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Rows of planned searches that returned after the pick started, not yet shown to the model.
         const lateSearchRows: string[] = [];
         let gradingToolCalls = 0;
-        // People whose location or tenure the run already asked the model about once.
-        const locationAsked = new Set<string>();
-        // Recruiter messages whose round acceptance was questioned once because they name people of the round.
-        const approvalAsked = new Set<string>();
         // Messages already told that a round shown after them answers them.
-        /**
-         * Picked people whose saved location names only a country or a state, and those whose
-         * location shares no place with where the rest of the picks are.
-         */
-        const locationSlips = async (roleId: string, keys: readonly string[]) => {
-          const rows = await deps.prisma.recruitingCandidateOccurrence.findMany({
-            where: { roleId, candidateKey: { in: [...keys] } },
-            select: { candidateKey: true, name: true, location: true },
-          });
-          const regionOnly = new Map<string, string>();
-          const located = new Map<string, string>();
-          const labels = new Map<string, string>();
-          for (const key of keys) {
-            const seen = rows.filter((row) => row.candidateKey === key);
-            if (!seen.length) continue;
-            const location = seen.find((row) => !isRegionOnlyLocation(row.location))?.location;
-            const shown = seen.find((row) => row.location?.trim())?.location?.trim();
-            labels.set(
-              key,
-              `${seen.find((row) => row.name)?.name ?? key} (${shown || "no location"})`,
-            );
-            if (location) located.set(key, location);
-            else regionOnly.set(key, labels.get(key) as string);
-          }
-          const outliers = new Map(
-            locationOutliers(located).map((key) => [key, labels.get(key) as string]),
-          );
-          // A local role's own city: people beyond commuting distance of it are always outside.
-          const role = await deps.prisma.recruitingRole.findUnique({
-            where: { id: roleId },
-            select: {
-              currentRevision: { select: { brief: true, criteria: true } },
-            },
-          });
-          const place = localRolePlace([
-            JSON.stringify(role?.currentRevision ?? {}),
-            ...(await recruiterWords(deps.prisma, run.threadId)),
-          ]);
-          const beyond = new Map(
-            place
-              ? [...located]
-                  .filter(([, location]) => beyondCommute(location, place))
-                  .map(([key]) => [key, labels.get(key) as string])
-              : [],
-          );
-          return { regionOnly, outliers, beyond, place };
-        };
-        /** Picked people whose profile passage shows every current role started under six months ago. */
-        const newInCurrentRole = async (roleId: string, keys: readonly string[]) => {
-          const people = await recruitingRoundPeople(deps.prisma, {
-            threadId: run.threadId,
-            spaceId: run.spaceId,
-            roleId,
-            candidateKeys: keys,
-          });
-          const newcomers = new Map<string, string>();
-          for (const key of keys) {
-            const person = people.get(key);
-            const months = shortCurrentTenure(person?.snippet);
-            if (months !== null)
-              newcomers.set(key, `${person?.name ?? key} (${months} months in the current role)`);
-          }
-          return newcomers;
-        };
         let roundStream:
           | {
               callId: string;
@@ -4925,28 +4827,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!role) return undefined;
           const size = typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE;
-          // Staging 11-15: a Bay Area role's page listed two people in Texas whom the search
-          // had left out for living beyond commuting distance; the page uses the same city.
-          const place = localRolePlace([
-            JSON.stringify(role.currentRevision ?? {}),
-            ...(await recruiterWords(deps.prisma, role.sourceThreadId)),
-          ]);
           // One rule from the recruiter's seen record. Staging 11-15: asked for "only the new
           // ones", a page relisted five of round 1's ten and Kruit miscounted the new ones.
-          const { shown, inRounds, farAway } = peopleToShow(items as Array<RecruiterListItem>, {
+          const { shown, inRounds } = peopleToShow(items as Array<RecruiterListItem>, {
             size,
             listed: globalListed,
-            ...(place ? { beyond: (location: string) => beyondCommute(location, place) } : {}),
           });
           const leftOut = {
             ...(inRounds
               ? {
                   leftOutAsShownInRounds: `${inRounds} on this page were already shown in a round and are left out; everyone listed is new to the recruiter.`,
-                }
-              : {}),
-            ...(farAway && place
-              ? {
-                  leftOutFarAway: `${farAway} on this page live over ${COMMUTE_MILES} miles from ${place.label} and are left out; never list or count them.`,
                 }
               : {}),
           };
@@ -5184,18 +5074,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     (filter) => !String(filter.id ?? "").startsWith("recruiter-answer-"),
                   ),
                   ...answerSearchFilters(answers),
-                  // The playbook's default tenure preference, shown so the recruiter can lift it. An
-                  // inferred filter may only prefer, so it is worded as the people it prefers.
-                  ...((existing?.searchFilters ?? []).some((filter) => filter.id === "tenure")
-                    ? []
-                    : [
-                        {
-                          id: "tenure",
-                          mode: "prefer",
-                          origin: "inferred",
-                          statement: `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
-                        },
-                      ]),
                 ],
               },
             },
@@ -5458,26 +5336,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .join("\n") || undefined
           );
         };
-        /** What the recruiter wrote after this run recorded its round, newest message. */
-        const recruiterReplyAfterRound = async () => {
-          const round = await roundRecordedThisRun();
-          if (!round) return undefined;
-          const reply = await deps.prisma.message.findFirst({
-            where: {
-              threadId: thread.id,
-              steeringMessages: { none: { originTrigger: "follow_up" } },
-              role: "user",
-              botId: null,
-              createdAt: { gt: round.createdAt },
-            },
-            orderBy: { seq: "desc" },
-            select: { blocks: true },
-          });
-          const text = (Array.isArray(reply?.blocks) ? (reply.blocks as MessageBlock[]) : [])
-            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
-            .join("\n");
-          return text || undefined;
-        };
         const applyToolNow = async (
           name: string,
           rawArgs: Record<string, unknown>,
@@ -5719,7 +5577,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: newerRequestElsewhere(moved) };
             }
           }
-          if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
           // Tools that use the role from a job wait for its save; the first question and progress
           // lines do not, so the save never holds them up. The turn still ends after the save.
           if (
@@ -5989,9 +5846,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (criterion) =>
                   !languageRequirement || !languageFilters([criterion.statement]).length,
               ),
-              shortOfTen: SHORT_OF_TEN,
             });
-            if (!checked.ok) return { error: checked.error };
             if (Object.keys(checked.unverified).length || checks)
               args = { ...args, unverified: checked.unverified };
           }
@@ -6105,42 +5960,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const roleId = thread.activeRecruitingRoleId;
             if (!roleId) return { error: "This conversation has no active role." };
             const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
-            // Someone whose profile shows only a country or a state, or under six months in the
-            // current role, is left out of the first picks rather than costing a step.
-            const [{ regionOnly, beyond, place }, recent, repeated] = await Promise.all([
-              locationSlips(roleId, picked),
-              newInCurrentRole(roleId, picked),
-              calibrationRoundRepeats(
-                deps.prisma,
-                { userId: run.userId, spaceId: run.spaceId, email: "", isDeploymentOwner: false },
-                roleId,
-                picked,
-              ),
-            ]);
-            // The round record refuses anyone a round already showed or the recruiter turned down, so
-            // the list on screen leaves them out too instead of changing once the round is recorded.
-            const repeats = new Set(repeated?.repeats);
-            const left = [
-              repeats.size &&
-                `${[...repeats].join(", ")}: already shown in an earlier round or turned down; a later round takes only people no round has shown.`,
-              regionOnly.size &&
-                `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
-              beyond.size &&
-                place &&
-                `${[...beyond.values()].join(", ")}: over ${COMMUTE_MILES} miles from ${place.label}.`,
-              recent.size &&
-                `${[...recent.values()].join(", ")}: under ${MIN_CURRENT_ROLE_MONTHS} months in the current role.`,
-            ]
-              .filter(Boolean)
-              .join(" ");
-            const keys = picked.filter(
-              (key) =>
-                !regionOnly.has(key) && !beyond.has(key) && !recent.has(key) && !repeats.has(key),
-            );
-            if (!keys.length)
-              return {
-                error: `Not shown: ${left} Pick people who fit every requirement.`,
-              };
+            const keys = picked;
             const text = await recruitingRoundListText(deps.prisma, {
               chinese: turnLanguage === "zh",
               threadId: run.threadId,
@@ -6163,11 +5983,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             stream.shown = Math.max(stream.shown, keys.length);
             stream.posting = stream.posting.then(() => showRoundList(text));
             await stream.posting;
-            firstPicksShown = true;
             const late = lateSearchRows.splice(0);
             return {
               shown: keys.length,
-              ...(left ? { notShown: left } : {}),
               // The requirements calibration_round's checks take a verdict on, so it records the
               // first time.
               checksOn: Object.fromEntries(
@@ -6182,47 +6000,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : {}),
               next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
-          }
-          if (researchInput?.data?.operation === "calibration_round" && thread.activeRecruitingRoleId) {
-            const { regionOnly, outliers, beyond, place } = await locationSlips(
-              thread.activeRecruitingRoleId,
-              researchInput.data.candidateKeys,
-            );
-            // Beyond commuting distance of a local role's own city is never a fit, however often
-            // the same people come back.
-            if (beyond.size && place)
-              return {
-                error: `Not recorded. ${[...beyond.values()].join(", ")} ${beyond.size > 1 ? "live" : "lives"} over ${COMMUTE_MILES} miles from ${place.label}, outside the role's location. Replace them with people from the rows who fit. If fewer than ten fit, show the ones who do with show_picks, then ${SHORT_OF_TEN}.`,
-              };
-            // Asked once per person: when the same people come back the model has decided they fit
-            // (a role open to a whole country or state, or a real commute), and they are recorded.
-            const unasked = (people: Map<string, string>) =>
-              [...people].filter(([key]) => !locationAsked.has(key)).map(([, label]) => label);
-            const vague = unasked(regionOnly);
-            const far = unasked(outliers);
-            const recent = await newInCurrentRole(
-              thread.activeRecruitingRoleId,
-              researchInput.data.candidateKeys.map(savedCandidateKeyForm),
-            );
-            const newcomers = unasked(recent);
-            if (vague.length || far.length || newcomers.length) {
-              for (const key of [...regionOnly.keys(), ...outliers.keys(), ...recent.keys()])
-                locationAsked.add(key);
-              return {
-                error: [
-                  "Not recorded.",
-                  vague.length &&
-                    `${vague.join(", ")} show only a country or a state, which never counts inside a city or metro location scope.`,
-                  far.length &&
-                    `${far.join(", ")} ${far.length > 1 ? "are" : "is"} more than ${COMMUTE_MILES} miles from where the other picks are; check against the role's location scope.`,
-                  newcomers.length &&
-                    `${newcomers.join(", ")} started the current role under ${MIN_CURRENT_ROLE_MONTHS} months ago, which the round leaves out unless the recruiter asked for them.`,
-                  "Replace anyone outside the scope or new in their role with people from the rows who fit, and record the ten again. If they all fit, record the same ten again.",
-                ]
-                  .filter(Boolean)
-                  .join(" "),
-              };
-            }
           }
           const candidateOperation =
             name === "recruiting_feedback" &&
@@ -9644,24 +9421,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         pages: profilePages,
                       },
                     );
-                  // A local role's people beyond commuting distance of its city never make the
-                  // ten; a search filtered on a language returns them from across the country.
-                  const place = localRolePlace([
-                    String(connectorCall.args?.query ?? ""),
-                    JSON.stringify(role.currentRevision ?? {}),
-                    ...words,
-                  ]);
-                  const people = Array.isArray(checked.rows)
-                    ? checked.rows.filter(
-                        (row: Record<string, unknown>) =>
-                          !place ||
-                          typeof row.location !== "string" ||
-                          !beyondCommute(row.location, place),
-                      )
-                    : checked.rows;
-                  const farAway = Array.isArray(checked.rows)
-                    ? checked.rows.length - (people as unknown[]).length
-                    : 0;
+                  const people = checked.rows;
                   // Saved is not fit: the lead counted 60 saved as "60 found" with 36 graded as
                   // fitting (big-ask play, 11-24), so each search states all three counts.
                   const [peopleInResults, grades] = await Promise.all([
@@ -9689,11 +9449,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ...(checked.withoutLanguage
                       ? {
                           leftOutNoLanguage: `${checked.withoutLanguage} more people's profiles show no sign of the required language; they are in Results but not listed here and never make the ten.`,
-                        }
-                      : {}),
-                    ...(farAway && place
-                      ? {
-                          leftOutFarAway: `${farAway} more people live over ${COMMUTE_MILES} miles from ${place.label}; they are in Results but not listed here and never make the ten.`,
                         }
                       : {}),
                     ...(Array.isArray(rows) && rows.length > AUTOSAVED_PEOPLE_SHOWN
@@ -10300,26 +10055,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : ((name === "save_shared_memory" ? sharedMemorySaveError(args) : undefined) ??
                     nativeMemorySaveError(args));
               if (invalid) return finish({ error: invalid });
-            }
-            // "#6 and #8 are off, find more like the rest" turns people down: the next round
-            // reflects that before the recruiter accepts one. A message naming people of the round
-            // is questioned once; a second call stands.
-            if (
-              name === "recruiting_feedback" &&
-              args.target === "round" &&
-              args.operation === "approve" &&
-              recruitingSourceMessageId &&
-              !approvalAsked.has(recruitingSourceMessageId)
-            ) {
-              approvalAsked.add(recruitingSourceMessageId);
-              const named = await roundPeopleNamed(deps.prisma, {
-                threadId: run.threadId,
-                messageId: recruitingSourceMessageId,
-              }).catch(() => null);
-              if (named)
-                return finish({
-                  error: `Not recorded: this message also names people of round ${named.round} (${named.named.join(", ")}). When it turns any of them down it is feedback, not acceptance: record each turned-down person's review, then run the next round of ten that reflects it, without them and without anyone like them. Only if it names them as examples of who to find more of, call approve again.`,
-                });
             }
             if (applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
@@ -13610,7 +13345,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             planned.data.queries,
             words,
           );
-          const place = localRolePlace([...planned.data.queries, ...words]);
           const perSearch = 10;
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
@@ -13652,24 +13386,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           };
           const keyOf = (row: PlannedRow) =>
             typeof row.candidateKey === "string" ? row.candidateKey : undefined;
-          // The searches name the role's metro, so rows beyond commuting distance of it (or, with
-          // no city named, of where most rows are), or showing only a country or a state, never
-          // make the ten: they are left out of the pick. A required language spreads the rows
-          // across the country, so the named city holds the area rather than the rows' centre.
-          const outsideOf = (rows: PlannedRow[]) =>
-            outsideSearchArea(
-              new Map(
-                rows.flatMap((row) => {
-                  const key = keyOf(row);
-                  return key
-                    ? [[key, typeof row.location === "string" ? row.location : null] as const]
-                    : [];
-                }),
-              ),
-              place,
-            );
-          const inArea = (rows: PlannedRow[], outside: Set<string>) =>
-            rows.filter((row) => !outside.has(keyOf(row) ?? ""));
           // Late rows join a tool result, so their passages are shortened.
           const compactRow = ({ snippet, ...row }: PlannedRow & { snippet?: unknown }) => ({
             ...row,
@@ -13685,8 +13401,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const onTime = results.flatMap((result) =>
             result === PLANNED_SEARCH_LATE ? [] : (rowsOf(result) ?? []),
           );
-          const outside = outsideOf(onTime);
-          addFresh(inArea(onTime, outside));
+          addFresh(onTime);
           learnLanguage(planned.data.queries, onTime);
           // The people are already in Results; chat says so at once instead of staying on the
           // last activity until the model's picks.
@@ -13712,11 +13427,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             void pendings[index]?.then((late) => {
               const rows = rowsOf(late);
               if (!rows?.length) return;
-              const kept = inArea(rows, outsideOf([...onTime, ...rows]));
-              addFresh(kept);
-              learnLanguage(planned.data.queries, kept);
+              addFresh(rows);
+              learnLanguage(planned.data.queries, rows);
               lateSearchRows.push(
-                `Search ${index + 1} "${planned.data.queries[index]}":\n${JSON.stringify(kept.map(compactRow)).slice(0, 8_000)}`,
+                `Search ${index + 1} "${planned.data.queries[index]}":\n${JSON.stringify(rows.map(compactRow)).slice(0, 8_000)}`,
               );
             });
           });
@@ -13725,7 +13439,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (result === PLANNED_SEARCH_LATE)
               return `Search ${index + 1} "${query}": still running; its rows come back with your show_picks result, so start from the other searches and never wait or end the turn for it.`;
             const rows = rowsOf(result);
-            return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ? inArea(rows, outside) : result).slice(0, 24_000)}`;
+            return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ?? result).slice(0, 24_000)}`;
           });
           const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A row's fullProfile holds lines from that person's full profile about the must-haves, such as a licence or clearance; it is part of the row. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's checks mark it unknown for that person so the recruiter sees it. A required language is the exception: each row's requiredLanguage is the language check's decision on that person's full profile. Take it as given: confirmed or strong means the language requirement is met, never judge the language again from the row's text or mark it unverified, and the people with no sign of it are already left out. Nobody currently at the hiring company fits; that is only the employer the JD or the recruiter names, never one guessed from the location or industry, so when neither names it, nobody is left out for their employer. Among those who fit, pick by evidence, here and for the rest of the ten: first the people whose rows show every must-have, then those with one unknown, and never take someone with an unknown while a row that shows them all is left out. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
           const next =
@@ -14879,45 +14593,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     }
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
-                    // A run that recorded a round asks the next-step choice, which is asked anew each round,
-                    // unless the recruiter already wrote their next step after the ten appeared: then it
-                    // acts on that first, and may ask its own question after reporting what it did.
-                    if (thread.activeRecruitingRoleId && (await roundRecordedThisRun())) {
-                      const reply = await recruiterReplyAfterRound();
-                      if (reply && !turnReport.worked())
-                        return { instead: nextStepAlreadyGiven(reply) };
-                      const last = turnReport.lastWork(["role"]);
-                      if (!reply && (last === undefined || last === "round")) return undefined;
-                      const unreported = turnReport.bounceAsk(question);
-                      return unreported ? { instead: unreported } : undefined;
-                    }
-                    const unreported = turnReport.bounceAsk(question);
-                    if (unreported) return { instead: unreported };
-                    // Fewer than ten fit after a second set of searches: the recruiter decides how to go on.
-                    if (firstPicksShown && peopleSearchesRun < 8)
-                      return {
-                        instead:
-                          "Not asked: the ten are not recorded yet. Record them now with calibration_round, starting with the people already shown in chat in the same order; then end on the next-step card.",
-                      };
-                    const messages = await deps.prisma.message.findMany({
-                      where: {
-                        threadId: thread.id,
-                        steeringMessages: {
-                          none: { originTrigger: "follow_up" },
-                        },
-                      },
-                      orderBy: { seq: "asc" },
-                      select: { role: true, blocks: true },
-                    });
-                    // Older rounds asked this card in Chinese; its answer is not an intake answer either.
-                    const known = answeredAsk(
-                      question,
-                      intakeAnswers(messages).filter(({ key }) => !isRecruitingNextStepCard(key)),
-                    );
-                    if (known && !knownAskBounced.has(known.key)) {
-                      knownAskBounced.add(known.key);
-                      return `"${known.key}" → "${known.value}"`;
-                    }
                     return undefined;
                   },
                   onToolCompleted: async (completion) => {

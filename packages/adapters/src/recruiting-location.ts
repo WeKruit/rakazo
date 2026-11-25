@@ -3,18 +3,6 @@ import { US_PLACES } from "./us-places.js";
 const US_STATES =
   "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming";
 const COUNTRY = "united states(?: of america)?|usa|u\\.s\\.a?\\.?|us";
-const REGION_ONLY = new RegExp(
-  `^\\s*(?:(?:${US_STATES})(?:\\s*,\\s*(?:${COUNTRY}))?|${COUNTRY})\\s*$`,
-  "i",
-);
-
-/**
- * A profile location that names only a country or a state, or nothing at all, which never shows
- * the person inside a city or metro scope.
- */
-export function isRegionOnlyLocation(location: string | null | undefined): boolean {
-  return !location?.trim() || REGION_ONLY.test(location);
-}
 
 const STATE_CODES: Record<string, string> = Object.fromEntries(
   US_STATES.split("|").map((name, index) => [
@@ -66,66 +54,8 @@ export function locate(location: string): [number, number] | undefined {
 
 const COUNTRY_ONLY = new RegExp(`^(?:${COUNTRY})$`, "i");
 
-function miles([lat1, lon1]: [number, number], [lat2, lon2]: [number, number]): number {
-  const rad = Math.PI / 180;
-  const a =
-    Math.sin(((lat2 - lat1) * rad) / 2) ** 2 +
-    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(((lon2 - lon1) * rad) / 2) ** 2;
-  return 7918 * Math.asin(Math.sqrt(a));
-}
-
 /** Farther than this from where the group is centred is beyond an ordinary daily commute. */
 export const COMMUTE_MILES = 50;
-
-/**
- * People in a picked group who live beyond commuting distance of where the group is centred
- * (the pick closest to all the others), such as one LaGrange or Greensboro profile among ten
- * around Atlanta. Suburbs stay inside. It only points at a likely slip; the model decides.
- */
-export function locationOutliers(locations: ReadonlyMap<string, string>): string[] {
-  const points = [...locations]
-    .map(([key, location]) => [key, locate(location)] as const)
-    .filter((entry): entry is readonly [string, [number, number]] => Boolean(entry[1]));
-  if (points.length < 3) return [];
-  const spread = (point: [number, number]) =>
-    points.reduce((sum, [, other]) => sum + miles(point, other), 0);
-  const centre = points.reduce((best, entry) =>
-    spread(entry[1]) < spread(best[1]) ? entry : best,
-  )[1];
-  return points.filter(([, point]) => miles(point, centre) > COMMUTE_MILES).map(([key]) => key);
-}
-
-/**
- * People from a local search who are not in its area: when most rows centre on one metro, the
- * rows beyond commuting distance of it or showing only a country or a state. A search whose rows
- * spread out (a remote or nationwide role) leaves everyone in.
- */
-export function outsideSearchArea(
-  locations: ReadonlyMap<string, string | null | undefined>,
-  place?: NamedPlace,
-): Set<string> {
-  const points = [...locations]
-    .map(([key, location]) => [key, location ? locate(location) : undefined] as const)
-    .filter((entry): entry is readonly [string, [number, number]] => Boolean(entry[1]));
-  if (!place && points.length < 5) return new Set();
-  const spread = (point: [number, number]) =>
-    points.reduce((sum, [, other]) => sum + miles(point, other), 0);
-  const centre =
-    place?.point ??
-    points.reduce((best, entry) => (spread(entry[1]) < spread(best[1]) ? entry : best))[1];
-  const far = points.filter(([, point]) => miles(point, centre) > COMMUTE_MILES);
-  // Without a named place, rows spread across the country mean a remote or nationwide search.
-  if (!place && far.length > points.length * 0.4) return new Set();
-  return new Set([
-    ...far.map(([key]) => key),
-    ...[...locations]
-      .filter(
-        ([, location]) =>
-          isRegionOnlyLocation(location) || Boolean(place && location && isAbroad(location)),
-      )
-      .map(([key]) => key),
-  ]);
-}
 
 export type NamedPlace = { label: string; point: [number, number] };
 
@@ -162,21 +92,6 @@ export function namedPlace(texts: readonly string[]): NamedPlace | undefined {
     }
   const best = [...counts.values()].sort((a, b) => b.count - a.count)[0];
   return best ? { label: best.label, point: best.point } : undefined;
-}
-
-/** Whether a profile location is beyond commuting distance of the named place. */
-export function beyondCommute(location: string, place: NamedPlace): boolean {
-  const point = locate(location);
-  return point ? miles(point, place.point) > COMMUTE_MILES : isAbroad(location);
-}
-
-/** Profile locations outside the US, which the US place list cannot place. */
-const ABROAD =
-  /\b(canada|british columbia|ontario|quebec|alberta|toronto|vancouver|burnaby|montreal|ottawa|calgary|edmonton|mississauga|waterloo|kitchener|mexico|singapore|china|hong kong|taiwan|japan|korea|india|vietnam|malaysia|philippines|thailand|australia|united kingdom|england|ireland|germany|france|netherlands|spain|italy|brazil|united arab emirates|dubai)\b/i;
-
-/** Whether a profile location is outside the US. */
-export function isAbroad(location: string): boolean {
-  return ABROAD.test(location) && !/\bunited states\b/i.test(location);
 }
 
 const LOCAL_ROLE =

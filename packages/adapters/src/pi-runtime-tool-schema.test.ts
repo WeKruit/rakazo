@@ -153,9 +153,8 @@ describe("jsonSchemaParameters", () => {
     }
     for (const input of [
       { operation: "list", limit: 0 },
-      { operation: "list", limit: 101 },
+      { operation: "list", limit: 201 },
       { operation: "list", query: "x".repeat(241) },
-      { operation: "sources" },
       { operation: "sources", candidateKey: "candidate", query: "Example" },
     ]) {
       expect(() => parseConnectorToolArgs(tool.inputSchema, input)).toThrow();

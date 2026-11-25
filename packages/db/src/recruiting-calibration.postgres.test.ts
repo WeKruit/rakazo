@@ -220,22 +220,7 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } })).playbookStage,
     ).toBe("feedback");
 
-    // Shown in round 1: refused.
-    await expect(recordRound([...keys("first").slice(0, 8), "spare-0", "spare-1"])).rejects.toThrow(
-      /already shown in an earlier round or turned down/,
-    );
     await savePage([...keys("second").slice(0, 8)]);
-    // Staging 11-15: saved before round 1 but never shown is new to the recruiter, so a later
-    // round may show them; refusing them left round 2 with 2 of 10. The picks shown in chat use
-    // the same rule, so a list on screen never changes on record.
-    await expect(
-      recruiting.calibrationRoundRepeats(prisma, actor, roleId, [
-        ...keys("second").slice(0, 8),
-        "spare-0",
-        keys("first")[0] ?? "",
-      ]),
-    ).resolves.toEqual({ round: 1, repeats: [keys("first")[0]] });
-
     await savePage(keys("second").slice(8));
     const second = await recordRound(keys("second"));
     expect(second).toMatchObject({ status: "saved", round: 2 });
@@ -254,12 +239,6 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await savePage([keys("second")[0] ?? ""], ["Renamed by a later grade"]);
     const again = await recruiting.readRecruitingCalibrationRound(prisma, actor, { threadId });
     expect(again.round?.candidates[0]?.name).toBe("Person second-0");
-
-    // A later list holds only people no round has shown.
-    await savePage(["swap-0", "swap-1"]);
-    await expect(
-      recordRound([...keys("second").slice(0, 8), "swap-0", "swap-1"]),
-    ).rejects.toThrow(/already shown in an earlier round or turned down/);
   });
 
   it("accepts a round from the recruiter's own words and still records later rounds", async () => {

@@ -152,12 +152,10 @@ export async function roundCriteria(
   ];
 }
 
-export type RoundCheckResult =
-  | { ok: true; unverified: Record<string, string> }
-  | { ok: false; error: string };
+export type RoundCheckResult = { ok: true; unverified: Record<string, string> };
 
 /**
- * The picks' own verdicts, where the lead gave them: a "fails" keeps that person out, and what no
+ * The picks' own verdicts, where the lead gave them: what no
  * row shows becomes the round list's "Not verified" note. Verdicts are optional: the Reviewer
  * grades every round after feedback from full profiles, and asking the lead for a verdict on every
  * criterion of every pick cost refusals and up to a minute a round (staging 11-15/16).
@@ -166,17 +164,11 @@ export function checkRound(input: {
   keys: readonly string[];
   checks: RoundChecks | undefined;
   criteria: readonly RoundCriterion[];
-  /** What to do when fewer than ten fit. */
-  shortOfTen: string;
 }): RoundCheckResult {
   const unverified: Record<string, string> = {};
   if (!input.criteria.length) return { ok: true, unverified };
   const verdictOf = (key: string, id: string) => input.checks?.[key]?.[id];
-  const failing: string[] = [];
   for (const key of input.keys) {
-    const fails = input.criteria.filter((criterion) => verdictOf(key, criterion.id) === "fails");
-    if (fails.length)
-      failing.push(`${key} (${fails.map((criterion) => criterion.statement).join("; ")})`);
     // Something no pick's row shows is still unverified for each of them; the round list says
     // it once when every note is the same. A turned-down reason is not a requirement to list.
     const listed = input.criteria.filter(
@@ -185,11 +177,7 @@ export function checkRound(input: {
     );
     if (listed.length) unverified[key] = listed.map((criterion) => criterion.statement).join("; ");
   }
-  if (!failing.length) return { ok: true, unverified };
-  return {
-    ok: false,
-    error: `Not recorded. These picks fail a hard criterion by your own verdict, so they are not in the round: ${failing.join("; ")}. Replace them with people whose rows show every hard criterion. If fewer than ten do, show the ones who do with show_picks, then ${input.shortOfTen}.`,
-  };
+  return { ok: true, unverified };
 }
 
 /** What a recorded round's read says about repeats: the round record refuses anyone already seen. */

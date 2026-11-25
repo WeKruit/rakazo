@@ -446,8 +446,16 @@ export async function executeRecruitingCandidatesTool(
         : paged;
     }
     if (input.operation === "list") {
-      const { operation: _operation, roleId: namedRoleId, page, show: _show, ...query } = input;
+      const {
+        operation: _operation,
+        roleId: namedRoleId,
+        page,
+        show: _show,
+        brief,
+        ...query
+      } = input;
       const listRoleId = roleId ?? namedRoleId;
+      if (brief) query.limit ??= 200;
       if (page !== undefined && query.cursor === undefined) {
         query.limit ??= PAGE_SIZE;
         Object.assign(query, { offset: (page - 1) * query.limit });
@@ -473,6 +481,30 @@ export async function executeRecruitingCandidatesTool(
       };
       queryMs = Math.round(performance.now() - queryStarted);
       itemCount = result.items.length;
+      // A whole role in one read: 179 people at ten full rows a page took a helper 172 reads
+      // and eight minutes before it could mark anyone (big-ask play, 11-25).
+      if (brief) {
+        const seen = await readRecruiterSeen(deps.prisma, trusted.actor, {
+          roleId: listRoleId,
+          candidateKeys: result.items.map((item) => item.candidateKey),
+        });
+        succeeded = true;
+        return {
+          total: result.total,
+          nextCursor: result.nextCursor,
+          ...(result.counts ? { counts: result.counts } : {}),
+          items: result.items.map((item) => {
+            const person = seen.people.get(item.candidateKey);
+            return {
+              candidateKey: item.candidateKey,
+              name: item.name ?? null,
+              grade: item.ranking?.state === "current" ? item.ranking.grade : null,
+              ...(person?.round !== undefined ? { shownInRound: person.round } : {}),
+              ...(person?.verdict ? { recruiterVerdict: person.verdict } : {}),
+            };
+          }),
+        };
+      }
       // Every agent sees the emails earlier contact lookups saved, in any later turn.
       const lookups = result.items.length
         ? await lookedUpContacts(deps.prisma, trusted.actor)
@@ -670,54 +702,84 @@ export async function executeRecruitingCandidatesTool(
         },
       };
     }
-    const { operation: _operation, roleId: namedSourceRoleId, ...query } = input;
+    const {
+      operation: _operation,
+      roleId: namedSourceRoleId,
+      candidateKey: oneKey,
+      candidateKeys: manyKeys,
+      ...paging
+    } = input;
     const sourceRoleId = roleId ?? namedSourceRoleId;
     if (!sourceRoleId) {
       succeeded = true;
       return noCurrentRole();
     }
     if (!deps.artifacts) throw new IsolationError();
-    const result = await listRecruitingCandidateSources(deps.prisma, trusted.actor, {
-      roleId: sourceRoleId,
-      ...query,
-    });
-    queryMs = Math.round(performance.now() - queryStarted);
-    itemCount = result.items.length;
-    const reportsStarted = performance.now();
-    const readReport = createRecruitingCandidateReportReader(deps, trusted.actor, sourceRoleId, {
-      fromTool: true,
-    });
-    // Read distinct saved pages together; sources sharing a page stay sequential so the
-    // reader's per-request cache verifies and decodes that page once.
-    const byArtifact = new Map<string, number[]>();
-    result.items.forEach((source, index) => {
-      const key = source.artifactRef.artifactId;
-      byArtifact.set(key, [...(byArtifact.get(key) ?? []), index]);
-    });
-    const reports: Awaited<ReturnType<typeof readReport>>["report"][] = [];
-    await Promise.all(
-      [...byArtifact.values()].map(async (indexes) => {
-        for (const index of indexes)
-          reports[index] = (await readReport(result.items[index]!)).report;
-      }),
+    const artifacts = deps.artifacts;
+    const keys = manyKeys ?? (oneKey ? [oneKey] : []);
+    if (!keys.length) {
+      succeeded = true;
+      return { next: "Name the people to read with candidateKeys." };
+    }
+    const readReport = createRecruitingCandidateReportReader(
+      { ...deps, artifacts },
+      trusted.actor,
+      sourceRoleId,
+      { fromTool: true },
     );
-    const items = result.items.map((source, index) => ({ ...source, report: reports[index] }));
-    reportReadMs = Math.round(performance.now() - reportsStarted);
-    // The language check's finding on this person, saved with the search that found them, stands
-    // for the required language: whoever grades takes it as given instead of judging it again.
-    const language = (
-      await savedLanguageLevels(deps.prisma, sourceRoleId, [query.candidateKey])
-    ).get(query.candidateKey);
-    succeeded = true;
-    return {
-      ...result,
-      items,
-      ...(language
-        ? {
-            requiredLanguage: `${language.requirement}: ${language.level} (the language check's finding)`,
-          }
-        : {}),
+    const languages = await savedLanguageLevels(deps.prisma, sourceRoleId, keys);
+    const readOne = async (candidateKey: string) => {
+      const result = await listRecruitingCandidateSources(deps.prisma, trusted.actor, {
+        roleId: sourceRoleId,
+        candidateKey,
+        ...paging,
+      });
+      queryMs = Math.round(performance.now() - queryStarted);
+      const reportsStarted = performance.now();
+      // Read distinct saved pages together; sources sharing a page stay sequential so the
+      // reader's per-request cache verifies and decodes that page once.
+      const byArtifact = new Map<string, number[]>();
+      result.items.forEach((source, index) => {
+        const key = source.artifactRef.artifactId;
+        byArtifact.set(key, [...(byArtifact.get(key) ?? []), index]);
+      });
+      const reports: Awaited<ReturnType<typeof readReport>>["report"][] = [];
+      await Promise.all(
+        [...byArtifact.values()].map(async (indexes) => {
+          for (const index of indexes)
+            reports[index] = (await readReport(result.items[index]!)).report;
+        }),
+      );
+      reportReadMs = Math.round(performance.now() - reportsStarted);
+      // The language check's finding on this person, saved with the search that found them,
+      // stands for the required language: whoever grades takes it as given instead of judging it
+      // again.
+      const language = languages.get(candidateKey);
+      return {
+        ...result,
+        items: result.items.map((source, index) => ({ ...source, report: reports[index] })),
+        ...(language
+          ? {
+              requiredLanguage: `${language.requirement}: ${language.level} (the language check's finding)`,
+            }
+          : {}),
+      };
     };
+    // Five people took a grader five reads of three seconds each; several keys are one read.
+    const people = await Promise.all(
+      keys.map((key) =>
+        // One mistyped key never hides the other people of a batch.
+        manyKeys
+          ? readOne(key).catch((error) => {
+              if (!(error instanceof IsolationError)) throw error;
+              return { candidateKey: key, notSaved: true, items: [] };
+            })
+          : readOne(key),
+      ),
+    );
+    itemCount = people.reduce((sum, person) => sum + person.items.length, 0);
+    succeeded = true;
+    return manyKeys ? { people } : people[0];
   } finally {
     getLogger().info("recruiting.candidates.read.timing", {
       operation: input.operation,

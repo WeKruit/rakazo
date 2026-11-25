@@ -2685,6 +2685,7 @@ function builtinParameters(tool: ConnectorTool) {
     return Type.Object({
       name: Type.Optional(Type.String()),
       task: Type.Optional(Type.String()),
+      tools: Type.Optional(Type.Array(Type.String())),
       instructions: Type.Optional(Type.String()),
       model_provider: Type.Optional(Type.String()),
       model_id: Type.Optional(Type.String()),

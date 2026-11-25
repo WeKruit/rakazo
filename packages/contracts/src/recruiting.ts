@@ -1630,10 +1630,11 @@ const RecruitingAccountToolReadSchema = z.strictObject({
   limit: z.number().int().min(1).max(100).optional(),
 });
 export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operation", [
-  // The web list pages up to 200 rows; an agent reads bounded pages of at most 100.
   ListRecruitingCandidatesInput.pick({ query: true, cursor: true, sort: true }).extend({
     operation: z.literal("list"),
-    limit: z.number().int().min(1).max(100).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    /** One short line per person (key, name, grade, what the recruiter saw), 200 a page. */
+    brief: z.boolean().optional(),
     /** A numbered page of `limit` people (default 10), for jumping back and forth. */
     page: z.number().int().min(1).max(600).optional(),
     /** In Kruit's conversation: post this page to the recruiter in the round's list lines. */
@@ -1643,6 +1644,9 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   }),
   ListRecruitingCandidateSourcesInput.extend({
     operation: z.literal("sources"),
+    /** Several people in one read, in place of candidateKey. */
+    candidateKey: RecruitingId.optional(),
+    candidateKeys: z.array(RecruitingId).min(1).max(20).optional(),
     // As for list: a role conversation always reads its own role.
     roleId: RecruitingId.optional(),
   }),
