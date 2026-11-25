@@ -342,62 +342,6 @@ async function earlierGradingRun(
 }
 
 /**
- * Deeper (metered) searches one recruiter request may run for a role: the recruiter's rule is to
- * relax the bar over at most three tries, then say honestly what was found.
- */
-export const DEEPER_SEARCH_TRIES = 3;
-const DEEPER_SEARCH_WINDOW_MS = 6 * 60 * 60 * 1000;
-/** A low-effort run is billed at about $0.025; anything at or above this was a deeper run. */
-const DEEPER_SEARCH_MIN_COST_USD = 0.1;
-
-/**
- * Budget on paid deeper searches for one role: at most three per recruiter request. The count
- * starts again at the recruiter's latest message in this conversation, the role's latest
- * requirement change, or after six hours. Every agent (Main, Sourcer, a role team) goes through
- * this one check, so no prompt can loop past it.
- */
-async function requireDeeperSearchBudget(
-  prisma: PrismaClient,
-  roleId: string,
-  threadId: string | undefined,
-): Promise<void> {
-  const [message, revision] = await Promise.all([
-    threadId
-      ? prisma.message.findFirst({
-          where: { threadId, role: "user" },
-          orderBy: { createdAt: "desc" },
-          select: { createdAt: true },
-        })
-      : null,
-    prisma.recruitingRoleRevision.findFirst({
-      where: { roleId },
-      orderBy: { createdAt: "desc" },
-      select: { createdAt: true },
-    }),
-  ]);
-  const since = new Date(
-    Math.max(
-      Date.now() - DEEPER_SEARCH_WINDOW_MS,
-      message?.createdAt.getTime() ?? 0,
-      revision?.createdAt.getTime() ?? 0,
-    ),
-  );
-  const tries = await prisma.usageRecord.count({
-    where: {
-      roleId,
-      model: "agent_run",
-      unit: "credits",
-      costUsd: { gte: DEEPER_SEARCH_MIN_COST_USD },
-      createdAt: { gte: since },
-    },
-  });
-  if (tries < DEEPER_SEARCH_TRIES) return;
-  throw new IsolationError(
-    `This request already ran ${tries} deeper searches for this role, the most one request may use. Do not run another one or reword it. Tell the recruiter, in their language, how many people this role holds now, which requirement rules out the most, and offer to loosen it or widen the area; their next message or a change to the requirements allows new tries.`,
-  );
-}
-
-/**
  * People one quick people search may return. Ten is what the search's base price covers (each
  * result beyond ten is billed extra), and it keeps every search a small try, the recruiter's rule.
  */
@@ -597,7 +541,6 @@ export async function prepareAgentRun(
   if (grading) return prepared;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
-  if (metered) await requireDeeperSearchBudget(prisma, roleId, run?.threadId);
   const saved = await prisma.recruitingCandidate.findMany({
     where: { roleId, role: { id: roleId, spaceId: actor.spaceId, userId: actor.userId } },
     select: { candidateKey: true },
