@@ -651,7 +651,7 @@ import {
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
-import { checkRound, roundCriteria } from "./recruiting-round-check.js";
+import { checkRound, roundCriteria, withoutShownBefore } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -5749,14 +5749,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             // A key copied as a profile link or without its "/in/" prefix still names the saved
             // person, so the round records on the first call.
-            args = {
-              ...args,
-              candidateKeys: await savedRoleCandidateKeys(
-                deps.prisma,
-                thread.activeRecruitingRoleId,
-                args.candidateKeys,
-              ),
-            };
+            const fresh = await withoutShownBefore(
+              deps.prisma,
+              thread.activeRecruitingRoleId,
+              (
+                await savedRoleCandidateKeys(
+                  deps.prisma,
+                  thread.activeRecruitingRoleId,
+                  args.candidateKeys,
+                )
+              ).map(String),
+            );
+            // Nobody new: nothing is posted, and the agent hears why instead of a repeated list.
+            if (fresh.shownBefore && !fresh.keys.length)
+              return {
+                error: `Not recorded: all ${fresh.shownBefore} were already shown to the recruiter in an earlier round, so nothing was listed again. Record only people no round has shown, or say that nobody new fits yet.`,
+              };
+            args = { ...args, candidateKeys: fresh.keys };
           }
           // One round check for everything the recruiter asked for (brief, criteria and the reasons
           // they turned people down): the agent's verdict on each decides who is in.

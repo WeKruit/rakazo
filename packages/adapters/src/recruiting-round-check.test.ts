@@ -7,6 +7,7 @@ import {
   roundListedNotRecorded,
   roundPeopleNamed,
   roundRepeats,
+  withoutShownBefore,
 } from "./recruiting-round-check.js";
 
 describe("checkRound", () => {
@@ -346,6 +347,18 @@ describe("roundPeopleNamed", () => {
     await expect(
       roundPeopleNamed(prismaFor("ryan is off, find more", new Date()), input),
     ).resolves.toBeNull();
+  });
+});
+
+describe("withoutShownBefore", () => {
+  it("drops people an earlier round showed and keeps the rest in order", async () => {
+    const prisma = {
+      recruitingCalibrationRound: {
+        findMany: async () => [{ candidateKeys: ["a", "x"] }, { candidateKeys: ["c"] }],
+      },
+    };
+    await expect(withoutShownBefore(prisma as never, "role", ["a", "b", "c", "d", "b"])).resolves
+      .toEqual({ keys: ["b", "d"], shownBefore: 3 });
   });
 });
 

@@ -227,6 +227,25 @@ export async function roundRepeats(
     .join(" ");
 }
 
+/**
+ * A recorded round's people without anyone an earlier round of the role already showed, so the
+ * recruiter never reads the same person in two lists. Identity is the saved key, which is the
+ * person's LinkedIn path. A round with nobody new is left whole for the caller to turn back.
+ */
+export async function withoutShownBefore(
+  prisma: Pick<PrismaClient, "recruitingCalibrationRound">,
+  roleId: string,
+  keys: readonly string[],
+): Promise<{ keys: string[]; shownBefore: number }> {
+  const earlier = await prisma.recruitingCalibrationRound.findMany({
+    where: { roleId, candidateKeys: { hasSome: [...keys] } },
+    select: { candidateKeys: true },
+  });
+  const shown = new Set(earlier.flatMap((round) => round.candidateKeys));
+  const fresh = [...new Set(keys)].filter((key) => !shown.has(key));
+  return { keys: fresh, shownBefore: keys.length - fresh.length };
+}
+
 /** A role team's round list starts with this heading, in either language. */
 export const ROUND_HEADING = /^(?:\d+ (?:people|person) this round:|本轮 \d+ 人：)/;
 
