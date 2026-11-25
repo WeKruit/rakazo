@@ -21,7 +21,6 @@ import {
   readRecruitingFeedbackContext,
 } from "@rakazo/db";
 import type { ZodError } from "zod";
-import { peopleTargetFrom } from "./people-target.js";
 
 /** Why a preference naming the chat's role is not saved to memory shared by every role. */
 export const ROLE_PREFERENCE_ERROR =
@@ -34,9 +33,6 @@ export const NEW_ROLE_PREFERENCE_ERROR =
 /** A job description or new-role request: a title or new-role label at the start, or a "Job Title:" line. */
 const NEW_ROLE_TEXT =
   /^\s*(?:新(?:的)?(?:岗位|职位)|(?:岗位|职位)(?:名称)?|new (?:role|position|job|opening)|job title)\s*[:：]|(?:^|\n)\s*job title\s*[:：]/i;
-
-/** People to add when the recruiter accepts a round without naming a number: one small try. */
-const DEFAULT_SCALE_MORE = 20;
 
 /**
  * Round direction marks no one. fosp x5 11-20 (753783e2): "4、5、7不行…" and a turn-down naming three
@@ -118,7 +114,6 @@ export type RecruitingFeedbackResult = {
       round?: number;
       /** What to do in the same turn once a round is accepted. */
       next?: string;
-      target?: { people: number; inResultsNow: number };
     }
   | {
       status: "saved";
@@ -218,19 +213,11 @@ export async function executeRecruitingFeedback(
       roleId: feedback.roleId,
       expectedRoleRevision: feedback.expectedRoleRevision,
     });
-    // The server, not the model, works out the target: "find 50" with 65 already saved is 115.
-    const inResults = await deps.prisma.recruitingCandidate.count({
-      where: { roleId: feedback.roleId },
-    });
-    const target =
-      peopleTargetFrom(feedback.intent.quote, inResults) ??
-      inResults + DEFAULT_SCALE_MORE;
     return {
       ...result,
       status: approved.already ? "already_recorded" : "recorded",
       round: approved.round,
-      target: { people: target, inResultsNow: inResults },
-      next: `Target for this request: ${target} people in Results (${inResults} now). Use this number; do not work it out again. ${RECRUITING_SCALE_START}`,
+      next: RECRUITING_SCALE_START,
     };
   }
   if (feedback.target === "round") {

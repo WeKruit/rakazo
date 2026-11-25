@@ -110,7 +110,7 @@ export const RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP =
 
 /** Returned when the recruiter confirms the brief, so the first round starts without a role read. */
 export function recruitingBriefConfirmedNextStep(revision: number) {
-  return `The brief is confirmed and the role is now revision ${revision}; use expectedRoleRevision ${revision}. Start the first calibration round now: when this run's people searches already returned people rows, pick the ten from them and record them with calibration_round; otherwise issue the quick people searches together in your next step.`;
+  return `The brief is confirmed and the role is now revision ${revision}; use expectedRoleRevision ${revision}. When a round is already shown, carry on with what the recruiter asked. Otherwise start the first calibration round now: when this run's people searches already returned people rows, pick the ten from them and record them with calibration_round; otherwise issue the quick people searches together in your next step.`;
 }
 
 /**
@@ -135,7 +135,7 @@ export function isRecruitingNextStepCard(text: string): boolean {
 }
 
 export const RECRUITING_SCALE_START = `The recruiter accepts a round with the panel's accept control, the card's find-more option, or their own words to find more, scale up or go ahead ("find 100", "just search"). Record it at once with recruiting_feedback target "round" operation "approve" and their words; never ask again or show an approval card. A message that turns anyone down or changes who to look for is feedback for the next round of ten, even when it also says find more; judge by the recruiter's quoted words, also in a handoff from the global conversation. A note that conflicts with a confirmed requirement never holds the scale: scale first, then ask.
-Once accepted, in the same turn: (1) the target is 20 more than Results hold unless they named a number (a number at or below what Results hold means that many more, unless they say total; "more" with 100 or more held: ask how many with ask_user, 50 or 100 more plus custom); (2) run waves of four differently worded web_search_advanced_exa people searches (category "people", numResults 10, enableHighlights true, highlightsMaxCharacters 300; title variants, duty wording, nearby cities, peer companies, all feedback) as parallel calls, without reading or ranking between waves, until peopleInResults reaches the target or a wave adds fewer than five; (3) tell the recruiter in two or three lines with message_user how many are in Results and whether a deeper search continues; (4) only when short, end with one handoff to Sourcer for the missing number with the confirmed brief, all feedback, the accepted round as positive examples and everyone returned excluded (your reply after it is not shown). Scaling never starts an email draft. Report an unfilled target with the count found.`;
+Once accepted, in the same turn carry on to the number they named as the Short-round rule says (20 more when they named none; "more" with 100 or more held: ask how many with ask_user, 50 or 100 more plus custom). The number is people graded Strong or Promising, never how many Results hold: every search result gives gradedStrongOrPromising and notGradedYet, so each set of searches is followed by its check, and each report to the recruiter says how many fit so far. Scaling never starts an email draft.`;
 
 /**
  * A recruiter message asking for contacts, an email draft or a send. Round 1 of the playtest saw

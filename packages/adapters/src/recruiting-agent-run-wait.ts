@@ -62,7 +62,7 @@ export function recruitingAgentRunWaitPrompt(
   return [
     `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message; you are continuing your own work.`,
     quiet,
-    "When it has finished, say in one line how many new people were added and whether the role's target is met; if it is short, say why in plain words, as the provider's own summary explains it. Then carry on with the stage as your instructions say: if the role is still short of its target, the next wave continues this run with previousRunId. Start no unrelated search.",
+    "When it has finished, have its new people checked as the round rule says, then say in one line how many new people fit; if the request is still short, say why in plain words, as the provider's own summary explains it, and carry on as the Short-round rule says. Start no unrelated search.",
   ].join("\n");
 }
 
