@@ -492,6 +492,35 @@ describe("native recruiting_role", () => {
     );
   });
 
+  it("saves the role again when its save deadlocked with a search saving into it", async () => {
+    const input = {
+      operation: "create",
+      title: "Example engineer",
+      sourceRefs: [],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+      intent: { basis: "direct", quote: "Create this role" },
+    };
+    const receipt = { status: "saved", changed: true, workspace, source: { id: "verified-human" } };
+    // A Postgres deadlock as Prisma reports it from a raw query.
+    const deadlock = Object.assign(new Error("deadlock detected"), {
+      meta: { driverAdapterError: { cause: { originalCode: "40P01" } } },
+    });
+    vi.mocked(executeRecruitingRoleMutation)
+      .mockReset()
+      .mockRejectedValueOnce(deadlock)
+      .mockResolvedValueOnce(receipt as never);
+    expect(
+      await executeRecruitingRoleTool(
+        {} as PrismaClient,
+        { ...context, mutation: { ...mutation, effectRequest: input } },
+        input,
+      ),
+    ).toEqual(receipt);
+    expect(executeRecruitingRoleMutation).toHaveBeenCalledTimes(2);
+  });
+
   it("creates from semantic input without a model revision while keeping the native provenance guard", async () => {
     const prisma = {} as PrismaClient;
     const input = {

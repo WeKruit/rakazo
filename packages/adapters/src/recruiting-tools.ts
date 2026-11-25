@@ -53,6 +53,7 @@ import {
   saveRecruitingCandidateGrades,
   saveRecruitingCandidatePeopleSearch,
   scoped,
+  withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
@@ -291,12 +292,11 @@ export async function executeRecruitingRoleTool(
   const { actor, runId, sourceMessageId } = context;
   if (input.operation !== "read") {
     if (!context.mutation) throw new IsolationError();
-    return executeRecruitingRoleMutation(
-      prisma,
-      actor,
-      { ...context.mutation, runId, sourceMessageId },
-      input,
-      material,
+    const mutation = { ...context.mutation, runId, sourceMessageId };
+    // Searches saving into a new role lock it as they save. A deadlock with one rolls the role
+    // save back whole (staging branch play), so it runs again instead of failing the agent.
+    return withTransactionRetry(() =>
+      executeRecruitingRoleMutation(prisma, actor, mutation, input, material),
     );
   }
   const run = scoped(
