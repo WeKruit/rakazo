@@ -1,9 +1,4 @@
-import {
-  INSTANTLY_MCP_ENDPOINT,
-  isVendorService,
-  sendRecipients,
-  textLanguage,
-} from "@rakazo/core";
+import { INSTANTLY_MCP_ENDPOINT, isVendorService, sendRecipients } from "@rakazo/core";
 import {
   connectAskBlock,
   findAccountConnectAsk,
@@ -12,7 +7,6 @@ import {
   type PrismaClient,
 } from "@rakazo/db";
 
-import { SEND_NOW_REQUEST } from "./instantly-senders.js";
 import { hasPlatformMcpCredential } from "./mcp-connector.js";
 
 type ConnectBlock = ReturnType<typeof connectAskBlock>;
@@ -110,21 +104,14 @@ async function resolveProvider(prisma: PrismaClient, scope: Scope, provider: str
 }
 
 /**
- * A mail connect card for a send the recruiter asked for says, in one line built here, that the
- * draft is kept and goes out to the addresses they typed only when they press Send (gate
- * 9fd9c2ff: the card never showed the address; gate ecebc59b: the agent's own reason ran long).
- * Any other mail card keeps the agent's reason.
+ * A mail connect card keeps the agent's own reason and adds any address the recruiter typed that
+ * the reason leaves out (gate 9fd9c2ff: the card never showed the address). A fixed line here
+ * replaced the agent's "not sent yet" and claimed a kept draft even when none existed.
  */
 function mailReason(reason: string, recruiterText: string) {
-  const typed = sendRecipients({ text: recruiterText });
-  if (!typed.length && !SEND_NOW_REQUEST.test(recruiterText)) return reason;
-  const list = typed.join(", ");
-  const language = textLanguage(reason, 1);
-  if (language === "zh")
-    return `草稿已保留。连上 Gmail 后会出现发送卡片，按下发送才从你的邮箱${list ? `发给 ${list}` : "发出"}。`;
-  if (language === "en")
-    return `The draft is kept. Once Gmail is connected it comes back on a Send card and goes out from your own address${list ? ` to ${list}` : ""} only when you press Send.`;
-  const missing = typed.filter((address) => !reason.toLowerCase().includes(address));
+  const missing = sendRecipients({ text: recruiterText }).filter(
+    (address) => !reason.toLowerCase().includes(address),
+  );
   return missing.length ? `${reason} (${missing.join(", ")})` : reason;
 }
 
