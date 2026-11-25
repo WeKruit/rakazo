@@ -16,6 +16,7 @@ import {
   countRecruitingPeopleFoundSince,
   createThreadMessageInTransaction,
   mirrorAskInTransaction,
+  type Prisma,
   type PrismaClient,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -762,6 +763,7 @@ export async function showRoundWhereAskedNow(
   run: { id: string; spaceId: string; threadId: string },
   text: string,
   roundId: string,
+  picksOf?: string,
 ): Promise<void> {
   const found = await openDelegation(deps.prisma, run.threadId);
   if (!found) return;
@@ -774,7 +776,98 @@ export async function showRoundWhereAskedNow(
     })
   )
     return;
+  if (picksOf && (await setRoundPicksCopy(deps, run, root, picksOf, text, `round:${roundId}`)))
+    return;
   await showRoundWhereAsked(deps, run, root, `round:${roundId}`, text);
+}
+
+/**
+ * The first people of a round, shown while the rest are still being found, go where the round was
+ * asked for too (staging 11-25: the role chat had four people at 3 min, the chat the recruiter
+ * typed in had nothing until the ten were recorded at 5 min). `picksOf` is the role chat's list
+ * message; the same copy is rewritten as people are added and becomes the recorded round.
+ */
+export async function showRoundPicksWhereAsked(
+  deps: Pick<ExecutorDeps, "prisma" | "events">,
+  run: { id: string; spaceId: string; threadId: string },
+  text: string,
+  picksOf: string,
+): Promise<void> {
+  const found = await openDelegation(deps.prisma, run.threadId);
+  if (!found) return;
+  const { delegated, root } = found;
+  if (
+    await recruiterInRoleChat(deps.prisma, {
+      roleThreadId: run.threadId,
+      returnThreadId: root.returnThreadId,
+      since: delegated.createdAt,
+    })
+  )
+    return;
+  if (await setRoundPicksCopy(deps, run, root, picksOf, text)) return;
+  const blocks: MessageBlock[] = [{ kind: "text", text: clampBotMessage(text) }];
+  const shown = await withTransactionRetry(() =>
+    deps.prisma.$transaction(async (tx) => {
+      const copy = await createThreadMessageInTransaction(tx, {
+        threadId: root.returnThreadId,
+        role: "bot",
+        blocks,
+        botId: root.fromBotId,
+        runId: run.id,
+        clientNonce: `delegated-picks:${picksOf}`,
+        markUnread: true,
+        allowCancelledRun: true,
+      });
+      return appendEventInTransaction(tx, {
+        spaceId: run.spaceId,
+        threadId: root.returnThreadId,
+        botId: root.fromBotId,
+        type: "thread.message.created",
+        runId: run.id,
+        allowCancelledRun: true,
+        payload: { messageId: copy.id, role: "bot", blocks },
+      });
+    }),
+  );
+  await deps.events.notify(root.returnThreadId, shown.seq);
+}
+
+/** Rewrites the picks copy in place; with `recordedAs` it becomes the recorded round's copy. */
+async function setRoundPicksCopy(
+  deps: Pick<ExecutorDeps, "prisma" | "events">,
+  run: { id: string; spaceId: string },
+  root: { returnThreadId: string; fromBotId: string },
+  picksOf: string,
+  text: string,
+  recordedAs?: string,
+): Promise<boolean> {
+  const copy = await deps.prisma.message.findUnique({
+    where: {
+      threadId_clientNonce: {
+        threadId: root.returnThreadId,
+        clientNonce: `delegated-picks:${picksOf}`,
+      },
+    },
+    select: { id: true },
+  });
+  if (!copy) return false;
+  const blocks: MessageBlock[] = [{ kind: "text", text: clampBotMessage(text) }];
+  await deps.prisma.message.update({
+    where: { id: copy.id },
+    data: {
+      blocks: blocks as Prisma.InputJsonValue,
+      ...(recordedAs ? { clientNonce: `delegated-round:${recordedAs}` } : {}),
+    },
+  });
+  await deps.events.append({
+    spaceId: run.spaceId,
+    threadId: root.returnThreadId,
+    botId: root.fromBotId,
+    runId: run.id,
+    type: "thread.message.updated",
+    payload: { messageId: copy.id, role: "bot", blocks },
+  });
+  return true;
 }
 
 /** The text of the round as posted where it was asked for. */
