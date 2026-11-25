@@ -584,6 +584,9 @@ test("a role chat's reply follows the recruiter's newest message in any chat", (
   const language = (failures) => failures.some((f) => f.startsWith("language"));
   assert(!language(conversationChecks([jd, list], { recruiter: [jd, aside] })));
   assert(language(conversationChecks([jd, list], { recruiter: [jd] })));
+  // 11-25: the role chat's copy of the JD lands just after the aside; it is not newer words.
+  const copy = at(user(jd.text), "00:06");
+  assert(!language(conversationChecks([copy, list], { recruiter: [copy, jd, aside] })));
 });
 
 test("a card answer or the brief confirmation does not set the recruiter's language", () => {

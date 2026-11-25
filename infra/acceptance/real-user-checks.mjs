@@ -145,10 +145,14 @@ const clearLanguage = (text) =>
 /**
  * `recruiter` is every message the recruiter wrote in any chat (with `at`): the product answers in
  * the language of their newest message wherever they wrote it, so a role chat's reply follows an
- * aside typed in Kruit's chat. Without it, the chat's own last message counts.
+ * aside typed in Kruit's chat. Without it, the chat's own last message counts. The product's copy
+ * of an earlier message (the JD it posts to open a role chat) keeps the original's time.
  */
 export function conversationChecks(messages, { recruiter } = {}) {
   const failures = [];
+  recruiter = recruiter
+    ?.toSorted((a, b) => (a.at ?? "").localeCompare(b.at ?? ""))
+    .filter((item, index, all) => !all.slice(0, index).some((earlier) => earlier.text === item.text));
   const typed = messages
     .filter((message) => message.role === "user")
     .flatMap((message) => message.text.match(EMAIL) ?? [])
