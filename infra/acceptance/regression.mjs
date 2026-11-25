@@ -1537,6 +1537,9 @@ try {
   });
 
   async function memoryCase(team, kruit, fixture, failures) {
+    // An earlier check's card still waiting in Kruit would take the preference as its answer
+    // (gate 4250713f: it answered a city card and the resumed run stopped on a mail confirm).
+    await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
     const told = await say(
       kruit.id,
       `记住一个长期偏好：以后给我汇报时，把我的团队叫做「${team}」组。`,
