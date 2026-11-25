@@ -531,9 +531,7 @@ import {
   OUTREACH_MAILBOX_ONLY_NOTE,
   OWN_EMAIL_REQUEST,
   ownMailboxSendingAllowed,
-  SEND_NOW_REQUEST,
   SEND_NOW_WITHOUT_GMAIL_NOTE,
-  showsGmailCard,
   SENDER_READ_FIRST,
   senderApprovalDisplay,
 } from "./instantly-senders.js";
@@ -13441,10 +13439,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? OUTREACH_MAILBOX_ONLY_NOTE
             : undefined;
         // Own-email accounts: "send now" before Gmail is connected gets one plain line and the card.
+        // Every turn carries it: a phrase list missed 「发给他」 and 「不连邮箱」 (one-off-email,
+        // first-timer-no-gmail), and the agent then showed the card with no word that nothing went out.
         const sendNowNote =
-          hideVendors &&
-          (SEND_NOW_REQUEST.test(lastRecruiterText) || showsGmailCard(messages)) &&
-          (await ownMailboxSendingAllowed(deps.prisma, run).catch(() => false))
+          hideVendors && (await ownMailboxSendingAllowed(deps.prisma, run).catch(() => false))
             ? SEND_NOW_WITHOUT_GMAIL_NOTE
             : undefined;
         // Back after a day or more with news waiting: the reply opens with what changed.
