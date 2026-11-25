@@ -61,9 +61,11 @@ const RECRUITING_SERVICES: RecruitingService[] = [
     description: "Platform people search for quick calibration rounds",
     endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
     bots: ["main", "sourcer", "outreach", "reviewer"],
-    tools: ["web_search_exa", "web_search_advanced_exa", "agent_run"],
-    // Outreach searches the public web for a person's own posted email; only the advanced
-    // people search saves results into the role's candidates. The quality check grades saved
+    // One people search for rounds: the advanced one carries the profile evidence and the "why
+    // recommended" line the check reads. Offered beside the plain one, the plain one was picked
+    // for first rounds and its thin profiles came back graded unknown.
+    tools: ["web_search_advanced_exa", "agent_run"],
+    // Outreach searches the public web for a person's own posted email. The quality check grades saved
     // people with one agent run per batch.
     toolsByBot: { outreach: ["web_search_exa"], reviewer: ["agent_run"] },
   },

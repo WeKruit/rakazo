@@ -168,7 +168,7 @@ describe("ensurePlatformServices", () => {
           botId,
           serverId: "people-search",
           allowAllTools: false,
-          allowedTools: ["web_search_exa", "web_search_advanced_exa", "agent_run"],
+          allowedTools: ["web_search_advanced_exa", "agent_run"],
         }),
       ),
       skipDuplicates: true,
