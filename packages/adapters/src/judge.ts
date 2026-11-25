@@ -29,7 +29,33 @@ export interface TextJudge {
     rows: readonly LanguageRow[],
     signal?: AbortSignal,
   ): Promise<Map<string, LanguageSignal>>;
+  /**
+   * One person's text judged against every requirement in one request: how clearly the text
+   * shows each. Undefined when the judge could not answer.
+   */
+  criteria?(
+    state: Record<string, unknown>,
+    requirements: readonly { id: string; statement: string }[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, CriterionVerdict> | undefined>;
 }
+
+export const CRITERION_LEVELS = ["strong", "medium", "weak", "absent"] as const;
+/** How clearly a profile shows one requirement, and how likely it is not shown at all. */
+export type CriterionVerdict = {
+  level: (typeof CRITERION_LEVELS)[number];
+  confidence: number;
+  absent: number;
+};
+
+const CRITERION_CHOICES = {
+  strong: "The profile states it clearly, with detail or years",
+  medium: "The profile shows it but briefly or partly",
+  weak: "Only an indirect hint",
+  absent: "The profile does not show it, or shows the opposite",
+};
+/** Many questions ride one request, so it gets a little longer than a single yes/no. */
+const CRITERIA_TIMEOUT_MS = 5_000;
 
 const JUDGE_TIMEOUT_MS = 2_000;
 /** A batch is judged in parallel behind the check, so it gets the judge's time and a little more. */
@@ -102,6 +128,52 @@ export function typeSafeJudge(
 ): TextJudge {
   return {
     ...(languageUrl ? { language: languageCheck(languageUrl, apiKey, fetchImpl) } : {}),
+    async criteria(state, requirements, signal) {
+      try {
+        const timeout = AbortSignal.timeout(CRITERIA_TIMEOUT_MS);
+        const response = await fetchImpl("https://api.typesafe.ai/v1/systemone", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: "jev-latest",
+            state,
+            questions: Object.fromEntries(
+              requirements.map((requirement, index) => [
+                `q${index}`,
+                {
+                  type: "choice",
+                  instructions: `Does this person's profile show: ${requirement.statement}?`,
+                  criteria: CRITERION_CHOICES,
+                },
+              ]),
+            ),
+          }),
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+        if (!response.ok) return undefined;
+        const body = (await response.json()) as {
+          answers?: Record<
+            string,
+            { choice?: unknown; confidence?: unknown; probabilities?: { absent?: unknown } }
+          >;
+        };
+        const verdicts = new Map<string, CriterionVerdict>();
+        for (const [index, requirement] of requirements.entries()) {
+          const answer = body.answers?.[`q${index}`];
+          const level = CRITERION_LEVELS.find((item) => item === answer?.choice);
+          if (!level || typeof answer?.confidence !== "number") continue;
+          const absent = answer.probabilities?.absent;
+          verdicts.set(requirement.id, {
+            level,
+            confidence: answer.confidence,
+            absent: typeof absent === "number" ? absent : level === "absent" ? 1 : 0,
+          });
+        }
+        return verdicts.size ? verdicts : undefined;
+      } catch {
+        return undefined;
+      }
+    },
     async yes(instructions, state, signal) {
       try {
         const timeout = AbortSignal.timeout(JUDGE_TIMEOUT_MS);

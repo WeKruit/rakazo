@@ -7887,6 +7887,39 @@ const SEARCH_MATCH_TIERS: ReadonlySet<string> = new Set([
   "Partial",
 ]);
 
+/** The grade a saved search row shows the agent: its tier, score and the requirements not shown. */
+function gradeShown(entry: { row: Record<string, unknown>; check?: unknown }, already: boolean) {
+  if (already) return { alreadyGraded: true };
+  const check = entry.check as
+    | {
+        match_tier?: unknown;
+        match_score?: unknown;
+        criteria?: { statement: string; level: string }[];
+      }
+    | undefined;
+  const tier = check?.match_tier ?? entry.row.match_tier;
+  if (typeof tier !== "string" || !SEARCH_MATCH_TIERS.has(tier)) return {};
+  const notShown = (check?.criteria ?? [])
+    .filter((item) => item.level === "absent")
+    .map((item) => item.statement.slice(0, 80));
+  return {
+    grade: tier,
+    score: check?.match_score ?? entry.row.match_score ?? null,
+    ...(notShown.length ? { notShown } : {}),
+  };
+}
+
+/** The people of a role who already have a grade. */
+export async function listRecruitingGradedCandidateKeys(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  roleId: string,
+): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ candidateKey: string }[]>(Prisma.sql`
+    SELECT DISTINCT o."candidateKey" FROM "recruiting_candidate_occurrences" o
+    WHERE o."roleId" = ${roleId} AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'`);
+  return rows.map((row) => row.candidateKey);
+}
+
 export async function saveRecruitingCandidatePeopleSearch(
   prisma: PrismaClient,
   actor: Actor,
@@ -7950,18 +7983,25 @@ export async function saveRecruitingCandidatePeopleSearch(
       file.clientNonce !== `recruiting-people-search:${saving.id}`
     )
       throw new IsolationError();
+    const graded = new Set(await listRecruitingGradedCandidateKeys(tx, role.id));
     const saved = await saveUnassessedCandidatePage(
       tx,
       actor,
       { run, thread, role, saving, trusted, file },
       {
-        // A search that graded the people it found: its grade is the role's match for them.
+        // A person's grade for the role is given once: the check that ran on this search, or the
+        // search's own grade. Someone already graded keeps theirs when a later search finds them.
         rows: captured.rows.map((entry) => {
-          const { match_tier: tier, match_score: score } = entry.row;
+          const key = normalizeRecruitingCandidateRow(entry.row, {
+            schemaKnown: true,
+          }).candidateKey;
+          if (key && graded.has(key)) return entry;
+          const check = (entry as { check?: Prisma.InputJsonObject }).check;
+          const { match_tier: tier, match_score: score } = check ?? entry.row;
           return typeof tier === "string" &&
             SEARCH_MATCH_TIERS.has(tier) &&
             typeof score === "number"
-            ? { ...entry, matchFields: { match_score: score, match_tier: tier } }
+            ? { ...entry, matchFields: check ?? { match_score: score, match_tier: tier } }
             : entry;
         }),
         describe: ({ artifact, observedAt, candidateRows }) => ({
@@ -7983,9 +8023,7 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
-              ...(typeof saved.match_tier === "string" && SEARCH_MATCH_TIERS.has(saved.match_tier)
-                ? { grade: saved.match_tier, score: saved.match_score ?? null }
-                : {}),
+              ...gradeShown(captured.rows[row.rowIndex]!, graded.has(row.candidateKey)),
               email: (saved._profile as { email?: string | null } | undefined)?.email ?? null,
               _profile: saved._profile,
               _profileSourceEffectId: captured.rows[row.rowIndex]!.sourceEffectId,
