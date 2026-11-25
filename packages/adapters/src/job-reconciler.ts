@@ -26,6 +26,9 @@ import { isUserProgressClientNonce } from "./user-progress.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 100;
+// After one full sweep per process, profile intents are discovered from recent saves only;
+// older unprojected saves are swept again when the process restarts.
+const PROFILE_RECENT_MS = 60 * 60_000;
 const ROUTINE_LOOKAHEAD_MS = 60_000;
 const CONTROL_LOOKAHEAD_MS = 60_000;
 const STAGE_WATCH_SCAN_MS = 60_000;
@@ -163,6 +166,7 @@ export function createJobReconciler(
   let routineCursor: Cursor | undefined;
   let controlCursor: ControlCursor | undefined;
   let profileCursor: Cursor | undefined;
+  let profileSweptAt: Date | undefined;
   let controlScanDeadline: Date | undefined;
   let stagesWatchedAt = 0;
   let searchWaitsArmedAt = 0;
@@ -200,6 +204,7 @@ export function createJobReconciler(
               WHERE done.kind='recruiting_profile_projection' AND done.status='completed'
                 AND done."idempotencyKey"='recruiting-profile-project:'||page."effectId"||':'||page."artifactHash")
             ${profileCursor ? Prisma.sql`AND (saving."createdAt",saving.id)>(${profileCursor.at},${profileCursor.id})` : Prisma.empty}
+            ${profileSweptAt ? Prisma.sql`AND saving."createdAt">${new Date(profileSweptAt.getTime() - PROFILE_RECENT_MS)}` : Prisma.empty}
           ORDER BY saving."createdAt",saving.id LIMIT ${batchSize}
         `);
         await Promise.all(
@@ -208,6 +213,7 @@ export function createJobReconciler(
         const last = pages.at(-1);
         profileCursor =
           pages.length === batchSize && last ? { at: last.createdAt, id: last.id } : undefined;
+        if (!profileCursor) profileSweptAt = now;
       } catch (error) {
         getLogger().error("recruiting profile reconciliation", error);
       }
