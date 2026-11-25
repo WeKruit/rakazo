@@ -625,7 +625,7 @@ suite("stored global Inbox projection", () => {
     });
     expect(
       (await read({ query: "Subject cached-profile" })).items[0]?.person?.autumn?.ranking,
-    ).toMatchObject({ grade: "Partial", state: "outdated", roleRevisionId: roleId });
+    ).toMatchObject({ grade: "Partial", state: "current", roleRevisionId: roleId });
   });
   it("indexes 24,000 saved messages off-request while reads remain read-only and page immediately", async () => {
     const before = await prisma.recruitingInboxMessage.count({

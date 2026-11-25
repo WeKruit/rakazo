@@ -166,9 +166,6 @@ export function RecruitingEvidenceTab({
               <NativeSelectOption value="uncertain">
                 <Trans>Needs a closer look</Trans>
               </NativeSelectOption>
-              <NativeSelectOption value="outdated">
-                <Trans>Needs a new review</Trans>
-              </NativeSelectOption>
               <NativeSelectOption value="unreviewed">
                 <Trans>Not reviewed yet</Trans>
               </NativeSelectOption>
