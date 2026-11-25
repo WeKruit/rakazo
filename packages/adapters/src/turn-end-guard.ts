@@ -185,7 +185,8 @@ export async function recruitingRoundListText(
   return `${heading}${shared ? `\n${sharedLine}${shared}` : ""}\n\n${lines.join("\n")}`;
 }
 
-const PASSAGE_MAX = 220;
+// One line a recruiter reads at a glance; the whole profile and assessment are in Results.
+const PASSAGE_MAX = 120;
 
 /**
  * A profile passage as the recruiter reads it: without the search's field scaffolding
