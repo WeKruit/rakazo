@@ -67,7 +67,8 @@ type StatePrisma = Pick<
 /**
  * An account that sends from the recruiter's own Gmail, with none connected: nothing can go out,
  * so no line may read as going ahead with a send (gate ecebc59b: 「好，这就处理。」 after 「直接发吧」,
- * then the Connect card 22 s later).
+ * then the Connect card 22 s later). Gate 8856cf75 (mobile-first-look): asked where replies show
+ * up, Kruit named the Inbox but not that it stays empty until Gmail is connected.
  */
 async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userId: string }) {
   // deny-then-change-and-send 11-16: with no line on how this account sends, Kruit blamed a
@@ -86,7 +87,7 @@ async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userI
   });
   return gmail
     ? undefined
-    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Writing one needs no mailbox: show it in the reply now; it goes out once they press Connect Gmail and then Send on its card. Asked where to connect: the Connect button on that card in this chat, or later the menu under their name at the bottom left, then Integrations (集成); no other place exists.";
+    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Writing one needs no mailbox: show it in the reply now; it goes out once they press Connect Gmail and then Send on its card. Asked where to connect: the Connect button on that card in this chat, or later the menu under their name at the bottom left, then Integrations (集成); no other place exists. Their Inbox page shows only \"No emails yet\" and a Connect Gmail button until then: candidates' replies show there once Gmail is connected and an email has gone out from it.";
 }
 
 /** Calendar connectors the product books interviews through (request_connection's catalog). */
