@@ -10269,6 +10269,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   await showRoundWhereAskedNow(deps, run, text, applied.effect.id).catch((error) =>
                     getLogger().warn("round not shown where asked", { error: String(error) }),
                   );
+                  // The recorded round's list is final. A later round in the same run gets its own
+                  // message: it used to rewrite this one, so rounds of 5, 4 and 1 recorded in one
+                  // turn left the recruiter a single list of 1 (branch play 11-25).
+                  roundStream = undefined;
                 }
                 return round && typeof round === "object" && !Array.isArray(round)
                   ? {
