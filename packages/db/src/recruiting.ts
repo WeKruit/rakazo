@@ -7879,6 +7879,14 @@ export function recruitingPeopleSearchReceipt(
  * Save the people a people-search connector returned earlier in this run as one unassessed
  * candidate page on the thread's role. Every source must be a completed call of this run.
  */
+/** The grades a search may give a person it found; anything else is not saved as a grade. */
+const SEARCH_MATCH_TIERS: ReadonlySet<string> = new Set([
+  "Strong",
+  "Promising",
+  "Uncertain",
+  "Partial",
+]);
+
 export async function saveRecruitingCandidatePeopleSearch(
   prisma: PrismaClient,
   actor: Actor,
@@ -7947,7 +7955,15 @@ export async function saveRecruitingCandidatePeopleSearch(
       actor,
       { run, thread, role, saving, trusted, file },
       {
-        rows: captured.rows,
+        // A search that graded the people it found: its grade is the role's match for them.
+        rows: captured.rows.map((entry) => {
+          const { match_tier: tier, match_score: score } = entry.row;
+          return typeof tier === "string" &&
+            SEARCH_MATCH_TIERS.has(tier) &&
+            typeof score === "number"
+            ? { ...entry, matchFields: { match_score: score, match_tier: tier } }
+            : entry;
+        }),
         describe: ({ artifact, observedAt, candidateRows }) => ({
           source: {
             kind: "people_search",
@@ -7967,6 +7983,9 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
+              ...(typeof saved.match_tier === "string" && SEARCH_MATCH_TIERS.has(saved.match_tier)
+                ? { grade: saved.match_tier, score: saved.match_score ?? null }
+                : {}),
               email: (saved._profile as { email?: string | null } | undefined)?.email ?? null,
               _profile: saved._profile,
               _profileSourceEffectId: captured.rows[row.rowIndex]!.sourceEffectId,

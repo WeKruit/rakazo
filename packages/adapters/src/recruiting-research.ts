@@ -202,6 +202,13 @@ const EDUCATION_SCHEMA = {
  */
 export const AGENT_RUN_MAX_PEOPLE = 20;
 
+/** The grades a search gives a person it found, in the words Results already reads. */
+export const PEOPLE_MATCH_TIERS = ["Strong", "Promising", "Uncertain", "Partial"] as const;
+
+/**
+ * The search agent finds and grades in the same run (the recruiter's rule: it is our search agent,
+ * we only pass the request on), so every person comes back with a score, a tier and one reason.
+ */
 export const AGENT_RUN_PEOPLE_SCHEMA = {
   type: "object",
   required: ["people"],
@@ -211,7 +218,7 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
       maxItems: AGENT_RUN_MAX_PEOPLE,
       items: {
         type: "object",
-        required: ["name", "linkedin_url", "evidence"],
+        required: ["name", "linkedin_url", "evidence", "match_score", "match_tier", "fit_reasons"],
         properties: {
           name: { type: "string" },
           linkedin_url: { type: ["string", "null"], format: "uri" },
@@ -219,7 +226,27 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
           current_company: { type: ["string", "null"] },
           location: { type: ["string", "null"] },
           education: EDUCATION_SCHEMA,
-          evidence: { type: "string" },
+          evidence: {
+            type: "string",
+            description:
+              "What the public profile says, facts only: titles, companies, dates, years, skills, languages, current location.",
+          },
+          match_score: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100,
+            description: "How well the profile fits the request's requirements on the person.",
+          },
+          match_tier: {
+            type: "string",
+            enum: PEOPLE_MATCH_TIERS,
+            description:
+              "Strong: every requirement is shown on the profile. Promising: most are shown and none is contradicted. Uncertain: the profile does not show enough to tell. Partial: a requirement is clearly not met, or the person is someone the request says to leave out.",
+          },
+          fit_reasons: {
+            type: "string",
+            description: "One short sentence: why, and what is missing.",
+          },
         },
       },
     },
