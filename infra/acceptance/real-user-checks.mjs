@@ -188,7 +188,20 @@ export function conversationChecks(messages, { recruiter } = {}) {
       const echo =
         !/\p{Script=Han}/u.test(words) &&
         (words.toLowerCase().match(/[a-z]+/g) ?? []).every((word) => typed.has(word));
-      if (words.trim() && !echo && chinese !== mostlyChinese(words))
+      // Its row's time is when it was created; the words may be written until the chat's next
+      // message, so a recruiter message in between can set the language too.
+      const until = messages[index + 1]?.at;
+      const between = (recruiter ?? []).filter(
+        (item) =>
+          message.at &&
+          item.at > message.at &&
+          (!until || item.at <= until) &&
+          clearLanguage(item.text),
+      );
+      const fits = [newest, ...between].some(
+        (item) => mostlyChinese(item.text) === mostlyChinese(words),
+      );
+      if (words.trim() && !echo && !fits)
         failures.push(
           `language: recruiter wrote ${chinese ? "Chinese" : "English"}, reply is not: "${words.slice(0, 80)}"`,
         );
