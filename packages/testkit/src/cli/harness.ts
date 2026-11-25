@@ -233,7 +233,7 @@ async function main() {
     if (serveMode && process.env.TYPESAFE_API_KEY)
       await handles.judgeSettings
         .save(
-          { apiKey: process.env.TYPESAFE_API_KEY },
+          { provider: "typesafe", apiKey: process.env.TYPESAFE_API_KEY },
           {
             operationId: "harness.judge",
             traceId: "harness.judge",
