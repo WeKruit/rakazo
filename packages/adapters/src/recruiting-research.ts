@@ -481,6 +481,49 @@ export function limitPeopleSearch(
   return plain ? args : { ...args, numResults: wanted };
 }
 
+/** Most saved people one quick search leaves out by name. */
+const QUICK_SEARCH_EXCLUSION_LIMIT = 100;
+
+/**
+ * A quick people search leaves out the people already saved in the conversation's role, as an
+ * agent run does. The people index refuses URL filters and accepts a text filter, so they are
+ * named. Plays of 11-25: 50–80% of each later search's rows were people an earlier one had saved.
+ */
+export async function excludeFoundPeople(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  server: Pick<McpServer, "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (
+    toolName !== "web_search_advanced_exa" ||
+    args.category !== "people" ||
+    server.transport !== "streamable_http" ||
+    !server.endpoint ||
+    new URL(server.endpoint).host !== "mcp.exa.ai"
+  )
+    return args;
+  const roleId = (await runRole(prisma, actor))?.thread.activeRecruitingRoleId;
+  if (!roleId) return args;
+  const saved = await prisma.recruitingCandidateOccurrence.findMany({
+    where: {
+      roleId,
+      name: { not: null },
+      candidate: { role: { spaceId: actor.spaceId, userId: actor.userId } },
+    },
+    select: { name: true },
+    distinct: ["candidateKey"],
+    orderBy: { page: { observedAt: "desc" } },
+    take: QUICK_SEARCH_EXCLUSION_LIMIT,
+  });
+  const given = Array.isArray(args.excludeText) ? args.excludeText.map(String) : [];
+  const names = [
+    ...new Set([...given, ...saved.flatMap(({ name }) => (name?.trim() ? [name.trim()] : []))]),
+  ];
+  return names.length ? { ...args, excludeText: names } : args;
+}
+
 /** Most saved people sent as one agent run's exclusion list. */
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 

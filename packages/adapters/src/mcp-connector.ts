@@ -85,6 +85,7 @@ import { MCP_NOT_CONNECTED, type McpRuntimeAuth, McpSession } from "./mcp-transp
 import { addressTypedInConversation } from "./named-address.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
+  excludeFoundPeople,
   limitPeopleSearch,
   lookedUpContacts,
   prepareAgentRun,
@@ -1430,15 +1431,21 @@ export class McpConnector implements ConnectorProvider {
         };
         return;
       }
-      let args = limitPeopleSearch(
+      let args = await excludeFoundPeople(
+        this.prisma,
+        context,
         assignment.server,
         call.route.toolName,
-        await prepareAgentRun(
-          this.prisma,
-          context,
+        limitPeopleSearch(
           assignment.server,
           call.route.toolName,
-          ownedArgs,
+          await prepareAgentRun(
+            this.prisma,
+            context,
+            assignment.server,
+            call.route.toolName,
+            ownedArgs,
+          ),
         ),
       );
       if (emailScope && call.route.toolName === "list_emails") {
