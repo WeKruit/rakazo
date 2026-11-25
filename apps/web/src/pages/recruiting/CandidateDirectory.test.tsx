@@ -354,32 +354,19 @@ it("shows the same people in a board grouped only by their recorded states", asy
   expect(view.textContent).toContain("Passed");
 });
 
-it("shows the recruiter's pass, not a stale grade's re-review, on people they turned down", async () => {
-  // Staging 2d92e0d2 (fosp): turned-down people graded before a brief change read 需要重新评估.
-  const outdated = {
+it("shows a grade made before the brief changed as it was given", async () => {
+  // Big-ask 11-25: one loosened requirement showed all 123 people as 需要重新评估.
+  const graded = row("graded");
+  graded.autumn!.ranking = {
     source: "reviewer",
-    state: "outdated",
-    roleRevisionId: "old",
+    state: "current",
+    roleRevisionId: "earlier-brief",
     sourceEffectId: null,
-    grade: null,
+    grade: "Strong",
     score: 80,
-    group: "outdated",
-  } as const;
-  const turnedDown = row("turned-down");
-  turnedDown.autumn!.recruiterVerdict = "not_fit";
-  turnedDown.autumn!.ranking = outdated;
-  const waiting = row("waiting");
-  waiting.autumn!.ranking = outdated;
-  const { view } = await mount(
-    <CandidateDirectory rows={[turnedDown, waiting]} onOpen={vi.fn()} />,
-  );
-  const cells = Object.fromEntries(
-    [...view.querySelectorAll("tbody tr")].map((item) => [
-      item.textContent?.includes("Candidate turned-down") ? "turnedDown" : "waiting",
-      item.textContent ?? "",
-    ]),
-  );
-  expect(cells.turnedDown).toContain("Passed");
-  expect(cells.turnedDown).not.toContain("Needs a new review");
-  expect(cells.waiting).toContain("Needs a new review");
+    group: "strong_match",
+  };
+  const { view } = await mount(<CandidateDirectory rows={[graded]} onOpen={vi.fn()} />);
+  expect(view.querySelector("tbody tr")?.textContent).toContain("Strong Match");
+  expect(view.textContent).not.toContain("Needs a new review");
 });

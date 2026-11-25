@@ -8829,10 +8829,10 @@ export function candidateIndexQuery(
         WHERE s.v IS NOT NULL)
       ELSE CASE match."value" #>> '{}'
         WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Uncertain' THEN 3 END END`;
+  // A person keeps their latest Reviewer grade after a brief change: grades are never redone.
   const rankingValue = Prisma.sql`CASE WHEN reviewer."roleRevisionId" IS NOT NULL THEN
-    CASE WHEN reviewer."roleRevisionId" <> (SELECT "currentRevisionId" FROM "recruiting_roles" WHERE "id" = ${roleId}) THEN 4000
-      ELSE CASE reviewer.grade WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1000
-        WHEN 'Partial' THEN 2000 ELSE 3000 END + COALESCE(100 - reviewer.score, 101) END
+    CASE reviewer.grade WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1000
+      WHEN 'Partial' THEN 2000 ELSE 3000 END + COALESCE(100 - reviewer.score, 101)
     WHEN provider.score IS NOT NULL THEN 5000 + 100 - provider.score ELSE 6000 END`;
   const fields = [
     ["name", "name"],
@@ -11522,15 +11522,15 @@ export async function listRecruitingCandidates(
         );
       if (explicitSource) clauses.push(Prisma.sql`b."sourcePageId" IS NOT NULL`);
       if (input.rankingGroup) {
-        const group = [
-          "strong_match",
-          "worth_talking",
-          "partial",
-          "uncertain",
-          "outdated",
-          "unreviewed",
-          "unscored",
-        ].indexOf(input.rankingGroup);
+        // Thousands of rankingValue; 4 was the retired "needs a new review".
+        const group = {
+          strong_match: 0,
+          worth_talking: 1,
+          partial: 2,
+          uncertain: 3,
+          unreviewed: 5,
+          unscored: 6,
+        }[input.rankingGroup];
         clauses.push(Prisma.sql`floor(b."rankingValue" / 1000) = ${group}`);
       }
       const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, rankDomainPageId ?? input.sourceEffectId, input)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;

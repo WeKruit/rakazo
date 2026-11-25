@@ -186,15 +186,12 @@ const Fit = memo(function Fit({
   sections,
   compact = false,
   grading = false,
-  passedOn = false,
   ranking,
 }: {
   ranking?: DirectoryProfile["ranking"];
   sections: DirectoryProfile["sections"];
   compact?: boolean;
   grading?: boolean;
-  /** The recruiter passed on them: their own word stands over a grade made before a brief change. */
-  passedOn?: boolean;
 }) {
   const { t } = useLingui();
   if (grading && (ranking?.group === "unreviewed" || ranking?.group === "unscored"))
@@ -206,7 +203,7 @@ const Fit = memo(function Fit({
       </span>
     );
   const score = ranking
-    ? ranking.state === "outdated" || ranking.score === null
+    ? ranking.score === null
       ? null
       : { label: t`Match score`, value: ranking.score.toLocaleString() }
     : sections.fit?.score;
@@ -219,15 +216,11 @@ const Fit = memo(function Fit({
           ? t`Partial match`
           : ranking?.group === "uncertain"
             ? t`Needs a closer look`
-            : ranking?.group === "outdated"
-              ? passedOn
-                ? null
-                : t`Needs a new review`
-              : ranking?.group === "unreviewed"
-                ? t`Not reviewed yet`
-                : ranking?.group === "unscored"
-                  ? t`Not rated yet`
-                  : null;
+            : ranking?.group === "unreviewed"
+              ? t`Not reviewed yet`
+              : ranking?.group === "unscored"
+                ? t`Not rated yet`
+                : null;
   const tier = groupLabel
     ? { label: ranking?.grade ?? groupLabel, value: groupLabel }
     : sections.fit?.tier;
@@ -675,7 +668,6 @@ export function CandidateDirectory({
                       ranking={profile.ranking}
                       sections={profile.sections}
                       grading={grading}
-                      passedOn={passed(row)}
                       compact
                     />
                   </td>
@@ -748,12 +740,7 @@ export function CandidateDirectory({
                 ) : null}
                 {showFit ? (
                   <div className="mt-4 flex-1 border-t border-border pt-3">
-                    <Fit
-                      ranking={profile.ranking}
-                      sections={profile.sections}
-                      grading={grading}
-                      passedOn={passed(row)}
-                    />
+                    <Fit ranking={profile.ranking} sections={profile.sections} grading={grading} />
                   </div>
                 ) : null}
                 <div className="mt-3">

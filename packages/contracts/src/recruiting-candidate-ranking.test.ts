@@ -21,8 +21,9 @@ describe("saved candidate ranking", () => {
         roleRevisionId: "v1",
         currentRoleRevisionId: "v2",
         source: "reviewer",
-      }).group,
-    ).toBe("outdated");
+      }),
+      // A grade made before the brief changed stands; grades are never redone.
+    ).toMatchObject({ state: "current", group: "worth_talking" });
     expect(
       recruitingCandidateRanking({
         sourceEffectId: "saved-effect",

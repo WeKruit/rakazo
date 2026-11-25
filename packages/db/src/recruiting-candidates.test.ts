@@ -175,7 +175,7 @@ describe("candidate listing and shortlist boundaries", () => {
     });
     const query = f.tx.$queryRaw.mock.calls[0]![0] as Prisma.Sql;
     expect(query.sql).toContain(`e."request"->>'operation' = 'save_grades'`);
-    expect(query.sql).toContain(`reviewer."roleRevisionId" <>`);
+    expect(query.sql).not.toContain(`reviewer."roleRevisionId" <>`);
     expect(query.sql).toContain(`WHEN 'Promising' THEN 1000`);
     expect(query.sql).toContain(`floor(b."rankingValue" / 1000)`);
     expect(query.sql).toContain(
@@ -214,12 +214,13 @@ describe("candidate listing and shortlist boundaries", () => {
           INSERT INTO recruiting_candidate_occurrences ("roleId", "candidateKey", "pageId", "rowIndex", issues) VALUES ('role', 'zero', 'facts', 0, '["missing_field:name","missing_field:current_title","missing_field:current_company","missing_field:location","missing_field:linkedin_url","missing_field:resume_url","missing_field:evidence_urls"]');
         `);
         const candidates = [
+          // Graded before the brief changed: the grade still stands and sorts as Strong.
+          ["old-brief", "old", "Strong", 100],
           ["strong", "current", "Strong", 1],
           ["promising-a", "current", "Promising", 98],
           ["promising-b", "current", "Promising", 98],
           ["partial", "current", "Partial", 99],
           ["uncertain", "current", "Uncertain", 100],
-          ["outdated", "old", "Strong", 100],
           ["provider", "provider", "Strong", 7],
           ["zero", "provider", null, 0],
           ["missing", "provider", null, null],

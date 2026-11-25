@@ -737,7 +737,7 @@ describe("native saved candidate reads", () => {
         {
           candidateKey: "b",
           name: "B",
-          ranking: { source: "reviewer", state: "outdated", grade: "Promising", score: 70 },
+          ranking: { source: "reviewer", state: "current", grade: "Promising", score: 70 },
           match: { rank: null, tier: "Promising", score: 70 },
         },
         { candidateKey: "c", name: "C", match: { rank: null, tier: null, score: null } },
