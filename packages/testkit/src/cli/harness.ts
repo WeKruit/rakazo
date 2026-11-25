@@ -234,7 +234,13 @@ async function main() {
       await handles.judgeSettings
         .save(
           { apiKey: process.env.TYPESAFE_API_KEY },
-          { operationId: "harness.judge", traceId: "harness.judge", spaceId: "", userId: "" },
+          {
+            operationId: "harness.judge",
+            traceId: "harness.judge",
+            spaceId: "",
+            userId: "",
+            signal: AbortSignal.timeout(30_000),
+          },
         )
         .then(
           () => console.log("judge saved"),
