@@ -26,8 +26,6 @@ export interface TurnModelChoice {
   model: { provider: string; id: string };
   routed: "fast" | "configured";
   reason: string;
-  /** Overrides the bot's thinking level for this turn. */
-  thinkingLevel?: "low";
 }
 
 /**
@@ -44,18 +42,15 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
   if (!fastId) return { ...configured, reason: "fast_model_disabled" };
   const fastProvider = env.RAKAZO_FAST_MODEL_PROVIDER?.trim() || input.configured.provider;
   if (fastProvider === input.configured.provider && fastId === input.configured.id)
-    // A bot already on the fast model still opens a role at low thinking.
-    return input.recruitingIntake && !input.pendingToolLoop
-      ? { ...configured, reason: "recruiting_intake", thinkingLevel: "low" }
-      : { ...configured, reason: "already_fast" };
+    return { ...configured, reason: "already_fast" };
   const fast = { model: { provider: fastProvider, id: fastId }, routed: "fast" as const };
 
   if (input.pendingToolLoop) return { ...configured, reason: "pending_tool_loop" };
-  // An answer turn picks the people, so it keeps the bot's thinking level.
+  // The turn that opens a role produces the first round (searches, checks, picking the ten), so
+  // it is real work however short the message: at low thinking it ran one search and one check
+  // and recorded whoever came back.
+  if (input.recruitingIntake) return { ...configured, reason: "recruiting_intake" };
   if (input.answersQuestion) return { ...fast, reason: "clarifying_answer" };
-  // The turn that opens a role reads the JD and starts the first search while the recruiter
-  // waits, so it thinks at low. With thinking off the model wrote its planning into the reply.
-  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake", thinkingLevel: "low" };
   if (input.peerIntent === "status" || input.peerIntent === "fyi")
     return { ...fast, reason: "status_turn" };
   if (input.trigger !== "user" && input.trigger !== "messaging")

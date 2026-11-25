@@ -14080,7 +14080,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               throw new Error(`Fast model ${fast.provider}/${fast.id} is not in the catalog`);
             runModel = {
               ...fast,
-              thinkingLevel: turnModel.thinkingLevel ?? fast.thinkingLevel,
               routed: "fast",
               routeReason: turnModel.reason,
             };
@@ -14104,7 +14103,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         if (runModel === configuredRunModel) {
           runModel = {
             ...configuredRunModel,
-            ...(turnModel.thinkingLevel ? { thinkingLevel: turnModel.thinkingLevel } : {}),
             routed: "configured",
             routeReason: turnModel.reason,
           };
@@ -14120,7 +14118,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           runModel = { ...runModel, thinkingLevel: "low" };
         // A handed-in stage's first step only says what it is doing and starts its reads, so it
         // runs at low thinking.
-        // A turn routed to no thinking (a new role's first question) stays without it.
         if (handedIn && runModel.thinkingLevel !== "off")
           runModel = { ...runModel, firstStepThinkingLevel: "low" };
 
