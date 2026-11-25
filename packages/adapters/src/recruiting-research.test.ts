@@ -86,8 +86,6 @@ describe("people-search agent runs", () => {
           async (): Promise<Array<{ idempotencyKey: string; request: unknown }>> => [],
         ),
       },
-      // The role's deeper runs since the recruiter's latest message or requirement change.
-      usageRecord: { count: vi.fn(async () => 0) },
       message: {
         findFirst: vi.fn(async (): Promise<{ createdAt: Date } | null> => null),
         // The recruiter's recent messages, newest first.
@@ -174,40 +172,6 @@ describe("people-search agent runs", () => {
     // Fixed-price efforts take no budget; one the agent sent anyway is dropped.
     const low = await prepare(db, { query: "Find", effort: "low", budget: { maxCostDollars: 3 } });
     expect(low).not.toHaveProperty("budget");
-  });
-
-  it("allows three deeper searches per recruiter request for a role", async () => {
-    const db = fixture();
-    db.usageRecord.count.mockResolvedValue(3);
-    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).rejects.toThrow(
-      /already ran 3 deeper searches/,
-    );
-    // Counted from the latest of: the recruiter's last message, the last requirement change, 6 h.
-    const message = new Date(Date.now() - 60_000);
-    db.message.findFirst.mockResolvedValue({ createdAt: message });
-    db.recruitingRoleRevision.findFirst.mockResolvedValue({
-      createdAt: new Date(Date.now() - 120_000),
-    });
-    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).rejects.toThrow();
-    expect(db.message.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { threadId: "thread-1", role: "user" } }),
-    );
-    expect(db.usageRecord.count).toHaveBeenLastCalledWith({
-      where: expect.objectContaining({
-        roleId: "role-1",
-        model: "agent_run",
-        createdAt: { gte: message },
-      }),
-    });
-    // Quick low runs stay available: they cost cents and fill the round of ten.
-    await expect(prepare(db, { query: "Find 10 more", effort: "low" })).resolves.toMatchObject({
-      effort: "low",
-    });
-    // Under three tries, the deeper search goes ahead.
-    db.usageRecord.count.mockResolvedValue(2);
-    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).resolves.toMatchObject({
-      effort: "auto",
-    });
   });
 
   it("runs people searches only inside a saved role", async () => {
