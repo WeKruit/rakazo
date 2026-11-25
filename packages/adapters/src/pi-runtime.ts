@@ -1816,17 +1816,6 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           ...(options === undefined ? {} : { options }),
           ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
           ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
-          // An over-long planned search keeps its first 300 characters instead of failing the card.
-          ...(raw.plannedSearches === undefined
-            ? {}
-            : {
-                plannedSearches: Array.isArray(raw.plannedSearches)
-                  ? raw.plannedSearches.map((query) => {
-                      const text = String(query).trim();
-                      return text.length > 300 ? text.slice(0, 300).replace(/\s+\S*$/, "") : text;
-                    })
-                  : raw.plannedSearches,
-              }),
         };
       }
       if (tool.name === "request_secret") {
@@ -1965,13 +1954,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               throw new Error(
                 "ask_user requires two to four unique, non-empty options or a valid requestedSchema. Add two to four short options (the card already offers a custom answer) and ask again; never ask in plain text instead.",
               );
-            const { question, plannedSearches } = parsed.data;
-            const known = await host.request.beforeAsk?.(question, plannedSearches);
+            const { question } = parsed.data;
+            const known = await host.request.beforeAsk?.(question);
             if (known) {
               // Each bounce costs the person another model step before the card; say which check.
               getLogger().info("ask.not_shown", {
                 runId: host.request.runId,
-                plannedSearches: plannedSearches?.length ?? null,
                 reason: typeof known === "string" ? "already_answered" : known.instead.slice(0, 80),
               });
               return {
@@ -2013,7 +2001,6 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             host.queue.push({
               type: "ask",
               text: question,
-              ...(plannedSearches ? { plannedSearches } : {}),
               ...(requestedSchema
                 ? { requestedSchema }
                 : {

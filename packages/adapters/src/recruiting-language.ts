@@ -71,20 +71,6 @@ export function statedLanguageRequirement(texts: readonly string[]): string | un
   return found.length ? [...new Set(found)].join("; ").slice(0, 400) : undefined;
 }
 
-/**
- * Profile filters for planned people searches: the language most queries name, else the one the
- * recruiter's own words require.
- */
-export function plannedLanguageFilters(
-  queries: readonly string[],
-  recruiterTexts: readonly string[],
-): { filters: string[]; queriesNameIt: boolean } {
-  const named = languageFilters(queries);
-  if (named.length) return { filters: named, queriesNameIt: true };
-  const stated = statedLanguageRequirement(recruiterTexts);
-  return { filters: stated ? languageFilters([stated]) : [], queriesNameIt: false };
-}
-
 /** The built-in question reads this much of each profile; the deployment's check gets all of it. */
 const PROFILE_TEXT_LIMIT = 4_000;
 

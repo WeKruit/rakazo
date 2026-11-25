@@ -325,7 +325,7 @@ export const AskMultiple = z
     "true when the person may pick more than one option (e.g. several kinds of experience that all count); leave out for a single choice.",
   );
 
-/** People-search queries planned on the last recruiting question, run the moment it is answered. */
+/** Queries of the retired planned-search events; kept so stored events still read. */
 export const PlannedPeopleSearchesSchema = z.array(z.string().trim().min(3).max(300)).max(4);
 const askQuestion = {
   question: z
@@ -336,12 +336,6 @@ const askQuestion = {
       "One question with a single question mark; a recommendation follows it as a statement, never as a second question.",
     ),
 };
-// Last, so the question and its choices stream to the person before the search plan is written.
-const askPlannedSearches = {
-  plannedSearches: PlannedPeopleSearchesSchema.optional().describe(
-    "Recruiting intake only, on a clarifying question before the first round: the four people-search queries you would run if this answer were the last one needed. They run the moment the recruiter answers. Pass [] when the recruiter said not to look for people outside their own list.",
-  ),
-};
 export const AskUserInputSchema = z.union([
   z.strictObject({
     ...askQuestion,
@@ -351,9 +345,8 @@ export const AskUserInputSchema = z.union([
       .max(4)
       .refine((values) => new Set(values).size === values.length),
     multiple: AskMultiple.optional(),
-    ...askPlannedSearches,
   }),
-  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema, ...askPlannedSearches }),
+  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema }),
 ]);
 export const AskUserInputJsonSchema = z.toJSONSchema(AskUserInputSchema);
 

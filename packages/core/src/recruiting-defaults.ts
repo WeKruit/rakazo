@@ -340,16 +340,6 @@ export function screenLanguage(uiLocale: string | undefined): ReplyLanguage | un
   return /^zh\b/i.test(uiLocale) ? "zh" : "en";
 }
 
-/** The progress line once a search's people are in Results. */
-export function peopleFoundText(count: number, language: ReplyLanguage): string {
-  return {
-    zh: `找到 ${count} 人`,
-    ko: `${count}명을 찾았어요`,
-    ja: `${count}人見つかりました`,
-    en: `Found ${count} people`,
-  }[language];
-}
-
 /** An email signed by a team ("Best, Recruiting") instead of the person sending it. */
 export function signedAsTeam(body: string): boolean {
   const last =

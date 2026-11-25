@@ -195,7 +195,12 @@ function fixture(
     allowedTools: [],
   };
   const prisma = {
-    botMcpServer: { findFirst: vi.fn(async () => assignment) },
+    botMcpServer: {
+      findFirst: vi.fn(async () => assignment),
+      findMany: vi.fn(async () => [
+        { ...assignment, serverId: server.id, server: { ...server, slug: "crm" }, bot: {} },
+      ]),
+    },
     run: { findFirst: vi.fn(async () => ({ threadId: "current-thread" })) },
   };
   const connector = new McpConnector(prisma as never, {} as never, options);
@@ -220,6 +225,7 @@ function fixture(
       callTool,
       listTools: async () => ({
         tools: [
+          { name: "crm_import_candidate", inputSchema: { type: "object" } },
           {
             name: "list_emails",
             inputSchema: { type: "object", properties: { campaign_id: { type: "string" } } },
@@ -280,6 +286,23 @@ describe("CRM connector dispatch", () => {
       },
       expect.anything(),
     );
+  });
+  it("offers CRM tools only in a conversation linked to a CRM role", async () => {
+    const f = fixture();
+    const context = {
+      operationId: "op",
+      traceId: "trace",
+      runId: "run",
+      spaceId: "space",
+      userId: "owner",
+      botId: "bot",
+      signal: new AbortController().signal,
+    };
+    const names = async () =>
+      (await f.connector.discoverTools(context as never)).map((tool) => tool.route?.toolName);
+    expect(await names()).toEqual(["crm_import_candidate", "list_emails"]);
+    vi.mocked(getRecruitingWorkspaceCrmTarget).mockResolvedValue(null);
+    expect(await names()).toEqual(["list_emails"]);
   });
   it.each(["missing", "other-server", "stale-source"])(
     "refuses %s workspace before connecting",

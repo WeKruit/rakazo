@@ -77,7 +77,6 @@ import {
   RecruitingResearchToolInputSchema,
   type RecruitingSchedulingPlan,
   RecruitingSchedulingToolInputSchema,
-  RecruitingSearchesPlannedPayloadSchema,
   RecruitingShortlistToolInputSchema,
   RetainedRecruitingApprovalRequestSchema,
   UsageRecordedPayloadSchema,
@@ -150,7 +149,6 @@ import {
   POLL_MAX_MINUTES,
   POLL_MIN_MINUTES,
   parseSkillMd,
-  peopleFoundText,
   planActionGate,
   pollResultLines,
   promptInvokesSkill,
@@ -635,7 +633,6 @@ import {
 } from "./recruiting-grading.js";
 import {
   languageFilters,
-  plannedLanguageFilters,
   requiredLanguage,
   saveLanguageLevels,
   roundByLanguage,
@@ -1355,10 +1352,6 @@ const HANDOFF_ANSWER_NOTE = `A teammate just handed this stage to you, and the r
 const WAITING_CARDS_NEW_MESSAGE_NOTE =
   "The user's latest message is a new message, not an answer to those cards: answer what it actually asks. If it asks to go ahead with one of them, point the user to that card.";
 
-/** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
-const PLANNED_SEARCHES_NOTE =
-  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. Each query carries the role's location and must-haves; a required language goes into every query the way profiles list it (for example \"Mandarin\"). They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
-
 /**
  * Failures that a fresh attempt can clear: a silent or dropped stream, a timeout, an outage, or a
  * network blip ("fetch failed" is how fetch reports a connection it could not make).
@@ -1484,43 +1477,6 @@ export const steeringQuickReplySent = (line: string) =>
 const QUICK_REPLY_RECORDS_WAIT_MS = 1_000;
 // A finished answer waits this long for a first line still being written; a later one is dropped.
 const QUICK_REPLY_FINISH_WAIT_MS = 3_000;
-/** How long the answer turn waits for each planned search before picking without it. */
-const PLANNED_SEARCH_WAIT_MS = 6_000;
-/** After the first planned search returns, the others get at least this long: profile reads make them finish close together. */
-const PLANNED_SEARCH_GRACE_MS = 3_000;
-/**
- * When fewer than ten fit, the recruiter is told the quick search came up short and one deeper
- * search runs; the round then holds everyone who fits, even fewer than ten.
- */
-const SHORT_OF_TEN = `fill the places left in at most three tries in all, counting the people-search agent runs this turn already ran for the round: each try is one agent_run with effort "low" and a query that starts "Find N more people" (N five times the places left, at least 10 and at most 20, since most people a search returns fail the check and a run costs the same) with the role, the location scope, every hard requirement and the round feedback; it leaves out everyone already in Results. No try loosens a requirement: only the recruiter does. Then record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line, in the recruiter's language, how many short of ten it is and which requirement rules out the most, offering to loosen that one. Run no deeper search before the round: it runs only when the recruiter asks (then one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement, its people recorded as the next round)`;
-/** With this many new people from the planned searches, the first ten come from them. */
-const PLANNED_POOL_ENOUGH = 30;
-export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
-
-/**
- * Each planned search's result, or PLANNED_SEARCH_LATE for one still running at the wait. One slow
- * search must not hold the pick: it keeps saving to Results on its own. The first one is always
- * waited for, so the pick never starts without rows (under load every search outlasted the wait,
- * and the model made up keys).
- */
-export async function settlePlannedSearches<T>(
-  pendings: Promise<T>[],
-  startedAt: number,
-): Promise<Array<Awaited<T> | typeof PLANNED_SEARCH_LATE>> {
-  const late = Promise.race(pendings)
-    .then(
-      () =>
-        new Promise<void>((resolve) =>
-          setTimeout(
-            resolve,
-            Math.max(PLANNED_SEARCH_WAIT_MS - (Date.now() - startedAt), PLANNED_SEARCH_GRACE_MS),
-          ),
-        ),
-    )
-    .then((): typeof PLANNED_SEARCH_LATE => PLANNED_SEARCH_LATE);
-  return Promise.all(pendings.map((pending) => Promise.race([pending, late])));
-}
-
 /** A short message that opens with a role lead-in, such as 「新岗位：仓库经理（Atlanta）。要求：…」. */
 const ROLE_LEAD_IN =
   /^(?:新岗位|岗位|职位|招聘|new role|job title|job|role|position|hiring)\s*[:：]/i;
@@ -4704,8 +4660,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // strong people first and labels everyone below them.
         const languageLevels = new Map<string, LanguageSignal>();
         let languageRequirement: string | undefined;
-        // Rows carry the level the language check gave them, here or in the turn that planned
-        // the searches.
+        // Rows carry the level the language check gave them.
         const learnLanguage = (role: unknown, rows: unknown) => {
           const levels: Record<string, number> = {};
           for (const row of (Array.isArray(rows) ? rows : []) as Array<{
@@ -4740,12 +4695,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
-        // New people the searches planned with the last answer returned. Once the first picks come
-        // from them and there are this many, the ten come from them instead of another search.
-        let plannedNewPeople = 0;
-        const plannedFresh = new Set<string>();
-        // Rows of planned searches that returned after the pick started, not yet shown to the model.
-        const lateSearchRows: string[] = [];
         let gradingToolCalls = 0;
         // Messages already told that a round shown after them answers them.
         let roundStream:
@@ -5983,7 +5932,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             stream.shown = Math.max(stream.shown, keys.length);
             stream.posting = stream.posting.then(() => showRoundList(text));
             await stream.posting;
-            const late = lateSearchRows.splice(0);
             return {
               shown: keys.length,
               // The requirements calibration_round's checks take a verdict on, so it records the
@@ -5993,11 +5941,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (criterion) => [criterion.id, criterion.statement],
                 ),
               ),
-              ...(late.length
-                ? {
-                    lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
-                  }
-                : {}),
               next: "These people are in chat now; the round is not recorded yet. Carry on as the Fill rule says and record the ten with calibration_round, starting with these same people in the same order. Never ask anything or end the turn before calibration_round records the round.",
             };
           }
@@ -13310,148 +13253,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? { page: page.text.slice(0, 24_000) }
             : {};
         };
-        // The searches planned on the last intake question run the moment it is answered, beside
-        // the other setup, so the model's first step already has the people to pick from.
-        const plannedSearchNote = async () => {
-          const searchTool = [...connectorTools.keys()].find((name) =>
-            name.endsWith("web_search_advanced_exa"),
-          );
-          if (!nativeSources?.currentAnswer || !firstRoundPending || !searchTool) return undefined;
-          const plan = await deps.prisma.event.findFirst({
-            where: {
-              threadId: thread.id,
-              spaceId: run.spaceId,
-              runId,
-              type: "recruiting.searches.planned",
-            },
-            orderBy: { seq: "desc" },
-            select: { id: true, seq: true, payload: true },
-          });
-          const planned = RecruitingSearchesPlannedPayloadSchema.safeParse(plan?.payload);
-          // Only a plan made on the question just answered: one from an earlier question already ran.
-          const answeredBefore = nativeSources.answeredAsks
-            .filter((turn) => turn.answer.id !== nativeSources.currentAnswer?.id)
-            .map((turn) => turn.receiptSeq);
-          if (!plan || !planned.success || plan.seq <= Math.max(0, ...answeredBefore))
-            return undefined;
-          // A placeholder role was never described, so its plan searches for nobody in particular.
-          const role = await deps.prisma.recruitingRole.findUnique({
-            where: { id: thread.activeRecruitingRoleId ?? "" },
-            select: { title: true },
-          });
-          if (!role || role.title === NEW_ROLE_TITLE) return undefined;
-          const startedAt = Date.now();
-          // A required language is required on the profile in two of the searches: worded into a
-          // query alone, it still returned people with no sign of it. When the planned queries
-          // left it out, the recruiter's own words name it and the other two queries carry it.
-          const words = await recruiterWords(deps.prisma, thread.id);
-          const { filters: languages, queriesNameIt } = plannedLanguageFilters(
-            planned.data.queries,
-            words,
-          );
-          const perSearch = 10;
-          const pendings = planned.data.queries.map((query, index) =>
-            applyTool(
-              searchTool,
-              {
-                query:
-                  languages.length && !queriesNameIt && index >= 2
-                    ? `${query}. Languages: ${languages.join(", ")}`
-                    : query,
-                category: "people",
-                numResults: perSearch,
-                enableHighlights: true,
-                highlightsMaxCharacters: 900,
-                highlightsQuery: `concrete evidence of: ${query}`,
-                // The same request also says why each person fits, saved as its own column.
-                enableSummary: true,
-                summaryQuery: `In one sentence, why this person fits: ${query}`,
-                ...(languages.length && index < 2
-                  ? { includeText: [languages[index] ?? languages[0]] }
-                  : {}),
-              },
-              `${runId}:planned-search:${plan.id}:${index}`,
-            ).catch((error) => ({ error: String(error) })),
-          );
-          const results = await settlePlannedSearches(pendings, startedAt);
-          type PlannedRow = {
-            candidateKey?: unknown;
-            location?: unknown;
-            alreadyInPool?: unknown;
-          };
-          const rowsOf = (result: unknown): PlannedRow[] | undefined => {
-            const people =
-              result && typeof result === "object" && "people" in result
-                ? (result as { people: unknown }).people
-                : undefined;
-            return Array.isArray(people)
-              ? people.filter((row): row is PlannedRow => Boolean(row) && typeof row === "object")
-              : undefined;
-          };
-          const keyOf = (row: PlannedRow) =>
-            typeof row.candidateKey === "string" ? row.candidateKey : undefined;
-          // Late rows join a tool result, so their passages are shortened.
-          const compactRow = ({ snippet, ...row }: PlannedRow & { snippet?: unknown }) => ({
-            ...row,
-            ...(typeof snippet === "string" ? { snippet: snippet.slice(0, 300) } : {}),
-          });
-          const addFresh = (rows: PlannedRow[]) => {
-            for (const row of rows) {
-              const key = keyOf(row);
-              if (key && row.alreadyInPool === false) plannedFresh.add(key);
-            }
-            plannedNewPeople = plannedFresh.size;
-          };
-          const onTime = results.flatMap((result) =>
-            result === PLANNED_SEARCH_LATE ? [] : (rowsOf(result) ?? []),
-          );
-          addFresh(onTime);
-          learnLanguage(planned.data.queries, onTime);
-          // The people are already in Results; chat says so at once instead of staying on the
-          // last activity until the model's picks.
-          if (plannedNewPeople > 0 && !isBackgroundRunTrigger(run.trigger))
-            void deps.events
-              .publishTransient({
-                spaceId: run.spaceId,
-                threadId: thread.id,
-                botId: bot.id,
-                type: "thread.progress",
-                runId,
-                payload: {
-                  // In the recruiter's own language, like every other recruiter-facing line.
-                  text: peopleFoundText(plannedNewPeople, turnLanguage),
-                  activity: true,
-                },
-              })
-              .catch(() => undefined);
-          // A search still running at the pick adds its people when it returns; a refused extra
-          // search hands them to the model instead of searching again.
-          results.forEach((result, index) => {
-            if (result !== PLANNED_SEARCH_LATE) return;
-            void pendings[index]?.then((late) => {
-              const rows = rowsOf(late);
-              if (!rows?.length) return;
-              addFresh(rows);
-              learnLanguage(planned.data.queries, rows);
-              lateSearchRows.push(
-                `Search ${index + 1} "${planned.data.queries[index]}":\n${JSON.stringify(rows.map(compactRow)).slice(0, 8_000)}`,
-              );
-            });
-          });
-          const searches = planned.data.queries.map((query, index) => {
-            const result = results[index];
-            if (result === PLANNED_SEARCH_LATE)
-              return `Search ${index + 1} "${query}": still running; its rows come back with your show_picks result, so start from the other searches and never wait or end the turn for it.`;
-            const rows = rowsOf(result);
-            return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ?? result).slice(0, 24_000)}`;
-          });
-          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A row's fullProfile holds lines from that person's full profile about the must-haves, such as a licence or clearance; it is part of the row. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's checks mark it unknown for that person so the recruiter sees it. A required language is the exception: each row's requiredLanguage is the language check's decision on that person's full profile. Take it as given: confirmed or strong means the language requirement is met, never judge the language again from the row's text or mark it unverified, and the people with no sign of it are already left out. Nobody currently at the hiring company fits; that is only the employer the JD or the recruiter names, never one guessed from the location or industry, so when neither names it, nobody is left out for their employer. Among those who fit, pick by evidence, here and for the rest of the ten: first the people whose rows show every must-have, then those with one unknown, and never take someone with an unknown while a row that shows them all is left out. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
-          const next =
-            plannedNewPeople >= PLANNED_POOL_ENOUGH
-              ? `These searches returned ${plannedNewPeople} new people. Then, in your next step, fill the rest with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). If fewer than ten people fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`
-              : `Then complete the ten: if the answer does not change who you are looking for, fill the rest in your next step with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). No save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks (it names only the people who fit), then ${SHORT_OF_TEN}. Keep the people already shown unless one clearly fails a hard requirement.`;
-          return `${note} ${next}\n\n${searches.join("\n\n")}`;
-        };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
         // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
@@ -13481,7 +13282,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return false;
         };
-        const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards, attached] =
+        const [jobRole, intake, intakeSkill, replyContext, waitingCards, attached] =
           await ownTime(
             "turnNotes",
             Promise.all([
@@ -13500,12 +13301,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ).catch(() => null)
                 : null,
               loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
-              plannedSearchNote().catch((error) => {
-                getLogger().warn("planned people searches not run", {
-                  error: String(error),
-                });
-                return undefined;
-              }),
               run.trigger === "user" && currentTurnMessage?.role === "user"
                 ? waitingCardBlocks(deps.prisma, thread.id)
                     .then(waitingApprovalCards)
@@ -13662,13 +13457,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           )[0],
         );
         const languageNote = hideVendors ? replyLanguageNote(turnLanguage, screen) : undefined;
-        // Once the planned searches ran, the pick note alone says what to do next.
         const intakeSearchNote =
           intake &&
           [
-            plannedNote
-              ? PLANNED_SEARCHES_NOTE
-              : `Never search connectors or tools before the people searches. The recruiter sees the first ten before any question: issue the four people searches as your very next step, from what the role already holds. ${PLANNED_SEARCHES_NOTE}`,
+            "Never search connectors or tools before the people searches. The recruiter sees the first ten before any question: issue the four people searches as your very next step, from what the role already holds.",
             intake.page &&
               `The role's job page, already read and saved (never fetch it again):\n\n${intake.page}`,
           ]
@@ -13717,7 +13509,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? ROLE_NOT_SAVED_NOTE
             : undefined,
           intakeNote,
-          plannedNote,
           handedIn
             ? (await recruiterHasReply())
               ? HANDOFF_ANSWER_NOTE
@@ -14327,11 +14118,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // staging 11-16, the save step spent 3.1k reasoning tokens (28 s) on ten grades.
         if (run.trigger === "recruiting_grade" && runModel.thinkingLevel !== "off")
           runModel = { ...runModel, thinkingLevel: "low" };
-        // With the planned people in hand, the first step only shows the clearest few, at low
-        // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
-        // step only says what it is doing and starts its reads, so it runs at low thinking too.
+        // A handed-in stage's first step only says what it is doing and starts its reads, so it
+        // runs at low thinking.
         // A turn routed to no thinking (a new role's first question) stays without it.
-        if ((plannedNote || handedIn) && runModel.thinkingLevel !== "off")
+        if (handedIn && runModel.thinkingLevel !== "off")
           runModel = { ...runModel, firstStepThinkingLevel: "low" };
 
         try {
@@ -14957,28 +14747,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               await cardTakesLinesPlace().catch((error) =>
                 getLogger().warn("first line kept beside the card", { error: String(error) }),
               );
-              if (
-                event.plannedSearches?.length &&
-                (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn)
-              )
-                await deps.events
-                  .append({
-                    spaceId: run.spaceId,
-                    threadId: thread.id,
-                    botId: bot.id,
-                    runId,
-                    type: "recruiting.searches.planned",
-                    payload: {
-                      queries: event.plannedSearches.map((query) =>
-                        redactSecrets(query, runSecrets),
-                      ),
-                    },
-                  })
-                  .catch((error) =>
-                    getLogger().warn("planned people searches not saved", {
-                      error: String(error),
-                    }),
-                  );
               // The recruiter's likely answer, typed for them in the composer and the card (Tab).
               const cardSuggestion = event.requestedSchema
                 ? null

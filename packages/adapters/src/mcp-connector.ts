@@ -1185,7 +1185,19 @@ export class McpConnector implements ConnectorProvider {
         }
       }),
     );
-    return groups.flat();
+    const tools = groups.flat();
+    const crm = (tool: ConnectorTool) => /(?:^crm_|_crm_)/.test(tool.route?.toolName ?? "");
+    if (!context.runId || !tools.some(crm)) return tools;
+    // Every CRM call is refused outside a conversation linked to a CRM role, so the tools are
+    // not offered there: an agent that finds one spends its turn on calls that cannot succeed.
+    const unlinked = new Set<string>();
+    for (const { server } of assignments)
+      if (tools.some((tool) => crm(tool) && tool.route?.resourceId === server.id))
+        await this.crmBinding(context, server).catch((error: unknown) => {
+          if (!(error instanceof IsolationError)) throw error;
+          unlinked.add(server.id);
+        });
+    return tools.filter((tool) => !crm(tool) || !unlinked.has(tool.route?.resourceId ?? ""));
   }
 
   /**

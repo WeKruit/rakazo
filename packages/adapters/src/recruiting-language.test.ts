@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { LanguageRow, LanguageSignal, TextJudge } from "./judge.js";
 import {
   languageFilters,
-  plannedLanguageFilters,
   profileTexts,
   requiredLanguage,
   roundByLanguage,
@@ -204,7 +203,7 @@ describe("required language", () => {
     expect(checked.rows.map((row) => row.name)).toEqual(["Wei Test", "Joe Sample", "Ana Example"]);
   });
 
-  it("requires the language on the profile when most planned searches ask for it", () => {
+  it("requires the language on the profile when most searches ask for it", () => {
     expect(
       languageFilters([
         "Maintenance engineers near Linden, NJ, Mandarin-English bilingual",
@@ -218,18 +217,11 @@ describe("required language", () => {
     ]);
   });
 
-  it("falls back to the recruiter's own words when the planned queries leave the language out", () => {
+  it("reads a language requirement from the recruiter's own words", () => {
     const jd =
       "Location: on-site near Linden, NJ.\nMust speak both Mandarin Chinese and English.\nPLC troubleshooting.";
     expect(statedLanguageRequirement([jd])).toBe("Must speak both Mandarin Chinese and English.");
     expect(statedLanguageRequirement(["Spanish speakers welcome to apply"])).toBe(undefined);
-    expect(
-      plannedLanguageFilters(["Maintenance engineers near Linden", "PLC technicians in NJ"], [jd]),
-    ).toEqual({ filters: ["Mandarin", "Chinese"], queriesNameIt: false });
-    expect(plannedLanguageFilters(["PLC technicians in NJ"], ["No language needs"])).toEqual({
-      filters: [],
-      queriesNameIt: false,
-    });
   });
 });
 
