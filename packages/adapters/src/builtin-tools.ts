@@ -1575,7 +1575,8 @@ export const builtinAgentTools: ConnectorTool[] = [
       properties: {
         title: {
           type: "string",
-          description: 'Short role title, e.g. "Agent Engineer (new grad)".',
+          description:
+            'The role\'s name as the recruiter gave it, word for word (for example the text before a colon or inside 「」); when they gave none, a short title such as "Agent Engineer (new grad)".',
         },
         message: {
           type: "string",
