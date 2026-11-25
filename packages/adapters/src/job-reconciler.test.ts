@@ -90,6 +90,23 @@ describe("createJobReconciler", () => {
     expect(enqueue).toHaveBeenCalledTimes(4);
   });
 
+  it("scans only recent saves after a full profile sweep, and everything again after restart", async () => {
+    const prisma = fakePrisma();
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
+    const { jobs } = publisher();
+    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2 });
+    await reconciler.reconcileOnce();
+    await reconciler.reconcileOnce();
+    await createJobReconciler({ prisma, jobs }, { batchSize: 2 }).reconcileOnce();
+    const [full, recent, restarted] = vi
+      .mocked(prisma.$queryRaw)
+      .mock.calls.map(([query]) => query as unknown as { sql: string; values: unknown[] });
+    expect(full!.sql).not.toContain('saving."createdAt">');
+    expect(recent!.sql).toContain('saving."createdAt">');
+    expect(recent!.values.find((value) => value instanceof Date)).toBeDefined();
+    expect(restarted!.sql).not.toContain('saving."createdAt">');
+  });
+
   it("retries a failed profile enqueue without advancing its cursor or blocking core reconciliation", async () => {
     const prisma = fakePrisma();
     vi.mocked(prisma.$queryRaw).mockResolvedValue([
