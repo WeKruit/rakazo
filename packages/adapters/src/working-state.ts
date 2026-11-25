@@ -87,7 +87,7 @@ async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userI
   });
   return gmail
     ? undefined
-    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Writing one needs no mailbox: show it in the reply now; it goes out once they press Connect Gmail and then Send on its card. Asked where to connect: the Connect button on that card in this chat, or later the menu under their name at the bottom left, then Integrations (集成); no other place exists. Their Inbox page shows only \"No emails yet\" and a Connect Gmail button until then: candidates' replies show there once Gmail is connected and an email has gone out from it.";
+    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Writing one needs no mailbox: show it in the reply now; it goes out once they press Connect on the connect card and then Send on its card. Asked where to connect: the Connect button on that card in this chat, or later the menu under their name at the bottom left, then Integrations (集成); no other place exists. Their Inbox page shows only \"No emails yet\" and a Connect Gmail button until then: candidates' replies show there once Gmail is connected and an email has gone out from it.";
 }
 
 /** Calendar connectors the product books interviews through (request_connection's catalog). */
