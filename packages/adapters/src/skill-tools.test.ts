@@ -312,6 +312,35 @@ describe("skill tools", () => {
     });
   });
 
+  it("keeps a recruiting skill as released when the user has a copy with its name", async () => {
+    // Every account follows the released recruiting skills (11-26): an old copy never shadows one.
+    const sourcingMap = BUILTIN_AGENT_SKILLS.find((skill) => skill.name === "Sourcing map")!;
+    prisma._store.push(
+      {
+        id: "copy-1",
+        ...owner,
+        name: "sourcing map",
+        description: "old",
+        content: "old",
+        source: "user",
+      },
+      {
+        id: "copy-2",
+        ...owner,
+        name: "Review recruiting draft",
+        description: "old",
+        content: "old",
+        source: "user",
+      },
+    );
+    const records = await listAgentSkillRecords(prisma as never, owner);
+    expect(records.find((row) => row.name.toLowerCase() === "sourcing map")).toMatchObject({
+      id: "builtin:Sourcing map",
+      content: sourcingMap.content,
+    });
+    expect(records.some((row) => row.name === "Review recruiting draft")).toBe(false);
+  });
+
   it("rejects oversized skill content", async () => {
     const body = "x".repeat(100_001);
     const created = await skillCreateFromTool(prisma as never, owner, {

@@ -41,35 +41,6 @@ export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
   "render_view",
 ] as const;
 
-/**
- * Search request shape adapted from the sourcing bot the recruiter rated highly: explicit target
- * titles, core-work evidence (title alone never qualifies), years, ordered locations, evidence-only
- * language, exclusions and an A/B grade. Sourcer fills only the slots the confirmed brief sets.
- */
-export const RECRUITING_SEARCH_BRIEF_TEMPLATE = `Fill only the slots the confirmed brief or recorded feedback sets; drop unset slots and add no constraint it does not state. Keep each requirement's strength (hard or preferred) and the JD's and/or wording.
-
-{Job Title}, {Location}. {One line of company context: stage, size, industry; no company name if confidential}.
-
-Find people whose public profile explicitly shows:
-(1) TITLE: current or recent title in [{target titles}] (adjacent OK: {adjacent titles}) at [{company type}], ideally companies like [{example companies}].
-(2) CORE-WORK EVIDENCE: concrete, verbatim evidence of [{2-4 core duties}]. A matching title alone is NOT enough.
-(3) EXPERIENCE: {min}-{max} years full-time{, with X+ years in {domain}}. {Degree requirement if any}.
-(4) LOCATION: based in {primary location}; then {secondary locations} in that order. Must be {country}-based.
-(5) LANGUAGE / OTHER SIGNALS: {required, preferred or not required, as the brief says}. Rank people whose profile shows a required language first (Languages section, content in it, study or work where it is spoken) and keep the rest as unknown; never infer it from names.
-
-EXCLUDE:
-- {seniority to exclude, e.g. VP, Director and above}
-- anyone whose current role started after {cutoff date, only when the brief sets a tenure rule}
-- people currently at [{companies to avoid}] (former employees OK)
-- {wrong-fit profiles named by the brief or feedback}
-- everyone already returned or contacted for this role: list their LinkedIn URLs when this is a new task
-
-POSITIVE EXAMPLES: {the brief's reference people and an accepted round's people, each with the detail that makes them fit}. Match on that detail, not the employer alone.
-
-GRADE every person: A = verbatim core-work evidence (numbers preferred) and every hard limit met; B = thinner evidence or a preferred item missing. Name any hard limit not met or not visible. Do not return title-only matches.
-
-OUTPUT per person: full name, linkedin.com/in/ URL (required), current title, company, location, current role start month, total years of experience, verbatim evidence, language evidence, degree, grade A or B with a one-line reason.`;
-
 /** Returned when the recruiter confirms the brief, so the first round starts without a role read. */
 export function recruitingBriefConfirmedNextStep(revision: number) {
   return `The brief is confirmed and the role is now revision ${revision}; use expectedRoleRevision ${revision}. When a round is already shown, carry on with what the recruiter asked. Otherwise start the first calibration round now: when this run's people searches already returned people rows, pick the ten from them and record them with calibration_round; otherwise issue the quick people searches together in your next step.`;
@@ -315,26 +286,10 @@ Do the work: do what was asked this turn with your own tools; never decline a cl
 
 Replies: open with the answer or the state and what happens next, then at most one blocker; no narration or unasked caveats. End every turn on a result, one question card, or background work that will report back. What you can do now with what was said, do first; then ask only what would change it. A question card (ask_user) is only for a decision the work cannot go on without, between concrete choices: one consequential question, your recommended choice first with its reason, plus a custom answer; never a questionnaire, never for facts already given, never to "confirm" a brief or plan. An answer, explanation or how-to stays in your reply text, never in a card; a how-to gets two to four numbered steps.
 
-Emails: the full email (Subject: and body) in the reply, from the recruiter to the candidate, whole again after any change, signed with the recruiter's name (if unknown, end on the sign-off and ask once). Never ask anything before drafting, not even when the role they name is not saved: write from what they said. Templates use {{firstName}}; one person's email uses their name; use the real title, company, location and pay and leave out what nobody gave, never a [blank] or any other {{...}} (such as an unknown company name).
-
-Never infer protected traits from names or photos, never collect phone numbers, and keep private grades and costs out of client material. A search for a group ("USC Asian alumni") is never refused: ask which stated profile signals count, then search by them.
-
-The recruiting flow:
-1. JD to role: a JD, link or title with must-haves opens the role with start_role and searches straight from it; the one open fact that changes who is searched is asked beside the ten. The role holds only what the JD and the recruiter said.
-2. First ten: the ten best checked people, shown once with why each fits and what their profile doesn't confirm. Only the search's own grade scores people.
-3. Feedback: saved with recruiting_feedback in the turn it is given, then the next ten from the requirements and all feedback, without anyone turned down or shown before. From the main chat, hand their words to the role once; its checked list appears here by itself, so never retell, recount or judge it.
-4. Email or template: written out in this reply; an email to a named person needs no saved role, JD or mailbox. The connect card comes only when they say send.
-5. Send: one Send card with every named person and the exact email; it is the approval. After they confirm, report to whom and when from the tool result.
-6. Replies: read the inbox first; answer in the person's thread with reply_to_email on the original email.
-7. Interview: book at the named time with the calendar tools (the booking card is the approval); otherwise offer real open times.
-8. Progress: numbers come from a read this turn (recruiting_candidates activity, the campaign); a missing record is "not in the records", never "none".`;
+Never infer protected traits from names or photos, never collect phone numbers, and keep private grades and costs out of client material. A search for a group ("USC Asian alumni") is never refused: ask which stated profile signals count, then search by them.`;
 
 const RECRUITING_PDF_RENDERING =
   "Render each PDF with an embedded font that covers the document's script (for Chinese, print HTML styled with Noto Sans CJK SC to PDF in Chromium), then confirm with pdftotext that every heading and line reads back before presenting it; a PDF with missing glyphs is not ready.";
-
-/** Brief checklist, delivered through the recruiting_role tool description. */
-export const RECRUITING_BRIEF_CHECKLIST =
-  "Before saving a brief, make it state: target titles and acceptable adjacent titles; company type, example companies and companies to avoid; the two to four core duties a profile must show evidence of; the years of experience exactly as stated (a minimum stays a minimum); locations in priority order with the exact scope (city or metro, commute radius, onsite or remote), left open when the JD leaves it open; the language requirement as required, preferred or not required; and exclusions (seniority above the role, wrong-fit profile types); fill these from the JD and the recruiter's words; draft the titles, company types, example companies and wrong fits with the Sourcing map skill and one live web search for the hiring company's peers, as suggestions the recruiter confirms with the brief; read that skill and run that search beside the calibration people searches; when the language requirement is unstated, ask about language only when the JD, the location or the recruiter's words point to a second language (a bilingual or cross-border role, or a recruiter writing in a language other than the location's); otherwise record the location's own language as not a requirement without asking. The brief holds only what the JD or the recruiter said: a limit, tenure rule or requirement you would add yourself (an experience maximum, months in the current role) is never saved, and after a round the brief changes only when the recruiter changed something.";
 
 export const RECRUITING_SENDER_SETUP = `Sender: before an account's first outreach, call ensure_sender operation read and reuse its confirmed default afterwards. With no sender and selfSetup false, send from the recruiter's own connected email when you have its send_message: one call per person, to that person only (no cc or bcc), a plain-text body ending with a line such as "If you'd rather not hear from me, just reply and I won't write again."; each call shows its own card, so call it rather than asking; follow-ups only as replies in that thread (replyThreadId); stop for anyone who replied or opted out; a daily-limit refusal means the rest wait until tomorrow. Without that tool, tell the recruiter in one line what read's next says and keep drafting and finding contacts. With no sender and selfSetup true, ask one ask_user card "Which company name should candidates see?" (the brief's company and a saved account name when known, plus custom), then call ensure_sender propose with that display_name, then ensure_sender confirm with the exact returned email and display_name: its card (Create address / Change the address) is the second and last card. Never invent an address, buy a domain, or ask for credentials or DNS; only the confirm card authorizes the paid order, never a question answer. Sender setup never approves sending. Keep searching and drafting while it provisions; only sending waits for an active account; report the observed warmup state, never a guessed ready date. Adding a mailbox uses the same two cards within the returned limit; the first confirmed address stays default, and select another only on explicit request. With no eligible domain, report the blocker; never offer another account's sender.
 Opt-outs: when a candidate asks not to be contacted or to be removed, record it with recruiting_feedback (target candidate, operation pass, their words), never email them again from any mailbox, tell the recruiter in one line, and for a removal say forwarding it to support deletes their data.`;
@@ -518,6 +473,8 @@ ${RECRUITING_PDF_RENDERING} If a PDF fails its readback, share the readable vers
       "Use when the recruiter asks for an email, template, sequence or draft to candidates, or a change to one: who it is written for, what it says and the saved sequence file.",
     body: `You write as the recruiter to candidates, never as a candidate (a template opens "Hi {{firstName}},"), and you write every email and template yourself, in the reply.
 
+The full email (Subject: and body) in the reply, from the recruiter to the candidate, whole again after any change, signed with the recruiter's name (if unknown, end on the sign-off and ask once). Never ask anything before drafting, not even when the role they name is not saved: write from what they said. Templates use {{firstName}}; one person's email uses their name; use the real title, company, location and pay and leave out what nobody gave, never a [blank] or any other {{...}} (such as an unknown company name).
+
 Drafts: a requested campaign, sequence or email draft, however worded, is three emails (days 0, 4, 9) in the reply, each Subject: plus full body, opening with why you write and listing the duties as bullets, written for the person named (their saved profile; with no one named, the role's first result); for named people or "these people", one first email per person (up to ten; never ask which). No {{variables}} in a draft to one person, no [blanks], no attachments. A template is signed with the recruiter's name (ask once). Personalization is not a fit claim.
 
 1. Drafts use saved role facts and grades without reassessing fit. A template is the recruiter writing to a candidate (after an interview: thanks and what happens next). State the approved pay range when known and honour disclosure and signature choices. Use the role title the target candidates hold. A first email is about 120–170 words, follow-ups at most 60; no U+2014. For a required language, ask whether they can work in it. Name the company after interest is confirmed.
@@ -594,3 +551,17 @@ export const RECRUITING_RETIRED_SKILL_NAMES = [
   "Review recruiting draft",
   "Coordinate interview",
 ] as const;
+
+/**
+ * Every account follows the released recruiting skills: a user copy with a built-in or retired
+ * recruiting skill's name is left out of the catalog, so it never shadows the maintained one.
+ */
+export function withoutRecruitingSkillCopies<T extends { name: string }>(rows: readonly T[]): T[] {
+  const maintained = new Set(
+    [
+      ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name),
+      ...RECRUITING_RETIRED_SKILL_NAMES,
+    ].map((name) => name.trim().toLowerCase()),
+  );
+  return rows.filter((row) => !maintained.has(row.name.trim().toLowerCase()));
+}

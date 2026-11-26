@@ -6,6 +6,7 @@ import {
   parseSkillMd,
   type SkillRecord,
   type SkillSource,
+  withoutRecruitingSkillCopies,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { BUILTIN_AGENT_SKILLS } from "./builtin-skills.js";
@@ -90,7 +91,7 @@ export async function listAgentSkillRecords(
     where: { spaceId: owner.spaceId, userId: owner.userId },
     orderBy: [{ name: "asc" }, { id: "asc" }],
   });
-  return mergeBuiltinSkills(builtinRecords(), rows.map(toRecord));
+  return mergeBuiltinSkills(builtinRecords(), withoutRecruitingSkillCopies(rows.map(toRecord)));
 }
 
 async function findOwnedSkill(
