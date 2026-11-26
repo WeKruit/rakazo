@@ -51,8 +51,8 @@ function fixture(options: {
   earlier?: Array<{ createdAt: Date; checkinReplyIds: unknown }>;
   /** A conversation with no role that emailed people from its own one-off campaigns. */
   direct?: Array<{ request: unknown; result: unknown }>;
-  /** Saved receipts of emails sent from the recruiter's own Gmail. */
-  gmail?: Array<{ request: unknown; result: unknown }>;
+  /** Saved tool calls of the conversation: Gmail sends and reads by id. */
+  calls?: Array<{ request: unknown; result: unknown }>;
 }) {
   const runCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({
     id: "checkin-run",
@@ -77,9 +77,9 @@ function fixture(options: {
       })),
     },
     externalEffect: {
-      // Saved tool calls (the Gmail sends) are matched by their catalog marker.
+      // Saved tool calls are matched by their catalog marker.
       findMany: vi.fn(async (args: { where: { request?: { path?: string[] } } }) =>
-        args.where.request?.path?.[0] === "0" ? (options.gmail ?? []) : (options.direct ?? []),
+        args.where.request?.path?.[0] === "0" ? (options.calls ?? []) : (options.direct ?? []),
       ),
     },
     mcpServer: { findMany: vi.fn(async () => [{ id: "gmail-server" }]) },
@@ -217,6 +217,41 @@ describe("startRecruitingCheckin", () => {
     expect(deps.runCreate).not.toHaveBeenCalled();
     // Later check-ins re-read six hours before the last one.
     expect(readRecruitingRoleRepliesSince.mock.calls[0]![3]).toBe("2026-10-30T05:30:00.000Z");
+  });
+
+  it("never reports a reply the conversation's agent already read", async () => {
+    // A reply the agent had read when the recruiter asked about it was announced again as new.
+    const route = (resourceId: string, toolName: string) => ({
+      connectorId: "mcp",
+      resourceId,
+      resourceRevision: 3,
+      toolName,
+    });
+    const deps = fixture({
+      replies: [reply("a", "Interested."), reply("b", "Call me."), reply("c", "Not now.")],
+      calls: [
+        // Read through the bound tool, and through the catalog's generic execute tool.
+        {
+          request: [
+            "__rakazoCatalogTool",
+            "direct",
+            { route: route("mail", "native_instantly_get_email"), args: { id: "a" } },
+          ],
+          result: { structuredContent: { id: "a" } },
+        },
+        {
+          request: [
+            "__rakazoCatalogTool",
+            "gmail_execute_tool",
+            { id: "get_message", arguments: { messageId: "b" } },
+            route("gmail-server", "get_message"),
+          ],
+          result: { structuredContent: { id: "b" } },
+        },
+      ],
+    });
+    await start(deps);
+    expect(deps.runCreate.mock.calls[0]![0].data.checkinReplyIds).toEqual(["c"]);
   });
 
   it("waits while the conversation is busy, never reads the CRM, and looks again shortly", async () => {
@@ -376,7 +411,7 @@ describe("startRecruitingCheckin", () => {
       };
     });
     const deps = fixture({
-      gmail: [
+      calls: [
         {
           request: [
             "__rakazoCatalogTool",
@@ -428,11 +463,54 @@ describe("sweepRecruitingCheckins", () => {
                 { request: null, run: { threadId: "x" } },
                 { request: { serverId: "mail", direct: true }, run: { threadId: "main" } },
               ]
-            : // Emails sent from a recruiter's own Gmail.
-              [{ run: { threadId: "gmail-thread" } }],
+            : // Emails sent from a recruiter's own Gmail, here through the catalog's execute
+              // tool; another connection's send_message is not Gmail.
+              [
+                {
+                  request: [
+                    "__rakazoCatalogTool",
+                    "gmail_execute_tool",
+                    { id: "send_message", arguments: { to: ["ethan@example.test"] } },
+                    {
+                      connectorId: "mcp",
+                      resourceId: "gmail-id",
+                      resourceRevision: 1,
+                      toolName: "send_message",
+                    },
+                  ],
+                  result: {
+                    structuredContent: {
+                      sent: true,
+                      to: "ethan@example.test",
+                      messageId: "m1",
+                      threadId: "t1",
+                    },
+                  },
+                  run: { threadId: "gmail-thread" },
+                },
+                {
+                  request: [
+                    "__rakazoCatalogTool",
+                    "direct",
+                    {
+                      route: {
+                        connectorId: "mcp",
+                        resourceId: "chat-id",
+                        resourceRevision: 1,
+                        toolName: "send_message",
+                      },
+                      args: { text: "hi" },
+                    },
+                  ],
+                  result: {
+                    structuredContent: { sent: true, to: "x", messageId: "m2", threadId: "t2" },
+                  },
+                  run: { threadId: "chat-thread" },
+                },
+              ],
         ),
       },
-      mcpServer: { findMany: vi.fn(async () => [{ slug: "gmail" }]) },
+      mcpServer: { findMany: vi.fn(async () => [{ id: "gmail-id" }]) },
       thread: {
         findMany: vi.fn(async () => [
           { id: "source", activeRecruitingRole: { sourceThreadId: "source" } },
@@ -459,11 +537,6 @@ describe("sweepRecruitingCheckins", () => {
     const where = (prisma.thread.findMany as ReturnType<typeof vi.fn>).mock.calls[0]![0].where;
     expect(where.OR[0].activeRecruitingRole.OR).toContainEqual({ id: { in: ["sending-role"] } });
     expect(where.OR[1]).toEqual({ id: { in: ["main", "gmail-thread"] } });
-    expect(prisma.externalEffect.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ kind: { in: ["mcp__gmail__send_message"] } }),
-      }),
-    );
   });
 });
 

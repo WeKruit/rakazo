@@ -153,6 +153,28 @@ export type GmailSend = {
   to: string;
 };
 
+/** A saved tool call's route, arguments and result body, from its record. */
+function savedCall(effect: { request: unknown; result: unknown }) {
+  const direct = boundDirectApprovalDetails(effect.request, CATALOG_TOOL);
+  const catalog = direct ? undefined : catalogApprovalDetails(effect.request, CATALOG_TOOL);
+  const route = direct?.route ?? catalog?.route;
+  const args = direct?.args ?? record(catalog?.args.arguments);
+  if (route?.connectorId !== "mcp" || !args) return undefined;
+  const envelope = record(effect.result);
+  const body = mcpObject(envelope?.providerResult ?? envelope);
+  return { route, args, result: record(body?.result) ?? body };
+}
+export type SavedCall = NonNullable<ReturnType<typeof savedCall>>;
+
+const sentRecord = (call: SavedCall) =>
+  call.route.toolName === "send_message" &&
+  call.result?.sent === true &&
+  typeof call.result.threadId === "string" &&
+  typeof call.result.messageId === "string" &&
+  typeof call.result.to === "string"
+    ? { threadId: call.result.threadId, messageId: call.result.messageId, to: call.result.to }
+    : undefined;
+
 /** Conversations that sent email from a recruiter's own Gmail since `since`, newest first. */
 export async function recentGmailSenders(
   prisma: PrismaClient,
@@ -161,25 +183,40 @@ export async function recentGmailSenders(
 ): Promise<string[]> {
   const servers = await prisma.mcpServer.findMany({
     where: { endpoint: GMAIL_MCP_ENDPOINT, enabled: true },
-    select: { slug: true },
+    select: { id: true },
   });
-  const kinds = [...new Set(servers.map((server) => `mcp__${server.slug}__send_message`))];
-  if (!kinds.length) return [];
+  const gmail = new Set(servers.map((server) => server.id));
+  if (!gmail.size) return [];
+  // The send's route names the Gmail connection, whichever tool the agent called it through.
   const effects = await prisma.externalEffect.findMany({
-    where: { kind: { in: kinds }, status: "completed", createdAt: { gte: since } },
+    where: {
+      kind: { endsWith: "send_message" },
+      status: "completed",
+      createdAt: { gte: since },
+      request: { path: ["0"], equals: CATALOG_TOOL },
+    },
     orderBy: { createdAt: "desc" },
     take,
-    select: { run: { select: { threadId: true } } },
+    select: { request: true, result: true, run: { select: { threadId: true } } },
   });
-  return [...new Set(effects.map((effect) => effect.run.threadId))];
+  return [
+    ...new Set(
+      effects.flatMap((effect) => {
+        const call = savedCall(effect);
+        return call && gmail.has(call.route.resourceId) && sentRecord(call)
+          ? [effect.run.threadId]
+          : [];
+      }),
+    ),
+  ];
 }
 
-/** The emails this conversation sent from the recruiter's own Gmail, by their saved receipts. */
-export async function gmailSends(
+/** The tool calls this conversation's agents made from `since` on, newest first. */
+export async function conversationCalls(
   prisma: PrismaClient,
   conversation: Conversation,
   since: Date,
-): Promise<GmailSend[]> {
+): Promise<SavedCall[]> {
   const effects = await prisma.externalEffect.findMany({
     where: {
       spaceId: conversation.spaceId,
@@ -196,26 +233,44 @@ export async function gmailSends(
     take: SAVED_CALLS,
     select: { request: true, result: true },
   });
-  const sends = effects.flatMap((effect): GmailSend[] => {
-    const route =
-      boundDirectApprovalDetails(effect.request, CATALOG_TOOL)?.route ??
-      catalogApprovalDetails(effect.request, CATALOG_TOOL)?.route;
-    if (route?.connectorId !== "mcp" || route.toolName !== "send_message") return [];
-    const result = record(effect.result);
-    const sent = record(record(result?.providerResult ?? result)?.structuredContent);
-    return sent?.sent === true &&
-      typeof sent.threadId === "string" &&
-      typeof sent.messageId === "string" &&
-      typeof sent.to === "string"
-      ? [
-          {
-            serverId: route.resourceId,
-            threadId: sent.threadId,
-            messageId: sent.messageId,
-            to: sent.to,
-          },
-        ]
-      : [];
+  return effects.flatMap((effect) => {
+    const call = savedCall(effect);
+    return call ? [call] : [];
+  });
+}
+
+/**
+ * The emails the conversation's agents already read by id: an Instantly email or a Gmail message
+ * fetched on its own, or every message of a Gmail thread read in full.
+ */
+export function seenEmailIds(calls: readonly SavedCall[]): Set<string> {
+  return new Set(
+    calls.flatMap((call) => {
+      const tool = call.route.toolName;
+      if (tool === "get_email" || tool === "native_instantly_get_email")
+        return typeof call.args.id === "string" ? [call.args.id] : [];
+      if (tool === "get_message")
+        return typeof call.args.messageId === "string" ? [call.args.messageId] : [];
+      const messages = tool === "get_thread" ? call.result?.messages : undefined;
+      return Array.isArray(messages)
+        ? messages.flatMap((message) => {
+            const id = record(message)?.id;
+            return typeof id === "string" ? [id] : [];
+          })
+        : [];
+    }),
+  );
+}
+
+/** The emails this conversation sent from the recruiter's own Gmail, by their saved receipts. */
+export async function gmailSends(
+  prisma: PrismaClient,
+  conversation: Conversation,
+  calls: readonly SavedCall[],
+): Promise<GmailSend[]> {
+  const sends = calls.flatMap((call): GmailSend[] => {
+    const sent = sentRecord(call);
+    return sent ? [{ serverId: call.route.resourceId, ...sent }] : [];
   });
   if (!sends.length) return [];
   const gmail = await prisma.mcpServer.findMany({
