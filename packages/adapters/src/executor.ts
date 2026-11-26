@@ -658,7 +658,7 @@ import {
   withoutShownBefore,
 } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
-import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
+import { keepProfileText, lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_DIRECT_NOTICE,
   trackDirectRecruitingResearch,
@@ -9319,13 +9319,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     request,
                     context,
                     applied.effect.id,
-                    async (found) =>
-                      checkPeopleCriteria(
+                    async (found) => {
+                      await keepProfileText(
+                        deps.prisma,
+                        { userId: run.userId, spaceId: run.spaceId, runId },
+                        found,
+                      );
+                      await checkPeopleCriteria(
                         deps.judge,
                         deps.prisma,
                         { roleId, spaceId: run.spaceId, revision: role.revision },
                         found,
-                      ),
+                      );
+                    },
                   );
                   // Compact rows keep a 25-person search inside one tool result, so the pick
                   // never needs a follow-up read of the clipped output.

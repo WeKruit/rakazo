@@ -8005,11 +8005,10 @@ export async function saveRecruitingCandidatePeopleSearch(
           if (key && graded.has(key)) return entry;
           const check = (entry as { check?: Prisma.InputJsonObject }).check;
           const { match_tier: tier, match_score: score } = check ?? entry.row;
-          return typeof tier === "string" &&
-            SEARCH_MATCH_TIERS.has(tier) &&
-            typeof score === "number"
-            ? { ...entry, matchFields: check ?? { match_score: score, match_tier: tier } }
-            : entry;
+          if (typeof tier === "string" && SEARCH_MATCH_TIERS.has(tier) && typeof score === "number")
+            return { ...entry, matchFields: check ?? { match_score: score, match_tier: tier } };
+          // Verdicts on people no search has graded yet are kept; they carry no grade.
+          return check ? { ...entry, matchFields: check } : entry;
         }),
         describe: ({ artifact, observedAt, candidateRows }) => ({
           source: {

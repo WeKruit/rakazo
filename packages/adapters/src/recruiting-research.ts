@@ -510,32 +510,59 @@ export async function excludeFoundPeople(
     : args;
 }
 
-/**
- * The people given to grade, each with the profile text this run's people searches returned for
- * them, so the grade rests on that text. Given a name and link alone, the service took twice as
- * long, graded half of forty "insufficient public evidence" and once graded a namesake (11-26).
- */
-async function withProfileText(
+/** The full profile text this run's people searches returned, by person. */
+async function profileTexts(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
-  people: unknown[],
-): Promise<unknown[]> {
+): Promise<Map<string, string>> {
+  const texts = new Map<string, string>();
   try {
-    const texts = new Map<string, string>();
     for (const call of await listRunToolResults(prisma, { ...actor } as Actor, actor.runId!))
       if (isPeopleSearchEndpoint(call.endpoint))
         for (const person of peopleFromSearch(call.result, call.endpoint)) {
           const key = linkedinPersonKey(person.linkedin_url);
           if (key && person._profile_text && !texts.has(key)) texts.set(key, person._profile_text);
         }
-    if (!texts.size) return people;
-    return people.map((person) => {
-      const key = linkedinPersonKey(record(person)?.linkedin_url);
-      const profile = key ? texts.get(key) : undefined;
-      return profile ? { ...record(person), profile } : person;
-    });
   } catch {
-    return people;
+    // Without the text the people are graded and checked on what their row holds.
+  }
+  return texts;
+}
+
+/**
+ * People sent for grading carry the profile text our search already returned, so the grade rests
+ * on that text instead of a fresh lookup by name (measured 11-26: with only a name and link half
+ * came back "insufficient public evidence" and one was graded as a namesake).
+ */
+async function withProfileText(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  people: unknown[],
+): Promise<unknown[]> {
+  const texts = await profileTexts(prisma, actor);
+  if (!texts.size) return people;
+  return people.map((person) => {
+    const key = linkedinPersonKey(record(person)?.linkedin_url);
+    const profile = key ? texts.get(key) : undefined;
+    return profile ? { ...record(person), profile } : person;
+  });
+}
+
+/**
+ * Rows a grading run returns hold only the grade, so each keeps the profile text the search
+ * returned for that person: the requirement check then reads the same text the grade came from.
+ */
+export async function keepProfileText(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  entries: Array<{ row: Record<string, unknown> }>,
+): Promise<void> {
+  if (entries.every(({ row }) => row._profile_text)) return;
+  const texts = await profileTexts(prisma, actor);
+  for (const { row } of entries) {
+    const key = linkedinPersonKey(row.linkedin_url);
+    const text = key ? texts.get(key) : undefined;
+    if (text && !row._profile_text) row._profile_text = text;
   }
 }
 
