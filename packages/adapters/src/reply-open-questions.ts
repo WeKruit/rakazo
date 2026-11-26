@@ -4,6 +4,10 @@
  * structured field on its reply; code only carries that list to the reply card (AGENTS.md P9),
  * where the recruiter answers before pressing Send. It never blocks the reply.
  */
+import type { MailReply } from "@rakazo/contracts";
+import { MailReplySchema } from "@rakazo/contracts";
+import type { PrismaClient } from "@rakazo/db";
+
 export const OPEN_QUESTIONS = "open_questions";
 
 const DESCRIPTION =
@@ -39,7 +43,39 @@ export function takeOpenQuestions(args: Record<string, unknown>): {
   return { args: rest, open };
 }
 
-/** What the agent does after the recruiter sent a reply whose card listed open questions. */
+/**
+ * The open questions every reply card for this email listed in this conversation. A recruiter may
+ * answer on the card, or discard it and answer in their own words; either way the sent reply
+ * carries their answer.
+ */
+export async function openQuestionsForEmail(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  input: { spaceId: string; threadId: string; draft: MailReply },
+): Promise<string[]> {
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: input.spaceId,
+      run: { threadId: input.threadId },
+      kind: { endsWith: "reply_to_email" },
+    },
+    select: { result: true },
+    orderBy: { createdAt: "asc" },
+    take: 50,
+  });
+  const open = new Set(input.draft.openQuestions ?? []);
+  for (const effect of effects) {
+    const result = effect.result as { mailReplyApproval?: unknown } | null;
+    const card = MailReplySchema.safeParse(result?.mailReplyApproval).data;
+    if (
+      card?.inReplyTo.emailId === input.draft.inReplyTo.emailId &&
+      card.inReplyTo.sourceId === input.draft.inReplyTo.sourceId
+    )
+      for (const question of card.openQuestions ?? []) open.add(question);
+  }
+  return [...open];
+}
+
+/** What the agent does after the recruiter sent a reply to questions a card listed as open. */
 export function openQuestionsAnsweredNote(open: readonly string[]): string {
-  return `The recruiter answered the candidate's open questions (${open.map((question) => `"${question}"`).join("; ")}) in the reply they sent. Save each answer in the role's memory with save_group_memory (dated, from the recruiter's sent reply), so the next candidate who asks is answered from it.`;
+  return `The reply just sent answers the candidate's questions that the recruiter had not told you (${open.map((question) => `"${question}"`).join("; ")}), with the recruiter's own answers (in that reply or in their messages). Save each answer in the role's memory with save_group_memory (dated, from the recruiter), so the next candidate who asks is answered from it.`;
 }

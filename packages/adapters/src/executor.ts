@@ -648,7 +648,11 @@ import {
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
-import { openQuestionsAnsweredNote, takeOpenQuestions } from "./reply-open-questions.js";
+import {
+  openQuestionsAnsweredNote,
+  openQuestionsForEmail,
+  takeOpenQuestions,
+} from "./reply-open-questions.js";
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
@@ -12478,12 +12482,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // A sent reply ends the run quietly, unless it carried the recruiter's answers to the
           // candidate's open questions: then the agent gets the turn to save them in role memory.
-          if (
-            replyDraft.openQuestions?.length &&
-            replyOutcome === mailReplyOutcomeInstruction({ status: "sent" })
-          ) {
-            replyOutcome = `${replyOutcome}\n${openQuestionsAnsweredNote(replyDraft.openQuestions)}`;
-            replyAnswersToSave = true;
+          if (replyOutcome === mailReplyOutcomeInstruction({ status: "sent" })) {
+            const answered = await openQuestionsForEmail(deps.prisma, {
+              spaceId: run.spaceId,
+              threadId: thread.id,
+              draft: replyDraft,
+            });
+            if (answered.length) {
+              replyOutcome = `${replyOutcome}\n${openQuestionsAnsweredNote(answered)}`;
+              replyAnswersToSave = true;
+            }
           }
           sentReplyDirectly = true;
         }

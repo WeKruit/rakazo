@@ -521,6 +521,13 @@ function looked(turns) {
     : "";
 }
 
+// Stepping away leaves no line in the conversation, so the recruiter is told it already did.
+function awayNote(turns) {
+  const away = turns.filter((turn) => turn.move.action === "wait" && !turn.invalid).length;
+  const last = turns.at(-1);
+  return `${away ? `\n\nYou already stepped away ${away === 1 ? "once" : `${away} times`} and are back now.` : ""}${last?.invalid ? `\nYour last move was not done: ${last.invalid}.` : ""}`;
+}
+
 async function simulate(journey, turns, view, cards, screen, tag, since) {
   // A reused account's pages still show earlier tests; only this session's messages count.
   const earlier =
@@ -539,7 +546,7 @@ async function simulate(journey, turns, view, cards, screen, tag, since) {
     screen
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}${screen.fields?.length ? `\nText boxes on it: ${screen.fields.join(" | ")}` : ""}`
       : ""
-  }${earlier}${looked(turns)}\n\nYour moves so far: ${turns.length}. Your next move:`;
+  }${earlier}${looked(turns)}${awayNote(turns)}\n\nYour moves so far: ${turns.length}. Your next move:`;
   return askJson(screen ? UI_RULES : SIMULATOR_RULES, prompt, SIMULATOR);
 }
 
