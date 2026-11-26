@@ -351,7 +351,7 @@ it.each([
           end: "2026-10-23T10:30:00Z",
           timeZone: "UTC",
           attendees: [],
-          status: "accepted",
+          status: "booked",
           location: null,
           url: null,
         },

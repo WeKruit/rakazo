@@ -569,7 +569,7 @@ it.each([
   }
 });
 
-it.each(["confirmed", "accepted"])(
+it.each(["booked"])(
   "shows future %s recorded bookings and opens their exact role Interview",
   async (bookingStatus) => {
     const future = new Date(Date.now() + 86_400_000).toISOString();
@@ -590,7 +590,7 @@ it.each(["confirmed", "accepted"])(
         {
           id: "availability",
           kind: "availability",
-          status: "confirmed",
+          status: "booked",
           start: future,
           title: "Free slot",
         },
@@ -598,7 +598,7 @@ it.each(["confirmed", "accepted"])(
         {
           id: "past",
           kind: "event",
-          status: "confirmed",
+          status: "booked",
           start: "2000-01-01T00:00:00Z",
           title: "Past",
         },
@@ -625,7 +625,7 @@ it("does not present another role's retained calendar events as this role's book
       {
         id: "wrong",
         kind: "event",
-        status: "confirmed",
+        status: "booked",
         title: "Wrong role",
         start: new Date(Date.now() + 86_400_000).toISOString(),
       },

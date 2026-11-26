@@ -204,7 +204,7 @@ it("continues the native interview agenda through the shared cursor without losi
     end: "2026-10-30T15:00:00Z",
     timeZone: "UTC",
     attendees: [],
-    status: "confirmed",
+    status: "booked" as const,
     location: null,
     url: null,
   };

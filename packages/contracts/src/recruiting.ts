@@ -1702,6 +1702,41 @@ export const RecruitingCandidateHistorySchema = z.strictObject({
   after: z.string().nullable(),
 });
 
+/**
+ * An interview's state as the recruiter sees it, whichever calendar holds it: a saved plan not yet
+ * booked, a booking waiting on the host, booked, moved to another time, cancelled, or a booking
+ * whose outcome failed or is unknown.
+ */
+export const RecruitingInterviewStatusSchema = z.enum([
+  "planned",
+  "pending",
+  "booked",
+  "rescheduled",
+  "cancelled",
+  "failed",
+  "uncertain",
+]);
+export type RecruitingInterviewStatus = z.infer<typeof RecruitingInterviewStatusSchema>;
+const PROVIDER_INTERVIEW_STATUS: Record<string, RecruitingInterviewStatus> = {
+  // Google Calendar event status
+  confirmed: "booked",
+  tentative: "booked",
+  cancelled: "cancelled",
+  // Cal.com booking status
+  accepted: "booked",
+  pending: "pending",
+  awaiting_host: "pending",
+  rejected: "cancelled",
+  canceled: "cancelled",
+};
+/** A calendar's own status code for an event or booking, in the product's interview states. */
+export function recruitingInterviewStatus(value: unknown): RecruitingInterviewStatus | null {
+  if (typeof value !== "string") return null;
+  const status = value.toLowerCase();
+  const known = RecruitingInterviewStatusSchema.safeParse(status);
+  return known.success ? known.data : (PROVIDER_INTERVIEW_STATUS[status] ?? null);
+}
+
 export const RecruitingCorrespondenceSchema = z.strictObject({
   history: z.array(RecruitingCandidateHistorySchema).optional(),
   /** Actual reply failures/uncertainty, not a confirmation-to-booking association. */
@@ -1789,7 +1824,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       end: IsoDate.nullable(),
       timeZone: z.string().nullable(),
       attendees: z.array(z.string()),
-      status: z.string().nullable(),
+      status: RecruitingInterviewStatusSchema.nullable(),
       location: z.string().nullable(),
       url: z.httpUrl().nullable(),
     }),

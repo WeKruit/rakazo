@@ -49,6 +49,7 @@ import {
   RecruitingCrmRoleReferenceSchema,
   RecruitingCrmUnassignedReadSchema,
   RecruitingNativeCorrespondenceSchema,
+  recruitingInterviewStatus,
 } from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
@@ -2461,8 +2462,8 @@ export async function getRecruitingCorrespondence(
             status: availability
               ? null
               : supersededBookings.has(stableJsonValue([source.id, source.revision, row!.uid]))
-                ? "superseded"
-                : (row?.status ?? null),
+                ? "rescheduled"
+                : recruitingInterviewStatus(row?.status),
             location,
             url: typeof location === "string" && /^https?:\/\//u.test(location) ? location : null,
           });

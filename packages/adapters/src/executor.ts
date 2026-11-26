@@ -115,6 +115,7 @@ import {
   formatSkillsCatalogInstruction,
   GMAIL_MCP_ENDPOINT,
   GMAIL_SEND_TOOLS,
+  GOOGLE_CALENDAR_ENDPOINT,
   hideVendorBlocks,
   hideVendorNames,
   humanizeToolName,
@@ -394,6 +395,11 @@ import {
   readCalBookingSnapshot,
 } from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
+import {
+  GOOGLE_CALENDAR_EVENT_WRITES,
+  googleCalendarApprovalFacts,
+} from "./google-calendar-approval.js";
+import { schedulingNextStep } from "./scheduling-next-step.js";
 import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
@@ -1227,8 +1233,6 @@ export { shortQuestion };
  * A handed-in stage used to stay silent for 20-200 s while the specialist read context and ran
  * slow tools. Its first step runs at low thinking and opens with one line the recruiter sees.
  */
-const SCHEDULING_PREPARE_NEXT_STEP =
-  "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
 /** How recent a finished run's one-line reply must be for the next run's answer to take its place. */
 const LINE_TAKEOVER_MS = 120_000;
 const HANDOFF_STAGE_NOTE =
@@ -5251,10 +5255,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: sanitizeConnectorError(error, runSecrets),
                 code: "SCHEDULING_PLAN_UNAVAILABLE",
                 dispatched: false,
-                // A failed draft or plan read left agents stuck on "not found"; prepare is the path.
+                // A failed draft or plan read left agents stuck on "not found"; the next step is
+                // the booking path of the calendar this bot actually holds.
                 ...(operation === "book" || operation === "confirm"
                   ? {}
-                  : { next: SCHEDULING_PREPARE_NEXT_STEP }),
+                  : {
+                      next: await schedulingNextStep(deps.prisma, {
+                        spaceId: run.spaceId,
+                        userId: run.userId,
+                        botId: bot.id,
+                      }),
+                    }),
               };
             }
           }
@@ -6213,6 +6224,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             nativeMcpUrl &&
             `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
               "https://mcp.cal.com/mcp";
+          const googleCalendarWrite =
+            connectorCall.route?.connectorId === "mcp" &&
+            GOOGLE_CALENDAR_EVENT_WRITES.includes(connectorCall.route.toolName) &&
+            nativeMcpUrl &&
+            `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
+              GOOGLE_CALENDAR_ENDPOINT;
           const authorizeCalendar = async (route: NonNullable<typeof connectorCall.route>) => {
             const { server } = await requireMcpToolAssignment(
               deps.prisma,
@@ -7392,6 +7409,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 };
               }
             }
+
+            // A Google Calendar card shows the event a change targets and what the calendar
+            // already holds then; the request it approves stays exactly as the agent made it.
+            if (googleCalendarWrite && deps.connector && connectorCall.route)
+              approvalArgs = {
+                ...args,
+                ...(await googleCalendarApprovalFacts({
+                  connector: deps.connector,
+                  context,
+                  route: connectorCall.route,
+                  args,
+                  authorize: async (route) => {
+                    const { server } = await requireMcpToolAssignment(
+                      deps.prisma,
+                      context,
+                      route,
+                      route.toolName,
+                    );
+                    const url = server.endpoint ? URL.parse(server.endpoint) : null;
+                    if (
+                      !url ||
+                      `${url.origin}${url.pathname.replace(/\/$/, "")}` !== GOOGLE_CALENDAR_ENDPOINT
+                    )
+                      throw new IsolationError();
+                  },
+                })),
+              };
 
             let crmOperation:
               | "crm_bind_candidate_role"

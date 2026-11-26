@@ -135,6 +135,66 @@ describe("live role correspondence", () => {
     ).rejects.toBeInstanceOf(IsolationError);
     expect(execute).toHaveBeenCalledTimes(2);
   });
+  it("shows an interview booked in this role's conversation for an email nobody saved, as cancelled once cancelled", async () => {
+    const { prisma } = fixture();
+    const booked = {
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "calendar",
+            resourceRevision: 1,
+            toolName: "create_event",
+          },
+          args: { summary: "Call", attendees: [{ email: "typed@example.test" }] },
+        },
+      ],
+      result: { structuredContent: { id: "booked" } },
+    };
+    vi.mocked(prisma.externalEffect.findMany).mockImplementation((async (query: {
+      where: { OR?: unknown };
+    }) => (query.where.OR ? [booked] : [])) as never);
+    const event = (id: string, status: string, email: string) => ({
+      id,
+      status,
+      summary: id,
+      start: { dateTime: "2026-12-01T20:00:00Z" },
+      end: { dateTime: "2026-12-01T20:30:00Z" },
+      attendees: [{ email: "recruiter@example.test", self: true }, { email }],
+    });
+    let events = [
+      event("booked", "confirmed", "typed@example.test"),
+      event("unrelated", "confirmed", "someone@example.test"),
+    ];
+    const execute = vi.fn(async function* () {
+      yield { type: "result", data: { structuredContent: { events } } } as const;
+    });
+    const deps = { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> };
+    const read = async (user: string) => {
+      const output = empty();
+      await refreshRecruitingCorrespondence(
+        deps,
+        { ...actor, userId: user },
+        { roleId: "role", threadId: "thread", view: "interview" },
+        [source("calendar")],
+        output,
+      );
+      return output.events.map(({ id, status, roleAssociation }) => ({
+        id,
+        status,
+        roleAssociation,
+      }));
+    };
+    expect(await read("typed-email-user")).toEqual([
+      { id: "calendar:booked", status: "booked", roleAssociation: "booking" },
+    ]);
+    events = [event("booked", "cancelled", "typed@example.test")];
+    expect(await read("typed-email-cancelled-user")).toEqual([
+      { id: "calendar:booked", status: "cancelled", roleAssociation: "booking" },
+    ]);
+  });
   it("does not read the calendar for a role with nobody to match", async () => {
     const { prisma } = fixture();
     vi.mocked(prisma.externalEffect.findMany).mockResolvedValue([] as never);
