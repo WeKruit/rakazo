@@ -56,6 +56,30 @@ export type CriterionQuestion = {
   avoid?: boolean;
   /** How to read the profile for this requirement, given after the question. */
   rule?: string;
+  /** The requirement states a place: the answer says where the person is relative to it. */
+  place?: boolean;
+};
+
+/**
+ * Where a person is relative to the place a requirement states, whatever place that is, and the
+ * level each answer counts as. Asked "does the profile show the place", a past job there passed.
+ */
+export const PLACE_TAGS = {
+  there_now: "The current location is that place",
+  nearby:
+    "The current location is a neighbouring city in the same region, within about two hours of that place",
+  there_before:
+    "The current location is far from that place, and the person studied or worked in that place before",
+  elsewhere: "The current location is far from that place, with no past job or school there",
+  not_stated: "The profile gives no current location",
+} as const;
+export type PlaceTag = keyof typeof PLACE_TAGS;
+const PLACE_LEVEL: Record<PlaceTag, CriterionVerdict["level"]> = {
+  there_now: "strong",
+  nearby: "medium",
+  there_before: "weak",
+  elsewhere: "opposite",
+  not_stated: "silent",
 };
 
 export const CRITERION_LEVELS = ["strong", "medium", "weak", "silent", "opposite"] as const;
@@ -67,6 +91,7 @@ export type CriterionVerdict = {
   level: (typeof CRITERION_LEVELS)[number];
   confidence: number;
   against: number;
+  place?: PlaceTag;
 };
 
 const CRITERION_CHOICES = {
@@ -195,11 +220,17 @@ export function typeSafeJudge(
                       type: "noul",
                       instructions: `The recruiter turned other people down for this reason: "${requirement.statement}". Does this person's profile show the same problem? Answer no when the profile does not show it.`,
                     }
-                  : {
-                      type: "choice",
-                      instructions: `Does this person's profile show: ${requirement.statement}?${requirement.rule ? ` ${requirement.rule}` : ""}`,
-                      criteria: CRITERION_CHOICES,
-                    },
+                  : requirement.place
+                    ? {
+                        type: "choice",
+                        instructions: `Where is this person now, relative to the place this requirement states: "${requirement.statement}"? Judge the current location first; a past job or school in that place matters only when the person is now somewhere else.`,
+                        criteria: PLACE_TAGS,
+                      }
+                    : {
+                        type: "choice",
+                        instructions: `Does this person's profile show: ${requirement.statement}?${requirement.rule ? ` ${requirement.rule}` : ""}`,
+                        criteria: CRITERION_CHOICES,
+                      },
               ]),
             ),
           }),
@@ -229,6 +260,17 @@ export function typeSafeJudge(
                 confidence: Math.max(same, 1 - same),
                 against: same,
               });
+            continue;
+          }
+          if (requirement.place) {
+            const tag = answer?.choice as PlaceTag | undefined;
+            if (!tag || !(tag in PLACE_TAGS) || typeof answer?.confidence !== "number") continue;
+            verdicts.set(requirement.id, {
+              level: PLACE_LEVEL[tag],
+              confidence: answer.confidence,
+              against: tag === "elsewhere" ? answer.confidence : 0,
+              place: tag,
+            });
             continue;
           }
           const level = CRITERION_LEVELS.find((item) => item === answer?.choice);

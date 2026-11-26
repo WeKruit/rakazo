@@ -5952,7 +5952,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (criterion) => [criterion.id, criterion.statement],
                 ),
               ),
-              next: "These people are in chat now; the round is not recorded yet. Carry on as the Fill rule says and record the ten with calibration_round, starting with these same people in the same order. Never ask anything or end the turn before calibration_round records the round.",
+              next: "These people are in chat now; the round is not recorded yet. Once the grades are back, record the ten with calibration_round, best grade first. Never ask anything or end the turn before calibration_round records the round.",
             };
           }
           const candidateOperation =
@@ -9323,16 +9323,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       checkPeopleCriteria(
                         deps.judge,
                         deps.prisma,
-                        {
-                          roleId,
-                          spaceId: run.spaceId,
-                          revision: role.revision,
-                          request:
-                            (await recruiterWords(deps.prisma, thread.id)).reverse().join("\n") ||
-                            (typeof connectorCall.args?.query === "string"
-                              ? connectorCall.args.query
-                              : undefined),
-                        },
+                        { roleId, spaceId: run.spaceId, revision: role.revision },
                         found,
                       ),
                   );
