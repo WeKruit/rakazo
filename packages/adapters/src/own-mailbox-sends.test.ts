@@ -1,5 +1,15 @@
+import { projectRecruitingInboxMessages } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { ownMailboxSendRecord, ownMailboxSendRefusal } from "./own-mailbox-sends.js";
+import {
+  ownMailboxSendRecord,
+  ownMailboxSendRefusal,
+  recordOwnMailboxSend,
+} from "./own-mailbox-sends.js";
+
+vi.mock("@rakazo/db", async (original) => ({
+  ...(await original<typeof import("@rakazo/db")>()),
+  projectRecruitingInboxMessages: vi.fn(async () => undefined),
+}));
 
 const context = { spaceId: "w1", userId: "u1", runId: "run-1" };
 
@@ -70,7 +80,10 @@ describe("own-mailbox send checks", () => {
     ).resolves.toMatch(/ada@x\.test \(the recruiter asked that they never be contacted again\)/);
     // Even a follow-up in an earlier thread is refused for a stopped person.
     await expect(
-      ownMailboxSendRefusal(prisma as never, context, { to: "ada@x.test", replyThreadId: "abc123" }),
+      ownMailboxSendRefusal(prisma as never, context, {
+        to: "ada@x.test",
+        replyThreadId: "abc123",
+      }),
     ).resolves.toMatch(/never be contacted again/);
   });
 
@@ -96,7 +109,10 @@ describe("own-mailbox send checks", () => {
       ownMailboxSendRefusal(prisma as never, context, { to: "bob@x.test" }),
     ).resolves.toMatch(/already emailed bob@x\.test \(2026-11-21 10:00 UTC/);
     await expect(
-      ownMailboxSendRefusal(prisma as never, context, { to: "bob@x.test", replyThreadId: "abc123" }),
+      ownMailboxSendRefusal(prisma as never, context, {
+        to: "bob@x.test",
+        replyThreadId: "abc123",
+      }),
     ).resolves.toBeUndefined();
     await expect(
       ownMailboxSendRefusal(prisma as never, context, { to: "bob@x.test", resend: true }),
@@ -113,5 +129,35 @@ describe("own-mailbox send checks", () => {
       }),
     ).toEqual({ to: "ada@x.test", messageId: "m1", threadId: "t1" });
     expect(ownMailboxSendRecord({ error: "Email not sent." })).toBeUndefined();
+  });
+
+  it("keeps a send from a conversation with no role under that conversation", async () => {
+    // A one-off email from the main chat appeared on no page.
+    const sent = {
+      sourceId: "gmail",
+      sourceName: "Gmail",
+      mailbox: "me@x.test",
+      to: "ada@x.test",
+      subject: "Data role",
+      body: "Hi",
+      messageId: "m1",
+      threadId: "t1",
+      sentAt: "2026-11-26T10:00:00Z",
+    };
+    for (const role of [null, "role-1"]) {
+      const prisma = {
+        run: {
+          findFirst: vi.fn(async () => ({ thread: { id: "main", activeRecruitingRoleId: role } })),
+        },
+      };
+      await recordOwnMailboxSend(prisma as never, context, sent);
+    }
+    const owners = vi
+      .mocked(projectRecruitingInboxMessages)
+      .mock.calls.map(([, , input]) => [input.roleId, input.conversationId]);
+    expect(owners).toEqual([
+      [undefined, "main"],
+      ["role-1", undefined],
+    ]);
   });
 });

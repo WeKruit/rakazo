@@ -16,16 +16,24 @@ const object = (value: unknown) =>
     ? (value as Record<string, unknown>)
     : undefined;
 
-async function runRoleId(
+/** The run's conversation and its role, for this user's run only. */
+async function runConversation(
   prisma: Pick<PrismaClient, "run">,
   context: Pick<AdapterContext, "runId" | "spaceId" | "userId">,
 ) {
   if (!context.runId) return null;
   const run = await prisma.run.findFirst({
     where: { id: context.runId, spaceId: context.spaceId, userId: context.userId },
-    select: { thread: { select: { activeRecruitingRoleId: true } } },
+    select: { thread: { select: { id: true, activeRecruitingRoleId: true } } },
   });
-  return run?.thread.activeRecruitingRoleId ?? null;
+  return run?.thread ?? null;
+}
+
+async function runRoleId(
+  prisma: Pick<PrismaClient, "run">,
+  context: Pick<AdapterContext, "runId" | "spaceId" | "userId">,
+) {
+  return (await runConversation(prisma, context))?.activeRecruitingRoleId ?? null;
 }
 
 /** The record an own-mailbox send leaves on its effect, or undefined for a failed or other one. */
@@ -83,8 +91,9 @@ export async function ownMailboxSendRefusal(
 }
 
 /**
- * Puts a sent own-mailbox email on the role's pages when the conversation has a role; the send's
- * own effect stays the receipt. A failure here never turns a sent email into an error.
+ * Puts a sent own-mailbox email on the role's pages when the conversation has a role, and under
+ * the conversation in the account Inbox when it has none; the send's own effect stays the receipt.
+ * A failure here never turns a sent email into an error.
  */
 export async function recordOwnMailboxSend(
   prisma: PrismaClient,
@@ -101,13 +110,15 @@ export async function recordOwnMailboxSend(
     sentAt: string;
   },
 ) {
-  const roleId = await runRoleId(prisma, context).catch(() => null);
-  if (!roleId) return;
+  const conversation = await runConversation(prisma, context).catch(() => null);
+  if (!conversation) return;
   await projectRecruitingInboxMessages(
     prisma,
     { userId: context.userId, spaceId: context.spaceId, email: "", isDeploymentOwner: false },
     {
-      roleId,
+      ...(conversation.activeRecruitingRoleId
+        ? { roleId: conversation.activeRecruitingRoleId }
+        : { conversationId: conversation.id }),
       observedAt: new Date(sent.sentAt),
       emails: [
         {

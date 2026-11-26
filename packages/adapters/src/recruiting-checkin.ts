@@ -6,10 +6,10 @@ import type {
   JobPublisher,
 } from "@rakazo/adapter-kit";
 import { recruitingCheckinStartJob, runContinueJob } from "@rakazo/adapter-kit";
-import type { Actor, RunTrigger } from "@rakazo/contracts";
+import type { Actor, RecruitingCorrespondence, RunTrigger } from "@rakazo/contracts";
 import { automaticReplyVerdict, recruitingBotKey } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
-import { listRecruitingCandidates } from "@rakazo/db";
+import { listRecruitingCandidates, projectRecruitingInboxMessages } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
   conversationCalls,
@@ -360,11 +360,19 @@ export async function startRecruitingCheckin(
   };
   const mail = { prisma: deps.prisma, connector: deps.connector };
   let read: Awaited<ReturnType<typeof readRecruitingRoleRepliesSince>>;
+  // Mail read here that no role page reads is stored for the account Inbox: under the role, or
+  // under this conversation when it emailed people outside a role.
+  const rows: RecruitingCorrespondence["emails"] = [];
   try {
     read = target
       ? await readRecruitingRoleRepliesSince(deps.connector, target, context, since)
       : !role
-        ? await directRepliesSince(mail, thread, members.ids, direct, context, since)
+        ? await directRepliesSince(mail, thread, members.ids, direct, context, since).then(
+            (direct) => {
+              rows.push(...direct.rows);
+              return direct;
+            },
+          )
         : await mailboxRepliesSince(
             {
               prisma: deps.prisma,
@@ -386,6 +394,7 @@ export async function startRecruitingCheckin(
           );
     if (gmail.length) {
       const threads = await gmailRepliesSince(mail, thread, members.ids, gmail, context, since);
+      rows.push(...threads.rows);
       read = {
         replies: [...read.replies, ...threads.replies],
         complete: read.complete && threads.complete,
@@ -395,6 +404,17 @@ export async function startRecruitingCheckin(
     // The next sweep tries again; a check-in never reports a failed read as "no replies".
     return skipped("read failed", { error: String(error) });
   }
+  for (let offset = 0; offset < rows.length; offset += 200)
+    await projectRecruitingInboxMessages(deps.prisma, actor, {
+      ...(role ? { roleId: role.id } : { conversationId: thread.id }),
+      emails: rows.slice(offset, offset + 200),
+      observedAt: new Date(now),
+    }).catch((error: unknown) =>
+      getLogger().warn("recruiting.checkin.store_failed", {
+        threadId: thread.id,
+        error: error instanceof Error ? error.name : "Unknown error",
+      }),
+    );
   // Reported means the conversation has it: an earlier check-in named it, or its agent read it.
   const reported = new Set([
     ...reportedReplyIds(earlier.map((run) => run.checkinReplyIds)),

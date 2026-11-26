@@ -7,9 +7,11 @@ import type { RecruitingRoleReply } from "./recruiting-tools.js";
 const listRecruitingCandidates = vi.fn();
 const readRecruitingRoleRepliesSince = vi.fn();
 const getRecruitingCorrespondence = vi.fn();
+const projectRecruitingInboxMessages = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof import("@rakazo/db")>()),
   listRecruitingCandidates: (...args: unknown[]) => listRecruitingCandidates(...args),
+  projectRecruitingInboxMessages: (...args: unknown[]) => projectRecruitingInboxMessages(...args),
 }));
 vi.mock("./recruiting-tools.js", () => ({
   readRecruitingRoleRepliesSince: (...args: unknown[]) => readRecruitingRoleRepliesSince(...args),
@@ -82,7 +84,12 @@ function fixture(options: {
         args.where.request?.path?.[0] === "0" ? (options.calls ?? []) : (options.direct ?? []),
       ),
     },
-    mcpServer: { findMany: vi.fn(async () => [{ id: "gmail-server" }]) },
+    mcpServer: {
+      findMany: vi.fn(async () => [
+        { id: "gmail-server", name: "Gmail" },
+        { id: "mail-server", name: "Mail" },
+      ]),
+    },
     run: {
       findFirst: vi.fn(async () => (options.busy ? { id: "busy" } : null)),
       findMany: vi.fn(async () => options.earlier ?? []),
@@ -124,6 +131,7 @@ beforeEach(() => {
   listRecruitingCandidates.mockResolvedValue({ crmTarget: { target } });
   readRecruitingRoleRepliesSince.mockReset();
   getRecruitingCorrespondence.mockReset();
+  projectRecruitingInboxMessages.mockClear();
 });
 
 describe("startRecruitingCheckin", () => {
@@ -327,6 +335,23 @@ describe("startRecruitingCheckin", () => {
     ]);
     const prompt = String(deps.taskCreate.mock.calls[0]![0].data.prompt);
     expect(prompt).toContain("ada@example.test");
+    // The email and its answer are kept under this conversation for the account Inbox.
+    const [, owner, stored] = projectRecruitingInboxMessages.mock.calls[0] as unknown as [
+      unknown,
+      { userId: string; spaceId: string },
+      {
+        conversationId?: string;
+        roleId?: string;
+        emails: { direction: string; sourceName: string }[];
+      },
+    ];
+    expect(owner).toMatchObject({ userId: "user", spaceId: "space" });
+    expect(stored.conversationId).toBe("thread");
+    expect(stored.roleId).toBeUndefined();
+    expect(stored.emails.map((row) => [row.direction, row.sourceName])).toEqual([
+      ["received", "Mail"],
+      ["sent", "Mail"],
+    ]);
   });
 
   it("reads a role without a CRM link from its own mailbox, and wakes it once per reply", async () => {
@@ -442,6 +467,16 @@ describe("startRecruitingCheckin", () => {
     const prompt = String(deps.taskCreate.mock.calls[0]![0].data.prompt);
     expect(prompt).toContain("(reply id: reply-1)");
     expect(prompt).toContain("What is the pay?");
+    // The thread's own email and the answer are stored for the account Inbox; nobody else's.
+    const stored = projectRecruitingInboxMessages.mock.calls[0]![2] as {
+      roleId?: string;
+      emails: { id: string; direction: string; eaccount?: string }[];
+    };
+    expect(stored.roleId).toBe("role");
+    expect(stored.emails.map((row) => [row.id, row.direction, row.eaccount])).toEqual([
+      ["gmail-server:sent-1", "sent", "me@mail.test"],
+      ["gmail-server:reply-1", "received", "me@mail.test"],
+    ]);
   });
 
   it("treats a failed read as unknown, not as no replies", async () => {

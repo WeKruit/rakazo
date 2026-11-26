@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AdapterContext, ConnectorProvider } from "@rakazo/adapter-kit";
+import type { RecruitingCorrespondence } from "@rakazo/contracts";
+import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
@@ -10,6 +12,7 @@ import type { PrismaClient } from "@rakazo/db";
 import addressparser from "nodemailer/lib/addressparser";
 import { readInstantlyEmailPage } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
+import { instantlyInboxRow } from "./recruiting-live-correspondence.js";
 import type { RecruitingRoleReply } from "./recruiting-tools.js";
 
 /**
@@ -19,7 +22,9 @@ import type { RecruitingRoleReply } from "./recruiting-tools.js";
  */
 
 type Conversation = { id: string; spaceId: string; userId: string };
-type Reads = { replies: RecruitingRoleReply[]; complete: boolean };
+type InboxRow = RecruitingCorrespondence["emails"][number];
+/** Replies to report, and the mail read (sent and received) as rows the account Inbox stores. */
+type Reads = { replies: RecruitingRoleReply[]; complete: boolean; rows: InboxRow[] };
 const CATALOG_TOOL = "__rakazoCatalogTool";
 /** Newest saved tool calls of a conversation looked through for its Gmail sends. */
 const SAVED_CALLS = 200;
@@ -109,7 +114,13 @@ export async function directRepliesSince(
   since: string,
 ): Promise<Reads> {
   const replies: RecruitingRoleReply[] = [];
+  const rows: InboxRow[] = [];
   let complete = true;
+  const names = await serverNames(
+    deps.prisma,
+    conversation,
+    campaigns.map((campaign) => campaign.serverId),
+  );
   for (const { serverId, campaignId } of campaigns) {
     const page = readInstantlyEmailPage(
       await readTool(
@@ -124,12 +135,11 @@ export async function directRepliesSince(
     );
     if (!page) throw new Error("unreadable mail page");
     complete &&= !page.next_starting_after;
-    for (const email of page.items)
-      if (
-        email.ue_type === 2 &&
-        email.campaign_id === campaignId &&
-        Date.parse(email.timestamp_email) >= Date.parse(since)
-      )
+    const name = names.get(serverId);
+    for (const email of page.items) {
+      if (email.campaign_id !== campaignId) continue;
+      if (name) rows.push(instantlyInboxRow({ id: serverId, name }, email, campaignId, false));
+      if (email.ue_type === 2 && Date.parse(email.timestamp_email) >= Date.parse(since))
         replies.push({
           id: email.id,
           crmCandidateId: "",
@@ -142,8 +152,26 @@ export async function directRepliesSince(
             email.body.text ||
             (email.body.html ? htmlToPlainText(email.body.html) : (email.content_preview ?? "")),
         });
+    }
   }
-  return { replies, complete };
+  return { replies, complete, rows };
+}
+
+/** The names of this user's connections, as the Inbox shows a message's source. */
+async function serverNames(
+  prisma: PrismaClient,
+  conversation: Conversation,
+  ids: readonly string[],
+): Promise<Map<string, string>> {
+  const servers = await prisma.mcpServer.findMany({
+    where: {
+      id: { in: [...new Set(ids)] },
+      userId: conversation.userId,
+      spaceId: conversation.spaceId,
+    },
+    select: { id: true, name: true },
+  });
+  return new Map(servers.map((server) => [server.id, server.name]));
 }
 
 export type GmailSend = {
@@ -309,6 +337,12 @@ export async function gmailRepliesSince(
     threads.set(key, [...(threads.get(key) ?? []), send]);
   }
   const replies: RecruitingRoleReply[] = [];
+  const rows: InboxRow[] = [];
+  const names = await serverNames(
+    deps.prisma,
+    conversation,
+    sends.map((send) => send.serverId),
+  );
   for (const group of [...threads.values()].slice(0, GMAIL_THREADS)) {
     const { serverId, threadId } = group[0]!;
     const recipients = new Set(group.map((send) => send.to.trim().toLowerCase()));
@@ -325,18 +359,48 @@ export async function gmailRepliesSince(
     );
     const messages = thread?.messages;
     if (thread?.id !== threadId || !Array.isArray(messages)) throw new Error("unreadable thread");
+    // The recruiter's mailbox is the address our own email in this thread was sent from.
+    const mailbox = messages
+      .map((value) => record(value))
+      .find((message) => typeof message?.id === "string" && sent.has(message.id))?.sender;
+    const name = names.get(serverId);
     for (const value of messages) {
       const message = record(value);
       const from = address(message?.sender);
       const at = typeof message?.date === "string" ? Date.parse(message.date) : Number.NaN;
-      if (
-        typeof message?.id !== "string" ||
-        sent.has(message.id) ||
-        !from ||
-        !recipients.has(from) ||
-        !(at >= Date.parse(since))
-      )
-        continue;
+      if (typeof message?.id !== "string") continue;
+      const ours = sent.has(message.id);
+      const theirs = !ours && !!from && recipients.has(from);
+      if (!ours && !theirs) continue;
+      const body =
+        typeof message.plaintextBody === "string"
+          ? message.plaintextBody
+          : typeof message.snippet === "string"
+            ? message.snippet
+            : "";
+      const row = name
+        ? RecruitingCorrespondenceSchema.shape.emails.element.safeParse({
+            id: `${serverId}:${message.id}`,
+            sourceName: name,
+            sourceId: serverId,
+            providerMessageId: message.id,
+            providerThreadId: threadId,
+            ...(address(mailbox) ? { eaccount: address(mailbox) } : {}),
+            savedRead: null,
+            direction: ours ? "sent" : "received",
+            sender: typeof message.sender === "string" ? message.sender : null,
+            recipients: Array.isArray(message.toRecipients)
+              ? message.toRecipients.filter((to): to is string => typeof to === "string")
+              : [],
+            subject: typeof message.subject === "string" ? message.subject : "",
+            body: body.slice(0, 50_000),
+            snippet: typeof message.plaintextBody !== "string" || body.length > 50_000,
+            date: Number.isFinite(at) ? new Date(at).toISOString() : null,
+            url: null,
+          })
+        : undefined;
+      if (row?.success) rows.push(row.data);
+      if (!theirs || !(at >= Date.parse(since))) continue;
       replies.push({
         id: message.id,
         crmCandidateId: "",
@@ -354,5 +418,5 @@ export async function gmailRepliesSince(
       });
     }
   }
-  return { replies, complete: threads.size <= GMAIL_THREADS };
+  return { replies, complete: threads.size <= GMAIL_THREADS, rows };
 }

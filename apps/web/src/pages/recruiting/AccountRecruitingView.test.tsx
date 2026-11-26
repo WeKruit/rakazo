@@ -89,6 +89,7 @@ const indexPage = (
   partial = false,
 ): GlobalRecruitingInboxOutput => ({
   roles,
+  conversations: [],
   items: emails.map((email) => ({
     roleId: "one",
     key: `message:${email.id}`,
@@ -669,6 +670,59 @@ it("loads the next interview page into the calendar without losing previous even
   } finally {
     await act(async () => pageRoot.unmount());
     vi.useRealTimers();
+  }
+});
+
+it("lists mail sent from a conversation outside a role under that conversation", async () => {
+  // A one-off email from Kruit's main chat and its answer appeared on no page.
+  const page = indexPage([
+    {
+      id: "mail:reply",
+      direction: "received",
+      sender: "ada@example.test",
+      subject: "Re: Data role",
+      body: "Not looking right now.",
+      recipients: ["me@example.test"],
+      date: "2026-10-30T11:00:00Z",
+      sourceName: "Mailbox",
+      sourceId: "mail",
+      providerMessageId: "reply",
+      savedRead: null,
+      snippet: false,
+      url: null,
+    },
+  ]);
+  mockIndex({
+    ...page,
+    conversations: [{ id: "main", title: "Kruit", threadId: "main", groupId: "group-main" }],
+    items: page.items.map((item) => ({ ...item, roleId: "main" })),
+  });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    const inbox = container.querySelector('[data-testid="account-inbox"]')!;
+    expect(inbox.textContent).toContain("Re: Data role");
+    expect(inbox.textContent).toContain("Kruit");
+    expect(inbox.textContent).not.toContain("Role unavailable");
+    // Only a role opens a role page.
+    expect(inbox.textContent).not.toContain("Open role");
+  } finally {
+    await act(async () => pageRoot.unmount());
   }
 });
 

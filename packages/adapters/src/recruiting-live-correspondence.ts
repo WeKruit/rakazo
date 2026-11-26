@@ -59,6 +59,41 @@ type CalendarEntry = {
 const calendarCache = new Map<string, CalendarEntry>();
 /** Other campaigns of the account read for a role's replies, at most; more marks the read partial. */
 const OTHER_CAMPAIGNS = 10;
+
+/** One Instantly email as an Inbox row; a list read keeps at most 50,000 characters of its body. */
+export function instantlyInboxRow(
+  source: { id: string; name: string },
+  email: NonNullable<ReturnType<typeof readInstantlyEmail>>,
+  campaignId: string,
+  full: boolean,
+): RecruitingCorrespondence["emails"][number] {
+  const text =
+    email.body.text ||
+    (email.body.html ? htmlToPlainText(email.body.html) : (email.content_preview ?? ""));
+  const row = RecruitingCorrespondenceSchema.shape.emails.element.parse({
+    id: `${source.id}:${email.id}`,
+    sourceId: source.id,
+    sourceName: source.name,
+    providerMessageId: email.id,
+    providerThreadId: email.thread_id ?? null,
+    campaignId,
+    eaccount: email.eaccount,
+    savedRead: null,
+    direction: email.ue_type === 2 ? "received" : email.ue_type === 1 ? "sent" : null,
+    sender: email.from_address_email ?? null,
+    recipients: [email.to_address_email_list],
+    subject: email.subject,
+    body: text,
+    snippet:
+      !!email.body_fallback_reason ||
+      !(email.body.text || email.body.html) ||
+      (!full && text.length > 50000),
+    date: email.timestamp_email,
+    url: null,
+  });
+  if (!full) row.body = row.body.slice(0, 50000);
+  return row;
+}
 /** The calendar writes that put an interview on a calendar, Google's and Cal.com's. */
 const CALENDAR_BOOKINGS = ["create_event", "update_event", "create_booking", "reschedule_booking"];
 /** The event a completed calendar write made, by the id the calendar read gives it. */
@@ -150,31 +185,7 @@ export async function refreshRecruitingCorrespondence(
     email: NonNullable<ReturnType<typeof readInstantlyEmail>>,
     campaignId: string,
   ) => {
-    const text =
-      email.body.text ||
-      (email.body.html ? htmlToPlainText(email.body.html) : (email.content_preview ?? ""));
-    const row = RecruitingCorrespondenceSchema.shape.emails.element.parse({
-      id: `${source.id}:${email.id}`,
-      sourceId: source.id,
-      sourceName: source.name,
-      providerMessageId: email.id,
-      providerThreadId: email.thread_id ?? null,
-      campaignId,
-      eaccount: email.eaccount,
-      savedRead: null,
-      direction: email.ue_type === 2 ? "received" : email.ue_type === 1 ? "sent" : null,
-      sender: email.from_address_email ?? null,
-      recipients: [email.to_address_email_list],
-      subject: email.subject,
-      body: text,
-      snippet:
-        !!email.body_fallback_reason ||
-        !(email.body.text || email.body.html) ||
-        (!scope.message && text.length > 50000),
-      date: email.timestamp_email,
-      url: null,
-    });
-    if (!scope.message) row.body = row.body.slice(0, 50000);
+    const row = instantlyInboxRow(source, email, campaignId, !!scope.message);
     const attachments = await inboxAttachments(source, email);
     if (attachments.length) row.attachments = attachments;
     return row;

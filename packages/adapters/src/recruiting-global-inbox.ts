@@ -42,6 +42,9 @@ export async function getGlobalRecruitingInbox(
     const message = entry.email;
     if (!message.snippet) return page;
     const role = page.roles.find((role) => role.id === entry.roleId);
+    // Mail a conversation sent outside a role is shown as stored; no role reads it live.
+    if (!role && page.conversations.some((conversation) => conversation.id === entry.roleId))
+      return page;
     if (!role) throw new IsolationError();
     const target = () => roleTarget(deps.prisma, actor, role, authorize);
     const detail = await getRecruitingCorrespondence(
