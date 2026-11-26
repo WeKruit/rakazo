@@ -419,7 +419,7 @@ export const JOURNEYS = [
           name: "Ethan Park",
           address: ethan,
           persona:
-            "Ethan Park, a senior data engineer in Portland with 8 years of Spark and Kafka, on an H-1B visa, open to a move if the pay is right. In your first answer you ask the base pay, whether they help with relocation to Seattle, and whether they can transfer your H-1B. You can talk Tuesday or Wednesday 2–4 pm Central. If an answer dodges one of your questions, ask it again. Once a time is proposed that fits, you accept it.",
+            "Ethan Park, a senior data engineer in Portland with 8 years of Spark and Kafka, on an H-1B visa, open to a move if the pay is right. In your first answer you ask the base pay, whether they help with relocation to Seattle, and whether they can transfer your H-1B. You can talk Tuesday or Wednesday 2–4 pm Central. If an answer dodges one of your questions, ask it again. Your green card is weeks away, so a 'no' on the visa does not end it for you: you still want the call. Once a time is proposed that fits, you accept it.",
         },
         {
           name: "Ada Lin",
