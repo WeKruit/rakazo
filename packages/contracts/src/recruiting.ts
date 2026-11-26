@@ -1133,25 +1133,11 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
             message: `Each person appears once in a round. Repeated: ${[...new Set(repeated)].join(", ")}. Replace each repeat with another saved person's exact candidateKey.`,
           });
       }),
-    checks: z
-      .record(RecruitingId, z.record(RecruitingId, z.enum(["shown", "unknown", "fails"])))
+    groupOf: z
+      .record(RecruitingId, z.string().trim().min(1).max(80))
       .optional()
       .describe(
-        'Optional. candidateKey → { requirementId → verdict } on the role\'s requirements (the brief fields in the recruiter\'s words, the hard criteria and the reasons they turned people down): "shown" when the person\'s row shows it, "unknown" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), "fails" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round\'s "not verified" notes are written from the unknown verdicts.',
-      ),
-    unverified: z
-      .record(
-        RecruitingId,
-        // A long note keeps its start instead of refusing the round.
-        z
-          .string()
-          .trim()
-          .min(1)
-          .transform((text) => (text.length > 160 ? `${text.slice(0, 159).trimEnd()}…` : text)),
-      )
-      .optional()
-      .describe(
-        "candidateKey → the must-haves this person's row does not show, in English (for example 'startup experience, former Metrology Engineer'). Shown under that person in chat.",
+        "Optional. candidateKey → the heading of the group you put this person in, in the recruiter's language and your own words, from how their profile was judged against what the recruiter asked (for example 'Meet everything asked', 'Years on streaming not stated'). People are listed in candidateKeys order and a heading is printed where it changes, so give each group's people together.",
       ),
   }),
   // People returned by a people-search connector call in this same run, saved as one unassessed page.

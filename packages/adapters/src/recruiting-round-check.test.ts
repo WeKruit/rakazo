@@ -1,79 +1,16 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
-  checkRound,
   listedBeforeRound,
   roundCriteria,
   roundListedNotRecorded,
-  roundPeopleNamed,
   roundRepeats,
   withoutShownBefore,
 } from "./recruiting-round-check.js";
 
-describe("checkRound", () => {
-  // From a staging feedback round: Seattle and Spark/Kafka from the JD, then "no production
-  // Spark/Kafka shown" saved from the recruiter's turn-down after round one.
-  const criteria = [
-    { id: "seattle", statement: "Seattle area, hybrid 3 days", added: false },
-    { id: "years", statement: "6+ years", added: false },
-    { id: "prod-stack", statement: "shows production Spark and Kafka work", added: true },
-  ];
-  const base = { criteria, asked: new Set<string>() };
-  const all = (verdict: "shown" | "unknown" | "fails") => ({
-    seattle: "shown" as const,
-    years: verdict,
-    "prod-stack": verdict,
-  });
-
-  it("records picks with or without verdicts and notes what is unknown", () => {
-    // Staging 11-15/16: asking for a verdict on every criterion of every pick cost refusals and up
-    // to a minute a round; the search grades the people it returns.
-    expect(checkRound({ ...base, keys: ["a", "b"], checks: { a: all("shown") } })).toEqual({
-      ok: true,
-      unverified: {},
-    });
-    const checks = { a: all("shown"), b: all("fails"), c: all("unknown") };
-    expect(checkRound({ ...base, keys: ["a", "c"], checks })).toEqual({
-      ok: true,
-      unverified: { c: "6+ years; shows production Spark and Kafka work" },
-    });
-  });
-
-  it("never lists a turned-down reason as something to verify", () => {
-    // Staging 11-20 (44c1ad44): round 2 showed "未核实：…; not what the recruiter turned down:
-    // <name>没数仓建模" under four people. The reason still keeps look-alikes out; it is not a
-    // requirement the recruiter reads per person.
-    const turnedDown = {
-      id: "turned-down:fb-1",
-      statement: "not what the recruiter turned down: no DW modelling",
-      added: true,
-    };
-    const result = checkRound({
-      ...base,
-      criteria: [...criteria, turnedDown],
-      keys: ["a"],
-      checks: { a: { ...all("shown"), years: "unknown", "turned-down:fb-1": "unknown" } },
-    });
-    expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
-  });
-
-  // Long-search-finishes 11-15: Kubernetes and Terraform were unknown for all ten, so no note
-  // said so, and the round read as fully checked while the team called them unverified.
-  it("notes a requirement no pick's row shows on everyone", () => {
-    const shown = { seattle: "shown", "prod-stack": "shown" } as const;
-    const result = checkRound({
-      ...base,
-      keys: ["a", "b"],
-      checks: { a: { ...shown, years: "unknown" }, b: { ...shown, years: "unknown" } },
-    });
-    expect(result).toEqual({ ok: true, unverified: { a: "6+ years", b: "6+ years" } });
-  });
-});
-
 describe("roundCriteria", () => {
-  // Staging 11-15: the brief was saved seconds after round one was recorded, so every brief field
-  // looked raised since that round and "unknown" was refused for every person, base pay included,
-  // leaving round two short. New means the recruiter said it after the last round.
+  // The role's requirements are read as saved: the recruiter's and the job post's own fields and
+  // the hard criteria, nothing reworded, joined or added by code.
   const field = (key: string, value: string, message: string, origin = "user_instruction") => ({
     key,
     value,
@@ -81,7 +18,6 @@ describe("roundCriteria", () => {
     state: "known",
     sourceRefIds: [`human-message:${message}`],
   });
-  const roundAt = new Date("2026-11-15T00:18:00Z");
   const prisma = {
     recruitingRole: {
       findUnique: async () => ({
@@ -105,45 +41,18 @@ describe("roundCriteria", () => {
         },
       }),
     },
-    recruitingCalibrationRound: { findFirst: async () => ({ createdAt: roundAt }) },
-    message: {
-      findMany: async ({ where }: { where: { createdAt: { gt: Date } } }) =>
-        [
-          { id: "m-jd", createdAt: new Date("2026-11-15T00:17:00Z") },
-          { id: "m-after", createdAt: new Date("2026-11-15T00:19:00Z") },
-        ].filter((message) => message.createdAt > where.createdAt.gt),
-    },
-    externalEffect: {
-      findMany: async () => [
-        {
-          id: "fb-1",
-          createdAt: new Date("2026-11-15T00:19:30Z"),
-          request: { summary: "William Z. is a generic software engineer, not hands-on data eng" },
-        },
-      ],
-    },
   } as unknown as PrismaClient;
 
-  it("marks only what the recruiter said after the last round as new", async () => {
-    expect(await roundCriteria(prisma, { roleId: "r", spaceId: "s" })).toEqual([
+  it("returns each requirement in the words saved, with the brief field's key apart", async () => {
+    expect(await roundCriteria(prisma, { roleId: "r" })).toEqual([
       {
         id: "brief:production technologies",
-        statement: "production technologies: Spark and Kafka in production",
-        added: false,
+        statement: "Spark and Kafka in production",
+        field: "production technologies",
       },
-      { id: "brief:location", statement: "location: Seattle metro, hybrid", added: true },
-      {
-        id: "brief:Should I cap experience at 10 years?",
-        statement: "Target 6–10 years",
-        added: false,
-      },
-      { id: "titles", statement: "data engineer titles only", added: true },
-      {
-        id: "turned-down:fb-1",
-        statement:
-          "not what the recruiter turned down: William Z. is a generic software engineer, not hands-on data eng",
-        added: true,
-      },
+      { id: "brief:location", statement: "Seattle metro, hybrid", field: "location" },
+      { id: "brief:Should I cap experience at 10 years?", statement: "Target 6–10 years" },
+      { id: "titles", statement: "data engineer titles only" },
     ]);
   });
 });
@@ -259,97 +168,6 @@ describe("roundListedNotRecorded", () => {
   });
 });
 
-describe("roundPeopleNamed", () => {
-  const prismaFor = (text: string, approvedAt: Date | null = null) =>
-    ({
-      thread: { findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role-1" })) },
-      message: { findUnique: vi.fn(async () => ({ blocks: [{ kind: "text", text }] })) },
-      recruitingCalibrationRound: {
-        findFirst: vi.fn(async () => ({ round: 1, candidateKeys: ["a", "b", "c"], approvedAt })),
-      },
-      recruitingCandidateOccurrence: {
-        findMany: vi.fn(async () => [
-          { candidateKey: "a", name: "Ryan Braley" },
-          { candidateKey: "b", name: "Parthasarathi Samantaray" },
-          { candidateKey: "c", name: "Mohamed Hassan" },
-        ]),
-      },
-    }) as unknown as PrismaClient;
-  const input = { threadId: "thread", messageId: "message" };
-
-  // Staging play, 11-15: this message was recorded as accepting the round.
-  it("finds the people a mixed message turns down, by number or name", async () => {
-    await expect(
-      roundPeopleNamed(
-        prismaFor("#3 is off. parthasarathi is a technical architect. find me more like the rest"),
-        input,
-      ),
-    ).resolves.toEqual({
-      round: 1,
-      named: ["Parthasarathi Samantaray", "Mohamed Hassan"],
-      keys: ["b", "c"],
-    });
-  });
-
-  // Staging edb7834f: the recruiter's words reach the role's lead quoted in a handoff, and "the
-  // amazon ones" names people by their company; the next round left all of them unreviewed.
-  it("reads a handed-in message and finds people by their company", async () => {
-    const prisma = prismaFor("");
-    (prisma.message.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      blocks: [
-        {
-          kind: "bot_message_received",
-          text: 'The recruiter wrote, word for word:\n"kwang is LA based and half of these are amazon again"',
-        },
-      ],
-    });
-    (
-      prisma.recruitingCandidateOccurrence.findMany as ReturnType<typeof vi.fn>
-    ).mockResolvedValueOnce([
-      { candidateKey: "a", name: "Kwang Hyun Jang", company: "Apple" },
-      { candidateKey: "b", name: "Vinay Thanikonda", company: "Amazon" },
-      { candidateKey: "c", name: "Sashank Y.", company: "TikTok" },
-    ]);
-    await expect(roundPeopleNamed(prisma, input)).resolves.toEqual({
-      round: 1,
-      named: ["Kwang Hyun Jang", "Vinay Thanikonda"],
-      keys: ["a", "b"],
-    });
-  });
-
-  it("reads only the recruiter's quoted words, never the person Kruit's note names", async () => {
-    const prisma = prismaFor("");
-    (prisma.message.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      blocks: [
-        {
-          kind: "bot_message_received",
-          text: 'The recruiter wrote, word for word:\n"kwang is LA based"\n\nKruit\'s note, only on who and what this refers to:\nVinay Thanikonda at Amazon',
-        },
-      ],
-    });
-    (
-      prisma.recruitingCandidateOccurrence.findMany as ReturnType<typeof vi.fn>
-    ).mockResolvedValueOnce([
-      { candidateKey: "a", name: "Kwang Hyun Jang", company: "Apple" },
-      { candidateKey: "b", name: "Vinay Thanikonda", company: "Amazon" },
-    ]);
-    await expect(roundPeopleNamed(prisma, input)).resolves.toEqual({
-      round: 1,
-      named: ["Kwang Hyun Jang"],
-      keys: ["a"],
-    });
-  });
-
-  it("finds nobody in a plain request for more, or once the round is approved", async () => {
-    await expect(
-      roundPeopleNamed(prismaFor("these look right, find 20 more"), input),
-    ).resolves.toBeNull();
-    await expect(
-      roundPeopleNamed(prismaFor("ryan is off, find more", new Date()), input),
-    ).resolves.toBeNull();
-  });
-});
-
 describe("withoutShownBefore", () => {
   it("drops people an earlier round showed and keeps the rest in order", async () => {
     const prisma = {
@@ -357,8 +175,9 @@ describe("withoutShownBefore", () => {
         findMany: async () => [{ candidateKeys: ["a", "x"] }, { candidateKeys: ["c"] }],
       },
     };
-    await expect(withoutShownBefore(prisma as never, "role", ["a", "b", "c", "d", "b"])).resolves
-      .toEqual({ keys: ["b", "d"], shownBefore: 3 });
+    await expect(
+      withoutShownBefore(prisma as never, "role", ["a", "b", "c", "d", "b"]),
+    ).resolves.toEqual({ keys: ["b", "d"], shownBefore: 3 });
   });
 });
 
