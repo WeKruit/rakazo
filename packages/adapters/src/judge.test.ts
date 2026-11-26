@@ -166,16 +166,19 @@ describe("JudgeSettings", () => {
     });
   });
 
-  it("shows a requirement without the brief field's own key, and keeps a label a person wrote", async () => {
+  it("shows a brief field's requirement without the field's key, and keeps a label a criterion states", async () => {
     const requirements = await personRequirements({ yes: async () => undefined }, [
-      { id: "a", statement: "experience_and_pipelines: 5+ years of batch and streaming pipelines" },
-      { id: "b", statement: "Languages: Mandarin" },
+      {
+        id: "brief:experience",
+        statement: "experience: 5+ years of batch and streaming pipelines",
+      },
+      { id: "hard-1", statement: "Languages: Mandarin" },
     ]);
     expect(requirements.map(({ statement, shown }) => shown ?? statement)).toEqual([
       "5+ years of batch and streaming pipelines",
       "Languages: Mandarin",
     ]);
-    expect(requirements[0]!.statement).toContain("experience_and_pipelines");
+    expect(requirements[0]!.statement).toContain("experience:");
   });
 
   it("writes the verdicts as the assessment lines Results reads", () => {

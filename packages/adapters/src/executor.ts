@@ -3785,6 +3785,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : run.trigger === "recruiting_checkin"
               ? checkinTools(listedTools)
               : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
+        setupMark("toolsReady");
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
           : undefined;
@@ -3829,6 +3830,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           take: 3,
           select: { kind: true, status: true, result: true },
         });
+        setupMark("effectsRead");
         const discardedReplies = continuationEffects.flatMap((effect) => {
           if (effect.status !== "denied") return [];
           const retained =
