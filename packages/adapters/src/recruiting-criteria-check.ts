@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@rakazo/db";
+import type { Prisma, PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { CriterionQuestion, TextJudge } from "./judge.js";
 import type { PageReader } from "./keyless-http-web.js";
@@ -146,7 +146,10 @@ async function readMissingProfiles(
   await Promise.all(
     entries.map(async ({ row }) => {
       if (row._profile_text || typeof row.linkedin_url !== "string" || !row.linkedin_url) return;
-      const page = await read(row.linkedin_url, PROFILE_CHARS, signal).catch(() => undefined);
+      const page = await read(row.linkedin_url, PROFILE_CHARS, signal).catch((error) => {
+        getLogger().warn("recruiting.criteria.profile not read", { error: String(error) });
+        return undefined;
+      });
       if (page?.text) row._profile_text = page.text;
     }),
   );
@@ -240,5 +243,90 @@ export async function checkPeopleCriteria(
     });
   } catch (error) {
     getLogger().warn("recruiting.criteria.check failed", { error: String(error) });
+  }
+}
+
+/**
+ * People saved before the role had requirements were never judged: the first quick searches run
+ * before the brief is saved (play 11-26: all first ten stayed without a verdict). So each save of
+ * the role judges its people who have no verdicts yet and writes them on their newest saved row.
+ */
+export async function checkUnjudgedPeople(
+  judgeSettings: { resolve(): Promise<TextJudge | undefined> } | undefined,
+  prisma: PrismaClient,
+  role: { roleId: string; spaceId: string },
+  readProfile?: PageReader,
+): Promise<void> {
+  try {
+    const [saved, occurrences] = await Promise.all([
+      prisma.recruitingRole.findUnique({ where: { id: role.roleId }, select: { revision: true } }),
+      prisma.recruitingCandidateOccurrence.findMany({
+        where: { roleId: role.roleId },
+        orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+        select: {
+          pageId: true,
+          rowIndex: true,
+          candidateKey: true,
+          name: true,
+          location: true,
+          linkedinUrl: true,
+          matchFields: true,
+          report: true,
+        },
+      }),
+    ]);
+    if (!saved) return;
+    const newest = new Map<string, (typeof occurrences)[number]>();
+    for (const row of occurrences)
+      if (!newest.has(row.candidateKey)) newest.set(row.candidateKey, row);
+    const judged = new Set(
+      occurrences
+        .filter((row) =>
+          Array.isArray((row.matchFields as { criteria?: unknown } | null)?.criteria),
+        )
+        .map((row) => row.candidateKey),
+    );
+    const unjudged = [...newest.values()].filter((row) => !judged.has(row.candidateKey));
+    const entries = unjudged.map(
+      (row): { row: Record<string, unknown>; check?: CriteriaCheck } => ({
+        row: { name: row.name, location: row.location, linkedin_url: row.linkedinUrl },
+      }),
+    );
+    await checkPeopleCriteria(
+      judgeSettings,
+      prisma,
+      { ...role, revision: saved.revision },
+      entries,
+      readProfile,
+    );
+    await Promise.all(
+      entries.map(async ({ row, check }, at) => {
+        if (!check) return;
+        const { pageId, rowIndex, matchFields, report } = unjudged[at]!;
+        const fields = (report as { fields?: unknown[] } | null)?.fields;
+        const added = [
+          ["Requirements assessment", row.requirements_assessment],
+          ["Location tag", row.location_tag],
+        ].flatMap(([label, value]) =>
+          typeof value === "string" ? [{ label, value, sourceUrls: [] }] : [],
+        );
+        await prisma.recruitingCandidateOccurrence.update({
+          where: { pageId_rowIndex: { pageId, rowIndex } },
+          data: {
+            matchFields: { ...(matchFields as object | null), ...check } as Prisma.InputJsonObject,
+            ...(Array.isArray(fields)
+              ? {
+                  report: {
+                    ...(report as object),
+                    fields: [...fields, ...added],
+                  } as Prisma.InputJsonObject,
+                }
+              : {}),
+          },
+        });
+      }),
+    );
+  } catch (error) {
+    getLogger().warn("recruiting.criteria.unjudged failed", { error: String(error) });
   }
 }

@@ -638,7 +638,7 @@ import {
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
-import { checkPeopleCriteria } from "./recruiting-criteria-check.js";
+import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import {
   checkRound,
   withoutGradedBelowFit,
@@ -10479,6 +10479,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Native writes complete their immutable domain receipt in the same transaction.
             if (args.operation === "read" && !(await persistEffectResult(result)))
               return uncertainEffectResult(name);
+            // People saved before these requirements existed are judged on them now, beside the
+            // turn: nothing waits for it.
+            const savedRole = (result as { workspace?: { role?: { id?: unknown } } | null })
+              .workspace?.role?.id;
+            if (args.operation !== "read" && typeof savedRole === "string")
+              void checkUnjudgedPeople(
+                deps.judge,
+                deps.prisma,
+                { roleId: savedRole, spaceId: run.spaceId },
+                deps.profileReader,
+              );
             return deliverRecruitingRoleResult(result, args.operation === "read");
           }
           if (name === "read_memory") {

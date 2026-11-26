@@ -8029,6 +8029,8 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
+              // The search's own sentence on why it returned the person.
+              reason: saved.why_recommended ?? null,
               // Where the person is relative to the place the recruiter asked for.
               ...(typeof saved.location_tag === "string" ? { locationTag: saved.location_tag } : {}),
               ...gradeShown(captured.rows[row.rowIndex]!, graded.has(row.candidateKey)),

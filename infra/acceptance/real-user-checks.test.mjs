@@ -636,4 +636,15 @@ test("the number Kruit says is the number of people listed", () => {
     ),
     ["count: round says 10 people and lists 12", "count: says 20 shown, this chat has listed 22"],
   );
+  assert.deepEqual(
+    count(
+      conversationChecks([
+        user("找10个后端"),
+        round(10, 1, 10),
+        bot(`${round(2, 11, 12).text}\n\n累计展示 12 人，你淘汰了 2 人，计入 10 人。`),
+        bot("目前计入 8 人，还需 2 位。"),
+      ]),
+    ),
+    ["count: says 8 counted, its newest list said 10"],
+  );
 });

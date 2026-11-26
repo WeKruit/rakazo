@@ -30,6 +30,7 @@ import {
   createBackgroundJobHandlers,
   createCloudAgentConnection,
   createConnectorStack,
+  createExaPageReader,
   createJobReconciler,
   createMessagingContextLoader,
   createMessagingTeamChatSender,
@@ -596,6 +597,7 @@ export async function createApp(
     ticketBoardEnabled,
     messaging: messaging ? createMessagingContextLoader(prisma) : undefined,
     web: createWebProvider(),
+    profileReader: createExaPageReader(),
     cloudAgent,
     shutdownSignal: shutdown.signal,
   });

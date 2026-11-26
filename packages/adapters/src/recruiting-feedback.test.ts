@@ -71,6 +71,7 @@ function fixture(content = "keep this preference", revision = 1, roleTitle?: str
             activeRecruitingRole: roleTitle ? { title: roleTitle } : null,
           })),
         },
+        recruitingCandidateOccurrence: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       memory: { read, commit } as unknown as MemoryStore,
     },

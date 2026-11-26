@@ -124,6 +124,7 @@ export const questionsIn = (text) =>
 const ROUND_SIZE = /^(?:(\d+) (?:people|person) this round:|本轮 (\d+) 人：)/m;
 const SHOWN_SO_FAR =
   /累计展示 (\d+) 人(?:，你淘汰了 (\d+) 人，计入 (\d+) 人)?|(\d+) shown so far(?:, (\d+) turned down by you, (\d+) counted)?/;
+const OWN_COUNT = /(?:计入|计数为?)\s*\**\s*(\d+)|(\d+)\**\s*counted/;
 
 /**
  * The number Kruit says is the number of people on screen (the recruiter's rule, 11-26): a round's
@@ -133,6 +134,7 @@ const SHOWN_SO_FAR =
 export function countChecks(messages) {
   const failures = [];
   const listed = new Set();
+  let latest;
   for (const message of messages) {
     if (message.role === "user") continue;
     const text = message.text ?? "";
@@ -145,12 +147,21 @@ export function countChecks(messages) {
       for (const profile of profilesIn(text)) listed.add(profile);
     }
     const total = SHOWN_SO_FAR.exec(text);
-    if (!total) continue;
+    if (!total) {
+      // A count in Kruit's own words is the one its newest list gave ("计入 8 人" came a few
+      // seconds after the list that said 10, from a note it kept).
+      const own = OWN_COUNT.exec(text);
+      const said = own && Number(own[1] ?? own[2]);
+      if (own && latest !== undefined && said !== latest)
+        failures.push(`count: says ${said} counted, its newest list said ${latest}`);
+      continue;
+    }
     const [shown, turnedDown, counted] = (total[1] ? total.slice(1, 4) : total.slice(4, 7)).map(
       (value) => (value === undefined ? undefined : Number(value)),
     );
     if (shown < listed.size)
       failures.push(`count: says ${shown} shown, this chat has listed ${listed.size}`);
+    latest = counted ?? shown;
     if (counted !== undefined && counted !== shown - turnedDown)
       failures.push(`count: ${shown} shown less ${turnedDown} turned down is not ${counted}`);
   }
