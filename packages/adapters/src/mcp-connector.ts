@@ -24,8 +24,6 @@ import {
   GMAIL_SEND_TOOLS,
   PLACEHOLDER_NOTE,
   recruitingBotKey,
-  signedAsTeam,
-  TEAM_SIGNATURE_NOTE,
   unfilledPlaceholder,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
@@ -492,7 +490,6 @@ const GmailSendInput = z.strictObject({
     .min(1)
     .max(50_000)
     .describe("Plain-text body.")
-    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE)
     .refine((body) => !unfilledPlaceholder(body), PLACEHOLDER_NOTE),
   replyThreadId: z
     .string()

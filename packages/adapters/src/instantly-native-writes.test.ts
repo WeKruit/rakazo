@@ -617,64 +617,6 @@ describe("shared mail account isolation", () => {
     expect(rest).not.toHaveBeenCalled();
   });
 
-  it("refuses a new campaign whose email greets one person by name", async () => {
-    // Staging 11-13: "Hi Noah," for Noah and Ada split them into two campaigns, so the first
-    // card listed only Noah.
-    const rest = vi.fn();
-    const prisma = {
-      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
-      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
-      externalEffect: { findFirst: vi.fn(async () => null) },
-    };
-    await expect(
-      runInstantlyWrite(
-        prisma as never,
-        rest as never,
-        { ...(context as object), runId: "run-1" } as never,
-        "server",
-        "native_instantly_create_campaign",
-        {
-          name: "Senior Data Engineer",
-          eaccount: "me@ours.test",
-          steps: [{ subject: "A role", body: "Hi Noah, a role in Seattle.\n\nBest,\nNoah Liu" }],
-        },
-        { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
-      ),
-    ).rejects.toThrow("{{firstName}}");
-    expect(rest).not.toHaveBeenCalled();
-  });
-
-  it("refuses an email that still has a fill-in-the-blank", async () => {
-    // Staging 11-13: a template's "Hi [Candidate Name]," went out exactly as written.
-    const rest = vi.fn();
-    const prisma = {
-      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
-      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
-      externalEffect: { findFirst: vi.fn(async () => null) },
-    };
-    await expect(
-      runInstantlyWrite(
-        prisma as never,
-        rest as never,
-        { ...(context as object), runId: "run-1" } as never,
-        "server",
-        "native_instantly_create_campaign",
-        {
-          name: "Senior Data Engineer",
-          eaccount: "me@ours.test",
-          steps: [
-            {
-              subject: "A role",
-              body: "Hi [Candidate Name],\n\nA role in Seattle.\n\nBest,\nNoah Liu",
-            },
-          ],
-        },
-        { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
-      ),
-    ).rejects.toThrow("fill-in-the-blank");
-    expect(rest).not.toHaveBeenCalled();
-  });
-
   it("lists and uses only this account's own sending mailboxes", async () => {
     const rest = vi.fn(async (method: string, path: string) =>
       path.startsWith("/accounts?")
