@@ -311,7 +311,9 @@ export function SourceText({ text, start, end }: { text: string; start: number; 
         className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed"
       >
         {text.slice(0, start)}
-        <mark className="bg-accent text-accent-foreground">{text.slice(start, end)}</mark>
+        {end > start ? (
+          <mark className="bg-accent text-accent-foreground">{text.slice(start, end)}</mark>
+        ) : null}
         {text.slice(end)}
       </pre>
     </div>

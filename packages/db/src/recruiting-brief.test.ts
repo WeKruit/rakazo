@@ -3,14 +3,11 @@ import type { Actor, RecruitingBriefDraft, RecruitingCriterion } from "@rakazo/c
 import { ReviseRecruitingRoleInput } from "@rakazo/contracts";
 import { boundDirectApprovalRequest, RecruitingPlaybookValidationError } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import { extractPdfText } from "@rakazo/core/node/pdf-text";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import type { RecruitingRoleMaterialContext } from "./recruiting.js";
 import * as recruiting from "./recruiting.js";
 import { IsolationError } from "./scope.js";
-
-vi.mock("@rakazo/core/node/pdf-text", () => ({ extractPdfText: vi.fn() }));
 
 const actor: Actor = {
   spaceId: "space",
@@ -1037,10 +1034,8 @@ function materialFixture() {
   };
 }
 
-describe("original PDF source validation (mocked DB, storage and processor)", () => {
-  const text = "Original 🧭 candidate evidence\nSecond evidence line\f";
+describe("original file source validation (mocked DB and storage)", () => {
   const quote = "🧭 candidate evidence";
-  beforeEach(() => vi.mocked(extractPdfText).mockReset().mockResolvedValue(text));
 
   function pdfFixture() {
     const f = materialFixture();
@@ -1072,22 +1067,39 @@ describe("original PDF source validation (mocked DB, storage and processor)", ()
     return { ...f, artifact, source, input, provider };
   }
 
-  it("persists exact role quotes from one extraction per PDF within each validation call", async () => {
+  it("saves a quote that is not the file's own wording, and still refuses another file's fingerprint", async () => {
     const f = pdfFixture();
-    const saved = await recruiting.reviseRecruitingRole(f.prisma, actor, f.input, f.material);
-    expect(saved.revision.sourceRefs).toEqual(f.input.sourceRefs);
-    expect(extractPdfText).toHaveBeenCalledOnce();
-    expect(extractPdfText).toHaveBeenCalledWith(f.bytes.get("pdf"));
-    await recruiting.reviseRecruitingRole(
+    const sourceRefs = [{ ...f.source, quote: "The agent's own copy of the passage" }];
+    const saved = await recruiting.reviseRecruitingRole(
       f.prisma,
       actor,
-      { ...f.input, expectedRevision: 2 },
+      { ...f.input, sourceRefs },
       f.material,
     );
-    expect(extractPdfText).toHaveBeenCalledTimes(2);
+    expect(saved.revision.sourceRefs).toEqual(sourceRefs);
+    f.tx.recruitingRoleRevision.create.mockClear();
+    await expect(
+      recruiting.reviseRecruitingRole(
+        f.prisma,
+        actor,
+        {
+          ...f.input,
+          expectedRevision: 2,
+          sourceRefs: sourceRefs.map((source) => ({
+            ...source,
+            anchor: {
+              ...source.anchor,
+              artifact: { ...source.anchor.artifact, sha256: "0".repeat(64) },
+            },
+          })),
+        },
+        f.material,
+      ),
+    ).rejects.toThrow(recruiting.RecruitingSourceCheckError);
+    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
   });
 
-  it("batch-loads quoted messages while still rejecting a forged second quote", async () => {
+  it("batch-loads quoted messages", async () => {
     const f = pdfFixture();
     const human = {
       id: "jd-message",
@@ -1135,24 +1147,6 @@ describe("original PDF source validation (mocked DB, storage and processor)", ()
       f.tx.message.findMany.mock.invocationCallOrder[fullRead]!,
     );
     expect(f.provider).toHaveBeenCalledOnce();
-    expect(extractPdfText).toHaveBeenCalledOnce();
-
-    f.tx.recruitingRoleRevision.create.mockClear();
-    await expect(
-      recruiting.reviseRecruitingRole(
-        f.prisma,
-        actor,
-        {
-          ...f.input,
-          expectedRevision: 2,
-          sourceRefs: sourceRefs.map((source) =>
-            source.id === "second-quote" ? { ...source, quote: "Invented evidence" } : source,
-          ),
-        },
-        f.material,
-      ),
-    ).rejects.toThrow(recruiting.RecruitingSourceValidationError);
-    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
   });
 
   it("rejects a foreign message before locking sources or loading their full content", async () => {
@@ -1181,63 +1175,32 @@ describe("original PDF source validation (mocked DB, storage and processor)", ()
     expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "foreign",
-    "hash",
-    "bytes",
-    "provider-label",
-    "provider-origin",
-    "unreceipted",
-    "locator",
-  ])("rejects PDF %s before processing and writing a revision", async (boundary) => {
-    const f = pdfFixture();
-    let source = f.source;
-    if (boundary === "foreign") f.artifact.userId = "another-human";
-    if (boundary === "hash")
-      source = {
-        ...source,
-        anchor: { ...source.anchor, artifact: { artifactId: "pdf", sha256: "0".repeat(64) } },
-      };
-    if (boundary === "bytes") f.bytes.set("pdf", new TextEncoder().encode("changed"));
-    if (boundary === "provider-label") source = { ...source, kind: "provider_report" as never };
-    if (boundary === "provider-origin") f.provider.mockResolvedValue({ id: "provider" });
-    if (boundary === "unreceipted") f.artifact.runId = "run";
-    if (boundary === "locator")
-      source = { ...source, anchor: { ...source.anchor, locator: "page:1" } };
-    await expect(
-      recruiting.reviseRecruitingRole(
-        f.prisma,
-        actor,
-        { ...f.input, sourceRefs: [source] },
-        f.material,
-      ),
-    ).rejects.toThrow(IsolationError);
-    expect(extractPdfText).not.toHaveBeenCalled();
-    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
-  });
-
-  it.each(["quote", "processor"])("fails closed on PDF %s errors", async (boundary) => {
-    const f = pdfFixture();
-    if (boundary === "processor")
-      vi.mocked(extractPdfText).mockRejectedValueOnce(new Error("private processor path"));
-    const error = await recruiting
-      .reviseRecruitingRole(
-        f.prisma,
-        actor,
-        {
-          ...f.input,
-          sourceRefs: [{ ...f.source, quote: boundary === "quote" ? "Invented evidence" : quote }],
-        },
-        f.material,
-      )
-      .catch((error: unknown) => error);
-    expect(error).toBeInstanceOf(
-      boundary === "quote" ? recruiting.RecruitingSourceValidationError : IsolationError,
-    );
-    expect((error as Error).message).not.toMatch(/private processor path|%PDF|Invented evidence/);
-    expect(extractPdfText).toHaveBeenCalledOnce();
-    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
-  });
+  it.each(["foreign", "hash", "bytes", "provider-label", "provider-origin", "unreceipted"])(
+    "rejects PDF %s before writing a revision",
+    async (boundary) => {
+      const f = pdfFixture();
+      let source = f.source;
+      if (boundary === "foreign") f.artifact.userId = "another-human";
+      if (boundary === "hash")
+        source = {
+          ...source,
+          anchor: { ...source.anchor, artifact: { artifactId: "pdf", sha256: "0".repeat(64) } },
+        };
+      if (boundary === "bytes") f.bytes.set("pdf", new TextEncoder().encode("changed"));
+      if (boundary === "provider-label") source = { ...source, kind: "provider_report" as never };
+      if (boundary === "provider-origin") f.provider.mockResolvedValue({ id: "provider" });
+      if (boundary === "unreceipted") f.artifact.runId = "run";
+      await expect(
+        recruiting.reviseRecruitingRole(
+          f.prisma,
+          actor,
+          { ...f.input, sourceRefs: [source] },
+          f.material,
+        ),
+      ).rejects.toThrow(IsolationError);
+      expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("keepNumberedTitle", () => {
