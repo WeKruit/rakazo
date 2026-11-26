@@ -1,11 +1,33 @@
 import { containsSecret, redactSecrets } from "@rakazo/core";
+import { isRetryableTransactionConflict } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
 export function combineSignals(...signals: Array<AbortSignal | undefined>): AbortSignal {
   return AbortSignal.any(signals.filter((signal): signal is AbortSignal => Boolean(signal)));
 }
 
+/** What a tool step that collided with another write says; the database's own text never shows. */
+export const DATABASE_CONFLICT_TEXT =
+  "This step collided with another change being saved at the same moment and was not done. Nothing is wrong with the request: run the same step again.";
+
+/**
+ * A deadlock or serialization failure carries SQL and a database code (staging 11-26: a role
+ * search told the recruiter "40P01"). The step is recorded here and the agent gets plain words.
+ */
+export function databaseConflictText(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    !isRetryableTransactionConflict(error) &&
+    !/\b(40P01|40001)\b|deadlock detected/i.test(message)
+  )
+    return undefined;
+  getLogger().warn("tool.database_conflict", { error: message.slice(0, 300) });
+  return DATABASE_CONFLICT_TEXT;
+}
+
 export function sanitizeConnectorError(error: unknown, secrets: string[] = []): string {
+  const conflict = databaseConflictText(error);
+  if (conflict) return conflict;
   const message = error instanceof Error ? error.message : String(error);
   return redactSecrets(
     message
