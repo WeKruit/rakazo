@@ -69,6 +69,10 @@ describe("unfilledPlaceholder", () => {
     expect(unfilledPlaceholder("<p>Best,</p><p>[Your name]</p>")).toBe("[Your name]");
     expect(unfilledPlaceholder("您好 [候选人姓名]，")).toBe("[候选人姓名]");
     expect(unfilledPlaceholder("Hi {{firstName}},\n\nA role.")).toBeUndefined();
+    expect(unfilledPlaceholder("Hi {{ first_name }} at {{companyName}}.")).toBeUndefined();
+    // A merge field nobody fills goes out as written, in any language.
+    expect(unfilledPlaceholder("{{회사명}}에서 진행 중인 역할")).toBe("{{회사명}}");
+    expect(unfilledPlaceholder("Join {{Company}} in Seoul.")).toBe("{{Company}}");
     expect(unfilledPlaceholder("See [our site](https://example.com) for more.")).toBeUndefined();
     expect(unfilledPlaceholder("Rated [1] of 5.")).toBeUndefined();
   });

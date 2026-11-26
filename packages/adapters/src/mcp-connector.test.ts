@@ -6067,7 +6067,9 @@ describe("local native Instantly campaign and lead tools", () => {
           ((await f.run("ensure_role_campaign", args))[0] as { message: string }).message;
         expect(
           await message({ steps: [{ subject: "Hi", body: "Hi {{title}}" }], recipients: ["Abe"] }),
-        ).toMatch(/uses \{\{title\}\}; use only \{\{firstName\}\}/);
+        ).toMatch(
+          /fill-in-the-blank \(square brackets, or a \{\{\.\.\.\}\} other than \{\{firstName\}\}/,
+        );
         expect(
           await message({
             steps: [{ subject: "Hi", body: "Hi {{firstName}} {{lastName}}" }],

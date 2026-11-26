@@ -576,7 +576,7 @@ const LEAD_VARIABLES: Record<
   personalization: "personalization",
 };
 const VARIABLE = /\{\{\s*([^{}]*?)\s*\}\}/g;
-/** Refuses a role email whose variables cannot be filled in per person. */
+/** Refuses copy already on the campaign whose variables cannot be filled in per person (new copy is checked by Step). */
 function requireFillable(email: FirstEmail) {
   const unknown = [...`${email.subject} ${email.body}`.matchAll(VARIABLE)]
     .map((match) => match[1]!)
@@ -1922,9 +1922,6 @@ async function ensureRoleCampaign(
           (ENROLLABLE.has(campaign.status as number) && current === null));
       // The provider edits only draft or paused campaigns, so a live one is paused for new hours.
       const pausedForHours = Boolean(input.send_hours) && campaign.status === ACTIVE;
-      // A campaign that reads lead variables keeps doing so: the new role email goes into the
-      // variables of everyone without their own email.
-      if (writeSteps && templated) requireFillable(input.steps![0]!);
       if (pausedForHours) await rest("POST", `/campaigns/${mappedId}/pause`);
       if (patched || writeSteps || input.send_hours)
         await rest("PATCH", `/campaigns/${mappedId}`, {
@@ -2261,7 +2258,6 @@ async function saveOwnEmail(
   const who = label(chosen);
   // One email saved for several people reaches each of them alone: it greets each one by
   // {{firstName}}, filled in per person below, never by all their names at once.
-  if (/\{\{/.test(`${own.subject} ${own.body}`)) requireFillable(own);
   const unnamed = chosen.filter((person) => missingFields(own, person).length);
   if (unnamed.length)
     throw new Error(
