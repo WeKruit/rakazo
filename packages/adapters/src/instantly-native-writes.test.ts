@@ -168,6 +168,13 @@ describe("native reply_to_email", () => {
       body: "收到，谢谢",
     });
     expect(JSON.stringify(display)).not.toContain("Instantly");
+    // Audit 11-26: a Cc was sent but not on the card the recruiter approved.
+    const copied = await describeReplyToEmail(async () => ORIGINAL, {
+      reply_to_uuid: ORIGINAL.id,
+      body: { text: "Thanks" },
+      cc_address_email_list: "Hiring Lead <lead@client.test>, coordinator@client.test",
+    });
+    expect(copied.cc).toEqual(["lead@client.test", "coordinator@client.test"]);
   });
 });
 

@@ -537,6 +537,24 @@ describe("buildApprovalAskBlock", () => {
     );
     expect(`${block.text}\n${block.detail}`).not.toContain("Instantly");
     expect(block.detail).not.toContain("7a0a8e6e");
+    const copied = buildApprovalAskBlock(
+      "reply-effect",
+      "instantly__demo__reply_to_email",
+      { reply_to_uuid: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69", body: { text: "Thanks" } },
+      [],
+      {
+        oneTimeOnly: true,
+        instantlyReply: {
+          to: "ada@example.test",
+          cc: ["lead@client.test"],
+          from: "team@example.test",
+          subject: "Re: Founding Engineer",
+          inReplyTo: null,
+          body: "Thanks",
+        },
+      },
+    );
+    expect(copied.detail).toContain("To: ada@example.test\nCc: lead@client.test\n");
     expect(block.actions).toEqual([
       { id: "allow", label: "Confirm and send" },
       { id: "deny", label: "Cancel" },

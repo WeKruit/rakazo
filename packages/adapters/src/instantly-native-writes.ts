@@ -8,6 +8,7 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
 import { OWN_EMAIL_STEP, ownEmailSequences, ownFirstEmails } from "./campaign-own-emails.js";
 import { confirmedSends, sendingElsewhere } from "./campaign-send-record.js";
@@ -1647,6 +1648,8 @@ export async function describeCampaignActivation(
 
 export type InstantlyReplyDisplay = {
   to: string | null;
+  /** Everyone copied on the reply: the card shows every recipient the send reaches. */
+  cc?: string[];
   from: string | null;
   subject: string;
   inReplyTo: string | null;
@@ -1673,8 +1676,14 @@ export async function describeReplyToEmail(
   const text = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
   const originalSubject = text(original?.subject);
   const wanted = input.success ? input.data : undefined;
+  const cc = wanted?.cc_address_email_list
+    ? addressparser(wanted.cc_address_email_list, { flatten: true }).flatMap((entry) =>
+        entry.address ? [entry.address] : [],
+      )
+    : [];
   return {
     to: text(original?.from_address_email),
+    ...(cc.length ? { cc } : {}),
     from: text(wanted?.eaccount) ?? text(original?.eaccount),
     subject:
       text(wanted?.subject) ??

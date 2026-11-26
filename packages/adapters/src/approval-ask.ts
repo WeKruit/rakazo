@@ -302,6 +302,7 @@ function outboundTitle(toolName: string): string | undefined {
 function formatInstantlyReply(display: InstantlyReplyDisplay) {
   return [
     `To: ${display.to ?? "unknown"}`,
+    ...(display.cc?.length ? [`Cc: ${display.cc.join(", ")}`] : []),
     `From: ${display.from ?? "unknown"}`,
     `Subject: ${display.subject}`,
     `In reply to: ${display.inReplyTo ?? "unknown"}`,
