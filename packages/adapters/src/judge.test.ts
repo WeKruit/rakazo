@@ -169,7 +169,8 @@ describe("JudgeSettings", () => {
   it("grades a person from the verdicts, so the grade agrees with the lines", () => {
     const of = (...levels: string[]) => gradeOf(levels.map((level) => ({ level })));
     expect(of("strong", "strong")).toBe("Strong");
-    expect(of("strong", "medium")).toBe("Promising");
+    expect(of("strong", "strong", "medium")).toBe("Promising");
+    expect(of("strong", "medium", "weak", "medium")).toBe("Uncertain");
     expect(of("strong", "strong", "opposite")).toBe("Partial");
     expect(of("strong", "silent", "silent")).toBe("Uncertain");
     expect(of()).toBeUndefined();
