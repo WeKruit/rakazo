@@ -1,7 +1,6 @@
 import {
   DisabledBuiltinToolsSchema,
   disabledBuiltinToolSet,
-  RecruitingApprovalToolCallSchema,
   RecruitingCandidatesToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
@@ -45,30 +44,6 @@ describe("native recruiting approval tool", () => {
       expect(tool?.inputSchema).toEqual(z.toJSONSchema(schema, { io: "input" }));
       expect(tool?.readOnly).not.toBe(true);
     }
-  });
-
-  it("exposes the shared strict staged request as a one-time human approval", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_request_approval");
-
-    expect(tool).toBeDefined();
-    expect(tool?.inputSchema).toEqual(
-      z.toJSONSchema(RecruitingApprovalToolCallSchema, { io: "input" }),
-    );
-    expect(tool?.readOnly).not.toBe(true);
-    expect(tool?.description).toContain("a documents call is refused");
-    expect(tool?.description).toMatch(/never self-approve/i);
-    expect(
-      RecruitingApprovalToolCallSchema.parse({
-        stage: "brief",
-        roleId: "role",
-        expectedRoleRevision: 3,
-      }),
-    ).toEqual({ stage: "brief", roleId: "role", expectedRoleRevision: 3 });
-    expect(tool?.description).toContain('stage:"brief"');
-    expect(tool?.description).toContain("Generic ask_user answers never confirm requirements");
-    const role = builtinAgentTools.find((entry) => entry.name === "recruiting_role");
-    expect(role?.description).toContain('recruiting_request_approval stage:"brief"');
-    expect(role?.description).not.toContain("in the Role panel");
   });
 
   it("guides reusable preferences through one exact edit without confusing it with a full document", () => {

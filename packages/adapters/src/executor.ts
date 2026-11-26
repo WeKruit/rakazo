@@ -64,8 +64,6 @@ import {
   MailReplySchema,
   MessageBlock as MessageBlockSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
-  RecruitingApprovalToolCallSchema,
-  RecruitingApprovalToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
@@ -78,7 +76,6 @@ import {
   type RecruitingSchedulingPlan,
   RecruitingSchedulingToolInputSchema,
   RecruitingShortlistToolInputSchema,
-  RetainedRecruitingApprovalRequestSchema,
   UsageRecordedPayloadSchema,
   ViewBlockSchema,
 } from "@rakazo/contracts";
@@ -154,6 +151,7 @@ import {
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
   REPLY_LANGUAGE_NAME,
+  RETIRED_APPROVAL_KINDS,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
   RUN_EGRESS_RATE_LIMITED,
@@ -213,7 +211,6 @@ import {
   automationRateLimited,
   backgroundToolRun,
   backgroundToolSourceTrigger,
-  BRIEF_CONFIRMATION_TEXT,
   bindRecruitingSchedulingOperation,
   campaignSendCardHash,
   canvasOf,
@@ -221,7 +218,6 @@ import {
   claimRecruitingCrmImport,
   claimRecruitingReply,
   completedRunBlocks,
-  confirmRecruitingBrief,
   createRecruitingSchedulingPlan,
   createRunHistoryCache,
   createSpaceForMember,
@@ -229,7 +225,6 @@ import {
   earlierConfirmedSends,
   effectiveMemoryScope,
   executeNativeRecruitingShortlist,
-  executeRecruitingApproval,
   executeRecruitingCrmBinding,
   executeRecruitingNotesTool,
   executeRecruitingRemindersTool,
@@ -255,7 +250,6 @@ import {
   pollOf,
   prepareNativeRecruitingCandidateDecision,
   prepareNativeRecruitingShortlist,
-  prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
   prepareRecruitingSchedulingPlan,
   publishMailReplyCard,
@@ -3666,8 +3660,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             result: true,
           },
         });
+        const retiredApprovals = continuationEffects.filter(
+          (effect) => effect.status === "approved" && RETIRED_APPROVAL_KINDS.has(effect.kind),
+        );
+        // Closed here, so this run carries on instead of waiting for a replay nothing can make.
+        for (const effect of retiredApprovals)
+          await deps.prisma.externalEffect.updateMany({
+            where: { id: effect.id, spaceId: run.spaceId, runId, status: "approved" },
+            data: {
+              status: "failed",
+              result: { error: "This approval step no longer exists.", dispatched: false },
+            },
+          });
         const approvedEffects = continuationEffects.filter(
-          (effect) => effect.status === "approved",
+          (effect) => effect.status === "approved" && !retiredApprovals.includes(effect),
         );
         // A card denied in an earlier run of this thread since the recruiter's previous message:
         // their message now is their first word since, and its follow-up run would not know the
@@ -3708,29 +3714,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // ponytail: this continuation's decision stops replacements, until a new human message arrives.
         let replyDiscardActive = true;
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
-        const legacyCalibrations = approvedEffects.flatMap((effect) => {
-          if (effect.kind !== "recruiting_request_approval") return [];
-          const saved = RetainedRecruitingApprovalRequestSchema.safeParse(effect.request);
-          return saved.success &&
-            saved.data.stage === "calibration" &&
-            saved.data.profiles.some((profile) => "assessmentVersion" in profile)
-            ? [effect.request]
-            : [];
-        });
-        if (legacyCalibrations.length) {
-          const index = tools.findIndex((tool) => tool.name === "recruiting_request_approval");
-          if (index !== -1)
-            tools[index] = {
-              ...tools[index]!,
-              inputSchema: {
-                ...RetainedRecruitingApprovalRequestSchema.toJSONSchema({
-                  io: "input",
-                }),
-                // ponytail: this legacy recovery run accepts only approved originals; the next run rebuilds native parameters.
-                enum: legacyCalibrations,
-              },
-            };
-        }
         const baseComputerInstruction = persistentComputerInstruction({
           heldForTakeover,
           graphicalToolsAllowed,
@@ -5948,93 +5931,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (effect) => effect.request === nextApprovedRequest,
             )?.idempotencyKey;
           }
-          if (name === "recruiting_request_approval") {
-            if (nextApprovedTool !== name) {
-              const call = RecruitingApprovalToolCallSchema.safeParse(args);
-              if (!call.success)
-                return {
-                  error: sanitizeConnectorError(call.error, runSecrets),
-                };
-              if (call.data.stage === "calibration") {
-                // A calibration round is never approved on a card: the recruiter answers on the
-                // round panel or in their own words. Only already approved originals replay above.
-                const round = await deps.prisma.recruitingCalibrationRound.findFirst({
-                  where: {
-                    roleId: call.data.roleId,
-                    role: { spaceId: run.spaceId },
-                  },
-                  orderBy: { round: "desc" },
-                  select: { approvedAt: true, candidateKeys: true },
-                });
-                return {
-                  error: round?.approvedAt
-                    ? "The recruiter already accepted the latest calibration round. Start the scale-out now: search with the confirmed brief, every round's feedback and the target number; no card is needed."
-                    : round?.candidateKeys.length
-                      ? "Calibration rounds never use an approval card. The round is recorded: list its people in chat and end with the next-step question. When the recruiter accepts the round in their own words (these people look right, go find more like them) or presses accept on the round panel, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out."
-                      : "Calibration rounds never use an approval card. Record the ten with recruiting_research calibration_round, list them in chat and end with the next-step question.",
-                };
-              }
-              if (call.data.stage === "documents") {
-                // Role documents are work the recruiter asked for, not a decision: no card.
-                return {
-                  error:
-                    "Role documents never use an approval card. Present the named files in chat in one line and continue; the recruiter asks for changes in their own words.",
-                };
-              }
-              if (call.data.stage === "brief") {
-                // A complete brief is confirmed by the recruiter's own answers: record it the way
-                // the web control does, without a card, and go straight to the first round. The
-                // recruiter can still change the brief afterwards.
-                try {
-                  if (!deps.artifacts) throw new IsolationError();
-                  const saved = await confirmRecruitingBrief(
-                    deps.prisma,
-                    researchActor.actor,
-                    {
-                      threadId: thread.id,
-                      roleId: call.data.roleId,
-                      expectedRevision: call.data.expectedRoleRevision,
-                    },
-                    { artifacts: deps.artifacts, context },
-                  );
-                  return {
-                    confirmed: true,
-                    roleId: saved.role.id,
-                    expectedRoleRevision: saved.role.revision,
-                  };
-                } catch (error) {
-                  // After the ten are shown the brief stays saved unconfirmed: an open question
-                  // is never asked after the search.
-                  if (
-                    error instanceof RecruitingPlaybookValidationError &&
-                    (await deps.prisma.recruitingCalibrationRound.findFirst({
-                      where: {
-                        roleId: call.data.roleId,
-                        role: { spaceId: run.spaceId },
-                      },
-                      select: { id: true },
-                    }))
-                  )
-                    return {
-                      confirmed: false,
-                      note: "The brief stays saved unconfirmed; the first ten are already shown.",
-                    };
-                  return { error: sanitizeConnectorError(error, runSecrets) };
-                }
-              }
-            }
-            const parsed = (
-              nextApprovedTool === name
-                ? RetainedRecruitingApprovalRequestSchema
-                : RecruitingApprovalToolInputSchema
-            ).safeParse(args);
-            if (!parsed.success)
-              return {
-                error: sanitizeConnectorError(parsed.error, runSecrets),
-              };
-            args = parsed.data;
-            effectRequest = args;
-          }
           if (name === "recruiting_crm_target") {
             const parsed = RecruitingCrmTargetToolInputSchema.safeParse(args);
             if (!parsed.success)
@@ -7395,7 +7291,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               return DENIED_THIS_TURN_RESULT;
             }
-            let files: MessageBlock[] = [];
             let approvalArgs = args;
             let calendarApprovalHash: string | undefined;
             if (calChange) {
@@ -7482,9 +7377,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
 
-            let recruitingApproval:
-              | Awaited<ReturnType<typeof prepareRecruitingApproval>>
-              | undefined;
             let crmOperation:
               | "crm_bind_candidate_role"
               | "crm_update_candidate_stage"
@@ -7685,37 +7577,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : uncertainEffectResult(name);
               }
             }
-            if (name === "recruiting_request_approval") {
-              try {
-                if (!deps.artifacts) throw new IsolationError();
-                recruitingApproval = await prepareRecruitingApproval(
-                  deps.prisma,
-                  researchActor.actor,
-                  {
-                    runId,
-                    threadId: thread.id,
-                    botId: bot.id,
-                    leaseOwner: workerId,
-                    leaseFence: fence,
-                  },
-                  args,
-                  { artifacts: deps.artifacts, context },
-                );
-                files = recruitingApproval.files;
-              } catch (error) {
-                const result =
-                  error instanceof IsolationError &&
-                  (args as { stage?: unknown }).stage === "calibration"
-                    ? {
-                        error:
-                          "The ten profiles do not match their saved sources. Omit profiles and the server uses the recorded calibration round.",
-                      }
-                    : roleError(error);
-                return (await completeEffect(deps, applied!.effect.id, "intended", result))
-                  ? result
-                  : uncertainEffectResult(name);
-              }
-            }
             if (candidateDecision) {
               try {
                 approvalArgs = await prepareNativeRecruitingCandidateDecision(
@@ -7794,7 +7655,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 oneTimeOnly: requiresExplicitApproval,
                 emailSend,
                 crmOperation,
-                recruiting: recruitingApproval,
                 crmImportTarget: crmImportSelection?.target,
                 instantlyActivation,
                 instantlyReply,
@@ -7942,7 +7802,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               attemptId: attempt.id,
               leaseOwner: workerId,
               leaseFence: fence,
-              blocks: [...files, approvalBlock],
+              blocks: [approvalBlock],
             });
             // pauseRunForInput returning false after a successful renew means the run row no
             // longer matches this worker. Exiting via pauseForApproval() would leave the run
@@ -9276,40 +9136,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runSecrets,
                 ),
               );
-            } catch (error) {
-              return finish(roleError(error));
-            }
-          }
-          if (name === "recruiting_request_approval") {
-            try {
-              if (!deps.artifacts || !applied || !claimedEffect) throw new IsolationError();
-              // The domain receipt and effect complete together; keep the original human approval time.
-              const approved = await executeRecruitingApproval(
-                deps.prisma,
-                researchActor.actor,
-                {
-                  runId,
-                  threadId: thread.id,
-                  botId: bot.id,
-                  leaseOwner: workerId,
-                  leaseFence: fence,
-                  effectId: applied.effect.id,
-                  effectRequest: applied.effect.request,
-                },
-                args,
-                { artifacts: deps.artifacts, context },
-              );
-              if (approved.stage !== "brief") return approved;
-              const revision = await deps.prisma.recruitingRoleRevision.findFirst({
-                where: {
-                  id: approved.roleRevisionId,
-                  roleId: approved.roleId,
-                },
-                select: { revision: true },
-              });
-              return revision
-                ? { ...approved, expectedRoleRevision: revision.revision }
-                : approved;
             } catch (error) {
               return finish(roleError(error));
             }
@@ -10795,6 +10621,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               deliveryKey: roleKey,
               title,
               earlier: request,
+              earlierMessages: Math.min(10, Math.max(0, Math.trunc(Number(args.earlier_messages) || 0))),
             });
             if (!started) {
               if (!request)
@@ -11794,10 +11621,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   )
                   .join(" ")
               : "",
-          )
-          // fosp 11-23 (df2c09cb): the brief confirmation the product posts as the recruiter's is
-          // English, so a Chinese recruiter's checked rounds came in English.
-          .filter((text) => !BRIEF_CONFIRMATION_TEXT.test(text.trim()));
+          );
         const roleStartTexts = messages.flatMap((message) =>
           message.role === "user" &&
           message.clientNonce?.startsWith(ROLE_START_NONCE) &&
@@ -14345,7 +14169,6 @@ export function selectBuiltinToolsForRun(options: {
         (![
           "remember",
           "recruiting_role",
-          "recruiting_request_approval",
           "recruiting_candidates",
           "recruiting_shortlist",
           "recruiting_feedback",

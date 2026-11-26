@@ -199,7 +199,7 @@ describe("native CRM connection approval presentation", () => {
   });
 });
 
-describe("native approval file previews", () => {
+describe("a stored card of the retired recruiting approval step", () => {
   function fixture() {
     const actor = {
       userId: "owner",
@@ -308,145 +308,17 @@ describe("native approval file previews", () => {
     };
   }
 
-  it("adds an exact existing source target without changing the persisted card or original file fields", async () => {
-    const f = fixture();
-    const before = structuredClone(f.message);
-    const [message] = await f.read();
-    expect(message!.blocks[0]).toEqual({
-      ...f.file,
-      preview: {
-        label: "Job description",
-        source: {
-          kind: "role",
-          threadId: "thread",
-          roleRevisionId: "revision-5",
-          sourceRefId: "actual-source",
-        },
-      },
-    });
-    expect(message!.blocks.slice(1)).toEqual(f.message.blocks.slice(1));
-    expect(f.message).toEqual(before);
-    expect(f.externalEffect.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          spaceId: "space",
-          kind: { in: ["recruiting_request_approval", "recruiting_crm_target"] },
-          run: expect.objectContaining({ userId: "owner", spaceId: "space", threadId: "thread" }),
-        }),
-      }),
-    );
-    expect(f.artifact.findMany).toHaveBeenCalledOnce();
-    expect(f.thread.findFirst).toHaveBeenCalledOnce();
-  });
-
-  it.each([
-    "revision",
-    "role",
-    "unread",
-    "quote",
-    "locator",
-    "source-hash",
-    "source-id-conflict",
-    "source-kind",
-  ])("keeps the plain file card without a readable source for %s", async (change) => {
-    const f = fixture();
-    if (change === "revision") f.role.revision = 6;
-    if (change === "role") f.role.id = "other-role";
-    if (change === "unread") {
-      f.source.readState = "unread";
-      f.source.readAt = null as unknown as string;
-    }
-    if (change === "quote") f.source.quote = "";
-    if (change === "locator") f.source.anchor.locator = "different-field";
-    if (change === "source-hash") f.source.anchor.artifact = { ...f.ref, sha256: "c".repeat(64) };
-    if (change === "source-id-conflict")
-      f.role.currentRevision.sourceRefs.push({
-        ...f.source,
-        quote: "Different source with the same id",
-      });
-    if (change === "source-kind")
-      Object.assign(f.source.anchor, { kind: "message", messageId: "message", locator: "text" });
-    const [message] = await f.read();
-    expect(message!.blocks[0]).toEqual(f.file);
-  });
-
-  it("inherits only the exact completed documents request for a calibration card", async () => {
-    const f = fixture();
-    const documents = {
-      ...f.effects[0]!,
-      id: "documents",
-      runId: "documents-run",
-      status: "completed",
-      run: { botId: "documents-bot" },
-    };
-    Object.assign(f.effects[0]!, {
-      request: {
-        stage: "calibration",
-        roleId: "role",
-        expectedRoleRevision: 5,
-        documentsApprovalEffectId: "documents",
-        ruleChanges: [],
-        profiles: Array.from({ length: 10 }, (_, i) => ({
-          candidateKey: `candidate-${i}`,
-          linkedinUrl: `https://www.linkedin.com/in/person-${i}`,
-          evidenceUrl: `https://example.test/person-${i}`,
-          source: {
-            providerTaskId: "provider-task",
-            roleRevisionId: "revision-5",
-            effectId: "saved-page",
-            rowIndex: i,
-            artifactRef: f.ref,
-          },
-        })),
-      },
-    });
-    f.externalEffect.findMany.mockResolvedValueOnce(f.effects).mockResolvedValueOnce([documents]);
-    expect((await f.read())[0]!.blocks[0]).toMatchObject({
-      preview: { source: { sourceRefId: "actual-source" } },
-    });
-    expect(f.externalEffect.findMany).toHaveBeenCalledTimes(2);
-    documents.request = { ...f.request, roleId: "other-role" };
-    f.externalEffect.findMany.mockResolvedValueOnce(f.effects).mockResolvedValueOnce([documents]);
-    expect((await f.read())[0]!.blocks[0]).toEqual(f.file);
-  });
-
-  it.each([
-    "missing-effect",
-    "run",
-    "bot",
-    "file-hash",
-    "file-fields",
-    "foreign-actor",
-    "foreign-space",
-    "foreign-thread",
-  ])("does not trust a forged or out-of-scope %s", async (change) => {
-    const f = fixture();
-    const actor = { ...f.actor };
-    if (change === "missing-effect") f.effects.splice(0);
-    if (change === "run") f.effects[0]!.runId = "other-run";
-    if (change === "bot") f.effects[0]!.run.botId = "other-bot";
-    if (change === "file-hash")
-      f.artifact.findMany.mockResolvedValue([
-        {
-          id: f.ref.artifactId,
-          hash: "c".repeat(64),
-          name: f.file.name,
-          mimeType: f.file.mimeType,
-          size: f.file.size,
-        },
-      ]);
-    if (change === "file-fields") f.file.size++;
-    if (change === "foreign-actor") actor.userId = "foreign";
-    if (change === "foreign-space") actor.spaceId = "foreign";
-    if (change === "foreign-thread") f.message.threadId = "foreign";
-    if (change === "foreign-actor" || change === "foreign-space")
-      f.externalEffect.findMany.mockImplementation(
-        async ({ where }: { where: { run: { userId: string }; spaceId: string } }) =>
-          where.run.userId === "owner" && where.spaceId === "space" ? f.effects : [],
-      );
-    const [message] = await f.read([f.message], actor);
-    expect(message!.blocks[0]).not.toHaveProperty("preview");
-  });
+  it.each(["intended", "approved", "completed"])(
+    "loads a %s card as it was saved, with plain file cards",
+    async (status) => {
+      const f = fixture();
+      f.effects[0]!.status = status;
+      const [message] = await f.read();
+      expect(message!.blocks).toEqual(f.message.blocks);
+      expect(f.thread.findFirst).not.toHaveBeenCalled();
+      expect(f.artifact.findMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("strips untrusted preview metadata and makes no reads for ordinary files or messages", async () => {
     const f = fixture();
@@ -456,14 +328,6 @@ describe("native approval file previews", () => {
     expect(f.externalEffect.findMany).not.toHaveBeenCalled();
     expect(f.thread.findFirst).not.toHaveBeenCalled();
     expect(f.artifact.findMany).not.toHaveBeenCalled();
-  });
-
-  it("batches multiple attachments and cards in the same page", async () => {
-    const f = fixture();
-    await f.read([f.message, { ...f.message, id: "second-card" }]);
-    expect(f.externalEffect.findMany).toHaveBeenCalledOnce();
-    expect(f.artifact.findMany).toHaveBeenCalledOnce();
-    expect(f.thread.findFirst).toHaveBeenCalledOnce();
   });
 
   it.each(["thread.message.created", "thread.message.updated"] as const)(

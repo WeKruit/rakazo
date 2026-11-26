@@ -612,7 +612,6 @@ async function prepareRecruitingSourceShot() {
           sourceRefIds: [filterSource.id],
         },
       ],
-      confirmation: null,
     },
     criteria: [
       {
