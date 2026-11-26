@@ -88,7 +88,7 @@ const STATES_A_PLACE = (statement: string) =>
 const STATES_A_LANGUAGE = (statement: string) =>
   `Does this requirement state a language the person must speak or work in, rather than a skill, a place or a programming language? Requirement: "${statement}"`;
 /** A requirement on the person; a language they must speak goes to the deployment's language check. */
-type PersonRequirement = CriterionQuestion & { language?: boolean; shown: string };
+type PersonRequirement = CriterionQuestion & { language?: boolean };
 
 /**
  * How the language check's answer reads as a requirement's level. Profiles rarely list languages,
@@ -114,13 +114,7 @@ export async function personRequirements(
   criteria: readonly RoundCriterion[],
 ): Promise<PersonRequirement[]> {
   if (!criteria.length) return [];
-  // A brief field's own key (experience, target_role) is the agent's name for the field: the
-  // judge reads it for context, the recruiter is shown the requirement alone.
-  const facts = criteria.map(({ id, statement, field }) => ({
-    id,
-    statement: field ? `${field}: ${statement}` : statement,
-    shown: statement,
-  }));
+  const facts = criteria.map(({ id, statement }) => ({ id, statement }));
   const about = await judge.yesAll?.(
     Object.fromEntries(
       facts.flatMap((fact) => [
@@ -210,7 +204,7 @@ export async function checkPeopleCriteria(
     const spoken = judge.language ? requirements.filter((requirement) => requirement.language) : [];
     const questions = requirements
       .filter((requirement) => !spoken.includes(requirement))
-      .map(({ language: _language, shown: _shown, ...requirement }) => requirement);
+      .map(({ language: _language, ...requirement }) => requirement);
     await readMissingProfiles(readProfile, entries);
     const deadline = AbortSignal.timeout(12_000);
     const rows = entries.flatMap(({ row }, index) =>
@@ -258,18 +252,15 @@ export async function checkPeopleCriteria(
           const { match_tier: tier, match_score: score } = entry.row;
           entry.check = {
             requirementsRevision: role.revision,
-            criteria: answered.map(
-              ({ place: _place, language: _language, shown, ...requirement }) => {
-                const verdict = verdicts.get(requirement.id)!;
-                return {
-                  ...requirement,
-                  statement: shown,
-                  level: verdict.level,
-                  confidence: verdict.confidence,
-                  ...(verdict.place ? { place: verdict.place } : {}),
-                };
-              },
-            ),
+            criteria: answered.map(({ place: _place, language: _language, ...requirement }) => {
+              const verdict = verdicts.get(requirement.id)!;
+              return {
+                ...requirement,
+                level: verdict.level,
+                confidence: verdict.confidence,
+                ...(verdict.place ? { place: verdict.place } : {}),
+              };
+            }),
             ...(typeof tier === "string" && typeof score === "number"
               ? { match_tier: tier, match_score: score }
               : verdicts.overall

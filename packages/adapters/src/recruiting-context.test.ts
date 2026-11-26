@@ -19,6 +19,10 @@ const db = vi.hoisted(() => ({
   quality: vi.fn(),
   patterns: vi.fn(),
 }));
+vi.mock("./recruiting-round-check.js", async (original) => ({
+  ...(await original<object>()),
+  requestCounts: async () => ({ counted: 0, turnedDown: 0, fitNotShownYet: 0, notGradedYet: 0 }),
+}));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
   getRecruitingRoleSnapshot: db.workspace,

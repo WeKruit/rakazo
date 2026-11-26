@@ -24,6 +24,7 @@ import {
   recordRecruitingContextAdoption,
 } from "@rakazo/db";
 import type { LoadedAgentMemoryContext } from "./memory-context.js";
+import { requestCounts } from "./recruiting-round-check.js";
 
 export const RECRUITING_PRESENTATION_INSTRUCTION =
   "Speak to the recruiter as one assistant in business terms: role and candidate names, business steps, source links and named files. Never show internal agent names, handoff narration, tool names, task, run, artifact or connection IDs, hashes, cursors or raw JSON; keep those in tool arguments, resolve continuity yourself and never ask the recruiter for them. When work starts, say so briefly, then report a verified result, a real blocker or the one decision needed; never describe queued work as started. Ask one consequential question at a time on a native question card with two to four choices, and never repeat an answered or pending question. Provider reports are reports, not proof. This rule grants no permission.";
@@ -100,7 +101,15 @@ export async function loadRecruitingRunContext(
   if (!workspace) return undefined;
   // Always reauthorize saved source material, including the trusted-workspace fast path.
   // It and the feedback below are independent reads, so they share one wait.
-  const [crmSourceMaterial, recent, quality, patterns] = await Promise.all([
+  const [people, crmSourceMaterial, recent, quality, patterns] = await Promise.all([
+    // Where the request for people stands, as data, so a turn that starts from a recruiter's
+    // message knows who is already found and graded before it chooses to search (branch play
+    // 11-26: 27 graded people waited unshown while a teammate ran four minutes of new searches).
+    requestCounts(deps.prisma, {
+      roleId: workspace.role.id,
+      userId: run.userId,
+      spaceId: run.spaceId,
+    }),
     // A CRM link that no longer checks out (a reconnected or disabled CRM) leaves its material
     // out instead of failing the turn; CRM tools verify the link again when they run.
     getRecruitingWorkspaceCrmSourceMaterial(deps.prisma, actor, {
@@ -124,6 +133,7 @@ export async function loadRecruitingRunContext(
       {
         role: workspace.role,
         revision: workspace.revision,
+        people,
         derivedClarifications: workspace.revision.brief
           ? recruitingBriefClarifications(workspace.revision.brief)
           : null,
