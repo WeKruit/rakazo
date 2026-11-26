@@ -34,11 +34,24 @@ describe("turnWork", () => {
         { ok: true, readOnly: false, result: { structuredContent: { created: false } } },
       ),
     ).toBeUndefined();
-    // A send returns only after its card was confirmed: it went out, it is no draft.
+    // A direct send returns only after its card was confirmed: it went out, it is no draft.
     const sentCall = { ok: true, readOnly: false } as const;
-    expect(turnWork("instantly__mail__activate_campaign", {}, sentCall)).toBe("sent");
-    expect(turnWork("native_instantly_activate_campaign", {}, sentCall)).toBe("sent");
     expect(turnWork("mcp__gmail__send_message", {}, sentCall)).toBe("sent");
+    // Audit 11-26: a campaign send only starts the emails, and the mail service can hold them;
+    // the report says what the send's result recorded, never "sent".
+    const started = (delivery: string) => ({
+      ok: true,
+      readOnly: false,
+      result: { structuredContent: { result: { activated: true, delivery } } },
+    });
+    expect(turnWork("instantly__mail__activate_campaign", {}, started("on_its_way"))).toBe(
+      "send_queued",
+    );
+    expect(turnWork("native_instantly_activate_campaign", {}, started("scheduled"))).toBe(
+      "send_queued",
+    );
+    expect(turnWork("native_instantly_activate_campaign", {}, started("held"))).toBe("send_held");
+    expect(turnWork("native_instantly_activate_campaign", {}, sentCall)).toBe("send_queued");
     expect(turnWork("cal__main__create_booking", {}, { ok: true, readOnly: false })).toBe(
       "scheduling",
     );
