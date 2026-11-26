@@ -3,12 +3,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { createDb, createRecruitingRole } from "@rakazo/db";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
-import {
-  currentWorkEstimate,
-  startWorkEstimate,
-  waitWithCountdown,
-  wakeForResearchCountdown,
-} from "./work-estimate.js";
+import { currentWorkEstimate, startWorkEstimate, waitWithCountdown } from "./work-estimate.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const describePostgres =
@@ -184,34 +179,6 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     expect(
       await currentWorkEstimate(prisma, { spaceId, threadId: thread.id }, t0 + 6 * MINUTE),
     ).toBeNull();
-  });
-
-  it("reports progress once per run-out countdown for background research", async () => {
-    const { bot, thread, turn } = await conversation();
-    const taskId = `research-${suffix}`;
-    const jobs = { enqueue: vi.fn(async () => undefined) };
-    const started = await startWorkEstimate(prisma, turn, {
-      ref: `research:${taskId}`,
-      kind: "search",
-      people: 300,
-    });
-    expect(started?.estimateMs).toBe(10 * MINUTE);
-    const t0 = Date.parse(started!.startedAt);
-    const run = { spaceId, threadId: thread.id, botId: bot.id, userId };
-    const tick = (at: number) =>
-      wakeForResearchCountdown({ prisma, jobs }, { id: taskId, roleId: "role" }, run, at);
-
-    await tick(t0 + 5 * MINUTE);
-    expect(await wakes(thread.id)).toHaveLength(0);
-    await tick(t0 + 10.5 * MINUTE);
-    await tick(t0 + 11 * MINUTE);
-    let woken = await wakes(thread.id);
-    expect(woken).toHaveLength(1);
-    expect(woken[0]?.task?.prompt).toContain("estimated 10 minutes are up");
-    await finishWakes(thread.id);
-    await tick(t0 + 20.5 * MINUTE);
-    woken = await wakes(thread.id);
-    expect(woken).toHaveLength(2);
   });
 
   it("ends an agent's wait on background work when the countdown runs out", async () => {

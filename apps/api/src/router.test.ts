@@ -1241,7 +1241,7 @@ describe("MCP loopback endpoints", () => {
   };
 
   it("reports platform configuration without credentials or overriding a personal connection", async () => {
-    vi.stubEnv("AUTUMN_API_KEY", "test-platform-credential-not-for-clients");
+    vi.stubEnv("EXA_API_KEY", "test-platform-credential-not-for-clients");
     vi.stubEnv("FULLENRICH_API_KEY", "");
     try {
       const { list, handler } = mcpDeps();
@@ -1252,7 +1252,7 @@ describe("MCP loopback endpoints", () => {
         name: "Recruiting research",
         description: "",
         transport: "streamable_http",
-        endpoint: "https://api.autumn.ai/mcp",
+        endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
         command: null,
         args: [],
         env: {},
@@ -1265,7 +1265,7 @@ describe("MCP loopback endpoints", () => {
       };
       list.mockResolvedValue([
         server,
-        { ...server, id: "other-endpoint", endpoint: "https://api.autumn.ai/mcp?other=1" },
+        { ...server, id: "other-endpoint", endpoint: "https://mcp.exa.ai/mcp?other=1" },
         { ...server, id: "unconfigured-service", endpoint: "https://mcp.fullenrich.com/mcp" },
         { ...server, id: "stdio-service", transport: "stdio" },
         { ...server, id: "personal-service", secretId: "personal-secret" },

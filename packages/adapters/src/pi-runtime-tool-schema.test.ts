@@ -367,9 +367,14 @@ describe("jsonSchemaParameters", () => {
     const parameters = parametersFor(tool!);
     const wire = JSON.parse(JSON.stringify(parameters));
     const inputs: ToolCall["arguments"][] = [
-      { operation: "save_results", expectedRoleRevision: 1, providerTaskId: "task", cursor: null },
-      { operation: "status", taskId: "local-task" },
-      { operation: "rows", taskId: "local-task", limit: 7, cursor: "  opaque+/=\r\n " },
+      { operation: "save_search", expectedRoleRevision: 1 },
+      {
+        operation: "import_csv",
+        roleId: "role",
+        expectedRoleRevision: 1,
+        artifactId: "list",
+        mapping: { name: "  Full name\r\n " },
+      },
     ];
     for (const input of inputs) {
       expect(parseConnectorToolArgs(tool!.inputSchema, input)).toEqual(input);

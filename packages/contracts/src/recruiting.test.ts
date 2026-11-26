@@ -263,44 +263,6 @@ describe("recruiting contracts", () => {
       }).success,
     ).toBe(false);
   });
-  it("accepts a post-result native candidate save without a custom research action", () => {
-    const input = {
-      operation: "save_results",
-      expectedRoleRevision: 1,
-      mcpServerId: "research-server",
-      providerTaskId: "provider-task",
-    };
-    expect(contracts.RecruitingResearchToolInputSchema.parse(input)).toEqual({
-      ...input,
-      cursor: null,
-    });
-    const { mcpServerId: _, ...withoutInternalId } = input;
-    expect(contracts.RecruitingResearchToolInputSchema.parse(withoutInternalId)).toEqual({
-      ...withoutInternalId,
-      cursor: null,
-    });
-    for (const cursor of [null, "  opaque+/=\r\n "]) {
-      expect(contracts.RecruitingResearchToolInputSchema.parse({ ...input, cursor })).toEqual({
-        ...input,
-        cursor,
-      });
-    }
-    for (const invalid of [
-      { expectedRoleRevision: 0 },
-      { expectedRoleRevision: 1.5 },
-      { mcpServerId: " " },
-      { providerTaskId: "" },
-      { providerTaskId: " " },
-      { roleId: "forged-role" },
-      { actionId: "custom-action" },
-      { sourceEffectId: "forged-effect" },
-      { cursor: "" },
-    ]) {
-      expect(
-        contracts.RecruitingResearchToolInputSchema.safeParse({ ...input, ...invalid }).success,
-      ).toBe(false);
-    }
-  });
 
   it("requires candidate source task/action references to be present or null together", () => {
     const source = {
@@ -470,58 +432,14 @@ describe("recruiting contracts", () => {
         false,
       );
   });
-  const researchInputs = [
-    { operation: "status", taskId: "local-research-task" },
-    { operation: "rows", taskId: "local-research-task", limit: 7, cursor: "  opaque+/=\r\n " },
-  ];
-
-  it.each(researchInputs)(
-    "accepts the closed native research $operation input without changing its bytes",
-    (input) => {
-      expect(contracts.RecruitingResearchToolInputSchema?.parse(input)).toEqual(input);
-      for (const field of [
-        "actor",
-        "ownerId",
-        "spaceId",
-        "userId",
-        "botId",
-        "runId",
-        "threadId",
-        "sourceMessageId",
-        "roleId",
-        "roleRevisionId",
-        "sourceRefs",
-        "effectId",
-        "requestArtifact",
-        "contextArtifact",
-        "receiptArtifact",
-        "outputArtifacts",
-        "providerTaskId",
-        "task_id",
-        "prompt",
-        "message",
-        "arguments",
-      ]) {
-        expect(
-          contracts.RecruitingResearchToolInputSchema?.safeParse({ ...input, [field]: "forged" })
-            .success,
-        ).toBe(false);
-      }
-    },
-  );
-
-  it("rejects invalid research read identifiers and removed operations", () => {
+  it("rejects the removed research task operations", () => {
     for (const input of [
       { operation: "prepare", mcpServerId: "server", clientNonce: "nonce" },
       { operation: "continue", taskId: "task" },
       { operation: "start", actionId: "action" },
-      { operation: "status", taskId: "\n" },
-      { operation: "rows", taskId: "" },
-      { operation: "rows", taskId: "task", limit: 0 },
-      { operation: "rows", taskId: "task", limit: 1.5 },
-      { operation: "rows", taskId: "task", cursor: "" },
-      { operation: "status", taskId: "task", limit: 1 },
-      { operation: "rows", taskId: "task", actionId: "action" },
+      { operation: "status", taskId: "task" },
+      { operation: "rows", taskId: "task" },
+      { operation: "save_results", expectedRoleRevision: 1, providerTaskId: "task", cursor: null },
     ]) {
       expect(contracts.RecruitingResearchToolInputSchema?.safeParse(input).success).toBe(false);
     }

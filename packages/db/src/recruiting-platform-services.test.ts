@@ -18,6 +18,8 @@ function fixture(
   options: {
     servers?: Record<string, Server>;
     missing?: Record<string, string[]>;
+    /** False for an account without the recruiting defaults. */
+    installed?: boolean;
     lead?: boolean;
     linked?: number;
     grants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
@@ -42,6 +44,7 @@ function fixture(
   let current = "";
   const tx = {
     $queryRaw: vi.fn(async () => []),
+    capabilityInstall: { count: vi.fn(async () => (options.installed === false ? 0 : 1)) },
     spaceMember: {
       findUnique: vi.fn(async () => ({ organizationId: "org", space: { deletingAt: null } })),
     },
@@ -139,24 +142,6 @@ describe("ensurePlatformServices", () => {
     expect(earlier.tx.bot.updateMany).not.toHaveBeenCalled();
   });
 
-  it("leaves every grant to the retired research service with no tools", async () => {
-    const f = fixture();
-    await ensurePlatformServices(f.prisma, actor);
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
-      where: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        server: {
-          spaceId: actor.spaceId,
-          userId: actor.userId,
-          endpoint: "https://api.autumn.ai/mcp",
-        },
-        NOT: { allowAllTools: false, allowedTools: { equals: [] } },
-      },
-      data: { allowAllTools: false, allowedTools: [] },
-    });
-  });
-
   it("creates the services and links the crew members that predate them", async () => {
     const f = fixture({
       missing: { "people-search": ["main-bot", "sourcer-bot"], fullenrich: ["outreach-bot"] },
@@ -229,10 +214,14 @@ describe("ensurePlatformServices", () => {
       await ensurePlatformServices(f.prisma, actor);
       expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
     }
-    const none = fixture({ lead: false, missing: { fullenrich: ["outreach-bot"] } });
-    await ensurePlatformServices(none.prisma, actor);
-    expect(none.tx.mcpServer.create).not.toHaveBeenCalled();
-    expect(none.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+    for (const none of [
+      fixture({ lead: false, missing: { fullenrich: ["outreach-bot"] } }),
+      fixture({ installed: false, missing: { fullenrich: ["outreach-bot"] } }),
+    ]) {
+      await ensurePlatformServices(none.prisma, actor);
+      expect(none.tx.mcpServer.create).not.toHaveBeenCalled();
+      expect(none.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+    }
   });
 
   it("gives the people search's agent run to crews that already search", async () => {
@@ -252,7 +241,7 @@ describe("ensurePlatformServices", () => {
         server: expect.objectContaining({ endpoint: SEARCH, enabled: true }),
       }),
     });
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(2); // and the retired research grants
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(1);
     expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: "searches" }),
       data: { allowedTools: ["web_search_exa", "web_search_advanced_exa", "agent_run"] },
@@ -279,7 +268,7 @@ describe("ensurePlatformServices", () => {
         server: expect.objectContaining({ endpoint: "https://mcp.cal.com/mcp", enabled: true }),
       }),
     });
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(2); // and the retired research grants
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(1);
     expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
         id: "books",

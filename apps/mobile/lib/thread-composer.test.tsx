@@ -246,7 +246,7 @@ it("keeps Stop, Stop everything and each background-task action distinct on mobi
   const stop = vi.fn(async () => {});
   const stopAll = vi.fn(async () => {});
   const cancelTask = vi.fn(async () => {});
-  const task = { id: "research-1", kind: "research" as const, status: "running" as const };
+  const task = { id: "research-1", kind: "agent_run" as const, status: "running" as const };
   try {
     await act(async () =>
       root.render(
@@ -272,9 +272,7 @@ it("keeps Stop, Stop everything and each background-task action distinct on mobi
     );
     expect(stopAll).toHaveBeenCalledOnce();
     await act(async () =>
-      container
-        .querySelector<HTMLButtonElement>('button[aria-label="Stop research updates"]')!
-        .click(),
+      container.querySelector<HTMLButtonElement>('button[aria-label="Stop following"]')!.click(),
     );
     expect(cancelTask).toHaveBeenCalledExactlyOnceWith(task);
   } finally {

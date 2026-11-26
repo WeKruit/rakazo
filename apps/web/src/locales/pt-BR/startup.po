@@ -5131,10 +5131,6 @@ msgstr "Pare de Falar"
 msgid "Stop teaching"
 msgstr "Parar de ensinar"
 
-#: src/components/BackgroundTasks.tsx
-msgid "Stop updates"
-msgstr ""
-
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Stop-on-reply behavior is not reported."
 msgstr ""

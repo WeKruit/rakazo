@@ -5131,10 +5131,6 @@ msgstr "停止朗读"
 msgid "Stop teaching"
 msgstr "停止示范"
 
-#: src/components/BackgroundTasks.tsx
-msgid "Stop updates"
-msgstr "停止更新"
-
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Stop-on-reply behavior is not reported."
 msgstr "未提供收到回复后的停止设置。"

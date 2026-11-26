@@ -236,7 +236,6 @@ import {
   changeCanvas,
   claimRecruitingCrmImport,
   claimRecruitingReply,
-  claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
   createRecruitingSchedulingPlan,
@@ -641,32 +640,21 @@ import {
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { keepProfileText, lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
-  RECRUITING_RESEARCH_DIRECT_NOTICE,
-  trackDirectRecruitingResearch,
-} from "./recruiting-research-poll.js";
-import {
   assertSchedulingCall,
   SchedulingApprovalEvidenceSchema,
   schedulingBookingArguments,
   schedulingPlanHash,
   schedulingPlanReview,
 } from "./recruiting-scheduling.js";
-import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
 import {
-  admitRecruitingResearchCall,
-  bindRecruitingResearchReadCall,
-  completeRecruitingResearchCall,
   executeRecruitingRoleTool,
   importRecruitingCandidateCsv,
   createAsUpdate,
   normalizeRecruitingRoleArgs,
   PEOPLE_SEARCH_AUTOSAVE_KEY,
-  RecruitingCandidateOutputError,
   RecruitingCsvImportError,
   RecruitingPeopleSearchError,
   repairedRoleSave,
-  resolveRecruitingResearchTool,
-  saveNativeRecruitingCandidateResults,
   saveRecruitingPeopleSearch,
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
@@ -809,7 +797,6 @@ import {
   waitWithCountdown,
   withWorkNote,
   workEstimateAfterAgentRun,
-  workEstimateForResearch,
   workStartNote,
 } from "./work-estimate.js";
 import type { WorkingState } from "./working-state.js";
@@ -5554,8 +5541,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             Boolean(candidateDecision) ||
             name === "recruiting_shortlist" ||
             (researchInput?.success === true &&
-              (researchInput.data.operation === "save_results" ||
-                researchInput.data.operation === "import_csv" ||
+              (researchInput.data.operation === "import_csv" ||
                 researchInput.data.operation === "save_search" ||
                 researchInput.data.operation === "calibration_round"));
           const researchActor = {
@@ -5567,11 +5553,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             },
             runId,
             sourceMessageId: recruitingSourceMessageId,
-          };
-          const researchDispatchActor = {
-            ...researchActor,
-            leaseOwner: workerId,
-            leaseFence: fence,
           };
           const crmContext = {
             runId,
@@ -5617,9 +5598,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : { bcc: saved.bcc_address_email_list }),
             };
           };
-          let researchSelection:
-            | Awaited<ReturnType<typeof resolveRecruitingResearchTool>>
-            | undefined;
           let resolvedTool: ConnectorTool | undefined;
           let connectorCall: ConnectorCall = {
             tool: name,
@@ -5903,53 +5881,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: sanitizeConnectorError(error, runSecrets) };
             }
           }
-          if (
-            researchInput?.success &&
-            (researchInput.data.operation === "status" || researchInput.data.operation === "rows")
-          ) {
-            if (!deps.artifacts) return { error: "Recruiting research requires artifact storage" };
-            try {
-              researchSelection = await resolveRecruitingResearchTool(
-                { prisma: deps.prisma, artifacts: deps.artifacts },
-                researchActor,
-                researchInput.data,
-                context,
-              );
-              if (researchSelection.recoveredResult)
-                return redactConnectorPayload(researchSelection.recoveredResult, runSecrets);
-              if (!deps.connector?.resolveCall)
-                throw new Error("Recruiting research requires native MCP");
-              const resolved = await deps.connector.resolveCall(
-                {
-                  tool: catalogExecuteToolName("mcp"),
-                  route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
-                  args: {
-                    id: catalogIdForRoute(researchSelection.route),
-                    arguments: researchSelection.args,
-                  },
-                  executionId,
-                },
-                context,
-              );
-              const resolvedRoute = resolved?.call.route;
-              if (
-                !resolved ||
-                !resolvedRoute?.resourceId ||
-                !approvalRoutesMatch(
-                  { ...resolvedRoute, resourceId: resolvedRoute.resourceId },
-                  researchSelection.route,
-                )
-              )
-                throw new IsolationError();
-              if (BUILTIN_AGENT_TOOL_NAMES.has(resolved.tool.name)) throw new IsolationError();
-              name = resolved.tool.name;
-              args = resolved.call.args;
-              connectorCall = resolved.call;
-              resolvedTool = resolved.tool;
-            } catch (error) {
-              return { error: sanitizeConnectorError(error, runSecrets) };
-            }
-          }
           const onCatalogExecuteRoute = Boolean(
             connectorCall.route &&
               !connectorCall.route.resourceId &&
@@ -5971,7 +5902,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           let effectRequest: unknown = args;
           if (
-            !researchSelection &&
             !crmImportSelection &&
             !schedulingSelection &&
             connectorCall.route &&
@@ -6481,7 +6411,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
                 return {
                   error: round?.approvedAt
-                    ? "The recruiter already accepted the latest calibration round. Start the scale-out now: send the research provider's research tool the confirmed brief, every round's feedback and the target number; no card is needed."
+                    ? "The recruiter already accepted the latest calibration round. Start the scale-out now: search with the confirmed brief, every round's feedback and the target number; no card is needed."
                     : round?.candidateKeys.length
                       ? "Calibration rounds never use an approval card. The round is recorded: list its people in chat and end with the next-step question. When the recruiter accepts the round in their own words (these people look right, go find more like them) or presses accept on the round panel, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out."
                       : "Calibration rounds never use an approval card. Record the ten with recruiting_research calibration_round, list them in chat and end with the next-step question.",
@@ -6665,59 +6595,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: sanitizeConnectorError(error, runSecrets) };
             }
           }
-          let researchAdmission: RecruitingResearchCallAdmission | undefined;
-          if (connectorCall.route?.connectorId === "mcp" && !crmImportSelection) {
-            try {
-              const liveSchema = (resolvedTool ?? connectorTools.get(name))?.inputSchema;
-              if (liveSchema) assertConnectorToolArgs(liveSchema, args);
-              researchAdmission = await admitRecruitingResearchCall(
-                { prisma: deps.prisma, artifacts: deps.artifacts },
-                researchDispatchActor,
-                { ...connectorCall, tool: name, args },
-                context,
-                { taskId: researchSelection?.taskId },
-              );
-              if (researchSelection && !researchAdmission) throw new IsolationError();
-            } catch (error) {
-              return { error: sanitizeConnectorError(error, runSecrets) };
-            }
-          }
-          if (researchAdmission && disabledBuiltinTools.has("recruiting_research"))
-            return { error: "This tool is disabled for this bot." };
-          if (researchAdmission?.recoveredResult)
-            return redactConnectorPayload(researchAdmission.recoveredResult, runSecrets);
-          const researchResult = async (
-            admission: RecruitingResearchCallAdmission,
-            result: unknown,
-            receipt?: {
-              id: string;
-              request: unknown;
-              historicalBackfill?: boolean;
-            },
-          ) => {
-            if (!deps.artifacts) throw new Error("Recruiting research requires artifact storage");
-            return redactConnectorPayload(
-              await completeRecruitingResearchCall(
-                {
-                  prisma: deps.prisma,
-                  artifacts: deps.artifacts,
-                  jobs: deps.jobs,
-                },
-                researchActor,
-                admission,
-                result,
-                context,
-                receipt
-                  ? {
-                      effectId: receipt.id,
-                      request: receipt.request,
-                      historicalBackfill: receipt.historicalBackfill,
-                    }
-                  : undefined,
-              ),
-              runSecrets,
-            );
-          };
           const viaConnector = !BUILTIN_AGENT_TOOL_NAMES.has(name);
           const memoryWrite = ["remember", "save_shared_memory", "save_memory"].includes(name);
           const currentMemoryThread = memoryWrite
@@ -6757,9 +6634,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? recruitingPreference.scope === "user"
                   ? "save_shared_memory"
                   : "remember"
-                : researchAdmission
-                  ? "recruiting_research"
-                  : name;
+                : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
           const memoryRefusal = await unattendedMemoryWriteRefusal({
@@ -7003,7 +6878,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!verifiedInternalWrite) {
             const refusal = externalTextTriggerToolRefusal(
               run.trigger,
-              researchAdmission?.kind === "read" ? name : policyToolName,
+              policyToolName,
               viaConnector,
               connectorCall.route,
               args,
@@ -7016,7 +6891,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !verifiedInternalWrite &&
             unattendedTriggerToolRequiresApproval(
               run.trigger,
-              researchAdmission?.kind === "read" ? name : policyToolName,
+              policyToolName,
               viaConnector,
               declaredReadOnly,
             );
@@ -7024,7 +6899,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !verifiedInternalWrite &&
             (requiresUnattendedApproval ||
               toolRequiresApproval(
-                researchAdmission?.kind === "read" ? name : policyToolName,
+                policyToolName,
                 viaConnector,
                 declaredReadOnly,
               ));
@@ -7453,15 +7328,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 dispatched: false,
               };
             }
-          }
-          if (researchAdmission?.kind === "read") {
-            if (!applied) throw new IsolationError();
-            researchAdmission = await bindRecruitingResearchReadCall(
-              { prisma: deps.prisma },
-              researchDispatchActor,
-              researchAdmission,
-              applied.effect,
-            );
           }
 
           const runAutoReview = async () => {
@@ -8030,15 +7896,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           from,
                         },
                       )
-                    : researchAdmission
-                      ? await claimRecruitingResearchReadEffect(deps.prisma, researchActor.actor, {
-                          runId,
-                          leaseOwner: workerId,
-                          leaseFence: fence,
-                          effectId: applied!.effect.id,
-                          from,
-                        })
-                      : await claim(deps.prisma, applied!.effect.id);
+                    : await claim(deps.prisma, applied!.effect.id);
             } catch (error) {
               if (crmImportAdmission || replyAdmission) return roleError(error);
               throw error;
@@ -8065,11 +7923,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       (args.operation === "ask" ? "messageId" : "assessment") in retryGate.result))
                 )
                   return replayAssessment();
-                if (researchAdmission && current.status === "completed")
-                  return researchResult(researchAdmission, current.result, {
-                    ...current,
-                    historicalBackfill: true,
-                  });
                 if (
                   name === "recruiting_role" &&
                   retryGate.result &&
@@ -8700,11 +8553,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     (args.operation === "ask" ? "messageId" : "assessment") in gate.result))
               )
                 return replayAssessment();
-              if (researchAdmission && applied.effect.status === "completed")
-                return researchResult(researchAdmission, applied.effect.result, {
-                  ...applied.effect,
-                  historicalBackfill: true,
-                });
               if (name === "request_secret") {
                 const replacementSecret = await deps.prisma.secret.findFirst({
                   where: {
@@ -9696,8 +9544,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               !deps.artifacts ||
               !researchInput?.success ||
-              (researchInput.data.operation !== "save_results" &&
-                researchInput.data.operation !== "import_csv" &&
+              (researchInput.data.operation !== "import_csv" &&
                 researchInput.data.operation !== "save_search" &&
                 researchInput.data.operation !== "calibration_round")
             )
@@ -9849,25 +9696,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 if (!saved || typeof saved !== "object" || Array.isArray(saved)) return saved;
                 return { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP };
               }
-              if (researchInput.data.operation === "import_csv") {
-                if (!applied || !claimedEffect) throw new IsolationError();
-                // Internal record keeping like save_results: page, rows and effect commit together.
-                return await importRecruitingCandidateCsv(
-                  { prisma: deps.prisma, artifacts: deps.artifacts },
-                  {
-                    ...researchActor,
-                    leaseOwner: workerId,
-                    leaseFence: fence,
-                    effectId: applied.effect.id,
-                    effectRequest: applied.effect.request,
-                  },
-                  researchInput.data,
-                  context,
-                );
-              }
               if (!applied || !claimedEffect) throw new IsolationError();
-              // The local projection and this native effect complete in one transaction.
-              return await saveNativeRecruitingCandidateResults(
+              // Internal record keeping: page, rows and effect commit together.
+              return await importRecruitingCandidateCsv(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
                 {
                   ...researchActor,
@@ -9881,8 +9712,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
             } catch (error) {
               if (
-                (researchInput.data.operation === "save_results" ||
-                  researchInput.data.operation === "import_csv" ||
+                (researchInput.data.operation === "import_csv" ||
                   researchInput.data.operation === "calibration_round") &&
                 applied &&
                 claimedEffect &&
@@ -9906,7 +9736,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return uncertainEffectResult(name);
               }
               if (
-                error instanceof RecruitingCandidateOutputError ||
                 error instanceof RecruitingCsvImportError ||
                 error instanceof RecruitingPeopleSearchError ||
                 error instanceof RecruitingCalibrationRoundError
@@ -11964,7 +11793,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return archived;
           }
           if (deps.connector) {
-            if (applied && !claimedEffect && (researchAdmission || declaredReadOnly !== true)) {
+            if (applied && !claimedEffect && declaredReadOnly !== true) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
             }
@@ -12061,11 +11890,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
             if ("settled" in executed) return executed.settled;
             const result = executed.result;
-            if (researchAdmission) {
-              if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
-              if (!applied) throw new Error("Recruiting receipt requires its native effect");
-              return researchResult(researchAdmission, result, applied.effect);
-            }
             if (replyRoute) {
               if (!applied || !claimedEffect || !replyEvidence) throw new IsolationError();
               const envelope =
@@ -12089,36 +11913,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ...outcome,
                 sourceReadEffectId: replyEvidence.effectId,
                 providerResult: result,
-              });
-            }
-            const followed = await trackDirectRecruitingResearch(
-              deps,
-              context,
-              connectorCall.route,
-              connectorCall.args,
-              result,
-            ).catch((error) => {
-              getLogger().warn("recruiting research follow-up not scheduled", {
-                error: String(error),
-              });
-              return null;
-            });
-            if (followed) {
-              const body =
-                result !== null && typeof result === "object" && !Array.isArray(result)
-                  ? (result as Record<string, unknown>)
-                  : { providerResult: result };
-              // Research runs in the background like an agent run: it gets the same countdown.
-              const countdown = await workEstimateForResearch(
-                deps.prisma,
-                run,
-                followed,
-                connectorCall.args,
-              ).catch(() => null);
-              return finish({
-                ...body,
-                background: RECRUITING_RESEARCH_DIRECT_NOTICE,
-                ...(countdown ? { countdown } : {}),
               });
             }
             const finished = await finish(result);

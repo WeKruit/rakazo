@@ -734,7 +734,7 @@ export const appContract = {
       .input(
         threadTarget.safeExtend({
           id: Id,
-          kind: z.enum(["research", "cloud_agent", "run", "agent_run"]),
+          kind: z.enum(["cloud_agent", "run", "agent_run"]),
         }),
       )
       .output(z.object({ ok: z.literal(true) })),

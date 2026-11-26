@@ -65,7 +65,6 @@ export const DE_MESSAGES: Record<string, string> = {
   "Reconnect your model to continue.": "Verbinde dein Modell erneut, um fortzufahren.",
   "Stop everything": "Alles stoppen",
   "Stop following": "Nicht mehr verfolgen",
-  "Stop research updates": "Forschungsupdates stoppen",
   "Task transcript": "Aufgabenverlauf",
   "The computer could not start. Reset it to continue.":
     "Der Computer konnte nicht starten. Setze ihn zurück, um fortzufahren.",

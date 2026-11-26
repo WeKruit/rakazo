@@ -19,7 +19,6 @@ import type {
   RemoteConnectorDependencies,
 } from "@rakazo/adapters";
 import {
-  AutumnFileConnector,
   applyMessagingOutboundStatus,
   assertHomeStorageConfiguration,
   ChatSdkMessagingSurface,
@@ -446,7 +445,6 @@ export async function createApp(
       .providers()
       .filter((provider) => !composioOverride || provider.describe().id !== "composio"),
     mcp,
-    new AutumnFileConnector(prisma, secrets, artifacts, remoteConnectors),
   ]);
   const connector = stack.destination;
   await connector.start();

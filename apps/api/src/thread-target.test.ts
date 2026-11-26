@@ -4461,7 +4461,6 @@ describe("stopThreadRuns", () => {
     cloudAgent: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     task: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     attempt: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
-    recruitingResearchTask: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     routine: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
   });
   it.each(["run-a", "run-foreign", "run-unknown"])(
@@ -5070,7 +5069,7 @@ describe("stopThreadRuns", () => {
     expect(stoppedNotice(null, true)).toBe("助手已停止");
   });
 
-  it("ends research and reminders only for Stop everything", async () => {
+  it("ends reminders only for Stop everything", async () => {
     const tables = stopAllTables();
     const transaction = {
       $queryRaw: vi.fn(),
@@ -5092,11 +5091,9 @@ describe("stopThreadRuns", () => {
     const target = { kind: "bot", botId: "bot-1", threadId: "thread-1" } as ThreadTarget;
 
     await stopThreadRuns(deps, actor, target, "run-1");
-    expect(tables.recruitingResearchTask.updateMany).not.toHaveBeenCalled();
     expect(tables.routine.updateMany).not.toHaveBeenCalled();
 
     await stopThreadRuns(deps, actor, target);
-    expect(tables.recruitingResearchTask.updateMany).not.toHaveBeenCalled();
     expect(tables.routine.updateMany).not.toHaveBeenCalled();
 
     await stopThreadRuns(deps, actor, target, undefined, "all");
@@ -5115,11 +5112,6 @@ describe("stopThreadRuns", () => {
     expect(transaction.run.updateMany).toHaveBeenCalledWith({
       where: { threadId: "thread-1", status: "cancelled", error: "turn_stopped" },
       data: { error: null },
-    });
-    // Closed, so the research poll ignores the provider's completion and opens no wake.
-    expect(tables.recruitingResearchTask.updateMany).toHaveBeenCalledExactlyOnceWith({
-      where: { state: "active", createdByRun: { threadId: "thread-1" } },
-      data: { state: "closed" },
     });
     // Pending one-shot wakes in this conversation are disarmed; repeating routines are kept.
     expect(tables.routine.updateMany).toHaveBeenCalledExactlyOnceWith({

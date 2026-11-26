@@ -1184,7 +1184,7 @@ export type BackgroundWorkTiming = z.infer<typeof BackgroundWorkTimingSchema>;
 
 export const ThreadBackgroundTaskSchema = z.object({
   id: Id,
-  kind: z.enum(["research", "cloud_agent", "run", "agent_run"]),
+  kind: z.enum(["cloud_agent", "run", "agent_run"]),
   status: z.enum(["running", "cancelling"]),
   /** When the work was first seen running; optional for older servers. */
   startedAt: IsoDate.optional(),

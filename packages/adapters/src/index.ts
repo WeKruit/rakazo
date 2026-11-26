@@ -6,7 +6,6 @@ export * from "./artifact-read.js";
 export * from "./artifacts.js";
 export * from "./auto-review.js";
 export * from "./auto-review-factory.js";
-export * from "./autumn-files.js";
 export * from "./background-job-handlers.js";
 export * from "./billing-emulator.js";
 export * from "./bot-avatar.js";
@@ -142,7 +141,6 @@ export {
   isRecruitingCandidateReportField,
   projectRecruitingCandidateReport,
 } from "./recruiting-research.js";
-export { recruitingResearchWakeNonce } from "./recruiting-research-poll.js";
 export * from "./recruiting-sequences.js";
 export * from "./release-watch.js";
 export * from "./remote-mcp.js";

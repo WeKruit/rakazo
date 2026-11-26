@@ -15,7 +15,6 @@ import { createWorkerSecretStore } from "./secret-store.js";
 if (process.env.RAKAZO_RELEASE_PROFILE !== "staging") loadRootEnv();
 
 import {
-  AutumnFileConnector,
   artifactStorageOptionsFromEnv,
   assertHomeStorageConfiguration,
   ChatSdkMessagingSurface,
@@ -255,7 +254,6 @@ async function main() {
     new InstalledConnectorProvider(prisma, secrets, {}, allowPrivateEndpoint),
     ...integrationSettings.providers(),
     mcp,
-    new AutumnFileConnector(prisma, secrets, artifacts),
   ]);
   const connector = stack.destination;
   await connector.start();

@@ -1161,13 +1161,6 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
         "candidateKey → the must-haves this person's row does not show, in English (for example 'startup experience, former Metrology Engineer'). Shown under that person in chat.",
       ),
   }),
-  z.strictObject({
-    operation: z.literal("save_results"),
-    expectedRoleRevision: Revision,
-    mcpServerId: RecruitingId.optional(),
-    providerTaskId: RecruitingId,
-    cursor: z.string().min(1).nullable().default(null),
-  }),
   // People returned by a people-search connector call in this same run, saved as one unassessed page.
   z.strictObject({
     operation: z.literal("save_search"),
@@ -1189,13 +1182,6 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       // The recruiter's own address for each person: kept as their known contact email.
       email: ResearchText.optional(),
     }),
-  }),
-  z.strictObject({ operation: z.literal("status"), taskId: RecruitingId }),
-  z.strictObject({
-    operation: z.literal("rows"),
-    taskId: RecruitingId,
-    limit: z.number().int().positive().optional(),
-    cursor: z.string().min(1).optional(),
   }),
 ]);
 export type RecruitingResearchToolInput = z.infer<typeof RecruitingResearchToolInputSchema>;

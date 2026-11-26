@@ -235,6 +235,7 @@ function fixture() {
               row.source === where.source,
           ) ?? null,
       ),
+      count: vi.fn(async ({ where }) => presets.filter((row) => row.id === where.id).length),
       create: vi.fn(async ({ data }) => {
         presets.push(data);
         return data;
@@ -332,21 +333,9 @@ describe("ensureRecruitingWorkspace", () => {
       data: expect.objectContaining({
         spaceId: actor.spaceId,
         userId: actor.userId,
-        endpoint: "https://api.autumn.ai/mcp",
+        slug: "people-search",
         secretId: undefined,
       }),
-    });
-    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
-      data: [
-        ...[0, 1].map((index) =>
-          expect.objectContaining({
-            botId: f.bots[index]!.id,
-            allowAllTools: false,
-            allowedTools: [],
-          }),
-        ),
-      ],
-      skipDuplicates: true,
     });
   });
 
@@ -402,11 +391,11 @@ describe("ensureRecruitingWorkspace", () => {
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     expect(f.tx.mcpServer.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        endpoint: "https://api.autumn.ai/mcp",
+        endpoint: "https://mcp.fullenrich.com/mcp",
         secretId: undefined,
       }),
     });
-    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledTimes(4);
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledTimes(3);
     f.tx.botMcpServer.createMany.mockClear();
     f.tx.mcpServer.create.mockClear();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
@@ -460,23 +449,7 @@ describe("ensureRecruitingWorkspace", () => {
     expect(native.bot).toHaveBeenCalledTimes(4);
   });
 
-  it("does not replace a customized Autumn endpoint during fresh setup", async () => {
-    const f = fixture();
-    f.tx.mcpServer.findFirst.mockResolvedValueOnce({
-      id: "private-autumn",
-      endpoint: "https://example.test/mcp",
-      transport: "streamable_http",
-    } as never);
-    await expect(
-      recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
-        sandboxKind: "fake",
-      }),
-    ).rejects.toThrow("customized");
-    expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
-    expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
-  });
-
-  it("does not restore a deliberately removed Autumn assignment on repeat setup", async () => {
+  it("does not restore a deliberately removed assignment on repeat setup", async () => {
     const f = fixture();
     const options = { sandboxKind: "fake" };
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
@@ -493,7 +466,7 @@ describe("ensureRecruitingWorkspace", () => {
 
   it("does not overwrite a customized FullEnrich endpoint during fresh setup", async () => {
     const f = fixture();
-    f.tx.mcpServer.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({
+    f.tx.mcpServer.findFirst.mockResolvedValueOnce({
       id: "private-contact-service",
       endpoint: "https://custom.example.test/mcp",
       transport: "streamable_http",
@@ -701,12 +674,23 @@ describe("managed recruiting default upgrades", () => {
   it("adds a newly maintained service only in unchanged managed scope, retaining revocation history", async () => {
     const f = await previous();
     delete f.state.services.fullenrich;
-    f.servers.splice(1, 1);
+    f.servers.splice(
+      f.servers.findIndex((row) => row.slug === "fullenrich"),
+      1,
+    );
     for (let i = f.assignments.length - 1; i >= 0; i--)
       if (f.assignments[i]!.serverId === "fullenrich-a") f.assignments.splice(i, 1);
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
     expect(f.servers.some((s) => s.slug === "fullenrich")).toBe(true);
     expect(f.assignments.filter((a) => a.serverId === "fullenrich-a")).toHaveLength(2);
+  });
+  it("drops a service the product no longer ships from the recorded baseline, leaving the account's rows alone", async () => {
+    const f = await previous();
+    f.state.services.retired = { id: "retired-a", signature: "s", assignments: {} };
+    const rows = JSON.stringify({ servers: f.servers, assignments: f.assignments });
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect((f.presets[0]!.config as ManagedState).services).not.toHaveProperty("retired");
+    expect(JSON.stringify({ servers: f.servers, assignments: f.assignments })).toBe(rows);
   });
 });
 
@@ -784,18 +768,22 @@ it("upgrades exact managed tool sets without changing a user-replaced assignment
   const options = { sandboxKind: "fake" };
   await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
   const state = f.presets[0]!.config as ManagedState;
-  f.assignments[0]!.allowedTools = ["research"];
-  state.services.autumn!.assignments.main!.signature = hash([false, ["research"]]);
+  f.assignments[0]!.allowedTools = ["get_credits"];
+  state.services.fullenrich!.assignments.main!.signature = hash([false, ["get_credits"]]);
   f.assignments[1]!.allowedTools = ["credits"];
   f.presets[0]!.digest = "previous-release";
   await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-  expect(f.assignments[0]!.allowedTools).toEqual([]);
+  expect(f.assignments[0]!.allowedTools).toEqual([
+    "get_credits",
+    "enrich_bulk",
+    "get_enrichment_results",
+  ]);
   expect(f.assignments[1]!.allowedTools).toEqual(["credits"]);
   expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith(
     expect.objectContaining({
       where: expect.objectContaining({
         id: f.assignments[0]!.id,
-        allowedTools: { equals: ["research"] },
+        allowedTools: { equals: ["get_credits"] },
       }),
     }),
   );
@@ -1079,14 +1067,13 @@ describe("managed first-party recruiting CRM installation", () => {
     const before = structuredClone(f.presets[0]);
     f.busy();
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(f.servers).toHaveLength(4);
+    expect(f.servers).toHaveLength(3);
     expect(f.presets[0]).toEqual(before);
   });
 });
 
 describe("crews set up before the recruiting preset", () => {
   const options = { sandboxKind: "fake" };
-  const AUTUMN = "https://api.autumn.ai/mcp";
   function legacy() {
     const f = fixture();
     const updated = new Date("2026-10-01T00:00:00Z");
@@ -1102,34 +1089,16 @@ describe("crews set up before the recruiting preset", () => {
         archivedAt: null,
         updatedAt: updated,
       } as BotRow);
-    f.servers.push({
-      id: "old-autumn",
-      slug: "autumn",
-      endpoint: AUTUMN,
-      transport: "streamable_http",
-      enabled: true,
-      revision: 1,
-      args: [],
-      headers: {},
-      env: {},
-      command: null,
+    f.presets.push({
+      id: `recruiting-defaults-${hash([actor.spaceId, actor.userId])}`,
+      kind: "plugin",
+      source: "builtin:recruiting",
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      version: "legacy",
+      digest: null,
+      config: { legacy: true, routines: {} },
     });
-    f.assignments.push(
-      {
-        id: "a1",
-        botId: "old-main",
-        serverId: "old-autumn",
-        allowAllTools: false,
-        allowedTools: [],
-      },
-      {
-        id: "a2",
-        botId: "old-sourcer",
-        serverId: "old-autumn",
-        allowAllTools: false,
-        allowedTools: [],
-      },
-    );
     const skills = [
       {
         id: "s1",
@@ -1208,7 +1177,7 @@ describe("crews set up before the recruiting preset", () => {
     f.busy();
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
     expect(f.bots.find((bot) => bot.id === "old-main")!.instructions).toBe("Old Main instructions");
-    expect(f.presets).toHaveLength(0);
+    expect(f.presets[0]!.digest).toBeNull();
   });
 
   it("does not wait for a turn paused on a question or approval card", async () => {
@@ -1230,9 +1199,9 @@ describe("crews set up before the recruiting preset", () => {
     });
   });
 
-  it("does not adopt a crew without the platform research service", async () => {
+  it("does not adopt a crew that was not recorded as a legacy install", async () => {
     const f = legacy();
-    f.assignments.splice(0);
+    f.presets.splice(0);
     const original = f.bots.map((bot) => structuredClone(bot));
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     for (const bot of original)

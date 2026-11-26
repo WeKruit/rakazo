@@ -9,14 +9,8 @@ import {
   namesRole,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
-  reportStalledGroupStage,
   watchOpenStages,
 } from "./group-handoff.js";
-import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
-
-vi.mock("./recruiting-research-poll.js", () => ({
-  recruitingResearchInFlight: vi.fn(async () => false),
-}));
 
 const run = {
   id: "run-a",
@@ -796,7 +790,6 @@ describe("long stage check-in", () => {
     trigger: "recruiting_research",
     clientNonce,
   });
-  const inFlight = vi.mocked(recruitingResearchInFlight);
 
   function stageHarness(existing?: { sourceRuns: [] }, sourceNonce: string | null = null) {
     const h = harness([asked], existing);
@@ -819,7 +812,6 @@ describe("long stage check-in", () => {
   }
 
   it("reports a declined turn's stage when its retry finishes", async () => {
-    inFlight.mockResolvedValueOnce(false);
     const { deps, messageCreate, stageLookup } = stageHarness(
       undefined,
       "autocontinue:run-b:decline",
@@ -832,83 +824,6 @@ describe("long stage check-in", () => {
       expect.objectContaining({ where: expect.objectContaining({ id: "run-b" }) }),
     );
     expect(reported(messageCreate)).toEqual(["group-report:run-b"]);
-  });
-
-  it("holds the report while the worker's own search is still running", async () => {
-    inFlight.mockResolvedValueOnce(true);
-    const { deps, messageCreate } = stageHarness();
-    await expect(
-      reportGroupStageOutcome(deps as never, handedIn, "group-1", { status: "completed" }),
-    ).resolves.toBeUndefined();
-    expect(inFlight).toHaveBeenLastCalledWith(deps.prisma, "role-1", expect.any(Number), {
-      botId: "bot-b",
-      threadId: "thread-1",
-    });
-    expect(messageCreate).not.toHaveBeenCalled();
-  });
-
-  it("checks in once when the search's first partial results are saved", async () => {
-    inFlight.mockResolvedValueOnce(true);
-    const { deps, messageCreate, runCreate, stageLookup } = stageHarness();
-    await expect(
-      reportGroupStageOutcome(deps as never, wake("research-wake:task:rows:20"), "group-1", {
-        status: "completed",
-      }),
-    ).resolves.toEqual({ runId: "run-b" });
-    expect(stageLookup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          botId: "bot-b",
-          threadId: "thread-1",
-          trigger: "follow_up",
-          status: "completed",
-        }),
-      }),
-    );
-    expect(reported(messageCreate)).toEqual(["group-checkin:run-b"]);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [
-            expect.objectContaining({
-              toBotId: "bot-a",
-              report: "progress",
-              text: expect.stringContaining("reply exactly NO_RESPONSE"),
-            }),
-          ],
-        }),
-      }),
-    );
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ botId: "bot-a", trigger: "follow_up" }),
-      }),
-    );
-  });
-
-  it("never checks in twice, after the stage ended, or for a failed partial save", async () => {
-    inFlight.mockResolvedValueOnce(true);
-    const again = stageHarness({ sourceRuns: [] });
-    await expect(
-      reportGroupStageOutcome(again.deps as never, wake("n:rows:40"), "group-1", {
-        status: "completed",
-      }),
-    ).resolves.toBeUndefined();
-    expect(again.messageCreate).not.toHaveBeenCalled();
-
-    const finished = stageHarness();
-    await expect(
-      reportGroupStageOutcome(finished.deps as never, wake("n:rows:40"), "group-1", {
-        status: "completed",
-      }),
-    ).resolves.toBeUndefined();
-    await expect(
-      reportGroupStageOutcome(finished.deps as never, wake("n:rows:40"), "group-1", {
-        status: "failed",
-        error: "save failed",
-      }),
-    ).resolves.toBeUndefined();
-    expect(finished.messageCreate).not.toHaveBeenCalled();
   });
 
   it("reports the stage when the search's final wake ends with nothing left running", async () => {
@@ -936,24 +851,6 @@ describe("long stage check-in", () => {
       }),
     ).resolves.toBeUndefined();
     expect(messageCreate).not.toHaveBeenCalled();
-  });
-
-  it("tells the delegator when the search stopped being followed unfinished", async () => {
-    const { deps, messageCreate } = stageHarness();
-    await reportStalledGroupStage(deps as never, stage);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          clientNonce: "group-report:run-b",
-          blocks: [
-            expect.objectContaining({
-              report: "failed",
-              text: expect.stringContaining("still not finished"),
-            }),
-          ],
-        }),
-      }),
-    );
   });
 
   it("lets only the check-in answer end silently", () => {
@@ -1073,19 +970,6 @@ describe("open stage watch", () => {
         data: expect.objectContaining({
           blocks: [expect.objectContaining({ text: expect.not.stringContaining("an email") })],
         }),
-      }),
-    );
-  });
-
-  it("follows a finished turn only while its research still runs", async () => {
-    const idle = watchHarness([stage("completed", 41)]);
-    await expect(watchOpenStages(idle.deps as never, now, 100)).resolves.toBe(0);
-    vi.mocked(recruitingResearchInFlight).mockResolvedValueOnce(true as never);
-    const { deps, messageCreate } = watchHarness([stage("completed", 41)]);
-    await watchOpenStages(deps as never, now, 100);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ clientNonce: "group-checkin:run-completed:4" }),
       }),
     );
   });

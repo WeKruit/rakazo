@@ -38,16 +38,6 @@ type RecruitingService = {
 
 const RECRUITING_SERVICES: RecruitingService[] = [
   {
-    slug: "autumn",
-    name: "Autumn",
-    description: "Platform recruiting research",
-    endpoint: "https://api.autumn.ai/mcp",
-    // Retired: people search finds, scales and grades. Crews keep the connection, which marks
-    // them as recruiting crews, with no tools, so nothing spends its credits.
-    bots: ["main", "sourcer"],
-    tools: [],
-  },
-  {
     slug: "fullenrich",
     name: "FullEnrich",
     description: "Platform contact enrichment",
@@ -82,27 +72,6 @@ const RECRUITING_SERVICES: RecruitingService[] = [
 
 /** The operator's staff domain: verified mailboxes here see dollar spend for every account. */
 export const RECRUITING_OPERATOR_EMAIL_DOMAIN = "wekruit.com";
-
-/**
- * List prices of the platform services by slug, for the operator's spend estimate only.
- * Research: US$850 a month for 100,000 credits. Contact enrichment: the entry monthly plan,
- * US$29 for 500 credits (charged only for found data). People search: US$7 per 1,000
- * searches with contents. Outreach mail, calendar and mailbox connectors are flat-rate or free.
- * Model tokens are priced from the model catalog instead.
- */
-export const RECRUITING_SERVICE_UNIT_PRICES_USD: Readonly<
-  Record<string, { credits?: number; calls?: number }>
-> = {
-  autumn: { credits: 850 / 100_000, calls: 0 },
-  fullenrich: { credits: 29 / 500, calls: 0 },
-  // Agent runs report their own cost, recorded as one credit per dollar.
-  "people-search": { calls: 7 / 1000, credits: 1 },
-  "recruiting-crm": { calls: 0 },
-  // Flat subscriptions or free APIs: calls add no per-use cost.
-  instantly: { calls: 0 },
-  "cal-com": { calls: 0 },
-  gmail: { calls: 0 },
-};
 
 const CRM_READ_TOOLS = [
   "whoami",
@@ -356,11 +325,10 @@ const legacyDigest = (firstPartyMcpUrl?: string) =>
   digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS]);
 
 /**
- * Adopt a crew set up before the managed preset (bots named after the default roles, with Main
- * and Sourcer on the platform research service) so the account works like a new one: replace
- * the role instructions with the current defaults and remove user copies of the built-in
- * recruiting skills, again whenever the defaults change. Returns null when the Space has no such
- * crew.
+ * Adopt a crew set up before the managed preset (bots named after the default roles, recorded
+ * as a legacy install) so the account works like a new one: replace the role instructions with
+ * the current defaults and remove user copies of the built-in recruiting skills, again whenever
+ * the defaults change. Returns null when the Space has no such crew.
  */
 async function adoptLegacyCrew(
   tx: Prisma.TransactionClient,
@@ -368,8 +336,8 @@ async function adoptLegacyCrew(
   installed: CapabilityInstall | null,
   options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ): Promise<{ botId: string; groupId: string } | null> {
+  if (installed?.version !== LEGACY_PRESET_VERSION) return null;
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
   const bots = (await tx.bot.findMany({ where: { ...scope, archivedAt: null } })).filter(
     (bot) => !bot.archivedAt && !bot.spawnKey?.startsWith("recruiting:"),
   );
@@ -380,17 +348,6 @@ async function adoptLegacyCrew(
   const main = crew.find((item) => item.role.key === "main")?.bot;
   const sourcer = crew.find((item) => item.role.key === "sourcer")?.bot;
   if (!main || !sourcer) return null;
-  const servers = await tx.mcpServer.findMany({
-    where: scope,
-    include: { assignments: { where: scope } },
-  });
-  const onResearch = (botId: string) =>
-    servers.some(
-      (server) =>
-        server.endpoint === research.endpoint &&
-        server.assignments.some((assignment) => assignment.botId === botId),
-    );
-  if (!onResearch(main.id) || !onResearch(sourcer.id)) return null;
 
   const group =
     (await tx.chatGroup.findFirst({
@@ -457,11 +414,7 @@ async function adoptLegacyCrew(
     digest: target,
     config: { legacy: true, routines },
   };
-  if (installed) await tx.capabilityInstall.updateMany({ where: presetWhere(actor), data: record });
-  else
-    await tx.capabilityInstall.create({
-      data: { ...presetWhere(actor), name: "Recruiting defaults", ...record },
-    });
+  await tx.capabilityInstall.updateMany({ where: presetWhere(actor), data: record });
   return result;
 }
 
@@ -494,6 +447,10 @@ async function upgradeInTransaction(
   const baseline = readPreset(installed.config);
   if (baseline.groupId !== recruitingHomeGroupId(actor))
     throw new IsolationError("Recruiting defaults belong to another workspace");
+  // A service the product no longer ships leaves the baseline with it.
+  const shipped = new Set(recruitingServices(options.firstPartyMcpUrl).map((item) => item.slug));
+  for (const slug of Object.keys(baseline.services))
+    if (!shipped.has(slug)) delete baseline.services[slug];
   const originalServices = new Set(Object.keys(baseline.services));
   const newBotIds = new Set<string>();
   if (
@@ -753,17 +710,8 @@ export async function upgradeRecruitingWorkspace(
   options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ): Promise<void> {
   const installed = await prisma.capabilityInstall.findFirst({ where: presetWhere(actor) });
-  if (!installed) {
-    const crew = await prisma.bot.count({
-      where: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        archivedAt: null,
-        name: { in: ["Main", "Sourcer"] },
-      },
-    });
-    if (crew < 2) return;
-  } else if (installed.version === LEGACY_PRESET_VERSION) {
+  if (!installed) return;
+  if (installed.version === LEGACY_PRESET_VERSION) {
     if (installed.digest === legacyDigest(options.firstPartyMcpUrl)) return;
   } else if (
     installed.version === "unmanaged" ||
@@ -787,7 +735,8 @@ export async function upgradeRecruitingWorkspace(
         select: { id: true },
       });
       if (!personal) return;
-      if (!current || current.version === LEGACY_PRESET_VERSION) {
+      if (!current) return;
+      if (current.version === LEGACY_PRESET_VERSION) {
         const home = recruitingHomeGroupId(actor);
         const managed = await tx.chatGroup.count({ where: { id: home } });
         if (!managed) await adoptLegacyCrew(tx, actor, current, options);
@@ -846,7 +795,7 @@ export async function ensureRecruitingWorkspace(
         }),
       ]);
       const installed = await tx.capabilityInstall.findFirst({ where: presetWhere(actor) });
-      if (!existing && (!installed || installed.version === LEGACY_PRESET_VERSION)) {
+      if (!existing && installed?.version === LEGACY_PRESET_VERSION) {
         const legacy = await adoptLegacyCrew(tx, actor, installed, options);
         if (legacy) return legacy;
       }
@@ -1020,7 +969,6 @@ export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor)
   await ensureAddedTools(prisma, actor);
   await ensureSchedulingCalendar(prisma, actor);
   await ensureOutreachGmail(prisma, actor);
-  await retireResearchTools(prisma, actor);
 }
 
 /**
@@ -1112,23 +1060,6 @@ async function ensureOutreachGmail(prisma: PrismaClient, actor: Actor): Promise<
     roleKeys: ["outreach", "main"],
     servers,
     tools: [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS],
-  });
-}
-
-/**
- * The research service is retired for every account: each of the account's grants to it keeps
- * its row, which marks a recruiting crew, with no tools, whoever last set it.
- */
-async function retireResearchTools(prisma: PrismaClient, actor: Actor): Promise<void> {
-  const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
-  await prisma.botMcpServer.updateMany({
-    where: {
-      ...scope,
-      server: { ...scope, endpoint: research.endpoint },
-      NOT: { allowAllTools: false, allowedTools: { equals: [] } },
-    },
-    data: { allowAllTools: false, allowedTools: [] },
   });
 }
 
@@ -1406,23 +1337,20 @@ async function ensurePlatformService(
   slug: string,
 ): Promise<void> {
   const service = RECRUITING_SERVICES.find((item) => item.slug === slug);
-  const research = RECRUITING_SERVICES.find((item) => item.slug === "autumn");
-  if (!service || !research) return;
+  if (!service) return;
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
   const roleBots = (keys: readonly string[]) =>
     keys.flatMap((key) => [
       { spawnKey: `recruiting:${actor.userId}:${key}` },
       { name: RECRUITING_DEFAULT_BOTS.find((role) => role.key === key)?.name ?? key },
     ]);
-  const plan = async (client: Pick<PrismaClient, "mcpServer" | "bot" | "botMcpServer">) => {
-    // Only a recruiting crew: its lead is on the platform research service.
+  const plan = async (
+    client: Pick<PrismaClient, "capabilityInstall" | "mcpServer" | "bot" | "botMcpServer">,
+  ) => {
+    // Only a recruiting crew: the account has the recruiting defaults and its lead.
+    if (!(await client.capabilityInstall.count({ where: presetWhere(actor) }))) return null;
     const lead = await client.bot.findFirst({
-      where: {
-        ...scope,
-        archivedAt: null,
-        OR: roleBots(["main"]),
-        mcpServers: { some: { ...scope, server: { ...scope, endpoint: research.endpoint } } },
-      },
+      where: { ...scope, archivedAt: null, OR: roleBots(["main"]) },
       select: { id: true },
     });
     if (!lead) return null;

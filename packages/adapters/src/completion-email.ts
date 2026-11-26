@@ -2,7 +2,6 @@ import type { TransactionalEmailProvider } from "@rakazo/adapter-kit";
 import { truncatedPlainText } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 
 /**
  * "Email me when this finishes": the recruiter's answer to an agent's offer on long work is
@@ -118,7 +117,6 @@ export async function sendCompletionEmailIfDone(
       select: { activeRecruitingRole: { select: { id: true, title: true } } },
     });
     const role = thread?.activeRecruitingRole;
-    if (role && (await recruitingResearchInFlight(deps.prisma, role.id))) return;
     const body = ended.text.trim() || (await latestReply(deps.prisma, run.threadId));
     if (!body) return;
     const claimed = await deps.prisma.externalEffect.updateMany({
