@@ -656,6 +656,7 @@ model Message {
   @@unique([threadId, clientNonce])
   @@index([threadId, seq])
   @@index([replyToMessageId])
+  @@index([createdAt])
   @@map("messages")
 }
 
@@ -889,6 +890,7 @@ model ExternalEffect {
 
   @@unique([idempotencyKey])
   @@index([runId, status])
+  @@index([kind, status, createdAt, id])
   @@map("external_effects")
 }
 

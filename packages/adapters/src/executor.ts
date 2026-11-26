@@ -2581,6 +2581,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : null;
         const semanticMemory: SemanticMemoryProvider | null = configuredMemory?.provider ?? null;
 
+        // Tool discovery needs only the context, so it runs while run.started is written.
+        const discoveredPromise = ownTime(
+          "discovery",
+          deps.connector ? deps.connector.discoverTools(context) : Promise.resolve([]),
+        );
+        // Awaited below; this keeps a failed append from leaving its rejection unhandled.
+        discoveredPromise.catch(() => undefined);
         await deps.events.append({
           spaceId: run.spaceId,
           threadId: thread.id,
@@ -2595,10 +2602,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         });
 
         setupMark("runStarted");
-        const discoveredPromise = ownTime(
-          "discovery",
-          deps.connector ? deps.connector.discoverTools(context) : Promise.resolve([]),
-        );
         const nativeSources = await nativeSourcesPending();
         // The model and its key are settled first, beside history, tools and memory.
         const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
@@ -3667,30 +3670,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
           : undefined;
-        const continuationEffects = await deps.prisma.externalEffect.findMany({
-          where: { runId, status: { in: ["approved", "denied"] } },
-          orderBy: APPROVED_EFFECT_REPLAY_ORDER,
-          select: {
-            id: true,
-            idempotencyKey: true,
-            kind: true,
-            status: true,
-            request: true,
-            result: true,
-          },
-        });
+        // A card denied in an earlier run of this thread since the recruiter's previous message:
+        // their message now is their first word since, and its follow-up run would not know the
+        // card was cancelled (deny plays 11-21: "标题不对" renamed the role). Both reads below are
+        // independent, so they share one round trip.
+        const [continuationEffects, [, previousHuman]] = await Promise.all([
+          deps.prisma.externalEffect.findMany({
+            where: { runId, status: { in: ["approved", "denied"] } },
+            orderBy: APPROVED_EFFECT_REPLAY_ORDER,
+            select: {
+              id: true,
+              idempotencyKey: true,
+              kind: true,
+              status: true,
+              request: true,
+              result: true,
+            },
+          }),
+          deps.prisma.message.findMany({
+            where: { threadId: thread.id, role: "user" },
+            orderBy: { createdAt: "desc" },
+            take: 2,
+            select: { createdAt: true },
+          }),
+        ]);
         const approvedEffects = continuationEffects.filter(
           (effect) => effect.status === "approved",
         );
-        // A card denied in an earlier run of this thread since the recruiter's previous message:
-        // their message now is their first word since, and its follow-up run would not know the
-        // card was cancelled (deny plays 11-21: "标题不对" renamed the role).
-        const [, previousHuman] = await deps.prisma.message.findMany({
-          where: { threadId: thread.id, role: "user" },
-          orderBy: { createdAt: "desc" },
-          take: 2,
-          select: { createdAt: true },
-        });
         const deniedSinceLastWord = await deps.prisma.externalEffect.findMany({
           where: {
             status: "denied",

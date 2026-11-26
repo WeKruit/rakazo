@@ -92,6 +92,14 @@ postgres("message embeddings (PostgreSQL)", () => {
       await embedRecentMessages(prisma, fakeEmbedder(calls), { maxTokensPerDay: 0 }),
     ).toMatchObject({ embedded: 0 });
     expect(calls).toHaveLength(0);
+    // A pass from a sweep after every message reads none of them.
+    expect(
+      await embedRecentMessages(prisma, fakeEmbedder(calls), {
+        maxTokensPerDay: 1_000,
+        since: new Date(Date.now() + 60_000),
+      }),
+    ).toMatchObject({ embedded: 0, swept: true });
+    expect(calls).toHaveLength(0);
     const result = await embedRecentMessages(prisma, fakeEmbedder(calls), {
       maxTokensPerDay: 1_000,
     });
@@ -107,7 +115,7 @@ postgres("message embeddings (PostgreSQL)", () => {
     // Nothing left, and the next pass spends nothing.
     expect(
       await embedRecentMessages(prisma, fakeEmbedder(calls), { maxTokensPerDay: 1_000 }),
-    ).toMatchObject({ embedded: 0 });
+    ).toMatchObject({ embedded: 0, swept: true });
   });
 
   it("ranks by meaning only when no message shares a word, inside the same visibility", async () => {
