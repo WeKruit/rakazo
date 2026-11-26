@@ -2,6 +2,7 @@ import type { AdapterContext, ConnectorProvider } from "@rakazo/adapter-kit";
 import { expect, it, vi } from "vitest";
 import { calendarEvidenceHash, readCalBookingSnapshot } from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
+import { googleCalendarApprovalFacts } from "./google-calendar-approval.js";
 
 function fixture(toolName = "reschedule_booking") {
   const route = { connectorId: "mcp", resourceId: "cal", resourceRevision: 3, toolName };
@@ -162,4 +163,104 @@ it("preserves exact authorization identity when a catalog presentation label is 
   expect(
     await f.check({ route: { ...f.evidence.route, catalogGroup: "Calendar" } }),
   ).toBeUndefined();
+});
+
+function googleCalendar(events: unknown[], options: { failList?: boolean } = {}) {
+  const route = { connectorId: "mcp", resourceId: "gcal", resourceRevision: 2 };
+  const tool = (toolName: string, properties: string[]) => ({
+    name: toolName,
+    description: toolName,
+    route: { ...route, toolName },
+    inputSchema: {
+      type: "object",
+      properties: Object.fromEntries(properties.map((key) => [key, {}])),
+    },
+  });
+  const execute = vi.fn(async function* (call: {
+    route?: { toolName: string };
+    args: Record<string, unknown>;
+  }) {
+    if (call.route?.toolName === "list_events" && options.failList) {
+      yield { type: "error" as const, error: "unavailable" };
+      return;
+    }
+    const data =
+      call.route?.toolName === "get_event"
+        ? (events as { id: string }[]).find((event) => event.id === call.args.eventId)
+        : { events };
+    yield { type: "result" as const, data: { structuredContent: data } };
+  });
+  return {
+    route,
+    connector: {
+      discoverTools: async () => [
+        tool("get_event", ["eventId", "calendarId"]),
+        tool("list_events", ["calendarId", "startTime", "endTime", "timeZone", "pageSize"]),
+      ],
+      execute,
+    } as unknown as ConnectorProvider,
+    context: { operationId: "gcal", signal: new AbortController().signal } as AdapterContext,
+  };
+}
+
+const interview = {
+  id: "event-1",
+  status: "confirmed",
+  summary: "Interview",
+  start: { dateTime: "2026-12-01T20:00:00.000Z", timeZone: "America/Chicago" },
+  end: { dateTime: "2026-12-01T20:30:00.000Z", timeZone: "America/Chicago" },
+  attendees: [{ email: "ethan@candidate.example.test" }],
+};
+
+it("reads what a Google Calendar move would collide with, leaving the moved event out", async () => {
+  const lunch = {
+    id: "lunch",
+    status: "confirmed",
+    start: { dateTime: "2026-12-02T20:15:00.000Z" },
+    end: { dateTime: "2026-12-02T21:00:00.000Z" },
+  };
+  const free = { ...lunch, id: "focus", availability: "AVAILABILITY_FREE" };
+  const calendar = googleCalendar([interview, lunch, free]);
+  const facts = await googleCalendarApprovalFacts({
+    ...calendar,
+    route: { ...calendar.route, toolName: "update_event" },
+    args: {
+      eventId: "event-1",
+      startTime: "2026-12-02T20:00:00Z",
+      endTime: "2026-12-02T20:30:00Z",
+    },
+    authorize: async () => {},
+  });
+  expect(facts).toEqual({
+    originalEvent: {
+      summary: "Interview",
+      start: "2026-12-01T20:00:00.000Z",
+      end: "2026-12-01T20:30:00.000Z",
+      timeZone: "America/Chicago",
+      attendees: interview.attendees,
+    },
+    calendarConflicts: [{ start: "2026-12-02T20:15:00.000Z", end: "2026-12-02T21:00:00.000Z" }],
+  });
+});
+
+it("marks a Google Calendar card unchecked when the calendar cannot be read, without blocking it", async () => {
+  const calendar = googleCalendar([], { failList: true });
+  const facts = await googleCalendarApprovalFacts({
+    ...calendar,
+    route: { ...calendar.route, toolName: "create_event" },
+    args: {
+      summary: "Interview",
+      startTime: "2026-12-01T20:00:00Z",
+      endTime: "2026-12-01T20:30:00Z",
+    },
+    authorize: async () => {},
+  });
+  expect(facts).toEqual({ calendarConflicts: null });
+  const unknownEvent = await googleCalendarApprovalFacts({
+    ...calendar,
+    route: { ...calendar.route, toolName: "delete_event" },
+    args: { eventId: "missing" },
+    authorize: async () => {},
+  });
+  expect(unknownEvent).toEqual({ originalEvent: null });
 });

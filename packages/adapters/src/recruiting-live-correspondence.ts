@@ -6,7 +6,8 @@ import type {
   JobPublisher,
 } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
-import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
+import { RecruitingCorrespondenceSchema, recruitingInterviewStatus } from "@rakazo/contracts";
+import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingSchedulingPlans } from "@rakazo/db";
@@ -50,6 +51,28 @@ type CalendarEntry = {
   refreshing?: boolean;
 };
 const calendarCache = new Map<string, CalendarEntry>();
+/** The calendar writes that put an interview on a calendar, Google's and Cal.com's. */
+const CALENDAR_BOOKINGS = ["create_event", "update_event", "create_booking", "reschedule_booking"];
+/** The event a completed calendar write made, by the id the calendar read gives it. */
+function calendarBooking(effect: { request: unknown; result: unknown }) {
+  const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
+  const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
+  const route = direct?.route ?? catalog?.route;
+  const args = record(direct?.args ?? record(catalog?.args)?.arguments) ?? {};
+  if (
+    route?.connectorId !== "mcp" ||
+    !route.resourceId ||
+    !CALENDAR_BOOKINGS.includes(route.toolName)
+  )
+    return undefined;
+  const body = mcpObject(effect.result);
+  if (route.toolName.endsWith("_event")) {
+    const id = body?.id ?? args.eventId;
+    return typeof id === "string" && id ? `${route.resourceId}:${id}` : undefined;
+  }
+  const uid = record(body?.data)?.uid;
+  return typeof uid === "string" && uid ? `${route.resourceId}:booking:${uid}` : undefined;
+}
 
 export async function refreshRecruitingCorrespondence(
   deps: {
@@ -301,6 +324,24 @@ export async function refreshRecruitingCorrespondence(
       }
     }
   }
+  // An interview booked from this role's conversation is the role's whoever its guests are, so a
+  // booking for an email the recruiter typed shows here though no saved contact has that email.
+  // It is matched by the event the calendar returned, never by a guest's other events.
+  if (scope.view === "interview")
+    for (const write of await deps.prisma.externalEffect.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        status: "completed",
+        run: { spaceId: actor.spaceId, userId: actor.userId, threadId: scope.threadId },
+        OR: CALENDAR_BOOKINGS.map((tool) => ({ kind: { endsWith: tool } })),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: { request: true, result: true },
+    })) {
+      const booking = calendarBooking(write);
+      if (booking) bookingIds.add(booking);
+    }
   for (const plan of plans.plans) {
     contactEmails.add(plan.candidate.email.toLowerCase());
     const event = RecruitingCorrespondenceSchema.shape.events.element.parse({
@@ -345,7 +386,7 @@ export async function refreshRecruitingCorrespondence(
     )
       continue;
     // With nobody to match, the calendar cannot hold one of this role's interviews.
-    if (scope.view === "interview" && !contactEmails.size) {
+    if (scope.view === "interview" && !contactEmails.size && !bookingIds.size) {
       output.status = "ready";
       output.checkedAt = new Date().toISOString();
       continue;
@@ -526,19 +567,23 @@ export async function refreshRecruitingCorrespondence(
                   typeof record(value)?.email === "string" ? [record(value)!.email as string] : [],
                 )
               : [];
-            if (!attendees.some((email) => contactEmails.has(email.toLowerCase()))) continue;
+            if (
+              !bookingIds.has(id) &&
+              !attendees.some((email) => contactEmails.has(email.toLowerCase()))
+            )
+              continue;
             const start = google ? record(row.start)?.dateTime : row.start;
             const end = google ? record(row.end)?.dateTime : row.end;
             const event = RecruitingCorrespondenceSchema.shape.events.element.safeParse({
               id,
-              roleAssociation: !google && bookingIds.has(id) ? "booking" : "contact",
+              roleAssociation: bookingIds.has(id) ? "booking" : "contact",
               kind: "event",
               title: google ? (row.summary ?? null) : (row.title ?? null),
               start,
               end: end ?? null,
               timeZone: google ? (record(row.start)?.timeZone ?? null) : null,
               attendees,
-              status: row.status ?? null,
+              status: recruitingInterviewStatus(row.status),
               location: typeof row.location === "string" ? row.location : null,
               url: google ? (row.htmlLink ?? null) : null,
             });

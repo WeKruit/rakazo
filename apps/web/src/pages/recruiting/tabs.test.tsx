@@ -1411,7 +1411,7 @@ it.each([
         id: "exact-event",
         title: "Candidate-specific appointment",
         kind: "event",
-        status: "confirmed",
+        status: "booked",
         // Upcoming and in the current week whenever the test runs (tomorrow is next week on Sundays).
         start: new Date(Date.now() + 60_000).toISOString(),
         end: null,

@@ -46,7 +46,7 @@ const saved: RecruitingCorrespondence = {
       start: "2026-10-21T09:00:00Z",
       end: "2026-10-21T10:00:00Z",
       timeZone: "UTC",
-      status: "confirmed",
+      status: "booked",
       attendees: ["candidate@example.test"],
       location: "Video room",
       url: null,
@@ -58,7 +58,7 @@ const saved: RecruitingCorrespondence = {
       start: "2026-10-21T11:00:00Z",
       end: "2026-10-21T12:00:00Z",
       timeZone: "UTC",
-      status: "confirmed",
+      status: "booked",
       attendees: ["other@example.test"],
       location: null,
       url: null,
@@ -161,7 +161,7 @@ it("shows a read failure and ignores a late response for a previous role", async
   expect(element.querySelector('[data-event-id="candidate-event"]')).toBeNull();
 });
 
-it("shows failed and uncertain replies separately while the booked event stays confirmed", async () => {
+it("shows failed and uncertain replies separately while the event stays booked", async () => {
   const operations: NonNullable<RecruitingCorrespondence["operations"]> = [
     {
       id: "failed-reply",
@@ -190,7 +190,7 @@ it("shows failed and uncertain replies separately while the booked event stays c
   expect(outcomes?.textContent).toContain("not linked to a specific calendar event");
   expect(outcomes?.textContent).not.toMatch(/original|failed-reply|delivered/i);
   expect(element.querySelector('[data-event-id="candidate-event"]')).not.toBeNull();
-  expect(saved.events[0]!.status).toBe("confirmed");
+  expect(saved.events[0]!.status).toBe("booked");
   await render({ candidateId: "candidate", candidateEmail: "candidate@example.test" });
   expect(element.querySelector('[aria-label="Reply outcomes"]')).toBeNull();
 });

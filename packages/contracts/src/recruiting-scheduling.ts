@@ -64,7 +64,8 @@ export const RecruitingSchedulingPlanSchema = RecruitingSchedulingPlanInputSchem
   mailSourceId: Id,
   mailSourceRevision: z.number().int().positive(),
   mailRead: z.strictObject({ effectId: Id, linkedRunId: Id, messageId: Id.nullable() }),
-  bookingStatus: z.enum(["pending", "completed", "failed", "uncertain"]).nullable(),
+  // Cancelled: the booking was made and a later confirmed cancellation of it completed.
+  bookingStatus: z.enum(["pending", "completed", "failed", "uncertain", "cancelled"]).nullable(),
   confirmationStatus: z.enum(["pending", "completed", "failed", "uncertain"]).nullable(),
   bookingEffectId: Id.nullable(),
   confirmationEffectId: Id.nullable(),
