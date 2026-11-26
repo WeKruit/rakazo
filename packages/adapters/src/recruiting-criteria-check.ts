@@ -110,7 +110,11 @@ async function personRequirements(
  * kind the recruiter did not state comes back silent, which excludes nobody.
  */
 const ASKED_FOR: readonly CriterionQuestion[] = [
-  ["place", "the place (city or country) the recruiter_request states, if it states one"],
+  [
+    "place",
+    // A past job in the city reads as "shows the place" unless the question says now.
+    "that the person's current location is the place the recruiter_request states (a past job there does not count), if it states one",
+  ],
   ["years", "the years of experience the recruiter_request states, if it states any"],
   ["title", "the job title and level the recruiter_request states"],
   ["skills", "the skills and technologies the recruiter_request requires"],
