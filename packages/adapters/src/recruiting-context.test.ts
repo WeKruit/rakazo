@@ -9,7 +9,6 @@ import {
   RECRUITING_PRESENTATION_INSTRUCTION,
 } from "./recruiting-context.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
-import type * as UnrecordedVerdicts from "./unrecorded-verdicts.js";
 
 const db = vi.hoisted(() => ({
   workspace: vi.fn(),
@@ -19,11 +18,6 @@ const db = vi.hoisted(() => ({
   feedback: vi.fn(),
   quality: vi.fn(),
   patterns: vi.fn(),
-  unsaved: vi.fn(),
-}));
-vi.mock("./unrecorded-verdicts.js", async (original) => ({
-  ...(await original<object>()),
-  namedWithoutVerdict: db.unsaved,
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
@@ -128,7 +122,6 @@ describe("recruiting run context", () => {
     db.crmSource.mockReset().mockResolvedValue(null);
     db.feedback.mockResolvedValue({ feedback: [], nextCursor: null });
     db.quality.mockResolvedValue({ rounds: [], goodExample: 0, notFit: 0 });
-    db.unsaved.mockResolvedValue(undefined);
     db.patterns.mockResolvedValue({ role: [], allRoles: [] });
   });
 
@@ -371,63 +364,6 @@ describe("recruiting run context", () => {
       "round 1: 2 good examples, 6 not a fit of 10 shown; round 2: 1 good examples, 5 not a fit of 10 shown; all people on this role: 3 good examples, 11 not a fit.",
     );
     expect(loaded!.text).toContain("tell the recruiter in one line what you changed");
-  });
-
-  it("tells the agent whom the recruiter named since the round with nothing saved (branch b0ceaea0)", async () => {
-    // Three people were turned down in the main chat; the role team never saved it, so Results
-    // marked them only after the recruiter complained.
-    const { deps } = fixture();
-    db.unsaved.mockResolvedValueOnce({ round: 1, names: ["Ann Example", "王测试"] });
-    const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
-      reason: "turn",
-    });
-    expect(loaded!.text).toContain(
-      "Since round 1 was shown the recruiter wrote about Ann Example, 王测试 from it",
-    );
-    const { namedWithoutVerdict, namesPerson } = await vi.importActual<typeof UnrecordedVerdicts>(
-      "./unrecorded-verdicts.js",
-    );
-    expect(namesPerson("Victor Doe 是架构师，Tom G. 是转行的", "Victor Middle Doe")).toBe(true);
-    expect(namesPerson("王测试最近经历停在2021，不要", "王测试")).toBe(true);
-    expect(namesPerson("Kai Sample 不要", "Kai (Nick) Sample")).toBe(true);
-    expect(namesPerson("Mark is fine", "Ma Test")).toBe(false);
-    const prisma = {
-      recruitingCalibrationRound: {
-        findFirst: vi.fn(async () => ({
-          round: 1,
-          candidateKeys: ["a", "b", "c"],
-          createdAt: new Date("2026-11-20T13:25:42Z"),
-        })),
-      },
-      message: {
-        findMany: vi.fn(async () => [
-          {
-            blocks: [
-              {
-                kind: "bot_message_received",
-                text: 'The recruiter wrote, word for word:\n"Ann Lee 才3年经验，Bo Chen 不要"\n\nKruit\'s note, only on who:\nCy Wu is fine',
-              },
-            ],
-          },
-        ]),
-      },
-      recruitingCandidateOccurrence: {
-        findMany: vi.fn(async () => [
-          { candidateKey: "a", name: "Ann Lee" },
-          { candidateKey: "b", name: "Bo Chen" },
-          { candidateKey: "c", name: "Cy Wu" },
-        ]),
-      },
-      recruitingCandidate: { findMany: vi.fn(async () => [{ candidateKey: "b" }]) },
-      $queryRaw: vi.fn(async () => []),
-    };
-    // Bo Chen already has a pass; Cy Wu is named only in Kruit's note, never by the recruiter.
-    await expect(
-      namedWithoutVerdict(prisma as never, { spaceId: "space", userId: "owner" } as never, {
-        roleId: "role",
-        threadId: "thread",
-      }),
-    ).resolves.toEqual({ round: 1, names: ["Ann Lee"] });
   });
 
   it("tells the agent what the praised and turned-down people share, on this role and across roles", async () => {

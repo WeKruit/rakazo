@@ -75,23 +75,6 @@ export function recruitingBriefConfirmedNextStep(revision: number) {
   return `The brief is confirmed and the role is now revision ${revision}; use expectedRoleRevision ${revision}. When a round is already shown, carry on with what the recruiter asked. Otherwise start the first calibration round now: when this run's people searches already returned people rows, pick the ten from them and record them with calibration_round; otherwise issue the quick people searches together in your next step.`;
 }
 
-/** Any version of the next-step card, whatever number it offers: its answer is not an intake answer. */
-export function isRecruitingNextStepCard(text: string): boolean {
-  return /^(?:下一步怎么做？|What's next\?|合格的人不到十个。|Fewer than ten fit\.)/.test(
-    text.trim(),
-  );
-}
-
-/**
- * A recruiter message asking for contacts, an email draft or a send. Round 1 of the playtest saw
- * the lead answer these itself and decline; they belong to Outreach.
- */
-export function asksForOutreach(text: string): boolean {
-  return /\b(?:send|e-?mails?|contacts?|outreach|campaign|draft)\b|发(?:\s*\d+|给|送|邮件|出去)|邮件|邮箱|联系方式|草稿|外联/i.test(
-    text,
-  );
-}
-
 /**
  * Typical credits per step, from 14 days of the usage ledger (200 credits = $1 of cost; p50 to
  * p90). Only accounts with a credit balance are told, so the agent can say what a step costs.
@@ -146,13 +129,6 @@ export function isEnglishText(text: string): boolean {
  */
 export function recruiterLanguageText(newestFirst: string[]): string {
   return newestFirst.find((text) => textLanguage(text)) ?? newestFirst[0] ?? "";
-}
-
-/** A request for one email template naming no one: the coordinator writes it in its reply. */
-export function asksForTemplate(text: string): boolean {
-  return (
-    /模板|template/i.test(text) && !/序列|系列|三封|sequence|campaign|这些人|these/i.test(text)
-  );
 }
 
 /** What a recruiter may see. The executor adds this to every recruiting run's instructions. */

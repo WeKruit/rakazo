@@ -112,6 +112,8 @@ export function createToolFixMemory(input: {
   runId: string;
   threadId: string;
   now?: () => Date;
+  /** Called with the memory path after each save, so the run counts the write as its own. */
+  onSaved?: (path: string) => void;
 }) {
   const failures = new Map<string, FailedCall>();
   let loaded: Promise<{ fixes: ToolFix[]; revision: number }> | undefined;
@@ -149,6 +151,7 @@ export function createToolFixMemory(input: {
           input.context,
         );
         loaded = Promise.resolve({ fixes: next, revision: saved.revision });
+        input.onSaved?.(saved.path);
         return;
       } catch (error) {
         if (error instanceof Error && error.message === MEMORY_REVISION_CONFLICT_ERROR) continue;

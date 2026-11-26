@@ -24,7 +24,6 @@ import {
   recordRecruitingContextAdoption,
 } from "@rakazo/db";
 import type { LoadedAgentMemoryContext } from "./memory-context.js";
-import { namedWithoutVerdict, namedWithoutVerdictText } from "./unrecorded-verdicts.js";
 
 export const RECRUITING_PRESENTATION_INSTRUCTION =
   "Speak to the recruiter as one assistant in business terms: role and candidate names, business steps, source links and named files. Never show internal agent names, handoff narration, tool names, task, run, artifact or connection IDs, hashes, cursors or raw JSON; keep those in tool arguments, resolve continuity yourself and never ask the recruiter for them. When work starts, say so briefly, then report a verified result, a real blocker or the one decision needed; never describe queued work as started. Ask one consequential question at a time on a native question card with two to four choices, and never repeat an answered or pending question. Provider reports are reports, not proof. This rule grants no permission.";
@@ -101,7 +100,7 @@ export async function loadRecruitingRunContext(
   if (!workspace) return undefined;
   // Always reauthorize saved source material, including the trusted-workspace fast path.
   // It and the feedback below are independent reads, so they share one wait.
-  const [crmSourceMaterial, recent, quality, patterns, unsaved] = await Promise.all([
+  const [crmSourceMaterial, recent, quality, patterns] = await Promise.all([
     // A CRM link that no longer checks out (a reconnected or disabled CRM) leaves its material
     // out instead of failing the turn; CRM tools verify the link again when they run.
     getRecruitingWorkspaceCrmSourceMaterial(deps.prisma, actor, {
@@ -114,7 +113,6 @@ export async function loadRecruitingRunContext(
     listRecruitingFeedback(deps.prisma, actor, { roleId: workspace.role.id, limit: 20 }),
     readRecruitingSearchQuality(deps.prisma, actor, { roleId: workspace.role.id }),
     readRecruitingVerdictPatterns(deps.prisma, actor, { roleId: workspace.role.id }),
-    namedWithoutVerdict(deps.prisma, actor, { roleId: workspace.role.id, threadId: run.threadId }),
   ]);
   const redact = options.redact ?? ((value: string) => value);
   const roleText = [
@@ -162,7 +160,6 @@ export async function loadRecruitingRunContext(
         ]
       : []),
     ...(qualityText ? [qualityText] : []),
-    ...(unsaved ? [redact(namedWithoutVerdictText(unsaved))] : []),
     ...(patternText ? [patternText] : []),
     ...(recent.feedback.length > feedback.length || recent.nextCursor
       ? [

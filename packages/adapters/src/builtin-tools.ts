@@ -1563,14 +1563,14 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "start_role",
     description:
-      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's latest message and attached files exactly as they wrote them, and shows the recruiter a card that opens it. Use it when the recruiter wants to start hiring for a role that has no team yet; when they say the role is new, call it directly, and check recruiting_candidates operation roles first only when they may mean a role that already exists. Pass a short title. Leave message out when the request is in the recruiter's latest message (never retype a JD); the role's team cannot see this conversation, so pass message whenever they gave anything the role needs in earlier messages here (requirements, and an email template they wrote or approved, copied word for word), in their own words. The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
+      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's latest message and attached files exactly as they wrote them, and shows the recruiter a card that opens it. Use it when the recruiter names a role that has no team yet, with its JD, link, file or job title; a question about how to start or how to get candidates opens nothing and is answered in words. When they say the role is new, call it directly, and check recruiting_candidates operation roles first only when they may mean a role that already exists. Pass a short title. Leave message out when the request is in the recruiter's latest message (never retype a JD); the role's team cannot see this conversation, so pass message whenever they gave anything the role needs in earlier messages here (requirements, and an email template they wrote or approved, copied word for word), in their own words. The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
     inputSchema: {
       type: "object",
       properties: {
         title: {
           type: "string",
           description:
-            'The role\'s name as the recruiter gave it, word for word (for example the text before a colon or inside 「」); when they gave none, a short title such as "Agent Engineer (new grad)".',
+            'The role\'s name as the recruiter gave it, word for word (for example the text before a colon or inside 「」); when only their JD names it, a short title from it such as "Agent Engineer (new grad)".',
         },
         message: {
           type: "string",

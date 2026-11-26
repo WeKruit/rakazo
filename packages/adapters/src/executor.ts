@@ -88,7 +88,6 @@ import {
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
-  asksForOutreach,
   assertTransition,
   attachmentExtensionForMimeType,
   BACKGROUND_RUN_TRIGGERS,
@@ -115,7 +114,6 @@ import {
   expandSkillReferencesInPrompt,
   externalTextTriggerToolRefusal,
   findSkillByName,
-  formatSkillRunPrompt,
   formatSkillsCatalogInstruction,
   GMAIL_MCP_ENDPOINT,
   GMAIL_SEND_TOOLS,
@@ -149,7 +147,6 @@ import {
   parseSkillMd,
   planActionGate,
   pollResultLines,
-  promptInvokesSkill,
   RateWindow,
   EMAIL_SEND_TOOLS,
   RECRUITER_LANGUAGE,
@@ -509,7 +506,6 @@ import {
   asksSenderCompanyName,
   isSenderRead,
   OUTREACH_MAILBOX_ONLY_NOTE,
-  OWN_EMAIL_REQUEST,
   ownMailboxSendingAllowed,
   SEND_NOW_WITHOUT_GMAIL_NOTE,
   SENDER_READ_FIRST,
@@ -4088,9 +4084,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return secretPausedToolResult();
         };
 
-        // Gate acd31504: a second call with still no email written went through; it is refused
-        // again, and only a third goes through so a run cannot loop on it.
-        let gmailDraftRefusals = 0;
         // Like request_secret: an unconnected MCP server pauses on a native connect card.
         const requestConnectionTool = async (args: Record<string, unknown>) => {
           // Gate 398accae, one-off-email: each message typed past the card ("草稿还在吗") got only
@@ -4104,39 +4097,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             steeredUnanswered = false;
             return { error: connectAnswerFirst(steeredText) };
-          }
-          // Staging 11-13: the Gmail card said "the email is above" when no email had been shown.
-          if (hideVendors && gmailDraftRefusals < 2 && /gmail/i.test(String(args.provider ?? ""))) {
-            // An email already shown earlier in this conversation is not written out again,
-            // unless the recruiter has since given facts it lacks.
-            const earlierDraft = await deps.prisma.message
-              .findMany({
-                where: { threadId: thread.id, role: "bot" },
-                orderBy: { seq: "desc" },
-                take: 12,
-                select: { blocks: true },
-              })
-              .then((messages) =>
-                messages
-                  .map((message) =>
-                    (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
-                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                      .join("\n"),
-                  )
-                  .find((text) => /Subject\s*[:：]|主题\s*[:：]/i.test(text)),
-              )
-              .catch(() => "");
-            if (
-              gmailCardNeedsDraft(
-                args.provider,
-                lastRecruiterText,
-                [...midTurnUserTexts, assembled].join("\n"),
-                earlierDraft,
-              )
-            )
-              return {
-                error: gmailDraftFirstNote(gmailDraftRefusals++ > 0),
-              };
           }
           let leaseLost = false;
           const result = await requestConnection(
@@ -11466,7 +11426,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // hears the estimate once so it can tell them. Bookkeeping never fails the search.
             const countdown =
               connectorCall.route?.toolName === "agent_run"
-                ? await workEstimateAfterAgentRun(deps.prisma, run, finished, connectorCall.args)
+                ? await workEstimateAfterAgentRun(deps.prisma, run, finished)
                 : null;
             // The save sits between the search and the model's pick, so its cost is logged apart.
             const saveStartedAt = performance.now();
@@ -11544,6 +11504,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           botId: bot.id,
           runId,
           threadId: thread.id,
+          onSaved: (path) => contextWatch?.acknowledge("memory", `bot: ${path}`),
         });
         const credits = createCreditGuard();
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
@@ -11759,15 +11720,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           [task.prompt, probeNote, missingImagesInstruction].filter(Boolean).join("\n\n"),
           agentSkills,
         );
-        const invokedSkill = savedSkills.find((skill) =>
-          promptInvokesSkill(taskPrompt, skill.name || skill.goal),
-        );
-        const basePrompt = invokedSkill
-          ? `${formatSkillRunPrompt(
-              invokedSkill.name || invokedSkill.goal.slice(0, 80),
-              parsePlaybook(invokedSkill.playbook),
-            )}\n\n${taskPrompt}`
-          : taskPrompt;
+        const basePrompt = taskPrompt;
         const approvalContinuation = buildApprovalContinuation(
           approvedEffects,
           (request) => redactSecrets(JSON.stringify(request), runSecrets),
@@ -12046,11 +11999,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const signingNote = hideVendors
           ? await recruiterSigningNote(deps.prisma, run.userId).catch(() => undefined)
           : undefined;
-        // Accounts we set up send only through their outreach mailbox; say so when asked.
+        // Accounts we set up send only through their outreach mailbox.
         const mailboxNote =
-          hideVendors &&
-          OWN_EMAIL_REQUEST.test(lastRecruiterText) &&
-          !(await ownMailboxSendingAllowed(deps.prisma, run).catch(() => true))
+          hideVendors && !(await ownMailboxSendingAllowed(deps.prisma, run).catch(() => true))
             ? OUTREACH_MAILBOX_ONLY_NOTE
             : undefined;
         // Own-email accounts: "send now" before Gmail is connected gets one plain line and the card.
@@ -15414,41 +15365,9 @@ export function runAllowsSilentEmpty(trigger: string): boolean {
   return trigger === "routine" || isBackgroundRunTrigger(trigger);
 }
 
-/** A Gmail connect card for an email the recruiter asked for, before that email was shown in chat. */
-export function gmailCardNeedsDraft(
-  provider: unknown,
-  recruiterText: string,
-  shown: string,
-  /** The latest email already shown in this conversation, if any. */
-  earlierDraft?: string,
-): boolean {
-  if (!/gmail/i.test(String(provider ?? "")) || DRAFT_SUBJECT.test(shown)) return false;
-  // One-off-email x5 on ce4a9c24: "直接写" with the role's facts got the card and no email,
-  // since the card ends the turn. With no email shown yet, only a plain connect ask skips it.
-  // first-timer-no-gmail 11-25: "不连邮箱能发候选人邮件吗" asks whether, not for an email, so its
-  // card goes under the answer; a question that asks to write one or names whom still waits.
-  if (
-    earlierDraft === undefined &&
-    /[?？吗呢]\s*$/.test(recruiterText.trim()) &&
-    !/写|起草|草拟|\b(?:write|draft)\b|[^\s@]+@[^\s@]+/i.test(recruiterText)
-  )
-    return false;
-  if (earlierDraft === undefined)
-    return asksForOutreach(recruiterText) || !/连|\bconnect/i.test(recruiterText);
-  // An email is already shown: whether it needs the recruiter's newer facts is the model's call
-  // (one-off-email 11-25: "Hi Wei," was refused as lacking "Zhang", so no card came).
-  return false;
-}
-
-const DRAFT_SUBJECT = /Subject\s*[:：]|主题\s*[:：]/i;
-
 /** Model-facing: a message the person typed instead of pressing Connect is answered first. */
 export const connectAnswerFirst = (message: string) =>
   `Not shown yet: the recruiter wrote "${message.trim().slice(0, 300)}" instead of pressing the card. Answer that message first in your reply, in one or two plain lines in their language, then call request_connection again so the card sits under your answer.`;
-
-/** Model-facing: the email is written out in chat before the Gmail connect card is shown. */
-export const gmailDraftFirstNote = (again: boolean) =>
-  `${again ? "Still not shown: no email was written since the last call. " : "Not shown yet: "}Write the full email (Subject: and body) as text in your reply now, before any other tool call, so the recruiter sees it above the card; then call request_connection again.`;
 
 export function runPromotesMidTurnNarration(trigger: string): boolean {
   return trigger !== "routine" && !isBackgroundRunTrigger(trigger);
