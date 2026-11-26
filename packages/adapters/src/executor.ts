@@ -630,7 +630,6 @@ import {
   gradingToolRefusal,
   gradingTools,
 } from "./recruiting-grading.js";
-import { statedMustHaveCriteria } from "./recruiting-must-haves.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -9165,6 +9164,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   !peopleFromSearch(returned, server.endpoint).length)
               )
                 return null;
+              // The step's own brief save lands first, so these people are judged on the
+              // requirements it holds rather than on the role as it was a moment earlier.
+              if (roleSavesInFlight.size)
+                await withinDeadline(
+                  Promise.all([...roleSavesInFlight]),
+                  ROLE_SAVE_WAIT_MS,
+                  () => undefined,
+                );
               // A brief saved in the same step moves the revision; one retry reads the new one.
               for (const attempt of ["", ":2"]) {
                 const role = await deps.prisma.recruitingRole.findFirst({
@@ -12916,9 +12923,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .trim()
               : "";
           if (!block && !file && !request) return undefined;
-          // Must-haves the recruiter's message states are saved with the role at once, at
-          // priority hard, citing their message.
-          const criteria = statedMustHaveCriteria(currentMessageSourceRef(currentTurnMessage));
           const create = (title: string, sourceRefs: unknown[], quote: string) =>
             step(
               "recruiting_role",
@@ -12927,7 +12931,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 title,
                 brief: null,
                 sourceRefs,
-                criteria,
+                criteria: [],
                 preferences: [],
                 definitionQuestions: [],
                 intent: { basis: "direct", quote: quote.trim() },
