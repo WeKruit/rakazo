@@ -445,77 +445,6 @@ describe("recruiting contracts", () => {
     }
   });
 
-  it("requires exact stage-specific approval packages without accepting an approval from the model", () => {
-    const documents = {
-      stage: "documents",
-      roleId: role.id,
-      expectedRoleRevision: role.revision,
-      documents: { jdText: artifact, namedPdf: artifact, anonymousPdf: null, deck: null },
-    };
-    const calibration = {
-      stage: "calibration",
-      roleId: role.id,
-      expectedRoleRevision: role.revision,
-      documentsApprovalEffectId: "documents-approval",
-      profiles: Array.from({ length: 10 }, (_, i) => ({
-        candidateKey: `candidate-${i}`,
-        source: {
-          effectId: "source-effect",
-          rowIndex: i,
-          roleRevisionId: "role-revision",
-          providerTaskId: "provider-task",
-          artifactRef: artifact,
-        },
-        linkedinUrl: `https://www.linkedin.com/in/example-${i}`,
-        evidenceUrl: `https://example.com/evidence/${i}`,
-      })),
-      ruleChanges: ["Keep the supplied qualification unchanged."],
-    };
-    const schema = contracts.RecruitingApprovalToolInputSchema;
-    expect(schema.parse(documents)).toEqual(documents);
-    expect(schema.parse(calibration)).toEqual(calibration);
-    const historical = {
-      ...calibration,
-      profiles: calibration.profiles.map(({ source: _source, ...profile }) => ({
-        ...profile,
-        assessmentVersion: 1,
-      })),
-    };
-    expect(schema.safeParse(historical).success).toBe(false);
-    expect(contracts.RetainedRecruitingApprovalRequestSchema.parse(historical)).toEqual(historical);
-    expect(
-      JSON.stringify(contracts.RecruitingApprovalToolInputSchema.toJSONSchema()),
-    ).not.toContain("assessmentVersion");
-    for (const field of [
-      "effectId",
-      "rowIndex",
-      "roleRevisionId",
-      "providerTaskId",
-      "artifactRef",
-    ]) {
-      const source = { ...calibration.profiles[0]!.source };
-      delete source[field as keyof typeof source];
-      expect(
-        schema.safeParse({
-          ...calibration,
-          profiles: [{ ...calibration.profiles[0], source }, ...calibration.profiles.slice(1)],
-        }).success,
-      ).toBe(false);
-    }
-    for (const input of [documents, calibration]) {
-      for (const field of ["approvedByUserId", "approvedAt", "status", "spaceId", "runId"])
-        expect(schema.safeParse({ ...input, [field]: "forged" }).success).toBe(false);
-      expect(schema.safeParse({ ...input, expectedRoleRevision: 0 }).success).toBe(false);
-    }
-    expect(schema.safeParse({ ...documents, documents: { jdText: artifact } }).success).toBe(false);
-    // A round short of ten after the deeper search is approved as it stands; eleven never is.
-    expect(
-      schema.safeParse({ ...calibration, profiles: calibration.profiles.slice(1) }).success,
-    ).toBe(true);
-    for (const profiles of [[], [...calibration.profiles, calibration.profiles[0]]])
-      expect(schema.safeParse({ ...calibration, profiles }).success).toBe(false);
-  });
-
   it("closes native ordinary Ask answer provenance to the exact card, block and human message", () => {
     const payload = {
       messageId: "ask-card",
@@ -905,6 +834,18 @@ describe("recruiting contracts", () => {
       contracts.RecruitingRoleRevisionSchema.safeParse({ ...revision, recallScope: "local" })
         .success,
     ).toBe(false);
+    // A brief saved while a confirmation step existed still loads; the field is dropped.
+    const brief = { fields: [], questions: [], rules: [], searchFilters: [] };
+    expect(
+      contracts.RecruitingRoleRevisionSchema.parse({
+        ...revision,
+        criteria: [],
+        brief: {
+          ...brief,
+          confirmation: { revision: 1, userId: "human", messageId: "message", confirmedAt: now },
+        },
+      }).brief,
+    ).toEqual(brief);
   });
 
   it("rejects atom IDs reused for different requirements in one role revision", () => {

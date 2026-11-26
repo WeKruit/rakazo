@@ -1,14 +1,9 @@
 import type { RecruitingBriefDraft } from "@rakazo/contracts";
-import {
-  RecruitingBriefDraftSchema,
-  RecruitingRoleToolInputSchema,
-  RecruitingSourceRefSchema,
-} from "@rakazo/contracts";
+import { RecruitingSourceRefSchema } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
   recruitingBriefClarifications,
   recruitingCalibrationIdentity,
-  requireRecruitingBriefConfirmation,
   validateRecruitingBrief,
 } from "./recruiting-playbook.js";
 
@@ -276,35 +271,6 @@ describe("sourced recruiting intake", () => {
         { ...role, criteria: [{ ...criteria[0]!, priority: "preferred" }] },
       ),
     ).not.toThrow();
-  });
-  it("requires explicit current-version confirmation and invalidates it on revision", () => {
-    const confirmed = {
-      revision: 2,
-      brief: {
-        ...brief(),
-        confirmation: {
-          revision: 2,
-          userId: "human",
-          messageId: "confirmation",
-          confirmedAt: "2026-10-16T18:00:00Z",
-        },
-      },
-    };
-    expect(() => requireRecruitingBriefConfirmation(confirmed)).not.toThrow();
-    expect(() => requireRecruitingBriefConfirmation({ ...confirmed, revision: 3 })).toThrow(
-      "Confirm the current recruiting brief before continuing.",
-    );
-    expect(() => requireRecruitingBriefConfirmation({ revision: 1, brief: null })).toThrow(
-      "Confirm the current recruiting brief before continuing.",
-    );
-    expect(RecruitingBriefDraftSchema.safeParse(confirmed.brief).success).toBe(false);
-    expect(
-      RecruitingRoleToolInputSchema.safeParse({
-        operation: "confirm",
-        roleId: "role",
-        expectedRevision: 2,
-      }).success,
-    ).toBe(false);
   });
 });
 describe("LinkedIn identity", () => {

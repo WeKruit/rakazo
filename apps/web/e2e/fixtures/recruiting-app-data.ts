@@ -63,7 +63,6 @@ export const revision: RecruitingRoleRevision = {
       },
     ],
     searchFilters: [],
-    confirmation: null,
   },
   criteria: [
     {

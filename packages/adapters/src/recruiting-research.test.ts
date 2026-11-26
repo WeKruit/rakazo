@@ -624,12 +624,6 @@ const context = {
         ],
         questions: [],
         rules: [],
-        confirmation: {
-          revision: 2,
-          userId: "owner",
-          messageId: "confirmation",
-          confirmedAt: "2026-10-16T18:00:00Z",
-        },
       },
     },
   },

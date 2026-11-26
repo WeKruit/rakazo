@@ -286,15 +286,6 @@ describe("recruiting run context", () => {
         ],
         rules: [],
         questions: [],
-        confirmation:
-          salary === "ready"
-            ? {
-                revision: 1,
-                userId: run.userId,
-                messageId: "confirmed",
-                confirmedAt: "2026-10-20T00:00:00.000Z",
-              }
-            : null,
       };
       const current = { ...workspace, revision: { ...workspace.revision, brief } };
       const savedBefore = JSON.stringify(current);
@@ -553,12 +544,6 @@ describe("recruiting run context", () => {
         },
       ],
       questions: [],
-      confirmation: {
-        revision: 1,
-        userId: "owner",
-        messageId: "confirmation",
-        confirmedAt: "2026-10-16T00:00:00Z",
-      },
     };
     const current = {
       ...workspace,
@@ -581,7 +566,6 @@ describe("recruiting run context", () => {
         brief: {
           ...brief,
           searchFilters: [],
-          confirmation: { ...brief.confirmation, revision: 2 },
         },
       },
     };

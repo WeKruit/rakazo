@@ -97,20 +97,6 @@ export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
   }));
 }
 
-export function requireRecruitingBriefConfirmation(
-  role: Pick<RecruitingRoleRevision, "revision" | "brief">,
-) {
-  const brief = role.brief;
-  if (
-    !brief?.confirmation ||
-    brief.confirmation.revision !== role.revision ||
-    recruitingBriefClarifications(brief).length
-  )
-    throw new RecruitingPlaybookValidationError(
-      "Confirm the current recruiting brief before continuing.",
-    );
-}
-
 export function recruitingCalibrationIdentity(link: string): string | null {
   try {
     const url = new URL(link);

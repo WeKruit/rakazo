@@ -47,7 +47,6 @@ const api = vi.hoisted(() => ({
   createRole: vi.fn(),
   bindRole: vi.fn(),
   reviseRole: vi.fn(),
-  confirmBrief: vi.fn(),
   editCriteria: vi.fn(),
   list: vi.fn(),
   history: vi.fn(),
@@ -2003,7 +2002,6 @@ it("shows actual saved brief criteria without exposing internal field keys or fe
         ],
         rules: [],
         questions: [],
-        confirmation: null,
       },
     },
   });
@@ -2024,7 +2022,6 @@ it("shows actual saved brief criteria without exposing internal field keys or fe
   expect(api.listCandidates).not.toHaveBeenCalled();
   expect(api.listResearch).not.toHaveBeenCalled();
   expect(api.list).not.toHaveBeenCalled();
-  expect(api.confirmBrief).not.toHaveBeenCalled();
   expect(api.editCriteria).not.toHaveBeenCalled();
 });
 
@@ -6228,7 +6225,6 @@ function searchFilterWorkspace() {
             sourceRefIds: [],
           },
         ],
-        confirmation: null,
       },
     },
   };
@@ -7360,7 +7356,6 @@ it("shows sourced brief prose and unresolved confirmation questions in Role and 
     ],
     rules: [],
     searchFilters: [],
-    confirmation: null,
   };
   api.getWorkspace.mockResolvedValue({
     role,
@@ -7389,11 +7384,6 @@ it("shows sourced brief prose and unresolved confirmation questions in Role and 
   expect(view.container.textContent).toContain("Assumption");
   expect(view.container.textContent).toContain(brief.questions[0]!.question);
   expect(view.container.textContent).toContain(brief.questions[1]!.question);
-  expect(
-    [...view.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Confirm brief",
-    )?.disabled,
-  ).toBe(true);
   await view.click("Missing info");
   const definition = [...view.container.querySelectorAll("h3")].find(
     (item) => item.textContent === "Role definition",
@@ -7406,7 +7396,6 @@ it("shows sourced brief prose and unresolved confirmation questions in Role and 
   await view.render("thread-1", 0, true);
   expect(view.container.textContent).toContain("python_stack");
   expect(view.container.textContent).toContain("sourcing_quantity_scope");
-  expect(api.confirmBrief).not.toHaveBeenCalled();
 });
 
 it("names known brief details and asks their missing question without requesting another question", async () => {
@@ -7446,7 +7435,6 @@ it("names known brief details and asks their missing question without requesting
         questions: [],
         rules: [],
         searchFilters: [],
-        confirmation: null,
       },
     },
   });
@@ -7463,7 +7451,6 @@ it("names known brief details and asks their missing question without requesting
   expect(definition.textContent).not.toContain("company_deck");
   expect(definition.textContent).not.toContain("salary_range");
   expect(definition.textContent).not.toContain("What salary range may be stated in outreach?");
-  expect(api.confirmBrief).not.toHaveBeenCalled();
 });
 
 it.each(["missing", "conflict", "known"] as const)(
@@ -7510,16 +7497,10 @@ it.each(["missing", "conflict", "known"] as const)(
           questions: [],
           rules: [],
           searchFilters: [],
-          confirmation: null,
         },
       },
     });
     const view = await mounted("thread-1", undefined, false);
-    expect(
-      [...view.container.querySelectorAll("button")].find(
-        (button) => button.textContent === "Confirm brief",
-      )?.disabled,
-    ).toBe(true);
     await view.click("Missing info");
     const definition = [...view.container.querySelectorAll("h3")].find(
       (item) => item.textContent === "Role definition",
@@ -7540,7 +7521,6 @@ it.each(["missing", "conflict", "known"] as const)(
     expect(definition.textContent).not.toContain("No saved questions");
     expect(definition.textContent).not.toContain(key);
     expect(definition.textContent).not.toContain(key.replaceAll("_", " "));
-    expect(api.confirmBrief).not.toHaveBeenCalled();
   },
 );
 
@@ -7565,121 +7545,12 @@ it("never asks for a salary the search does not need when saved questions are em
         questions: [],
         rules: [],
         searchFilters: [],
-        confirmation: null,
       },
     },
   });
   const view = await mounted("thread-1", undefined, false);
-  const confirm = [...view.container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Confirm brief",
-  )!;
-  expect(confirm.disabled).toBe(false);
   expect(view.container.textContent).not.toContain("What salary range may be stated in outreach?");
   expect(view.container.textContent).not.toContain("salary_range");
-  expect(api.confirmBrief).not.toHaveBeenCalled();
-});
-
-it("confirms only the reviewed brief revision through the human API", async () => {
-  const brief = {
-    fields: [
-      {
-        key: "location",
-        value: "Remote in the United Kingdom",
-        origin: "jd",
-        state: "known",
-        consequential: true,
-        sourceRefIds: [source.id],
-      },
-      {
-        key: "salary_range",
-        value: "GBP 90,000 to 120,000",
-        origin: "jd",
-        state: "known",
-        consequential: true,
-        sourceRefIds: [source.id],
-      },
-    ],
-    questions: [],
-    rules: [],
-    searchFilters: [],
-    confirmation: null,
-  };
-  api.getWorkspace.mockResolvedValue({
-    role,
-    revision: {
-      ...revision,
-      brief,
-      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
-    },
-  });
-  api.confirmBrief.mockResolvedValue({ role, revision });
-  const view = await mounted();
-  expect(api.confirmBrief).not.toHaveBeenCalled();
-  await view.click("Confirm brief");
-  expect(api.confirmBrief).toHaveBeenCalledWith({
-    threadId: "thread-1",
-    roleId: role.id,
-    expectedRevision: 2,
-  });
-});
-
-it("keeps an unresolved brief unconfirmed and preserves its view after a conflict", async () => {
-  const brief = {
-    fields: [
-      {
-        key: "salary_range",
-        value: null,
-        origin: "jd",
-        state: "conflict",
-        consequential: true,
-        sourceRefIds: [],
-      },
-      {
-        key: "location",
-        value: "Remote in the United Kingdom",
-        origin: "jd",
-        state: "known",
-        consequential: true,
-        sourceRefIds: [source.id],
-      },
-    ],
-    questions: [],
-    rules: [],
-    searchFilters: [],
-    confirmation: null,
-  };
-  api.getWorkspace.mockResolvedValue({
-    role,
-    revision: {
-      ...revision,
-      brief,
-      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
-    },
-  });
-  const view = await mounted();
-  const button = [...view.container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Confirm brief",
-  );
-  expect(button?.disabled).toBe(true);
-  brief.fields[0] = {
-    ...brief.fields[0]!,
-    state: "known",
-    value: "GBP 90,000 to 120,000",
-  } as never;
-  api.getWorkspace.mockResolvedValue({
-    role,
-    revision: {
-      ...revision,
-      brief,
-      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
-    },
-  });
-  await view.render("thread-1", 1);
-  api.confirmBrief.mockRejectedValueOnce(new Error("Revision changed"));
-  await view.click("Confirm brief");
-  expect(view.container.textContent).toContain("Brief changed or could not be confirmed");
-  expect(view.container.textContent).toContain("GBP 90,000 to 120,000");
-  expect(view.container.textContent).not.toContain("Brief confirmed");
 });
 
 it("renders the sourcing workspace from saved findings and uses native draft, shortlist and detail actions", async () => {

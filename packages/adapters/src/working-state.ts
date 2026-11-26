@@ -8,7 +8,7 @@ import {
   workActivityLabel,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
-import { BRIEF_CONFIRMATION_TEXT, recruitingHomeGroupId } from "@rakazo/db";
+import { recruitingHomeGroupId } from "@rakazo/db";
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import { openRecruitingRoles } from "./open-recruiting-roles.js";
 import type { RoleRecord } from "./role-records.js";
@@ -249,8 +249,7 @@ function recruiterWords(rows: readonly RecruiterRow[]): string[] {
       const blocks = (row.blocks ?? []) as MessageBlock[];
       if (blocks.some((block) => block.kind === "bot_message_received")) return [];
       const text = blocks.flatMap((block) => (block.kind === "text" ? [block.text] : [])).join(" ");
-      // The brief confirmation is posted as the recruiter's, in English (fosp 11-23, d6c65687).
-      return text.trim() && !BRIEF_CONFIRMATION_TEXT.test(text.trim()) ? [text] : [];
+      return text.trim() ? [text] : [];
     });
   // The copy still speaks for the recruiter when it is all there is (staging 11-14: with it left
   // out, a new role's first question went out in English to a Chinese recruiter).

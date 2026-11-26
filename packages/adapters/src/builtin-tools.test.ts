@@ -1,7 +1,6 @@
 import {
   DisabledBuiltinToolsSchema,
   disabledBuiltinToolSet,
-  RecruitingApprovalToolCallSchema,
   RecruitingCandidatesToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
@@ -51,30 +50,6 @@ describe("native recruiting approval tool", () => {
     }
   });
 
-  it("exposes the shared strict staged request as a one-time human approval", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_request_approval");
-
-    expect(tool).toBeDefined();
-    expect(tool?.inputSchema).toEqual(
-      z.toJSONSchema(RecruitingApprovalToolCallSchema, { io: "input" }),
-    );
-    expect(tool?.readOnly).not.toBe(true);
-    expect(tool?.description).toContain("a documents call is refused");
-    expect(tool?.description).toMatch(/never self-approve/i);
-    expect(
-      RecruitingApprovalToolCallSchema.parse({
-        stage: "brief",
-        roleId: "role",
-        expectedRoleRevision: 3,
-      }),
-    ).toEqual({ stage: "brief", roleId: "role", expectedRoleRevision: 3 });
-    expect(tool?.description).toContain('stage:"brief"');
-    expect(tool?.description).toContain("Generic ask_user answers never confirm requirements");
-    const role = builtinAgentTools.find((entry) => entry.name === "recruiting_role");
-    expect(role?.description).toContain('recruiting_request_approval stage:"brief"');
-    expect(role?.description).not.toContain("in the Role panel");
-  });
-
   it("guides reusable preferences through one exact edit without confusing it with a full document", () => {
     const feedback = builtinAgentTools.find((tool) => tool.name === "recruiting_feedback");
     expect(feedback?.description).toContain(
@@ -120,13 +95,10 @@ describe("native recruiting approval tool", () => {
 });
 
 describe("recruiting brief checklist", () => {
-  it("reaches every account through the role and brief-approval tools", () => {
+  it("reaches every account through the role tool", () => {
     const description = (name: string) =>
       builtinAgentTools.find((tool) => tool.name === name)!.description;
     expect(description("recruiting_role")).toContain(RECRUITING_BRIEF_CHECKLIST);
-    expect(description("recruiting_request_approval")).toContain(
-      "run the first calibration round as a quick people search in the same turn; never",
-    );
   });
 });
 
