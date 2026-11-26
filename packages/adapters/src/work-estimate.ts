@@ -322,7 +322,7 @@ export async function waitWithCountdown<T extends { timedOut: boolean }>(
   const more = minutes(open.estimateMs);
   return {
     ...result,
-    countdown: `The recruiter's countdown of about ${more} minutes ran out and started over. Tell them in one line how many people the role has in Results now and that the work keeps going, about ${more} more minutes; ask nothing. Then wait again.`,
+    countdown: `The recruiter's countdown of about ${more} minutes ran out and started over. Tell them in one line that the work keeps going, about ${more} more minutes; ask nothing. Then wait again.`,
   };
 }
 
