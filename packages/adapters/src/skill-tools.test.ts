@@ -4,6 +4,7 @@ import {
   formatSkillsCatalogInstruction,
   memoryTidyRoutinePrompt,
   parseSkillMd,
+  SKILL_CATALOG_DESCRIPTION_MAX,
 } from "@rakazo/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_AGENT_SKILLS } from "./builtin-skills.js";
@@ -229,9 +230,13 @@ describe("skill tools", () => {
     for (const skill of BUILTIN_AGENT_SKILLS) {
       const parsed = parseSkillMd(skill.content);
       expect(parsed).toMatchObject({ name: skill.name, description: skill.description });
-      // / picker truncates at 72; keep descriptions short so "review only" stays visible.
-      expect(skill.description.length).toBeLessThanOrEqual(72);
+      // The catalog cuts a longer description, and the model routes by it.
+      expect(skill.description.length).toBeLessThanOrEqual(SKILL_CATALOG_DESCRIPTION_MAX);
     }
+    // / picker truncates at 72; keep this one short so "review only" stays visible.
+    expect(
+      BUILTIN_AGENT_SKILLS.find((skill) => skill.name === "Interrogate")!.description.length,
+    ).toBeLessThanOrEqual(72);
 
     const records = await listAgentSkillRecords(prisma as never, owner);
     const interrogate = records.find((row) => row.name === "Interrogate");
@@ -305,6 +310,45 @@ describe("skill tools", () => {
       ok: true,
       name: name.trim(),
     });
+  });
+
+  it("keeps a recruiting skill as released when the user has a copy with its name", async () => {
+    // Every account follows the released recruiting skills (11-26): an old copy never shadows one.
+    const sourcingMap = BUILTIN_AGENT_SKILLS.find((skill) => skill.name === "Sourcing map")!;
+    prisma._store.push(
+      {
+        id: "copy-1",
+        ...owner,
+        name: "sourcing map",
+        description: "old",
+        content: "old",
+        source: "user",
+      },
+      {
+        id: "copy-2",
+        ...owner,
+        name: "Review recruiting draft",
+        description: "old",
+        content: "old",
+        source: "user",
+      },
+    );
+    const records = await listAgentSkillRecords(prisma as never, owner);
+    expect(records.find((row) => row.name.toLowerCase() === "sourcing map")).toMatchObject({
+      id: "builtin:Sourcing map",
+      content: sourcingMap.content,
+    });
+    expect(records.some((row) => row.name === "Review recruiting draft")).toBe(false);
+  });
+
+  it("refuses a new skill named like a recruiting skill, which the catalog would hide", async () => {
+    const created = await skillCreateFromTool(prisma as never, owner, {
+      name: "Coordinate interview",
+      description: "Old copy",
+      body: "Steps",
+    });
+    expect(created).toMatchObject({ error: expect.stringContaining("built-in recruiting skill") });
+    expect(prisma._store).toHaveLength(0);
   });
 
   it("rejects oversized skill content", async () => {

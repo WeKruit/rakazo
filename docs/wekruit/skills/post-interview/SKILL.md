@@ -17,12 +17,12 @@ HM-only observations, compensation and sponsorship details stay with an authoriz
 
 ## Follow the human decision
 
-- **Next round:** hand Coordinate interview the authorized decision, original case/round/event, approved audience/materials and dependencies. Use Interview materials for the brief/package. The scheduler owns availability and event actions; a handoff is not a booking.
+- **Next round:** hand Book or move an interview the authorized decision, original case/round/event, approved audience/materials and dependencies. Use Interview materials for the brief/package. The scheduler owns availability and event actions; a handoff is not a booking.
 - **Hold/review later:** preserve scope, reason and any human-specified review date. Stop affected chases with their owner. Do not propagate a hold to other roles or silently resume it on a new message.
 - **Pass/decline/withdrawal:** preserve decision and source. Rejections are always drafts. A recorded decision alone authorizes no send, negotiation or event cancellation.
 - **Unknown:** report the pending decision without inventing a stage, sending an update, enabling a reminder or repeating an unanswered card.
 
-Use Review recruiting draft for exact thread, recipients, content, attachments and one-time approval. `recruiting_reply` supports verified existing inbound candidate replies, not arbitrary HM introductions or new rejection sends. Without the assigned draft/approval capability, return an unsent text draft and the blocked action. A draft is not an executable approval; never rephrase an unknown send into a second send.
+Use Send to people for exact thread, recipients, content, attachments and one-time approval. `recruiting_reply` supports verified existing inbound candidate replies, not arbitrary HM introductions or new rejection sends. Without the assigned draft/approval capability, return an unsent text draft and the blocked action. A draft is not an executable approval; never rephrase an unknown send into a second send.
 
 ## Preserve the case and stop obsolete work
 
