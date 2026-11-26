@@ -19,14 +19,8 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof Database>()),
   executeRecruitingRoleMutation: vi.fn(),
   getRecruitingWorkspace: vi.fn(),
-  readRecruitingResearchContext: vi.fn(),
   recruitingResearchSnapshot: vi.fn(),
-  bindRecruitingResearchReadEffect: vi.fn(),
-  listUnmappedRecruitingResearchReads: vi.fn(),
-  recordRecruitingResearchObservation: vi.fn(),
   saveRecruitingAssessment: vi.fn(),
-  readNativeRecruitingCandidatePage: vi.fn(),
-  saveNativeRecruitingCandidatePage: vi.fn(),
   saveRecruitingCandidateCsvImport: vi.fn(),
 }));
 

@@ -366,7 +366,7 @@ export function RecruitingEvidenceTab({
               refreshSignal={(refreshSignal ?? 0) + refresh}
               readCache={readCache}
               readCacheScope={readCacheScope}
-              autumn={{
+              sourced={{
                 items: candidatePage?.items ?? [],
                 loading: candidateLoading && !candidatePage,
                 failed: candidateFailed,

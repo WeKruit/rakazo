@@ -67,7 +67,7 @@ export function accountInboxPerson(
     );
   }
   if (email.candidateKey)
-    return people.find((person) => person.autumn?.candidateKey === email.candidateKey);
+    return people.find((person) => person.sourced?.candidateKey === email.candidateKey);
   if (email.direction !== "received") return undefined;
   const address = (email.sender?.trim().match(/^[^<>]*<([^<>]+)>$/)?.[1] ?? email.sender)
     ?.trim()
@@ -384,7 +384,7 @@ export function AccountInbox({
               const counterpart = sentOnly ? incoming.recipients[0] : incoming.sender;
               const unread = row.emails.some((message) => readState.unread(message) === true);
               const person = row.person;
-              const profile = person?.autumn?.savedProfile;
+              const profile = person?.sourced?.savedProfile;
               const work =
                 profile?.experience
                   .slice(0, 2)
@@ -405,7 +405,7 @@ export function AccountInbox({
                   ) ??
                 [];
               const school = profile?.education[0];
-              const ranking = person?.autumn?.ranking;
+              const ranking = person?.sourced?.ranking;
               const grade =
                 ranking?.source === "reviewer" && ranking.state === "current"
                   ? ranking.group === "strong_match"
@@ -661,7 +661,7 @@ export function AccountInbox({
                       .sender
                   }
                   candidateTitle={selected.person?.title}
-                  candidatePhotoUrl={selected.person?.autumn?.savedProfile?.profileImageUrl}
+                  candidatePhotoUrl={selected.person?.sourced?.savedProfile?.profileImageUrl}
                   onOpenProfile={
                     selected.person &&
                     onOpenProfile &&

@@ -4847,7 +4847,7 @@ it("keeps current findings ahead of collapsed feedback and source-specific evide
   expect(api.getById).not.toHaveBeenCalled();
 });
 
-it("shows exact Autumn rule states from the latest report before source history loads without classifying prose", async () => {
+it("shows exact search rule states from the latest report before source history loads without classifying prose", async () => {
   const candidate = {
     ...candidateFixture("provider-status", false),
     name: "Provider-status person",
@@ -9189,7 +9189,7 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
   expect(api.crmData).not.toHaveBeenCalled();
 });
 
-it("shows Autumn's criterion states, evidence, source round and saved decision for every returned candidate", async () => {
+it("shows the search's criterion states, evidence, source round and saved decision for every returned candidate", async () => {
   api.listAssessments.mockResolvedValue([]);
   api.listCandidates.mockResolvedValue(
     candidatePage(

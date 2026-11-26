@@ -1306,7 +1306,7 @@ it("keeps Sequence status chips from the loaded rows when totalling fails", asyn
   expect(view.textContent).not.toContain("[role");
 });
 
-function autumnRead(overrides: Record<string, unknown> = {}) {
+function sourcedRead(overrides: Record<string, unknown> = {}) {
   return {
     items: [] as never[],
     loading: false,
@@ -1324,8 +1324,8 @@ function autumnRead(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-const autumnAda = {
-  candidateKey: "autumn-ada",
+const sourcedAda = {
+  candidateKey: "sourced-ada",
   name: "Ada",
   title: "Staff Engineer",
   company: "Acme",
@@ -1350,10 +1350,10 @@ it("renders each source as it loads, with skeleton rows only while one is still 
     <ContactsTab
       {...props}
       crmTarget={target}
-      autumn={autumnRead({ items: [autumnAda], total: 1 })}
+      sourced={sourcedRead({ items: [sourcedAda], total: 1 })}
     />,
   );
-  // Autumn's row is already on screen while the CRM read is still pending.
+  // the search's row is already on screen while the CRM read is still pending.
   expect(view.querySelector("tbody")?.textContent).toContain("Ada");
   expect(view.querySelector("tbody")?.textContent).toContain("92");
   expect(view.querySelector('[role="status"]')).not.toBeNull();
@@ -1375,7 +1375,7 @@ it("shows a failed source as a compact Retry that re-reads only that source", as
     <ContactsTab
       {...props}
       crmTarget={target}
-      autumn={autumnRead({ items: [autumnAda], total: 1 })}
+      sourced={sourcedRead({ items: [sourcedAda], total: 1 })}
     />,
   );
   const alert = view.querySelector('[role="alert"]');

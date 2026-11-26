@@ -692,7 +692,7 @@ export const CONTACT_STATUS_LABELS = [
   "verification status",
 ];
 
-/** Autumn's own per-criterion states with their raw evidence and sources, never re-judged. */
+/** The search's own per-criterion states with their raw evidence and sources, never re-judged. */
 export function CandidateCriteria({ candidate }: { candidate: RecruitingCandidate }) {
   const fields = candidate.latestSource?.report?.fields.filter((field) => field.providerStatus);
   return fields?.length ? (

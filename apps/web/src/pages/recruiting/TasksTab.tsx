@@ -27,8 +27,8 @@ export function reminderCandidateKeys(
   searchKey: string | null | undefined,
   crmId: string | false | null | undefined,
 ) {
-  return [searchKey && `autumn:${searchKey}`, crmId && `crm:${crmId}`].filter(
-    (key): key is string => !!key && /^(autumn|crm):\S+$/.test(key) && key.length <= 300,
+  return [searchKey && `sourced:${searchKey}`, crmId && `crm:${crmId}`].filter(
+    (key): key is string => !!key && /^(sourced|crm):\S+$/.test(key) && key.length <= 300,
   );
 }
 
@@ -94,7 +94,7 @@ function ReminderForm({
 
 /**
  * One person's open reminders for the role, overdue first. `candidateKey` is the reminder key,
- * "autumn:<search key>" or "crm:<CRM candidate id>".
+ * "sourced:<search key>" or "crm:<CRM candidate id>".
  */
 export function TasksTab({
   roleId,

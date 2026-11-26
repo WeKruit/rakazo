@@ -47,7 +47,7 @@ export function ShortlistDirectory({
           location: candidate.location,
           linkedinUrl: candidate.linkedinUrl,
           email: candidateSections(candidate.latestSource?.report?.fields).email,
-          autumn: candidate,
+          sourced: candidate,
           crm: null,
         }),
       ),
@@ -55,8 +55,8 @@ export function ShortlistDirectory({
   );
   function target(index: number): RecruitingDetailTarget | undefined {
     const row = rows[index];
-    if (!row?.autumn || !workspace) return undefined;
-    const candidate = row.autumn;
+    if (!row?.sourced || !workspace) return undefined;
+    const candidate = row.sourced;
     return {
       view: "contact",
       collection: { label: shortlistView ? t`Shortlist` : t`Contacts`, index, total: rows.length },
@@ -118,7 +118,7 @@ export function ShortlistDirectory({
       ...chosen.map((row) => [
         row.name,
         row.title,
-        row.autumn?.company,
+        row.sourced?.company,
         row.location,
         row.linkedinUrl,
       ]),
@@ -265,25 +265,25 @@ export function ShortlistDirectory({
         onOpen={(row, index, trigger) => {
           const next = target(index);
           if (detail && next) detail.open(next);
-          else if (row.autumn) model.selectCandidate(row.autumn, trigger as HTMLButtonElement);
+          else if (row.sourced) model.selectCandidate(row.sourced, trigger as HTMLButtonElement);
         }}
         renderActions={(row) => (
           <Button
             size="sm"
             variant="ghost"
-            aria-pressed={row.autumn!.shortlisted}
+            aria-pressed={row.sourced!.shortlisted}
             disabled={!candidateFresh || shortlistPending !== null}
             aria-label={
-              row.autumn!.shortlisted
+              row.sourced!.shortlisted
                 ? t`Remove ${row.name} from shortlist`
                 : t`Add ${row.name} to shortlist`
             }
-            onClick={() => void model.setShortlist(row.autumn!, !row.autumn!.shortlisted)}
+            onClick={() => void model.setShortlist(row.sourced!, !row.sourced!.shortlisted)}
           >
             <Bookmark
               size={15}
               aria-hidden
-              fill={row.autumn!.shortlisted ? "currentColor" : "none"}
+              fill={row.sourced!.shortlisted ? "currentColor" : "none"}
             />
           </Button>
         )}

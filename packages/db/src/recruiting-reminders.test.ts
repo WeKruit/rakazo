@@ -111,7 +111,7 @@ describe("recruiting reminders (db)", () => {
   it("lists by several candidate keys (OR) within the owner's scope", async () => {
     const { prisma } = fake();
     const due = "2026-11-01T00:00:00.000Z";
-    for (const candidateKey of ["autumn:a", "crm:1", "crm:2"])
+    for (const candidateKey of ["sourced:a", "crm:1", "crm:2"])
       await createRecruitingReminder(prisma, alice, {
         title: candidateKey,
         dueAt: due,
@@ -125,10 +125,10 @@ describe("recruiting reminders (db)", () => {
     const both = await listRecruitingReminders(
       prisma,
       alice,
-      { candidateKeys: ["autumn:a", "crm:1"] },
+      { candidateKeys: ["sourced:a", "crm:1"] },
       NOW,
     );
-    expect(both.items.map((i) => i.title)).toEqual(["autumn:a", "crm:1"]);
+    expect(both.items.map((i) => i.title)).toEqual(["sourced:a", "crm:1"]);
     const merged = await listRecruitingReminders(
       prisma,
       alice,

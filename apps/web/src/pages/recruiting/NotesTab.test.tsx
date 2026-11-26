@@ -103,8 +103,8 @@ async function type(input: HTMLTextAreaElement, value: string) {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
-const keys = ["autumn:k1", `crm:${ADA}`];
-const tab = () => <NotesTab roleId="role-1" candidateKeys={keys} createKey="autumn:k1" />;
+const keys = ["sourced:k1", `crm:${ADA}`];
+const tab = () => <NotesTab roleId="role-1" candidateKeys={keys} createKey="sourced:k1" />;
 
 it("lists notes newest first with author and relative time", async () => {
   const api = notesMock([
@@ -134,7 +134,7 @@ it("adds a note once it has text and clears the box", async () => {
   await act(async () => button(view, "Add note")!.click());
   await settle();
   expect(api.create).toHaveBeenCalledWith({
-    candidateKey: "autumn:k1",
+    candidateKey: "sourced:k1",
     roleId: "role-1",
     body: "Prefers remote",
   });
@@ -178,9 +178,9 @@ it("shows loading, a retry when notes fail to load and an alert when a change fa
 });
 
 it("keys notes by every key the person has and mounts in the detail panel", async () => {
-  expect(noteCandidateKeys("k1", ADA)).toEqual(["autumn:k1", `crm:${ADA}`]);
+  expect(noteCandidateKeys("k1", ADA)).toEqual(["sourced:k1", `crm:${ADA}`]);
   expect(noteCandidateKeys(undefined, ADA)).toEqual([`crm:${ADA}`]);
-  expect(noteCandidateKeys("k1", false)).toEqual(["autumn:k1"]);
+  expect(noteCandidateKeys("k1", false)).toEqual(["sourced:k1"]);
   expect(noteCandidateKeys("has space", false)).toEqual([]);
   const api = notesMock([]);
   const current: RecruitingDetailTarget = { view: "notes", person, role };
@@ -237,7 +237,7 @@ it("uploads a native attachment only with a nonempty note and keeps the draft on
     <NotesTab
       roleId="role-1"
       candidateKeys={keys}
-      createKey="autumn:k1"
+      createKey="sourced:k1"
       conversation={{ groupId: "group-1" }}
     />,
   );
@@ -264,7 +264,7 @@ it("uploads a native attachment only with a nonempty note and keeps the draft on
   );
   expect(notes.create).toHaveBeenCalledWith({
     roleId: "role-1",
-    candidateKey: "autumn:k1",
+    candidateKey: "sourced:k1",
     body: "Saved evidence",
     artifactIds: ["native-artifact"],
   });

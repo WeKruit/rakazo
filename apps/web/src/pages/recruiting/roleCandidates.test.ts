@@ -25,9 +25,9 @@ it("normalizes LinkedIn profiles across hosts, case, slashes and queries", () =>
   expect(linkedinIdentity(null)).toBeNull();
 });
 
-it("joins a CRM contact to the same Autumn result by LinkedIn, then by email", () => {
+it("joins a CRM contact to the same search result by LinkedIn, then by email", () => {
   const rows = mergeRoleCandidates({
-    autumn: [
+    sourced: [
       entry("a", { linkedinUrl: "https://linkedin.com/in/ada" }),
       entry("b", { email: "Ben@Example.com" }),
     ],
@@ -38,18 +38,18 @@ it("joins a CRM contact to the same Autumn result by LinkedIn, then by email", (
     ],
     fit,
   });
-  expect(rows.map((row) => [row.key, row.autumn?.key ?? null, row.crm?.key ?? null])).toEqual([
+  expect(rows.map((row) => [row.key, row.sourced?.key ?? null, row.crm?.key ?? null])).toEqual([
     ["a", "a", "crm-ada"],
     ["b", "b", "crm-ben"],
     ["crm-cy", null, "crm-cy"],
   ]);
-  // The joined row fills what Autumn did not return from the CRM record.
+  // The joined row fills what the search did not return from the CRM record.
   expect(rows[0]!.email).toBe("ada@x.test");
 });
 
-it("orders Autumn rows by score, highest first, then CRM-only rows; keeps a second CRM record", () => {
+it("orders search rows by score, highest first, then CRM-only rows; keeps a second CRM record", () => {
   const rows = mergeRoleCandidates({
-    autumn: [entry("low", { score: "40" }), entry("none", {}), entry("high", { score: "92" })],
+    sourced: [entry("low", { score: "40" }), entry("none", {}), entry("high", { score: "92" })],
     crm: [
       entry("crm-1", { email: "same@example.com" }),
       entry("crm-2", { email: "same@example.com" }),
@@ -58,7 +58,7 @@ it("orders Autumn rows by score, highest first, then CRM-only rows; keeps a seco
   });
   expect(rows.map((row) => row.key)).toEqual(["high", "low", "none", "crm-1", "crm-2"]);
   const given = mergeRoleCandidates({
-    autumn: [entry("low", { score: "40" }), entry("high", { score: "92" })],
+    sourced: [entry("low", { score: "40" }), entry("high", { score: "92" })],
     crm: [],
     fit,
     sortByScore: false,

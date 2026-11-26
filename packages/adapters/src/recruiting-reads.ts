@@ -4222,7 +4222,7 @@ type RoleCandidatesInput = {
   shortlistedOnly?: boolean | undefined;
   shortlistedSince?: string | undefined;
 };
-type RoleCandidatesAutumnPage = Pick<
+type RoleCandidatesSourcedPage = Pick<
   ListRecruitingCandidatesOutput,
   "items" | "nextCursor" | "total" | "counts" | "crmTarget"
 >;
@@ -4231,8 +4231,8 @@ type RoleCandidatesCrmRow = Extract<
   { operation: "candidates" }
 >["items"][number] & { serverId: string; organizationId: string };
 export type RoleCandidatesSources = {
-  autumn(cursor: string | undefined, limit: number): Promise<RoleCandidatesAutumnPage>;
-  autumnLinkedinUrls(): Promise<string[]>;
+  sourced(cursor: string | undefined, limit: number): Promise<RoleCandidatesSourcedPage>;
+  sourcedLinkedinUrls(): Promise<string[]>;
   /**
    * One CRM page from `offset`. `total` is the CRM's own count; a read without it returned every
    * remaining row.
@@ -4260,7 +4260,7 @@ export function linkedinIdentity(url: string | null | undefined): string | null 
 }
 
 const roleCandidatesCursor = {
-  /** `a`: Autumn cursor. `o`: CRM offset of the page being shown, `k`: its CRM-only rows shown. */
+  /** `a`: search-result cursor. `o`: CRM offset of the page being shown, `k`: its CRM-only rows shown. */
   read(raw: string | undefined, scope: string): { a?: string; o?: number; k?: number } {
     if (raw === undefined) return {};
     try {
@@ -4284,7 +4284,7 @@ const roleCandidatesCursor = {
 };
 
 /**
- * Merges one page of Autumn results with the role's CRM contacts. Pages Autumn first (its own
+ * Merges one page of search results with the role's CRM contacts. Pages search results first (its own
  * cursor/sort), then the CRM-only contacts one CRM page at a time; the cursor carries whichever
  * position is live. A request never reads more than one CRM page.
  */
@@ -4302,23 +4302,23 @@ export async function mergeRoleCandidates(
     ...(input.shortlistedSince ? [input.shortlistedSince] : []),
   ]);
   const position = roleCandidatesCursor.read(input.cursor, scope);
-  const autumnPhase = position.o === undefined;
+  const sourcedPhase = position.o === undefined;
   const crmOffset = position.o ?? 0;
   const needle = input.query?.trim().replace(/\s+/g, " ").toLowerCase();
-  // ponytail: the CRM phase still reads one Autumn row for totals, counts and the CRM binding.
-  const autumn = await sources.autumn(position.a, autumnPhase ? limit : 1);
-  const crm = autumn.crmTarget
-    ? await sources.crm(autumn.crmTarget.target, crmOffset, needle || undefined)
+  // ponytail: the CRM phase still reads one search row for totals, counts and the CRM binding.
+  const sourced = await sources.sourced(position.a, sourcedPhase ? limit : 1);
+  const crm = sourced.crmTarget
+    ? await sources.crm(sourced.crmTarget.target, crmOffset, needle || undefined)
     : ({ status: "not_bound" } as const);
-  // One slot per person: LinkedIn identity first, then lowercased email. Autumn rows have no email.
-  type Slot = { autumn: boolean; crm: RoleCandidatesCrmRow | null };
+  // One slot per person: LinkedIn identity first, then lowercased email. Search rows have no email.
+  type Slot = { sourced: boolean; crm: RoleCandidatesCrmRow | null };
   const owners = new Map<string, Slot>();
   const crmOnly: RoleCandidatesCrmRow[] = [];
   const outreach: Record<string, number> = {};
   if (crm.status === "ok" && crm.rows.length) {
-    for (const url of await sources.autumnLinkedinUrls()) {
+    for (const url of await sources.sourcedLinkedinUrls()) {
       const key = linkedinIdentity(url);
-      if (key && !owners.has(`li:${key}`)) owners.set(`li:${key}`, { autumn: true, crm: null });
+      if (key && !owners.has(`li:${key}`)) owners.set(`li:${key}`, { sourced: true, crm: null });
     }
     for (const row of crm.rows) {
       const li = linkedinIdentity(row.linkedinUrl);
@@ -4326,7 +4326,7 @@ export async function mergeRoleCandidates(
       const keys = [li && `li:${li}`, email && `em:${email}`].filter((key) => key !== null);
       let slot = keys.map((key) => owners.get(key)).find((found) => found !== undefined);
       if (!slot) {
-        slot = { autumn: false, crm: row };
+        slot = { sourced: false, crm: row };
         crmOnly.push(row);
       } else if (!slot.crm) slot.crm = row;
       else continue; // Same person listed twice in the CRM.
@@ -4370,20 +4370,20 @@ export async function mergeRoleCandidates(
       : null;
   const items: RecruitingRoleCandidate[] = [];
   let nextCursor: string | null = null;
-  if (autumnPhase)
-    for (const candidate of autumn.items) {
+  if (sourcedPhase)
+    for (const candidate of sourced.items) {
       const li = linkedinIdentity(candidate.linkedinUrl);
       const slot = li ? owners.get(`li:${li}`) : undefined;
-      const contact = (slot?.autumn && slot.crm) || null;
+      const contact = (slot?.sourced && slot.crm) || null;
       const fields = candidate.latestSource?.report?.fields ?? [];
       items.push({
-        key: `autumn:${candidate.candidateKey}`,
+        key: `sourced:${candidate.candidateKey}`,
         name: candidate.name ?? contact?.name ?? null,
         title: candidate.title ?? contact?.title ?? null,
         location: candidate.location ?? contact?.location ?? null,
         email: contact?.email ?? null,
         linkedinUrl: candidate.linkedinUrl ?? contact?.linkedinUrl ?? null,
-        autumn: {
+        sourced: {
           candidateKey: candidate.candidateKey,
           ranking: candidate.ranking,
           savedProfile: candidate.savedProfile ?? null,
@@ -4408,8 +4408,8 @@ export async function mergeRoleCandidates(
         shortlistedAt: candidate.shortlistedAt,
       });
     }
-  if (autumnPhase && autumn.nextCursor)
-    nextCursor = roleCandidatesCursor.write(scope, { a: autumn.nextCursor });
+  if (sourcedPhase && sourced.nextCursor)
+    nextCursor = roleCandidatesCursor.write(scope, { a: sourced.nextCursor });
   else {
     const shown = position.k ?? 0;
     const page = visibleCrmOnly.slice(shown, shown + limit - items.length);
@@ -4421,7 +4421,7 @@ export async function mergeRoleCandidates(
         location: row.location,
         email: row.email,
         linkedinUrl: row.linkedinUrl,
-        autumn: null,
+        sourced: null,
         crm: crmSide(row),
         shortlisted: false,
         shortlistedAt: null,
@@ -4440,9 +4440,9 @@ export async function mergeRoleCandidates(
     items,
     nextCursor,
     // A CRM with more than one page is counted by its own total, the same on every page, so it can
-    // include a few people also listed by Autumn. A CRM read in one page is deduped exactly.
+    // include a few people also listed by the search. A CRM read in one page is deduped exactly.
     total:
-      autumn.total +
+      sourced.total +
       (crm.status === "ok" &&
       crm.total !== undefined &&
       (crmOffset > 0 || crm.rows.length < crm.total)
@@ -4450,7 +4450,7 @@ export async function mergeRoleCandidates(
         : visibleCrmOnly.length),
     counts: {
       ...outreach,
-      shortlisted: input.shortlistedSince ? autumn.total : autumn.counts.shortlisted,
+      shortlisted: input.shortlistedSince ? sourced.total : sourced.counts.shortlisted,
       replied: outreach.replied ?? 0,
     },
     crmStatus: crm.status,
@@ -4460,7 +4460,7 @@ export async function mergeRoleCandidates(
   };
 }
 
-/** `recruiting.roleCandidates`: existing Autumn list + existing CRM candidates read, merged. */
+/** `recruiting.roleCandidates`: existing search-result list + existing CRM candidates read, merged. */
 const CRM_PAGE = 50;
 const CRM_PAGE_READS = 4;
 
@@ -4530,7 +4530,7 @@ export async function getRecruitingRoleCandidates(
     };
   const sort = input.sort ?? "ranking";
   return mergeRoleCandidates(input, {
-    autumn: (cursor, limit) =>
+    sourced: (cursor, limit) =>
       timed(
         "candidatesSavedMs",
         listRecruitingCandidates(
@@ -4549,7 +4549,7 @@ export async function getRecruitingRoleCandidates(
           options.summary ? { reports: false } : {},
         ),
       ),
-    autumnLinkedinUrls: () =>
+    sourcedLinkedinUrls: () =>
       timed(
         "candidatesLinkedinMs",
         authenticated(() =>

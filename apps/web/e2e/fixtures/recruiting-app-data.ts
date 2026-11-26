@@ -503,7 +503,7 @@ export async function mockRecruitingApp(
           item.candidates.items[0] = {
             ...item.candidates.items[0],
             key: `crm:${people[0]!.candidateId}`,
-            autumn: null,
+            sourced: null,
             crm: {
               serverId: source.serverId,
               organizationId: source.organizationId,
@@ -898,7 +898,7 @@ export async function mockRecruitingApp(
               {
                 name: "Avery Example",
                 email: "avery@example.test",
-                autumn: { candidateKey: "fixture-native-candidate" },
+                sourced: { candidateKey: "fixture-native-candidate" },
               },
             ]
           : [],

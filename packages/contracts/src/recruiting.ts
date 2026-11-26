@@ -1469,7 +1469,7 @@ export const ListRecruitingCandidatesOutput = z.strictObject({
   }),
 });
 export type ListRecruitingCandidatesOutput = z.infer<typeof ListRecruitingCandidatesOutput>;
-/** One merged person per row: Autumn search result and/or the role's CRM contact. */
+/** One merged person per row: search result and/or the role's CRM contact. */
 export const RecruitingRoleCandidatesInputFields = {
   threadId: RecruitingId,
   limit: z.number().int().min(1).max(100).optional(),
@@ -1500,7 +1500,7 @@ export const RecruitingRoleCandidateSchema = z.strictObject({
   location: z.string().nullable(),
   email: z.string().nullable(),
   linkedinUrl: z.string().nullable(),
-  autumn: z
+  sourced: z
     .strictObject({
       candidateKey: RecruitingId,
       ranking: RecruitingCandidateRankingSchema.optional(),
@@ -1543,7 +1543,7 @@ export const RecruitingRoleCandidatesOutputSchema = z.strictObject({
   items: z.array(RecruitingRoleCandidateSchema),
   nextCursor: Text.nullable(),
   total: z.number().int().nonnegative(),
-  /** `shortlisted` (Autumn) and `replied` always; plus one count per CRM outreachStatus. */
+  /** `shortlisted` (search results) and `replied` always; plus one count per CRM outreachStatus. */
   counts: z
     .object({
       shortlisted: z.number().int().nonnegative(),
@@ -2753,10 +2753,11 @@ export const RecruitingCrmRoleCampaignsReadSchema = z.object({
 
 // Owner-scoped follow-up reminders (role and/or candidate), shared by RPC and the agent tool.
 export const RecruitingReminderStatusSchema = z.enum(["open", "done", "dismissed"]);
-const ReminderCandidateKey = Text.max(300).regex(
-  /^(autumn|crm):\S+$/,
-  'Use "autumn:<key>" or "crm:<id>"',
-);
+// Keys written before the rename, in old conversations and saved links, keep working.
+const ReminderCandidateKey = z
+  .string()
+  .transform((value) => value.replace(/^autumn:/, "sourced:"))
+  .pipe(Text.max(300).regex(/^(sourced|crm):\S+$/, 'Use "sourced:<key>" or "crm:<id>"'));
 /** Actual profile opens, retained in the existing native event history. */
 export const RecruitingProfileActivityInput = z.strictObject({
   roleId: RecruitingId,

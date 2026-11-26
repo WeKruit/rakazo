@@ -291,7 +291,7 @@ it("adds Activity and Tasks to the detail tabs", async () => {
 });
 
 it("keys reminders by search result first, then CRM record", async () => {
-  expect(reminderCandidateKey("k1", ADA)).toBe("autumn:k1");
+  expect(reminderCandidateKey("k1", ADA)).toBe("sourced:k1");
   expect(reminderCandidateKey(undefined, ADA)).toBe(`crm:${ADA}`);
   expect(reminderCandidateKey(undefined, false)).toBeNull();
   expect(reminderCandidateKey("has space", false)).toBeNull();
@@ -306,7 +306,7 @@ it("keys reminders by search result first, then CRM record", async () => {
 });
 
 it("lists reminders under both keys of a person but creates under the primary one", async () => {
-  expect(reminderCandidateKeys("k1", ADA)).toEqual(["autumn:k1", `crm:${ADA}`]);
+  expect(reminderCandidateKeys("k1", ADA)).toEqual(["sourced:k1", `crm:${ADA}`]);
   expect(reminderCandidateKeys(undefined, false)).toEqual([]);
   remindersMock([]);
   const view = await mount(
@@ -319,7 +319,7 @@ it("lists reminders under both keys of a person but creates under the primary on
   );
   expect(reminders.list).toHaveBeenCalledWith({
     roleId: "role-1",
-    candidateKeys: ["autumn:k1", `crm:${ADA}`],
+    candidateKeys: ["sourced:k1", `crm:${ADA}`],
     status: "open",
   });
   expect(view.textContent).toContain("Create reminder");
@@ -442,7 +442,7 @@ it("merges known search and CRM profile histories with actor, time and role cont
       {
         id: candidateKey,
         at: ago(1),
-        actorName: candidateKey.startsWith("autumn:") ? "Search recruiter" : "CRM recruiter",
+        actorName: candidateKey.startsWith("sourced:") ? "Search recruiter" : "CRM recruiter",
         roleTitle: "Staff Engineer",
       },
     ],
@@ -451,7 +451,7 @@ it("merges known search and CRM profile histories with actor, time and role cont
   const view = await mount(<ActivityTab {...role} person={person} candidateKey="person-key" />);
   expect(profileActivity.list).toHaveBeenCalledWith({
     roleId: role.roleId,
-    candidateKey: "autumn:person-key",
+    candidateKey: "sourced:person-key",
   });
   expect(profileActivity.list).toHaveBeenCalledWith({
     roleId: role.roleId,

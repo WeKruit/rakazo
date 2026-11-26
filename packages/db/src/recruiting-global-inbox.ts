@@ -117,7 +117,7 @@ export async function projectRecruitingInboxMessages(
               candidate.crm?.candidateId === email.crm?.candidateId,
           )
         : email.candidateKey
-          ? people.find((candidate) => candidate.autumn?.candidateKey === email.candidateKey)
+          ? people.find((candidate) => candidate.sourced?.candidateKey === email.candidateKey)
           : undefined;
       await put(tx, actor, { ...input, email, kind: "observed", person });
     }
@@ -304,7 +304,7 @@ async function savedPerson(
       location: contact.location,
       email: contact.email,
       linkedinUrl: contact.linkedinUrl,
-      autumn: null,
+      sourced: null,
       shortlisted: false,
       shortlistedAt: null,
       crm: {
@@ -324,7 +324,7 @@ async function savedPerson(
       },
     });
   }
-  const candidateKey = email.candidateKey ?? supplied?.autumn?.candidateKey;
+  const candidateKey = email.candidateKey ?? supplied?.sourced?.candidateKey;
   if (!candidateKey) return null;
   const candidates = await tx.$queryRaw<
     {
@@ -354,7 +354,7 @@ async function savedPerson(
   });
   const profiles = await listRecruitingSavedProfiles(tx, actor, [row.candidateKey]);
   return RecruitingRoleCandidateSchema.parse({
-    key: `autumn:${row.candidateKey}`,
+    key: `sourced:${row.candidateKey}`,
     name: row.name,
     title: row.title,
     location: row.location,
@@ -363,7 +363,7 @@ async function savedPerson(
     shortlisted: row.shortlisted,
     shortlistedAt: row.shortlistedAt,
     crm: null,
-    autumn: {
+    sourced: {
       candidateKey: row.candidateKey,
       savedProfile: profiles.get(row.candidateKey) ?? null,
       ranking: recruitingCandidateRanking({
