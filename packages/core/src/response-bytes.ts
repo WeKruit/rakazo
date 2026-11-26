@@ -1,3 +1,5 @@
+export class ResponseTooLargeError extends Error {}
+
 /** Read a response within a byte budget, releasing failed streams without waiting for cancellation.
  * Callers own header validation and wrap lazy read operations in their request deadline.
  */
@@ -12,7 +14,7 @@ export async function readBoundedResponseBytes(
   const { maxBytes, tooLargeMessage, read } = options;
   if (!response.body) {
     const buffer = await read(() => response.arrayBuffer());
-    if (buffer.byteLength > maxBytes) throw new Error(tooLargeMessage);
+    if (buffer.byteLength > maxBytes) throw new ResponseTooLargeError(tooLargeMessage);
     return new Uint8Array(buffer);
   }
 
@@ -25,7 +27,7 @@ export async function readBoundedResponseBytes(
       if (done) break;
       if (!value?.byteLength) continue;
       total += value.byteLength;
-      if (total > maxBytes) throw new Error(tooLargeMessage);
+      if (total > maxBytes) throw new ResponseTooLargeError(tooLargeMessage);
       chunks.push(value);
     }
   } catch (error) {

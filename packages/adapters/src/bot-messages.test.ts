@@ -664,6 +664,15 @@ describe("delegating to a role team in another conversation", () => {
   }
   const roleRun = { ...run, botId: "bot-main", threadId: "thread-role", sourceMessageId: "m" };
   const said = (text: string) => ({ role: "bot", blocks: [{ kind: "text", text }] });
+  const roundList = (text: string, roundId?: string) => ({
+    kind: "text",
+    text,
+    recruitingRoundList: roundId ? { roundId } : {},
+  });
+  const listed = (text: string, roundId?: string) => ({
+    role: "bot",
+    blocks: [roundList(text, roundId)],
+  });
   const returnedTo = (harness: ReturnType<typeof team>) =>
     harness.tx.message.create.mock.calls
       .map(([call]) => call as { data: { threadId: string; blocks: unknown[] } })
@@ -801,7 +810,7 @@ describe("delegating to a role team in another conversation", () => {
   it("returns a finished round while Kruit's later follow-ups to the team still queue", async () => {
     // Staging 11-13: "where's the next round?" was delegated twice while Sourcer ran the round;
     // the queued follow-ups held the finished round back and Kruit said it had not come back.
-    const harness = team({ later: [said("10 people this round: …")] });
+    const harness = team({ later: [listed("10 people this round: …")] });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
     expect(harness.deps.prisma.message.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -823,7 +832,7 @@ describe("delegating to a role team in another conversation", () => {
         }),
       }),
     );
-    expect(returnedTo(harness)).toEqual([{ kind: "text", text: "10 people this round: …" }]);
+    expect(returnedTo(harness)).toEqual([roundList("10 people this round: …")]);
   });
 
   it("shows a returned round to the recruiter itself and gives Kruit no turn to retell it", async () => {
@@ -831,9 +840,9 @@ describe("delegating to a role team in another conversation", () => {
     // listed another eight from the pool. fosp 11-21 (f68ae6bf): told the round was shown and to
     // say nothing, Kruit still summarised it 5 s later, so the recruiter read it twice.
     const round = "7 people this round:\n\n1. **Sathya G** · Sr Engineer · Zillow";
-    const harness = team({ later: [said(round), said("Round 2 is posted.")] });
+    const harness = team({ later: [listed(round), said("Round 2 is posted.")] });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    expect(returnedTo(harness)).toEqual([{ kind: "text", text: round }]);
+    expect(returnedTo(harness)).toEqual([roundList(round)]);
   });
 
   it("shows a round where it was asked as it is shown, though the team is still busy", async () => {
@@ -842,35 +851,36 @@ describe("delegating to a role team in another conversation", () => {
     const round = "本轮 10 人：\n\n1. **Yijun Y.** · Big Data Engineer · TEMU";
     const harness = team({ busy: true });
     await showRoundWhereAskedNow(harness.deps, roleRun, round, "effect-round-2");
-    expect(returnedTo(harness)).toEqual([{ kind: "text", text: round }]);
+    expect(returnedTo(harness)).toEqual([roundList(round, "effect-round-2")]);
     // Shown where it was asked already: not again.
-    const again = team({ busy: true, shown: [said(round)] });
+    const again = team({ busy: true });
+    again.tx.message.findUnique.mockResolvedValue({ id: "message-round" });
     await showRoundWhereAskedNow(again.deps, roleRun, round, "effect-round-2");
+    expect(again.tx.message.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          threadId_clientNonce: {
+            threadId: "thread-global",
+            clientNonce: "delegated-round:round:effect-round-2",
+          },
+        },
+      }),
+    );
     expect(returnedTo(again)).toEqual([]);
   });
 
   it("posts a round once where it was asked, though two requests return it", async () => {
     // fosp 11-20 (1ae3a9c3): "再来5个" and a correction a minute later both got the round, 11 s apart.
     const round = "5 people this round:\n\n1. **Yu Zhang** · Data Engineer · EcoWater";
-    const harness = team({ later: [said(round)], shown: [said(round)] });
-    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    expect(returnedTo(harness)).not.toContainEqual({ kind: "text", text: round });
-  });
-
-  it("does not post a round whose people Kruit already listed where it was asked", async () => {
-    // fosp 11-21 (f2a69ebe): Kruit read the recorded round and listed its people itself; the
-    // round posted 90 s later read as the list sent twice.
-    const round =
-      "2 people this round:\n\n1. **[Yanan Wang](https://www.linkedin.com/in/yw)** · Senior Data Engineer · Shopee\n2. **[赵磊](https://www.linkedin.com/in/zl)** · 高级数据工程师 · Ant Group";
-    const listed =
-      "新找到 2 位：\n\n1. [Yanan Wang](https://www.linkedin.com/in/yw) — Shopee\n2. [赵磊](https://www.linkedin.com/in/zl) — Ant Group";
-    const harness = team({ later: [said(round)], shown: [said(listed)] });
+    const harness = team({ later: [listed(round, "effect-round-3")] });
+    harness.tx.message.findUnique.mockImplementation(
+      async (args: { where: { threadId_clientNonce: { clientNonce: string } } }) =>
+        args.where.threadId_clientNonce.clientNonce === "delegated-round:round:effect-round-3"
+          ? { id: "message-round" }
+          : null,
+    );
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
     expect(returnedTo(harness)).toEqual([]);
-    // A different earlier round naming only one of them does not count.
-    const other = team({ later: [said(round)], shown: [said("1. [Yanan Wang](x) — Shopee")] });
-    await returnDelegatedTeamOutcome(other.deps, { ...roleRun, botId: "bot-sourcer" });
-    expect(returnedTo(other)).toEqual([{ kind: "text", text: round }]);
   });
 
   it("brings the round's people back with the team's closing line", async () => {
@@ -878,11 +888,11 @@ describe("delegating to a role team in another conversation", () => {
     // the people or say who has both must-haves.
     const round = "10 people this round:\n\n1. **Hima Y** · Sr Data Engineer · Starbucks";
     const harness = team({
-      later: [said("Recording the feedback."), said(round), said("Round 2 is posted.")],
+      later: [said("Recording the feedback."), listed(round), said("Round 2 is posted.")],
     });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
     // The round itself is posted; the team's closing line stays in its own chat.
-    expect(returnedTo(harness)[0]).toEqual({ kind: "text", text: round });
+    expect(returnedTo(harness)[0]).toEqual(roundList(round));
   });
 
   it("returns the team's answer as written, with where its saved people are read", async () => {
@@ -937,7 +947,7 @@ describe("delegating to a role team in another conversation", () => {
     const harness = team({
       roleId: "role-1",
       root: { ...delegation, text: "Senior SRE in Austin, can you pull some people?" },
-      later: [said(round)],
+      later: [listed(round)],
     });
     const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
     const person = (slug: string, name: string) => ({
@@ -971,9 +981,9 @@ describe("delegating to a role team in another conversation", () => {
       "10 people this round:\n\n1. **[Nirneth M](https://www.linkedin.com/in/nirnethm)**";
     const harness = team({
       later: [
-        said(round),
+        listed(round),
         { role: "user", blocks: [{ kind: "text", text: "arpit doesn't fit, more like the rest" }] },
-        said("10 people this round:\n\n1. **[Akhil K](https://www.linkedin.com/in/akhil)**"),
+        listed("10 people this round:\n\n1. **[Akhil K](https://www.linkedin.com/in/akhil)**"),
       ],
     });
     await returnDelegatedTeamOutcome(harness.deps, roleRun);
@@ -998,10 +1008,14 @@ describe("delegating to a role team in another conversation", () => {
     };
     const round = "9 people this round:\n\n1. **[Kiran K](https://www.linkedin.com/in/kk)** · SDE";
     const harness = team({
-      later: [card, { role: "user", blocks: [{ kind: "text", text: label }] }, said(round)],
+      later: [
+        card,
+        { role: "user", blocks: [{ kind: "text", text: label, cardAnswer: true }] },
+        listed(round),
+      ],
     });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    expect(returnedTo(harness)).toEqual([{ kind: "text", text: round }]);
+    expect(returnedTo(harness)).toEqual([roundList(round)]);
   });
 
   it("stops at the recruiter's own next message in the role conversation", async () => {

@@ -10,6 +10,7 @@ import {
   decodeLoginSecret,
   isPrivateNetworkHost,
   SecretHttpRequest,
+  unsupportedSecretHeader,
 } from "@rakazo/contracts";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { withTransactionRetry } from "@rakazo/db";
@@ -74,6 +75,8 @@ export function allowPrivateHttpSecretOrigins(): boolean {
   return process.env.RAKAZO_SECRETS_ALLOW_PRIVATE_HTTP === "1";
 }
 
+class CredentialDestinationError extends Error {}
+
 export function normalizeSecretDestination(value: unknown): BotSecretDestination {
   const parsed = botSecretDestinationSchema({
     allowPrivateHttpOrigin: allowPrivateHttpSecretOrigins(),
@@ -85,7 +88,7 @@ export function normalizeSecretDestination(value: unknown): BotSecretDestination
     const detail = parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "credential"}: ${issue.message}`)
       .join("; ");
-    throw new Error(`Invalid credential destination — ${detail}`);
+    throw new CredentialDestinationError(`Invalid credential destination — ${detail}`);
   }
   if (parsed.data.auth.type === "command") return parsed.data;
   return { ...parsed.data, origin: new URL(parsed.data.origin).origin };
@@ -284,7 +287,7 @@ export function resolveRequestSecretDestination(
     } catch (error) {
       return {
         error:
-          error instanceof Error && error.message.startsWith("Invalid credential destination")
+          error instanceof CredentialDestinationError
             ? error.message
             : "Specify a credential name, HTTPS origin, and auth method.",
       };
@@ -362,11 +365,10 @@ function authMetadata(value: unknown): unknown {
   if (!isPlainObject(value)) return undefined;
   if (value.type === "header") {
     if (typeof value.name !== "string") return { type: "header" };
-    const header = BotSecretAuth.safeParse({ type: "header", name: value.name });
-    const unsupported =
-      !header.success &&
-      header.error.issues.some((issue) => issue.message === "Unsupported credential header");
-    return { type: "header", name: unsupported ? "Cookie" : "bad header" };
+    return {
+      type: "header",
+      name: unsupportedSecretHeader(value.name) ? "Cookie" : "bad header",
+    };
   }
   if (value.type === "basic") {
     if (typeof value.username !== "string") return { type: "basic" };

@@ -334,16 +334,9 @@ export async function runAutoReviewJudge(input: {
       },
     )) {
       if (event.type === "usage" && !event.accounted) await input.onUsage?.(event);
-      if (
-        event.type === "text" &&
-        /^(?:I hit a problem:|Unknown model )/i.test(event.text.trim())
-      ) {
-        failed = true;
-      }
-      if (event.type === "done" && event.text) {
-        const body = event.text.trim();
-        if (/^(?:I hit a problem:|Unknown model )/i.test(body)) failed = true;
-        else text = body;
+      if (event.type === "done") {
+        if (event.failed) failed = true;
+        else if (event.text) text = event.text.trim();
       }
     }
   } catch {

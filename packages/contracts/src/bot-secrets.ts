@@ -11,16 +11,16 @@ export const BotSecretName = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 // before the pattern tightened stays listable and removable instead of failing a whole list call.
 export const StoredBotSecretName = z.string().min(1).max(256);
 
+/** A header the product sets itself or that would change where a request goes. */
+export const unsupportedSecretHeader = (name: string) =>
+  /^(host|connection|content-length|content-type|transfer-encoding|te|trailer|upgrade|cookie|origin|referer|accept|proxy-.*|sec-.*|.*forwarded.*)$/i.test(
+    name,
+  );
+
 const SecretHeaderName = z
   .string()
   .regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,120}$/)
-  .refine(
-    (name) =>
-      !/^(host|connection|content-length|content-type|transfer-encoding|te|trailer|upgrade|cookie|origin|referer|accept|proxy-.*|sec-.*|.*forwarded.*)$/i.test(
-        name,
-      ),
-    "Unsupported credential header",
-  );
+  .refine((name) => !unsupportedSecretHeader(name), "Unsupported credential header");
 
 export const BotSecretAuth = z.discriminatedUnion("type", [
   z.object({ type: z.literal("bearer") }),

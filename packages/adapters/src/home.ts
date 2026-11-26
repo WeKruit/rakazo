@@ -14,6 +14,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import type { AdapterContext, AgentHomeStore, PortableFile } from "@rakazo/adapter-kit";
+import { ByteLimitError } from "@rakazo/adapter-kit";
 import { fileHandlePath } from "./file-handle-path.js";
 
 type StoreSignal = Pick<AdapterContext, "signal"> & Partial<AdapterContext>;
@@ -143,7 +144,7 @@ export class LocalAgentHomeStore implements AgentHomeStore {
       if (options?.maxBytes !== undefined) {
         const info = await handle.stat();
         if (info.size > options.maxBytes) {
-          throw new Error(`agent home file exceeds ${options.maxBytes} bytes`);
+          throw new ByteLimitError(`agent home file exceeds ${options.maxBytes} bytes`);
         }
       }
       return await handle.readFile("utf8");

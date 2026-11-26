@@ -18,6 +18,7 @@ import {
   loadMcpCredentialRecord,
   McpConnector,
   NO_EMAIL_HISTORY_YET,
+  NoOutreachCampaignError,
   PATH_REFUSAL_NOTE,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
@@ -552,7 +553,7 @@ describe("local native Instantly thread history", () => {
     vi.spyOn(
       f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
       "instantlyCampaignScope",
-    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    ).mockRejectedValue(new NoOutreachCampaignError());
     const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     try {
       await f.connector.discoverTools(f.context as never);
@@ -577,7 +578,7 @@ describe("local native Instantly thread history", () => {
     vi.spyOn(
       f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
       "instantlyCampaignScope",
-    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    ).mockRejectedValue(new NoOutreachCampaignError());
     try {
       await f.connector.discoverTools(f.context as never);
       const result = await f.collect({}, { ...route, toolName: "list_emails" });
@@ -596,7 +597,7 @@ describe("local native Instantly thread history", () => {
     vi.spyOn(
       f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
       "instantlyCampaignScope",
-    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    ).mockRejectedValue(new NoOutreachCampaignError());
     try {
       await f.connector.discoverTools(f.context as never);
       const result = await f.collect(

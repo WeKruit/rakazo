@@ -63,10 +63,8 @@ describe("reply suggestion", () => {
     );
   });
 
-  it("drops empty, failed or overlong output", () => {
+  it("drops empty or overlong output", () => {
     expect(cleanSuggestion("")).toBeNull();
-    expect(cleanSuggestion("I hit a problem: timeout")).toBeNull();
-    expect(cleanSuggestion("No response. Try again.")).toBeNull();
     expect(cleanSuggestion("x".repeat(200))).toBeNull();
     expect(cleanSuggestion("「看看前十个」")).toBe("看看前十个");
   });

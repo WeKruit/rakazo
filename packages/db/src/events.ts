@@ -282,22 +282,17 @@ export async function questionClosedByChat(
       blocks: { array_contains: [{ kind: "ask" }] },
     },
     orderBy: { seq: "desc" },
-    select: { blocks: true, runId: true, seq: true },
+    select: { blocks: true, seq: true },
   });
   const parsed = MessageBlockSchema.array().safeParse(latest?.blocks);
   const ask = parsed.success ? parsed.data.findLast((block) => block.kind === "ask") : undefined;
-  if (ask?.kind !== "ask" || ask.status !== "answered" || typeof ask.answer !== "string") return;
-  if (!latest?.runId) return;
+  if (!latest || ask?.kind !== "ask" || ask.status !== "answered" || !ask.answeredInChat) return;
+  if (typeof ask.answer !== "string") return;
   const spokeSince = await tx.message.findFirst({
     where: { threadId: input.threadId, botId: input.botId, role: "bot", seq: { gt: latest.seq } },
     select: { id: true },
   });
   if (spokeSince) return;
-  const run = await tx.run.findFirst({
-    where: { id: latest.runId, threadId: input.threadId },
-    select: { task: { select: { prompt: true } } },
-  });
-  if (!run?.task.prompt.endsWith(`${ask.text}\nAnswer: ${chatReplyToAsk(ask.answer)}`)) return;
   return { question: ask.text, reply: ask.answer };
 }
 
@@ -1262,6 +1257,7 @@ async function commitAnswerRunInput(
       {
         kind: "text" as const,
         text: ordinaryAsk ? (selectedChoice?.label ?? answerText) : answerText,
+        ...(ordinaryAsk ? { cardAnswer: true as const } : {}),
       },
     ];
     const utterance = await createThreadMessageInTransaction(tx, {
@@ -1389,6 +1385,7 @@ async function commitAnswerRunInput(
           ...block,
           status: "answered" as const,
           answer: recordedAnswer,
+          ...(input.answerMessageId ? { answeredInChat: true as const } : {}),
           ...(block.mailReply
             ? {
                 mailReply: {
