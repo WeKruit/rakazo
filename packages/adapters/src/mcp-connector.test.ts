@@ -755,13 +755,17 @@ describe("local native Instantly thread history", () => {
                 {
                   campaignId: anchor.campaign_id,
                   stopOnReply: false,
-                  warning: expect.stringMatching(/stop_on_reply is off/),
+                  warning: expect.stringContaining(
+                    `call pause_campaign with their email and campaign_id ${anchor.campaign_id}`,
+                  ),
                 },
               ],
             },
           },
         },
       ]);
+      // Audit 11-26: the advice named the mail service and asked for a change nobody could make.
+      expect(JSON.stringify(events)).not.toMatch(/in Instantly|stop_on_reply is off/);
       const campaignCalls = f.rest.mock.calls.filter((call) =>
         new URL(logicalHref(...call)).pathname.startsWith("/api/v2/campaigns/"),
       );
@@ -4135,7 +4139,10 @@ describe("local native Instantly campaign and lead tools", () => {
       /** The campaign read after an edit fails, as a timed-out request does. */
       failReadAfterPatch: false,
       /** What the mail service's sending-status read says about the role campaign. */
-      sendingStatus: null as Record<string, unknown> | null,
+      sendingStatus: null as
+        | Record<string, unknown>
+        | ((requests: { method: string; path: string }[]) => Record<string, unknown>)
+        | null,
       lookups: [] as Record<string, unknown>[],
       /** The role's saved candidates, as a role-wide candidate read returns them. */
       candidates: [] as Record<string, unknown>[],
@@ -4264,7 +4271,11 @@ describe("local native Instantly campaign and lead tools", () => {
           return Response.json(state.campaign);
         }
         if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}/sending-status`)
-          return Response.json(state.sendingStatus ?? { diagnostics: null, summary: null });
+          return Response.json(
+            (typeof state.sendingStatus === "function"
+              ? state.sendingStatus(state.requests)
+              : state.sendingStatus) ?? { diagnostics: null, summary: null },
+          );
         if (url.pathname.startsWith(`/api/v2/campaigns/${CAMPAIGN}/`))
           return Response.json(state.campaign);
         const listed = state.campaigns.find((c) => url.pathname === `/api/v2/campaigns/${c.id}`);
@@ -4639,9 +4650,9 @@ describe("local native Instantly campaign and lead tools", () => {
         body: { email_gap: 1, random_wait_max: 1 },
       },
       { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
-      // Whether the mail service counts the mailbox, before promising a time.
-      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}/sending-status` },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
+      // What the mail service says once the send started, before promising a time.
+      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}/sending-status` },
     ]);
   });
 
@@ -5117,7 +5128,7 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(events[0]).toMatchObject({ type: "result" });
     const paths = f.state.requests.map((r) => `${r.method} ${r.path}`);
     expect(paths).toContain("POST /api/v2/campaigns");
-    expect(paths.at(-1)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
+    expect(paths.at(-2)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
     expect(f.result(events)).toMatchObject({ activated: true, campaignId: CAMPAIGN });
   });
 
@@ -5348,6 +5359,46 @@ describe("local native Instantly campaign and lead tools", () => {
       });
     });
 
+    it("stops one person for good without sending anything, and refuses a later send to them", async () => {
+      // Audit 11-26: "don't contact Ada again" could only pause the whole campaign, and nothing
+      // kept a later send from reaching her.
+      const { f, binding } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      f.state.existingLeads = [{ id: ABE.id, email: ABE.email }];
+      const out = f.result(
+        await f.run("pause_campaign", { email: "Abe@x.test", campaign_id: CAMPAIGN }),
+      );
+      expect(out).toMatchObject({ stopped: true, stoppedInCampaigns: [CAMPAIGN] });
+      expect(
+        f.state.requests
+          .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+          .map((r) => `${r.method} ${r.path}`),
+      ).toEqual([`DELETE /api/v2/leads/${ABE.id}`]);
+      expect(Object.keys((binding.result as { leads: object }).leads)).not.toContain(
+        "key-abe@x.test",
+      );
+      expect(f.state.effects.get("outreach-contact-stop:w1:abe@x.test")).toMatchObject({
+        kind: "outreach_contact_stop",
+        status: "completed",
+      });
+      // A later send naming them is refused before anything is added or started.
+      f.state.campaign.status = 0;
+      f.state.campaignLeads.push({ ...ABE });
+      f.state.requests.length = 0;
+      const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
+      expect((events[0] as { message: string }).message).toMatch(
+        /abe@x\.test \(the recruiter asked that they never be contacted again\)/,
+      );
+      expect(sends(f)).toEqual([]);
+      // Taken back only when the recruiter says so.
+      expect(
+        f.result(await f.run("pause_campaign", { email: "abe@x.test", allow_again: true })),
+      ).toMatchObject({ allowedAgain: true });
+      expect(
+        f.result(await f.run("activate_campaign", { recipients: ["abe@x.test"] })),
+      ).toMatchObject({ activated: true });
+    });
+
     it("takes the unnamed never-sent people out of a draft before activating it", async () => {
       const { f, binding } = await roleWithSixteen();
       const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
@@ -5356,8 +5407,8 @@ describe("local native Instantly campaign and lead tools", () => {
       const deletes = paths.filter((path) => path.startsWith("DELETE"));
       expect(deletes).toEqual(OTHERS.map((lead) => `DELETE /api/v2/leads/${lead.id}`));
       // Every removal and a re-read showing only Abe come before the one activation.
-      expect(paths.indexOf(`POST /api/v2/campaigns/${CAMPAIGN}/activate`)).toBe(paths.length - 1);
-      expect(paths.at(-2)).toBe("POST /api/v2/leads/list");
+      expect(paths.indexOf(`POST /api/v2/campaigns/${CAMPAIGN}/activate`)).toBe(paths.length - 2);
+      expect(paths.at(-3)).toBe("POST /api/v2/leads/list");
       expect(f.state.campaignLeads.map((lead) => lead.email)).toEqual(["abe@x.test"]);
       // The role's lead map drops them too, so a later send adds them again from saved emails.
       expect(Object.keys((binding.result as { leads: object }).leads)).toEqual(["key-abe@x.test"]);
@@ -5668,6 +5719,42 @@ describe("local native Instantly campaign and lead tools", () => {
         next: expect.stringContaining("cannot send right now"),
       });
       expect(out.next).not.toMatch(/minutes/);
+    });
+
+    it("reads the mailbox after a draft starts, so a first send from a broken mailbox is not on its way", async () => {
+      // Audit 11-26: the sending status was read before the draft started, when the mail service
+      // reports only "draft", so the first send from a mailbox it could not use was "on its way".
+      const { f } = await roleWithSixteen();
+      f.state.sendingStatus = (requests) =>
+        requests.some((r) => r.method === "POST" && r.path.endsWith("/activate"))
+          ? {
+              summary: {
+                status: "no_accounts_available",
+                status_message: "No sending accounts available",
+              },
+            }
+          : { summary: { status: "campaign_draft", status_message: "Draft" } };
+      const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
+      expect(out).toMatchObject({
+        activated: true,
+        delivery: "held",
+        mailServiceSays: { status: "no_accounts_available" },
+        next: expect.stringContaining("cannot send right now"),
+      });
+      expect(out.next).not.toContain("their email is on its way");
+    });
+
+    it("never calls a started send on its way while the mail service still reports it not running", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.sendingStatus = {
+        summary: { status: "campaign_paused", status_message: "Campaign is paused" },
+      };
+      const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
+      expect(out).toMatchObject({
+        delivery: "held",
+        mailServiceSays: { status: "campaign_paused" },
+      });
+      expect(out.next).not.toContain("their email is on its way");
     });
 
     it("says why the mail service is holding a confirmed send instead of promising an hour", async () => {

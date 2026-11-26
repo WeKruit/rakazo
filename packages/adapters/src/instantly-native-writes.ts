@@ -8,6 +8,7 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
 import { OWN_EMAIL_STEP, ownEmailSequences, ownFirstEmails } from "./campaign-own-emails.js";
 import { confirmedSends, sendingElsewhere } from "./campaign-send-record.js";
@@ -30,6 +31,7 @@ import {
 import { htmlToPlainText } from "./keyless-http-web.js";
 import { recipientParts, untypedAddressRefusal } from "./named-address.js";
 import { oneAtATime } from "./one-at-a-time.js";
+import { outreachStopRefusal, outreachStops, stopContact } from "./outreach-stops.js";
 import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
@@ -122,6 +124,22 @@ const UpdateLeadInterestInput = z.strictObject({
     ),
 });
 const CampaignIdInput = z.strictObject({ campaign_id: Uuid });
+const PauseCampaignInput = z
+  .strictObject({
+    campaign_id: Uuid.optional().describe(
+      "The campaign to pause; with email, the campaign that emailed that person, when known.",
+    ),
+    email: Email.optional().describe(
+      "Stop only this person, in every campaign of this account that holds them.",
+    ),
+    allow_again: z
+      .boolean()
+      .optional()
+      .describe("With email: only when the recruiter says this person may be contacted again."),
+  })
+  .refine((input) => input.email || (input.campaign_id && !input.allow_again), {
+    message: "Pass campaign_id to pause a campaign, or email to stop one person.",
+  });
 const RoleId = z
   .string()
   .min(1)
@@ -305,9 +323,9 @@ export const nativeInstantlyWrites = [
   ),
   tool(
     "pause_campaign",
-    CampaignIdInput,
+    PauseCampaignInput,
     false,
-    "Pauses a campaign; stops further sends. Only when the recruiter asks to stop or hold sending: a send they confirmed is their decision, so never pause it on your own, for example to change when it goes out; tell them when it goes out instead and offer send_now.",
+    "Pauses a campaign; stops further sends. Only when the recruiter asks to stop or hold sending: a send they confirmed is their decision, so never pause it on your own, for example to change when it goes out; tell them when it goes out instead and offer send_now. With email instead, stops only that person: no follow-up or later email from this account reaches them, everyone else keeps going. Use it when the recruiter says not to contact someone again, or when a person who replied would otherwise keep getting follow-ups; it records that they are not contacted again, so later sends to them are refused, sends nothing and needs no confirmation. allow_again lifts that stop only when the recruiter says to contact them again.",
   ),
   tool(
     "get_email",
@@ -331,7 +349,7 @@ export const nativeInstantlyWrites = [
     "add_shortlist_leads",
     AddShortlistLeadsInput,
     false,
-    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence); a person passed without an email gets the one an earlier contact lookup saved. Skips people with no email, on hold or passed for the role, or already in the campaign; records candidate_key -> lead id. When the campaign is already sending, the people are kept ready instead and are emailed only through activate_campaign with them as recipients.",
+    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence); a person passed without an email gets the one an earlier contact lookup saved. Skips people with no email, on hold or passed for the role, stopped for good (pause_campaign with their email), or already in the campaign; records candidate_key -> lead id. When the campaign is already sending, the people are kept ready instead and are emailed only through activate_campaign with them as recipients.",
   ),
 ];
 const TOOL_NAMES = new Set(nativeInstantlyWrites.map((entry) => entry.toolName));
@@ -518,6 +536,27 @@ function firstEmail(campaign: Record<string, unknown> | undefined) {
     ? { subject: variant.subject, body: variant.body }
     : null;
 }
+
+/** A follow-up the campaign sends after the first email: every version of each later step. */
+type FollowUp = { after: string; subject: string; body: string };
+function followUps(campaign: Record<string, unknown> | undefined): FollowUp[] {
+  const list = Array.isArray(campaign?.sequences) ? campaign.sequences : [];
+  const steps = (list[0] as { steps?: unknown } | undefined)?.steps;
+  return (Array.isArray(steps) ? steps.slice(1) : []).flatMap((raw) => {
+    const step = raw as { delay?: unknown; delay_unit?: unknown; variants?: unknown };
+    const delay = typeof step.delay === "number" ? step.delay : 0;
+    const unit = typeof step.delay_unit === "string" ? step.delay_unit : "days";
+    const after = `${delay} ${delay === 1 ? unit.replace(/s$/, "") : unit} after the email before`;
+    return (Array.isArray(step.variants) ? step.variants : []).flatMap((variant) => {
+      const v = variant as { subject?: unknown; body?: unknown };
+      return typeof v?.body === "string"
+        ? [{ after, subject: typeof v.subject === "string" ? v.subject : "", body: v.body }]
+        : [];
+    });
+  });
+}
+const hasVariables = (emails: readonly FirstEmail[]) =>
+  emails.some((email) => `${email.subject} ${email.body}`.match(VARIABLE));
 
 /**
  * One-person first emails. The role campaign keeps its one sequence, but once a person has their
@@ -803,8 +842,10 @@ export type InstantlyActivationDisplay = {
     email: string;
     emailType?: "work" | "personal";
     personalization?: string;
-    /** This person's own first email, when it is not the role's. */
+    /** The first email exactly as this person gets it, when it is not the one shown for all. */
     firstEmail?: FirstEmail;
+    /** The follow-ups exactly as this person gets them, when they are not the ones shown for all. */
+    followUps?: FollowUp[];
     /** When this account already sent them a first email from another campaign. */
     alreadyEmailedAt?: string;
   }[];
@@ -812,8 +853,13 @@ export type InstantlyActivationDisplay = {
   recipientCount: number | null;
   stopOnReply: boolean | null;
   schedule: string | null;
-  /** The first email; null when the campaign has none, omitted when it could not be read. */
+  /**
+   * The first email everyone shown gets; null when the campaign has none, omitted when it could
+   * not be read or each person gets their own (then each recipient carries it).
+   */
   firstEmail?: { subject: string; body: string } | null;
+  /** The follow-ups everyone shown gets, in order; omitted when each person carries their own. */
+  followUps?: FollowUp[];
   /** Why this send cannot be shown as exact recipients; no card is shown. */
   refusal?: string;
   /** People a paused campaign never emailed who this send takes out of it, unemailed. */
@@ -1572,6 +1618,18 @@ export async function describeCampaignActivation(
       : wanted
         ? { refusal: "This campaign could not be read, so nothing was sent; try again." }
         : { send: "activate" as const, recipients: people, remove: [] };
+  // The card shows what each person actually gets: an email with variables is shown filled in
+  // for each recipient from the lead data the send uses (audit 11-26: raw {{firstName}}).
+  const roleEmail = !campaign
+    ? undefined
+    : !templated
+      ? (firstEmail(campaign) ?? undefined)
+      : binding?.roleEmail
+        ? { subject: binding.roleEmail.subject, body: bodyHtml(binding.roleEmail.body) }
+        : undefined;
+  const later = campaign ? followUps(campaign) : [];
+  const fillEach = roleEmail ? hasVariables([roleEmail]) : false;
+  const fillLater = hasVariables(later);
   let roleCopyShown = false;
   const recipients = ("refusal" in plan ? [] : plan.recipients).map((person) => {
     const emailType = types.get(person.email.toLowerCase());
@@ -1587,32 +1645,29 @@ export async function describeCampaignActivation(
         ? { subject: own[OWN_SUBJECT], body: own[OWN_BODY] }
         : undefined;
     if (!theirs) roleCopyShown = true;
+    const received = theirs ?? (fillEach && roleEmail ? fillFor(roleEmail, person) : undefined);
     return {
       name: fullName(person) || null,
       email: person.email,
       ...(emailType ? { emailType } : {}),
-      ...(person.personalization && !theirs ? { personalization: person.personalization } : {}),
-      ...(theirs ? { firstEmail: theirs } : {}),
+      ...(person.personalization && !received ? { personalization: person.personalization } : {}),
+      ...(received ? { firstEmail: received } : {}),
+      ...(fillLater
+        ? { followUps: later.map((step) => ({ ...step, ...fillFor(step, person) })) }
+        : {}),
     };
   });
   // A templated campaign's own step is variables: the card shows the role's email instead, and
-  // only when someone on it gets that email.
+  // only when someone on it gets that email and it reads the same for all of them.
   const shownEmail = !campaign
     ? {}
-    : !templated
-      ? { firstEmail: firstEmail(campaign) }
-      : binding?.roleEmail
-        ? roleCopyShown
-          ? {
-              firstEmail: {
-                subject: binding.roleEmail.subject,
-                body: bodyHtml(binding.roleEmail.body),
-              },
-            }
-          : {}
-        : recipients.length && !roleCopyShown
-          ? {}
-          : { firstEmail: null };
+    : !roleEmail
+      ? recipients.length && !roleCopyShown
+        ? {}
+        : { firstEmail: null }
+      : (roleCopyShown || !templated) && !(fillEach && recipients.length)
+        ? { firstEmail: roleEmail }
+        : {};
   return {
     ...("refusal" in plan ? { refusal: plan.refusal } : {}),
     ...(campaign?.senderState &&
@@ -1639,6 +1694,7 @@ export async function describeCampaignActivation(
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
     schedule: sendTime(campaign, binding, sendNow),
     ...shownEmail,
+    ...(later.length && !(fillLater && recipients.length) ? { followUps: later } : {}),
     ...("remove" in plan && plan.remove.length && campaign?.status !== DRAFT
       ? { takenOut: plan.remove.map((person) => person.email) }
       : {}),
@@ -1647,6 +1703,8 @@ export async function describeCampaignActivation(
 
 export type InstantlyReplyDisplay = {
   to: string | null;
+  /** Everyone copied on the reply: the card shows every recipient the send reaches. */
+  cc?: string[];
   from: string | null;
   subject: string;
   inReplyTo: string | null;
@@ -1673,8 +1731,14 @@ export async function describeReplyToEmail(
   const text = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
   const originalSubject = text(original?.subject);
   const wanted = input.success ? input.data : undefined;
+  const cc = wanted?.cc_address_email_list
+    ? addressparser(wanted.cc_address_email_list, { flatten: true }).flatMap((entry) =>
+        entry.address ? [entry.address] : [],
+      )
+    : [];
   return {
     to: text(original?.from_address_email),
+    ...(cc.length ? { cc } : {}),
     from: text(wanted?.eaccount) ?? text(original?.eaccount),
     subject:
       text(wanted?.subject) ??
@@ -1731,21 +1795,31 @@ export async function requireReplySendingMailboxReady(
   }
   const roleId = await activeRoleId(prisma, context);
   if (
-    !roleId ||
     typeof original.campaign_id !== "string" ||
     !original.campaign_id.trim() ||
     typeof original.thread_id !== "string" ||
     !original.thread_id.trim()
   )
     throw new MailReplySendingError("sender_unavailable");
-  const key = bindingKey(serverId, roleId);
+  const campaignId = original.campaign_id;
+  const key = roleId ? bindingKey(serverId, roleId) : null;
+  // A one-off campaign made outside a role (create_campaign) is recorded under its own key with
+  // no role, so a reply to its email is proven by that record wherever the recruiter asks.
+  const proofs = [
+    ...(key && roleId
+      ? [key, historyKey(serverId, roleId), `${key}:campaign:${campaignId}`].map((k) => ({
+          idempotencyKey: k,
+          scope: { request: { path: ["roleId"], equals: roleId } },
+        }))
+      : []),
+    {
+      idempotencyKey: `instantly-direct-campaign:${serverId}:${campaignId}`,
+      scope: { request: { path: ["direct"], equals: true } },
+    },
+  ];
   let owned: Partial<RoleBinding> | null = null;
   // Existing native associations have unique keys; never scan unrelated effect history for proof.
-  for (const idempotencyKey of [
-    key,
-    historyKey(serverId, roleId),
-    `${key}:campaign:${original.campaign_id}`,
-  ]) {
+  for (const { idempotencyKey, scope } of proofs) {
     const binding = await prisma.externalEffect.findUnique({
       where: {
         idempotencyKey,
@@ -1755,8 +1829,8 @@ export async function requireReplySendingMailboxReady(
         status: "completed",
         AND: [
           { request: { path: ["serverId"], equals: serverId } },
-          { request: { path: ["roleId"], equals: roleId } },
-          { result: { path: ["campaignId"], equals: original.campaign_id } },
+          { result: { path: ["campaignId"], equals: campaignId } },
+          scope,
         ],
       },
       select: { result: true },
@@ -2194,7 +2268,7 @@ async function addSavedRecipients(
   const stopped = candidates.filter((c) => out.onHoldOrPassed.includes(c.candidate_key));
   if (stopped.length)
     throw new Error(
-      `Nothing was saved: ${stopped.map((c) => [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email).join(", ")} is on hold or passed for this role. Ask the recruiter one question: take them off hold and email them, or leave them out?`,
+      `Nothing was saved: ${stopped.map((c) => [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email).join(", ")} is on hold or passed for this role, or the recruiter asked that they not be contacted again. Ask the recruiter one question: contact them again and email them, or leave them out?`,
     );
   return candidates.map((c) => c.email!);
 }
@@ -2463,6 +2537,15 @@ async function addShortlistLeads(
       })
       .map((candidate) => candidate.candidateKey),
   );
+  // People the recruiter asked never to contact again are not added either.
+  const doNotContact = await outreachStops(
+    prisma,
+    context,
+    null,
+    candidates.flatMap((c) => (c.email ? [c.email] : [])),
+  );
+  for (const c of candidates)
+    if (c.email && doNotContact.has(c.email.toLowerCase())) stopped.add(c.candidate_key);
   const named = candidates.filter(isNamedEmail);
   if (named.length) {
     const known = [
@@ -2721,6 +2804,14 @@ async function sendCampaign(
     input.send_now === true,
   );
   if ("refusal" in plan) throw new Error(plan.refusal);
+  // Nobody stopped, on hold or passed is emailed, whatever the card said when it was shown.
+  const stops = await outreachStops(
+    prisma,
+    context,
+    await activeRoleId(prisma, context),
+    plan.recipients.map((person) => person.email),
+  );
+  if (stops.size) throw new Error(outreachStopRefusal(stops));
   if (input.resend !== true) {
     const elsewhere = await sendingElsewhere(prisma, (id) => rest("GET", `/campaigns/${id}`), {
       spaceId: context.spaceId,
@@ -2783,22 +2874,30 @@ async function sendCampaign(
       sendingToday: campaign.sendingToday,
     };
   }
-  // Inside sending hours a confirmed send is queued, not sent: say until when.
-  // A mailbox the mail service does not count holds every send; say so instead of a time.
-  const blocked = await mailboxBlocked(rest, campaignId);
-  const paced = (count: number) => ({
-    next: blocked
-      ? `Nobody is emailed and nobody will be yet: the mail service says "${blocked.message}" for this campaign's sending mailbox (${(Array.isArray(campaign.email_list) ? campaign.email_list : []).join(", ")}). Tell the recruiter the email has not gone out because that sending mailbox cannot send right now, and give no time; it needs the mailbox fixed before anything leaves.`
-      : `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter their email is on its way and that time, in plain words (never "queue"), never that it was sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still on its way, not failed, so never take that answer back.`,
-    ...(blocked ? { mailServiceSays: blocked } : {}),
-  });
+  // Inside sending hours a confirmed send is queued, not sent: say until when. What the mail
+  // service says is read after the send started: before it, a draft reports only that it is a
+  // draft, which hid a mailbox that cannot send (audit 11-26). Any hold it reports is the state.
+  const paced = async (count: number) => {
+    const held = await sendingHeld(rest, campaignId);
+    const mailbox = (Array.isArray(campaign.email_list) ? campaign.email_list : []).join(", ");
+    return held
+      ? {
+          delivery: "held" as const,
+          mailServiceSays: held,
+          next: `Nobody is emailed and nobody will be yet: the mail service says "${held.message}" for this campaign${mailbox ? ` (it sends from ${mailbox})` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}. Tell the recruiter the email has not gone out and why in plain words${MAILBOX_BLOCKED.has(held.status) ? ": that sending mailbox cannot send right now, and it needs the mailbox fixed before anything leaves" : ""}; never say it is on its way, and give no time it has not given.`,
+        }
+      : {
+          delivery: "on_its_way" as const,
+          next: `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter their email is on its way and that time, in plain words (never "queue"), never that it was sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still on its way, not failed, so never take that answer back.`,
+        };
+  };
   if (plan.send === "now") {
     if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
     return {
       sendingNow: true,
       campaignId,
       recipients: plan.recipients.map((person) => person.email),
-      ...paced(plan.recipients.length),
+      ...(await paced(plan.recipients.length)),
     };
   }
   const sendingMailbox = Array.isArray(campaign.email_list) ? campaign.email_list : [];
@@ -2807,6 +2906,7 @@ async function sendCampaign(
   const when =
     later && !later.now
       ? {
+          delivery: "scheduled" as const,
           firstEmailAt: later.at,
           next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are waiting and their first email goes out ${later.local}. Tell the recruiter that time and that activate_campaign send_now can send them now; it is not a failure.`,
         }
@@ -2857,7 +2957,7 @@ async function sendCampaign(
       campaignId,
       sendingMailbox,
       recipients: sent,
-      ...(later && !later.now ? when : paced(sent.length)),
+      ...(later && !later.now ? when : await paced(sent.length)),
       notCreatedByProvider: plan.recipients
         .filter((person) => !sent.includes(person.email))
         .map((person) => person.email),
@@ -2899,7 +2999,7 @@ async function sendCampaign(
     campaignId,
     sendingMailbox: Array.isArray(activated.email_list) ? activated.email_list : sendingMailbox,
     recipients: plan.recipients.map((person) => person.email),
-    ...(later && !later.now ? when : paced(plan.recipients.length)),
+    ...(later && !later.now ? when : await paced(plan.recipients.length)),
   };
 }
 
@@ -2999,10 +3099,6 @@ const MAILBOX_BLOCKED = new Set([
   "campaign_accounts_unhealthy",
   "campaign_account_suspended",
 ]);
-async function mailboxBlocked(rest: InstantlyRest, campaignId: string) {
-  const held = await sendingHeld(rest, campaignId);
-  return held && MAILBOX_BLOCKED.has(held.status) ? held : null;
-}
 
 /**
  * A draft whose people another of this account's campaigns is sending: the send went out from
@@ -3742,11 +3838,15 @@ export async function runInstantlyWrite(
         activateCampaign(prisma, rest, context, serverId, input, Boolean(owned)),
       );
     }
-    case "native_instantly_pause_campaign":
+    case "native_instantly_pause_campaign": {
+      const input = PauseCampaignInput.parse(args);
+      if (input.email)
+        return stopContact(prisma, rest, context, serverId, { ...input, email: input.email });
       return {
-        ...(await rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`)),
+        ...(await rest("POST", `/campaigns/${input.campaign_id}/pause`)),
         next: PAUSED_NEXT,
       };
+    }
     case "native_instantly_get_email": {
       const input = EmailIdInput.parse(args);
       const original = await readEmail(rest, input.id);

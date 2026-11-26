@@ -86,11 +86,24 @@ describe("Gmail send from the recruiter's own mailbox", () => {
     // A self-signup account: a credit limit and no product sending mailbox.
     const account = { usageCreditLimit: 10_000 as number | null };
     const mailboxes: { result: unknown }[] = [];
+    /** Earlier sends from this mailbox, as their effects record them. */
+    const ownSends: { result: unknown; updatedAt: Date }[] = [];
     const prisma = {
       mcpServer: { count: vi.fn(async () => 1) },
       botMcpServer: { findFirst: vi.fn(async () => assignment) },
       user: { findUnique: vi.fn(async () => account) },
-      externalEffect: { findMany: vi.fn(async () => mailboxes) },
+      externalEffect: {
+        findMany: vi.fn(async ({ where }: { where: { kind?: unknown } }) =>
+          typeof where.kind === "object" ? ownSends : mailboxes,
+        ),
+        // The recruiter asked that stopped@example.test never be contacted again.
+        findUnique: vi.fn(async ({ where }: { where: { idempotencyKey: string } }) =>
+          where.idempotencyKey === "outreach-contact-stop:w1:stopped@example.test"
+            ? { spaceId: "w1", kind: "outreach_contact_stop", status: "completed" }
+            : null,
+        ),
+      },
+      $queryRaw: vi.fn(async () => []),
     };
     const connector = new McpConnector(prisma as never, {} as never, { network }, {
       providerFor: vi.fn(async () => ({ tokens: async () => ({ access_token: "tok-1" }) })),
@@ -122,6 +135,8 @@ describe("Gmail send from the recruiter's own mailbox", () => {
         structuredContent: {
           sent: true,
           to: "a@example.test",
+          subject: "Re: Hi",
+          sentAt: expect.any(String),
           messageId: "sent-1",
           threadId: "t1",
         },
@@ -134,6 +149,21 @@ describe("Gmail send from the recruiter's own mailbox", () => {
     expect(mail.head).toContain("In-Reply-To: <m1@mail.test>");
     expect(mail.body).toBe("Following up.");
     expect(JSON.stringify(sent)).not.toContain("tok-1");
+
+    // Audit 11-26: own-mailbox sends skipped the checks a campaign send makes. Someone stopped is
+    // never emailed, and a second new email to someone already emailed waits for the recruiter.
+    const checked = requests.length;
+    expect(await run({ to: ["stopped@example.test"], subject: "Hi", body: "Hello" })).toEqual([
+      { type: "error", message: expect.stringMatching(/never be contacted again/) },
+    ]);
+    ownSends.push({
+      result: (sent as { data: unknown }).data,
+      updatedAt: new Date("2026-11-25T10:00:00Z"),
+    });
+    expect(await run({ to: ["A@example.test"], subject: "Hi again", body: "Hello" })).toEqual([
+      { type: "error", message: expect.stringMatching(/already emailed a@example\.test/) },
+    ]);
+    expect(requests).toHaveLength(checked);
 
     // Accounts we set up send through their product mailbox, never the recruiter's own email.
     const sends = requests.length;

@@ -505,6 +505,51 @@ describe("buildApprovalAskBlock", () => {
     expect(card(null)).toContain("Body: no email content yet");
   });
 
+  it("shows every email the send approves, each person's as they get it, in plain words", () => {
+    // Audit 11-26: follow-ups were never on the card, and it showed raw stored states.
+    const block = buildApprovalAskBlock("e", "instantly__demo__activate_campaign", {}, [], {
+      oneTimeOnly: true,
+      instantlyActivation: {
+        senderState: { state: "active", warmup: "active", readyAt: null },
+        campaignName: "Founding Engineer",
+        status: "Paused",
+        mailbox: "team@example.test",
+        recipients: [
+          {
+            name: "Ada Lovelace",
+            email: "ada@example.test",
+            firstEmail: { subject: "Founding role", body: "<p>Hi Ada</p>" },
+            followUps: [{ after: "3 days after the email before", subject: "", body: "<p>Ada?</p>" }],
+          },
+        ],
+        recipientCount: 1,
+        stopOnReply: true,
+        schedule: "now",
+      },
+    });
+    expect(block.detail).toBe(
+      [
+        "Role: Founding Engineer",
+        "From: team@example.test",
+        "Sending address: ready to send",
+        "Warmup: warming up",
+        "To (1):",
+        "- Ada Lovelace <ada@example.test>",
+        "  Subject: Founding role",
+        "  Body:",
+        "  Hi Ada",
+        "  Follow-up 1, 3 days after the email before:",
+        "  Subject: (a reply in the same thread)",
+        "  Body:",
+        "  Ada?",
+        "Send time: now",
+        "Campaign: paused; this send resumes it",
+        "",
+        "Confirm sending these emails to these recipients",
+      ].join("\n"),
+    );
+  });
+
   it("shows a vendor-free reply card that sends only on confirmation", () => {
     const block = buildApprovalAskBlock(
       "reply-effect",
@@ -537,6 +582,24 @@ describe("buildApprovalAskBlock", () => {
     );
     expect(`${block.text}\n${block.detail}`).not.toContain("Instantly");
     expect(block.detail).not.toContain("7a0a8e6e");
+    const copied = buildApprovalAskBlock(
+      "reply-effect",
+      "instantly__demo__reply_to_email",
+      { reply_to_uuid: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69", body: { text: "Thanks" } },
+      [],
+      {
+        oneTimeOnly: true,
+        instantlyReply: {
+          to: "ada@example.test",
+          cc: ["lead@client.test"],
+          from: "team@example.test",
+          subject: "Re: Founding Engineer",
+          inReplyTo: null,
+          body: "Thanks",
+        },
+      },
+    );
+    expect(copied.detail).toContain("To: ada@example.test\nCc: lead@client.test\n");
     expect(block.actions).toEqual([
       { id: "allow", label: "Confirm and send" },
       { id: "deny", label: "Cancel" },

@@ -82,6 +82,7 @@ import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
 import { McpNotConnectedError, type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { addressTypedInConversation } from "./named-address.js";
+import { ownMailboxSendRefusal, recordOwnMailboxSend } from "./own-mailbox-sends.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   excludeFoundPeople,
@@ -508,6 +509,12 @@ const GmailSendInput = z.strictObject({
     .regex(/^[0-9a-f]{6,64}$/i)
     .optional()
     .describe("To follow up, the Gmail thread id of the earlier email to this person."),
+  resend: z
+    .boolean()
+    .optional()
+    .describe(
+      "Only when the recruiter asks for a new separate email to someone this account already emailed.",
+    ),
 });
 
 /**
@@ -2026,6 +2033,16 @@ export class McpConnector implements ConnectorProvider {
           `${server.name} is not connected; call request_connection with serverId "${server.id}".`,
         );
       redactions.push(token);
+      // The same checks a campaign send makes, from records, right before it goes out.
+      const refusal = await ownMailboxSendRefusal(this.prisma, context, {
+        to: input.to[0]!,
+        replyThreadId: input.replyThreadId,
+        resend: input.resend,
+      });
+      if (refusal) {
+        yield { type: "error", message: refusal };
+        return;
+      }
       const gmail = async (path: string, init?: RequestInit) => {
         const response = await safeFetch(
           new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`),
@@ -2060,12 +2077,32 @@ export class McpConnector implements ConnectorProvider {
           ...(input.replyThreadId ? { threadId: input.replyThreadId } : {}),
         }),
       });
+      const sentAt = new Date().toISOString();
+      const mailbox = await gmail("profile")
+        .then((profile) => (typeof profile.emailAddress === "string" ? profile.emailAddress : null))
+        .catch(() => null);
+      // The send's record, keyed by the mailbox's own message and thread ids.
+      if (typeof sent.id === "string")
+        await recordOwnMailboxSend(this.prisma, context, {
+          sourceId: server.id,
+          sourceName: server.name,
+          mailbox,
+          to: input.to[0]!,
+          subject: input.subject,
+          body: input.body,
+          messageId: sent.id,
+          threadId: typeof sent.threadId === "string" ? sent.threadId : null,
+          sentAt,
+        });
       yield {
         type: "result",
         data: {
           structuredContent: {
             sent: true,
             to: input.to[0],
+            ...(mailbox ? { from: mailbox } : {}),
+            subject: input.subject,
+            sentAt,
             messageId: sent.id,
             threadId: sent.threadId,
           },
@@ -2665,8 +2702,9 @@ export class McpConnector implements ConnectorProvider {
       // sequence field and Lead.status (2 Paused, 3 Completed) is readOnly. POST
       // /api/v2/leads/update-interest-status is documented to complete leads and trigger
       // automations/subsequences, not to stop a sequence, so it is not used as a stop.
-      // The native stop is the campaign setting GET /api/v2/campaigns/{id} stop_on_reply
-      // ("Whether to stop the campaign on reply"); report it, never fabricate a stop.
+      // The campaign setting GET /api/v2/campaigns/{id} stop_on_reply ("Whether to stop the
+      // campaign on reply") is reported; when it does not stop them, the agent stops that one
+      // person with pause_campaign and their email, which takes them out of the campaign.
       // https://developer.instantly.ai/api-reference/campaign/get-campaign
       const repliedCampaigns = [
         ...new Set(
@@ -2718,10 +2756,7 @@ export class McpConnector implements ConnectorProvider {
           ...(stopOnReply
             ? {}
             : {
-                warning:
-                  stopOnReply === false
-                    ? "The lead replied but this campaign's stop_on_reply is off, so Instantly keeps sending follow-ups. Turn on stop on reply for the campaign in Instantly."
-                    : "The lead replied but whether this campaign stops on reply could not be confirmed; check stop on reply for the campaign in Instantly.",
+                warning: `This person replied, but ${stopOnReply === false ? "this campaign keeps sending them its follow-ups" : "whether this campaign stops their follow-ups could not be confirmed"}. Unless the recruiter wants the follow-ups to continue, call pause_campaign with their email and campaign_id ${campaignId}: it stops only them and sends nothing. Tell the recruiter in plain words that their follow-ups were stopped, never naming the mail service.`,
               }),
         });
       }

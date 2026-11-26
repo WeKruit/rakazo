@@ -206,6 +206,45 @@ export function buildApprovalAskBlock(
 }
 
 const MAX_RECIPIENT_LINES = 20;
+/** Plain words for the sending address, the campaign and its warmup, never the stored states. */
+const SENDER_WORDS: Record<string, string> = {
+  active: "ready to send",
+  provisioning: "still being set up, cannot send yet",
+  setup_pending: "still being set up, cannot send yet",
+  unavailable: "cannot send right now",
+};
+const WARMUP_WORDS: Record<string, string> = {
+  active: "warming up",
+  starting: "starting to warm up",
+  paused: "not warming up",
+};
+const CAMPAIGN_WORDS: Record<string, string> = {
+  Active: "already sending to others",
+  Paused: "paused; this send resumes it",
+  Completed: "finished earlier; this send starts it again",
+};
+/** One email as the card shows it: subject (or the thread it replies in) and full body. */
+function emailLines(
+  email: { subject: string; body: string },
+  indent: string,
+  heading?: string,
+): string[] {
+  return [
+    ...(heading ? [`${indent}${heading}`] : []),
+    `${indent}Subject: ${email.subject || "(a reply in the same thread)"}`,
+    `${indent}Body:`,
+    ...htmlToPlainText(email.body)
+      .split("\n")
+      .map((line) => (line && indent ? `${indent}${line}` : line)),
+  ];
+}
+const followUpLines = (
+  followUps: readonly { after: string; subject: string; body: string }[],
+  indent: string,
+) =>
+  followUps.flatMap((step, index) =>
+    emailLines(step, indent, `Follow-up ${index + 1}, ${step.after}:`),
+  );
 /** The send-confirmation card body: no ids, only what the human is approving. */
 function formatInstantlyActivation(display: InstantlyActivationDisplay) {
   const unknown = (value: string | number | null) => (value === null ? "unknown" : String(value));
@@ -220,7 +259,10 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     `Role: ${display.campaignName ?? "this role"}`,
     `From: ${unknown(display.mailbox)}`,
     ...(display.senderState
-      ? [`Sending address: ${display.senderState.state}`, `Warmup: ${display.senderState.warmup}`]
+      ? [
+          `Sending address: ${SENDER_WORDS[display.senderState.state] ?? "not known"}`,
+          `Warmup: ${WARMUP_WORDS[display.senderState.warmup] ?? "not known"}`,
+        ]
       : []),
     `To (${count}):`,
     ...shown.flatMap((r) => [
@@ -231,15 +273,8 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
             `  First email already confirmed: ${r.alreadyEmailedAt.slice(0, 16).replace("T", " ")} UTC`,
           ]
         : []),
-      ...(r.firstEmail
-        ? [
-            `  Subject: ${r.firstEmail.subject}`,
-            "  Body:",
-            ...htmlToPlainText(r.firstEmail.body)
-              .split("\n")
-              .map((line) => (line ? `  ${line}` : "")),
-          ]
-        : []),
+      ...(r.firstEmail ? emailLines(r.firstEmail, "  ") : []),
+      ...(r.followUps ? followUpLines(r.followUps, "  ") : []),
     ]),
     ...(display.recipients.length > shown.length
       ? [`- and ${display.recipients.length - shown.length} more`]
@@ -251,15 +286,16 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     ...(display.firstEmail === undefined
       ? []
       : display.firstEmail
-        ? [
-            `Subject: ${display.firstEmail.subject}`,
-            "Body:",
-            htmlToPlainText(display.firstEmail.body),
-          ]
+        ? emailLines(display.firstEmail, "")
         : ["Body: no email content yet"]),
-    ...(display.status && display.status !== "Draft" ? [`Status: ${display.status}`] : []),
+    ...(display.followUps ? followUpLines(display.followUps, "") : []),
+    ...(display.status && CAMPAIGN_WORDS[display.status]
+      ? [`Campaign: ${CAMPAIGN_WORDS[display.status]}`]
+      : []),
     "",
-    "Confirm sending the first email to these recipients",
+    display.followUps?.length || display.recipients.some((r) => r.followUps?.length)
+      ? "Confirm sending these emails to these recipients"
+      : "Confirm sending the first email to these recipients",
   ].join("\n");
 }
 
@@ -302,6 +338,7 @@ function outboundTitle(toolName: string): string | undefined {
 function formatInstantlyReply(display: InstantlyReplyDisplay) {
   return [
     `To: ${display.to ?? "unknown"}`,
+    ...(display.cc?.length ? [`Cc: ${display.cc.join(", ")}`] : []),
     `From: ${display.from ?? "unknown"}`,
     `Subject: ${display.subject}`,
     `In reply to: ${display.inReplyTo ?? "unknown"}`,

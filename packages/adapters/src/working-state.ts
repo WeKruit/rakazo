@@ -13,7 +13,7 @@ import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import { openRecruitingRoles } from "./open-recruiting-roles.js";
 import type { RoleRecord } from "./role-records.js";
 import { loadRoleRecords } from "./role-records.js";
-import { isTurnWork, workDoneLabel } from "./turn-report.js";
+import { isTurnWork, SEND_WORK, workDoneLabel } from "./turn-report.js";
 
 /**
  * What the agents know each turn, read from records only: the recruiter's language, the role in
@@ -338,7 +338,7 @@ export async function loadWorkingState(
         type: "agent.tool.completed",
         createdAt: { gte: new Date(now - SEND_WINDOW_DAYS * 86_400_000) },
         thread: { userId: scope.userId },
-        payload: { path: ["work"], equals: "sent" },
+        OR: SEND_WORK.map((work) => ({ payload: { path: ["work"], equals: work } })),
       },
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -550,7 +550,9 @@ export async function loadWorkingState(
   const sendRows = await sendsRead;
   const sent = (sendRows ?? []).filter((event) => {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
-    return payload.outcome === "succeeded" && payload.work === "sent";
+    return (
+      payload.outcome === "succeeded" && SEND_WORK.some((work) => work === payload.work)
+    );
   });
   if (sendRows)
     lines.push(

@@ -19,6 +19,8 @@ export type TurnWork =
   | "contacts"
   | "draft"
   | "sent"
+  | "send_queued"
+  | "send_held"
   | "scheduling"
   | "sender"
   | "connected";
@@ -79,16 +81,36 @@ function isContactLookup(result: unknown): boolean {
     .some((value) => value?.source === "local_contact_lookup");
 }
 
-/** Whether a call's structured result says it created what it ensured. */
-function createdByCall(result: unknown): boolean {
+/** A call's structured results, however the tool result wraps them. */
+function structuredResults(result: unknown): Record<string, unknown>[] {
   const object = (value: unknown) =>
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : undefined;
   return [result, object(result)?.details, object(result)?.result]
     .map((value) => object(object(value)?.structuredContent))
-    .some((value) => value?.created === true || object(value?.result)?.created === true);
+    .flatMap((value) => (value ? [value, object(value.result)].filter((v) => v !== undefined) : []))
+    .filter((value): value is Record<string, unknown> => value !== undefined);
 }
+
+/** Whether a call's structured result says it created what it ensured. */
+function createdByCall(result: unknown): boolean {
+  return structuredResults(result).some((value) => value.created === true);
+}
+
+/**
+ * What a confirmed campaign send did, from the delivery its result records: started and on its
+ * way (or waiting for the chosen hours), or held by the mail service. It never says sent: a
+ * campaign send only starts the emails (audit 11-26: every activate was reported "sent").
+ */
+function campaignSendWork(result: unknown): TurnWork {
+  return structuredResults(result).some((value) => value.delivery === "held")
+    ? "send_held"
+    : "send_queued";
+}
+
+/** Work kinds that are a confirmed outside send, whatever came of it. */
+export const SEND_WORK: readonly TurnWork[] = ["sent", "send_queued", "send_held"];
 
 /** Tool operations that only read, by their leading verb. */
 const READ_ACTION =
@@ -152,9 +174,12 @@ export function turnWork(
   const action = (target.split("__").at(-1) ?? target).toLowerCase();
   // A writable tool's read operation ("ensure_sender" with operation "read") changed nothing.
   if (READ_ACTION.test(action) || (operation && READ_ACTION.test(operation))) return undefined;
-  // A send runs only once its card is confirmed, so a returned send went out.
-  if (/^(?:native_[a-z]+_)?(?:activate_campaign|send_email|send_message|send)$/.test(action))
-    return "sent";
+  // A send runs only once its card is confirmed. A direct send that returned went out; a
+  // campaign send is what its result says.
+  // The tool's own name, without a native integration's "native_<app>_" prefix.
+  const operationName = action.startsWith("native_") ? action.split("_").slice(2).join("_") : action;
+  if (operationName === "activate_campaign") return campaignSendWork(settled?.result);
+  if (["send_email", "send_message", "send"].includes(operationName)) return "sent";
   if (/sender|mailbox|sending_account/.test(action)) return "sender";
   // Ensuring a campaign that already exists, without new copy, changed nothing (staging 11-13:
   // each status check reported 「已完成：存好了邮件草稿」).
@@ -181,6 +206,8 @@ const WORK_DONE: Record<TurnWork, string> = {
   contacts: "looked up contact details",
   draft: "saved the email draft",
   sent: "sent the email",
+  send_queued: "started the email; it is on its way, not delivered yet",
+  send_held: "confirmed the email, but it has not gone out: sending is on hold",
   scheduling: "updated the schedule",
   sender: "got the sending email address ready",
   connected: "made changes in a connected app",
@@ -202,6 +229,8 @@ const WORK_DONE_ZH: Record<TurnWork, string> = {
   contacts: "查了联系方式",
   draft: "存好了邮件草稿",
   sent: "发出了邮件",
+  send_queued: "启动了邮件发送，正在发出，还没送达",
+  send_held: "确认了邮件，但还没发出：发送被暂停了",
   scheduling: "更新了日程",
   sender: "准备好了发件邮箱",
   connected: "在已连接的应用里做了修改",
