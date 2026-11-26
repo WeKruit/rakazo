@@ -354,14 +354,33 @@ export function greetsByName(body: string): boolean {
   return name !== undefined && !/^(?:there|all|everyone|team|folks)$/i.test(name);
 }
 
-/** A fill-in-the-blank left in an email ("[Candidate Name]", "[Your name]"), which would go out as written. */
+/** The merge fields the sending account fills in for each person; any other {{...}} goes out as written. */
+export const EMAIL_VARIABLES: readonly string[] = [
+  "firstName",
+  "first_name",
+  "lastName",
+  "last_name",
+  "companyName",
+  "company_name",
+  "personalization",
+];
+
+/**
+ * A fill-in-the-blank left in an email ("[Candidate Name]", "{{회사명}}"), which would go out as
+ * written: a bracketed blank, or a merge field that is not one of EMAIL_VARIABLES.
+ */
 export function unfilledPlaceholder(text: string): string | undefined {
-  return /\[[^[\]\n]{0,60}\p{L}[^[\]\n]{0,60}\](?!\()/u.exec(text.replace(/<[^>]+>/g, " "))?.[0];
+  const plain = text.replace(/<[^>]+>/g, " ");
+  const bracket = /\[[^[\]\n]{0,60}\p{L}[^[\]\n]{0,60}\](?!\()/u.exec(plain)?.[0];
+  if (bracket) return bracket;
+  for (const match of plain.matchAll(/\{\{\s*([^{}]*?)\s*\}\}/g))
+    if (!EMAIL_VARIABLES.includes(match[1]!)) return match[0];
+  return undefined;
 }
 
 /** Model-facing: why an email with a fill-in-the-blank is refused. */
 export const PLACEHOLDER_NOTE =
-  "This email still has a fill-in-the-blank in square brackets, which would be sent exactly as written. Put in the real text: {{firstName}} for each person's first name in a campaign, their actual name in a one-person email, and the recruiter's name or the mailbox's display name in the signature.";
+  "This email still has a fill-in-the-blank (square brackets, or a {{...}} other than {{firstName}}, {{lastName}}, {{companyName}} and {{personalization}}), which would be sent exactly as written. Put in the real text: {{firstName}} for each person's first name in a campaign, their actual name in a one-person email, the recruiter's name or the mailbox's display name in the signature, and leave out a fact nobody gave.";
 
 /** Model-facing: why a shared email that greets someone by name is refused. */
 export const NAMED_GREETING_NOTE =
@@ -383,7 +402,7 @@ Do the work: do what was asked this turn with your own tools; never decline a cl
 
 Replies: open with the answer or the state and what happens next, then at most one blocker; no narration or unasked caveats. End every turn on a result, one question card, or background work that will report back. What you can do now with what was said, do first; then ask only what would change it. A question card (ask_user) is only for a decision the work cannot go on without, between concrete choices: one consequential question, your recommended choice first with its reason, plus a custom answer; never a questionnaire, never for facts already given, never to "confirm" a brief or plan. An answer, explanation or how-to stays in your reply text, never in a card; a how-to gets two to four numbered steps.
 
-Emails: the full email (Subject: and body) in the reply, from the recruiter to the candidate, whole again after any change, signed with the recruiter's name (if unknown, end on the sign-off and ask once). Never ask anything before drafting, not even when the role they name is not saved: write from what they said. Templates use {{firstName}}; one person's email uses their name; use the real title, company, location and pay and leave out what nobody gave, never a [blank].
+Emails: the full email (Subject: and body) in the reply, from the recruiter to the candidate, whole again after any change, signed with the recruiter's name (if unknown, end on the sign-off and ask once). Never ask anything before drafting, not even when the role they name is not saved: write from what they said. Templates use {{firstName}}; one person's email uses their name; use the real title, company, location and pay and leave out what nobody gave, never a [blank] or any other {{...}} (such as an unknown company name).
 
 Never infer protected traits from names or photos, never collect phone numbers, and keep private grades and costs out of client material. A search for a group ("USC Asian alumni") is never refused: ask which stated profile signals count, then search by them.
 
