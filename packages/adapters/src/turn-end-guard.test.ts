@@ -87,11 +87,9 @@ describe("recruitingRoundListText", () => {
       spaceId: "space-1",
       roleId: "role-1",
       candidateKeys: ["linkedin:/in/zy"],
-      unverified: { "linkedin:/in/zy": "Mandarin not confirmed" },
     });
     expect(text).toContain("> Meets 2 of 3 requirements; not stated: Mandarin");
     expect(text).not.toContain("4 years and 11 months");
-    expect(text).not.toContain("Not verified");
   });
 
   it("links each name to the LinkedIn profile its key names", async () => {
@@ -166,21 +164,25 @@ describe("recruitingRoundListText", () => {
     expect(cut).not.toContain("Bo");
   });
 
-  it("names the must-haves a person's row does not show", async () => {
+  it("prints the agent's own group headings where they change, numbering straight through", async () => {
     const prisma = {
       externalEffect: { findMany: vi.fn(async () => []) },
       recruitingCandidateOccurrence: {
-        findMany: vi.fn(async () => [{ candidateKey: "person-1", name: "Person 1" }]),
+        findMany: vi.fn(async () =>
+          ["a", "b", "c"].map((key) => ({ candidateKey: key, name: key.toUpperCase() })),
+        ),
       },
     } as never;
     const text = await recruitingRoundListText(prisma, {
       threadId: "thread-1",
       spaceId: "space-1",
       roleId: "role-1",
-      candidateKeys: ["person-1"],
-      unverified: { "person-1": "初创公司经历" },
+      candidateKeys: ["a", "b", "c"],
+      groupOf: { a: "Meet everything asked", b: "Meet everything asked", c: "Years not stated" },
     });
-    expect(text).toContain("1. **Person 1**\n   Not verified: 初创公司经历");
+    expect(text).toBe(
+      "3 people this round:\n\nMeet everything asked\n1. **A**\n2. **B**\n\nYears not stated\n3. **C**",
+    );
   });
 
   it("writes its own words in Chinese for a recruiter writing Chinese", async () => {
@@ -196,10 +198,9 @@ describe("recruitingRoundListText", () => {
       spaceId: "space-1",
       roleId: "role-1",
       candidateKeys: ["person-1"],
-      unverified: { "person-1": "中文能力" },
       chinese: true,
     });
-    expect(text).toBe("本轮 1 人：\n\n1. **Person 1**\n   未核实：中文能力");
+    expect(text).toBe("本轮 1 人：\n\n1. **Person 1**");
   });
 
   it("lists a role's people under a given heading with the same lines as a round", async () => {
@@ -239,27 +240,6 @@ describe("recruitingRoundListText", () => {
       firstNumber: 11,
     });
     expect(text).toContain("\n\n11. **Person 11**");
-  });
-
-  it("says must-haves no one's row shows once, not under every person", async () => {
-    const prisma = {
-      externalEffect: { findMany: vi.fn(async () => []) },
-      recruitingCandidateOccurrence: {
-        findMany: vi.fn(async () => [
-          { candidateKey: "person-1", name: "Person 1" },
-          { candidateKey: "person-2", name: "Person 2" },
-        ]),
-      },
-    } as never;
-    const text = await recruitingRoundListText(prisma, {
-      threadId: "thread-1",
-      spaceId: "space-1",
-      roleId: "role-1",
-      candidateKeys: ["person-1", "person-2"],
-      unverified: { "person-1": "US work authorization", "person-2": "US work authorization" },
-    });
-    expect(text).toContain("this round:\nNot verified for anyone yet: US work authorization");
-    expect(text).not.toContain("   Not verified:");
   });
 
   // 2026-10-26 02:18 live ending: a blocked turn promised work for "after recovery" and stopped.

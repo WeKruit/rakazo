@@ -8,16 +8,12 @@ import {
 import { handedInRecruiterWords } from "./global-role-writes.js";
 
 /**
- * A calibration round's requirements and the agent's optional verdicts on them ("shown",
- * "unknown" or "fails"). What the recruiter says (a city, a level, the reason they turned people
- * down) is one of those requirements. The agent judges; this keeps a pick out only on its own
- * "fails" and turns its unknowns into the round list's notes.
+ * What the recruiter asked for on a role, as the agent saved it: the role's requirement memory.
+ * Each brief field the recruiter or their job post stated and each hard criterion, in the words
+ * saved, never reshaped here. `field` is the brief field's own key: context for a judge, not
+ * the recruiter's words.
  */
-
-export type RoundVerdict = "shown" | "unknown" | "fails";
-export type RoundChecks = Readonly<Record<string, Readonly<Record<string, RoundVerdict>>>>;
-
-export type RoundCriterion = { id: string; statement: string; added: boolean };
+export type RoundCriterion = { id: string; statement: string; field?: string };
 
 function statementOf(expression: RecruitingCriterionExpression): string {
   if (expression.kind === "atom") return expression.statement;
@@ -25,168 +21,38 @@ function statementOf(expression: RecruitingCriterionExpression): string {
   return expression.items.map(statementOf).join(expression.kind === "all" ? " and " : " or ");
 }
 
-/** The recruiter messages a requirement cites ("human-message:<id>" or a message anchor). */
-function citedMessages(refs: unknown): string[] {
-  if (!Array.isArray(refs)) return [];
-  return refs.flatMap((ref) => {
-    const id = typeof ref === "string" ? ref : (ref as { id?: unknown } | null)?.id;
-    const anchor = (ref as { anchor?: { messageId?: unknown } } | null)?.anchor?.messageId;
-    const fromId = typeof id === "string" ? /^human-message:(.+)$/.exec(id)?.[1] : undefined;
-    return [fromId, typeof anchor === "string" ? anchor : undefined].filter(
-      (value): value is string => !!value,
-    );
-  });
-}
+type BriefField = { key?: unknown; value?: unknown; state?: unknown; origin?: unknown };
 
-type Requirement = { id: string; statement: string; messages: string[] };
-
-function hardCriteria(criteria: unknown): Requirement[] {
-  if (!Array.isArray(criteria)) return [];
-  return (criteria as (RecruitingCriterion & { sourceRefs?: unknown })[])
-    .filter((criterion) => criterion?.priority === "hard" && criterion.expression)
-    .map((criterion) => ({
-      id: criterion.id,
-      statement: statementOf(criterion.expression),
-      messages: citedMessages(criterion.sourceRefs),
-    }));
-}
-
-type BriefField = {
-  key?: unknown;
-  value?: unknown;
-  state?: unknown;
-  origin?: unknown;
-  sourceRefIds?: unknown;
-};
-
-/**
- * The brief fields the recruiter stated themselves, as requirements in their words; with
- * everyOrigin, the JD's too, which a pasted job states for them.
- */
-function statedFields(brief: unknown, everyOrigin = false): Requirement[] {
-  const fields = (brief as { fields?: unknown } | null)?.fields;
-  if (!Array.isArray(fields)) return [];
-  return (fields as BriefField[]).flatMap((field) =>
-    typeof field?.key === "string" &&
-    typeof field.value === "string" &&
-    field.state === "known" &&
-    (field.origin === "user_instruction" || (everyOrigin && field.origin === "jd"))
-      ? [
-          {
-            id: `brief:${field.key}`,
-            // A field saved from an intake question keeps the question as its key; the answer
-            // alone says the requirement.
-            statement: field.key.trim().endsWith("?")
-              ? field.value
-              : `${field.key}: ${field.value}`,
-            messages: citedMessages(field.sourceRefIds),
-          },
-        ]
-      : [],
-  );
-}
-
-/**
- * Everything the recruiter asked for, as the requirements every pick gets a verdict on: the brief
- * fields in their own words, the role's hard criteria, and each reason they turned people down
- * (the recorded recruiting_feedback, so nothing has to be saved first). One is new when the
- * recruiter said it after the last round was recorded: the message it cites, or the turn-down
- * itself. When it was saved does not count, since the brief is often saved just after a round.
- */
 export async function roundCriteria(
-  prisma: PrismaClient,
-  input: { roleId: string; spaceId: string },
-  options: { everyOrigin?: boolean } = {},
+  prisma: Pick<PrismaClient, "recruitingRole">,
+  input: { roleId: string },
 ): Promise<RoundCriterion[]> {
-  const { roleId } = input;
-  const [role, last, turnedDown] = await Promise.all([
-    prisma.recruitingRole.findUnique({
-      where: { id: roleId },
-      select: { currentRevision: { select: { criteria: true, brief: true } } },
-    }),
-    prisma.recruitingCalibrationRound.findFirst({
-      where: { roleId },
-      orderBy: { round: "desc" },
-      select: { createdAt: true },
-    }),
-    prisma.externalEffect.findMany({
-      where: {
-        spaceId: input.spaceId,
-        kind: "recruiting_feedback",
-        status: "completed",
-        AND: [
-          { request: { path: ["roleId"], equals: roleId } },
-          { request: { path: ["fit"], equals: "not_fit" } },
-        ],
-      },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, request: true, createdAt: true },
-      take: 10,
-    }),
-  ]);
-  const stated = [
-    ...statedFields(role?.currentRevision.brief, options.everyOrigin),
-    ...hardCriteria(role?.currentRevision.criteria),
-  ];
-  const cited = [...new Set(stated.flatMap((requirement) => requirement.messages))];
-  const saidAfter = new Set(
-    last && cited.length
-      ? (
-          await prisma.message.findMany({
-            where: { id: { in: cited }, createdAt: { gt: last.createdAt } },
-            select: { id: true },
-          })
-        ).map((message) => message.id)
-      : [],
-  );
-  const reasons = turnedDown.reverse().flatMap((effect) => {
-    const summary = (effect.request as { summary?: unknown } | null)?.summary;
-    return typeof summary === "string" && summary.trim()
-      ? [
-          {
-            id: `turned-down:${effect.id}`,
-            statement: `not what the recruiter turned down: ${summary.trim()}`,
-            added: !!last && effect.createdAt > last.createdAt,
-          },
-        ]
-      : [];
+  const role = await prisma.recruitingRole.findUnique({
+    where: { id: input.roleId },
+    select: { currentRevision: { select: { criteria: true, brief: true } } },
   });
+  const fields = (role?.currentRevision.brief as { fields?: unknown } | null)?.fields;
+  const criteria = role?.currentRevision.criteria;
   return [
-    ...stated.map(({ id, statement, messages }) => ({
-      id,
-      statement,
-      added: messages.some((message) => saidAfter.has(message)),
-    })),
-    ...reasons,
+    ...(Array.isArray(fields) ? (fields as BriefField[]) : []).flatMap((field) =>
+      typeof field?.key === "string" &&
+      typeof field.value === "string" &&
+      field.state === "known" &&
+      (field.origin === "user_instruction" || field.origin === "jd")
+        ? [
+            {
+              id: `brief:${field.key}`,
+              statement: field.value,
+              // A field saved from an intake question keeps the question as its key.
+              ...(field.key.trim().endsWith("?") ? {} : { field: field.key }),
+            },
+          ]
+        : [],
+    ),
+    ...(Array.isArray(criteria) ? (criteria as unknown as RecruitingCriterion[]) : [])
+      .filter((criterion) => criterion?.priority === "hard" && criterion.expression)
+      .map((criterion) => ({ id: criterion.id, statement: statementOf(criterion.expression) })),
   ];
-}
-
-export type RoundCheckResult = { ok: true; unverified: Record<string, string> };
-
-/**
- * The picks' own verdicts, where the lead gave them: what no
- * row shows becomes the round list's "Not verified" note. Verdicts are optional: the search
- * grades the people it returns, and asking the lead for a verdict on every
- * criterion of every pick cost refusals and up to a minute a round (staging 11-15/16).
- */
-export function checkRound(input: {
-  keys: readonly string[];
-  checks: RoundChecks | undefined;
-  criteria: readonly RoundCriterion[];
-}): RoundCheckResult {
-  const unverified: Record<string, string> = {};
-  if (!input.criteria.length) return { ok: true, unverified };
-  const verdictOf = (key: string, id: string) => input.checks?.[key]?.[id];
-  for (const key of input.keys) {
-    // Something no pick's row shows is still unverified for each of them; the round list says
-    // it once when every note is the same. A turned-down reason is not a requirement to list.
-    const listed = input.criteria.filter(
-      (criterion) =>
-        verdictOf(key, criterion.id) === "unknown" && !criterion.id.startsWith("turned-down:"),
-    );
-    if (listed.length) unverified[key] = listed.map((criterion) => criterion.statement).join("; ");
-  }
-  return { ok: true, unverified };
 }
 
 /** What a recorded round's read says about repeats: the round record refuses anyone already seen. */
@@ -253,27 +119,6 @@ export async function withoutShownBefore(
   const shown = new Set(earlier.flatMap((round) => round.candidateKeys));
   const fresh = [...new Set(keys)].filter((key) => !shown.has(key));
   return { keys: fresh, shownBefore: keys.length - fresh.length };
-}
-
-/**
- * A round never lists someone the search graded below Promising: every person in a list counts
- * toward the request, so what the recruiter reads and the number they are told are the same
- * people (staging 11-26: "20 shown" beside rounds listing 21 to 30). People not graded yet may be
- * listed: a role's first ten are shown before their grades.
- */
-export async function withoutGradedBelowFit(
-  prisma: Pick<PrismaClient, "$queryRaw">,
-  roleId: string,
-  keys: readonly string[],
-): Promise<{ keys: string[]; leftOut: number }> {
-  const [graded, fit] = await Promise.all([
-    listRecruitingGradedCandidateKeys(prisma, roleId),
-    listRecruitingFitCandidateKeys(prisma, roleId),
-  ]);
-  const below = new Set(graded);
-  for (const key of fit) below.delete(key);
-  const kept = keys.filter((key) => !below.has(key));
-  return { keys: kept, leftOut: keys.length - kept.length };
 }
 
 /**

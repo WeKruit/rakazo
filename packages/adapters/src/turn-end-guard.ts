@@ -171,8 +171,8 @@ export async function recruitingRoundListText(
     knownOnly?: boolean;
     /** The last key may be cut mid-word: leave it out while it is the start of another person's. */
     lastMayBeCut?: boolean;
-    /** Per person, the must-haves their row does not show. */
-    unverified?: Readonly<Record<string, string>>;
+    /** Per person, the heading of the group the agent put them in; printed where it changes. */
+    groupOf?: Readonly<Record<string, string>>;
     /** The first line, when the list is not a round (a role's people listed elsewhere). */
     heading?: string;
     /** Number of the first line, for a later page of a longer list. */
@@ -193,15 +193,6 @@ export async function recruitingRoundListText(
     ? input.candidateKeys.filter((key, index) => people.has(key) && !cut(key, index))
     : input.candidateKeys;
   if (input.knownOnly && !keys.length) return "";
-  // The same open must-haves under every person say nothing about any one of them: say them once.
-  // A person whose full profile was judged is described by that judgement alone.
-  const judgedLine = (key: string) => {
-    const verdicts = people.get(key)?.verdicts;
-    return verdicts ? roundVerdictLine(verdicts, !!input.chinese) : undefined;
-  };
-  const notes = keys.map((key) => (judgedLine(key) ? "" : (input.unverified?.[key]?.trim() ?? "")));
-  const shared =
-    keys.length > 1 && notes[0] && notes.every((note) => note === notes[0]) ? notes[0] : undefined;
   const lines = keys.map((key, index) => {
     const person = people.get(key);
     // The saved key is the profile link, so the name opens the person's LinkedIn profile.
@@ -211,19 +202,25 @@ export async function recruitingRoundListText(
     const head = [name ? `**${name}**` : null, person?.title, person?.company, person?.location]
       .filter(Boolean)
       .join(" · ");
-    const judged = judgedLine(key);
-    const passage = input.brief ? undefined : (judged ?? roundPassage(person?.reason));
-    const unknown = shared || judged ? undefined : input.unverified?.[key]?.trim();
-    const unverifiedLabel = input.chinese ? "未核实：" : "Not verified: ";
-    return `${(input.firstNumber ?? 1) + index}. ${head}${passage ? `\n   > ${passage}` : ""}${unknown ? `\n   ${unverifiedLabel}${unknown}` : ""}`;
+    // A person whose full profile was judged is described by that judgement, else by the search's
+    // own reason for returning them.
+    const verdicts = person?.verdicts;
+    const passage = input.brief
+      ? undefined
+      : ((verdicts ? roundVerdictLine(verdicts, !!input.chinese) : undefined) ??
+        roundPassage(person?.reason));
+    // The agent's own grouping of the people, in its words.
+    const group = input.groupOf?.[key]?.trim();
+    const previous = index ? input.groupOf?.[keys[index - 1]!]?.trim() : undefined;
+    const groupLine = group && group !== previous ? `${index ? "\n" : ""}${group}\n` : "";
+    return `${groupLine}${(input.firstNumber ?? 1) + index}. ${head}${passage ? `\n   > ${passage}` : ""}`;
   });
   const heading =
     input.heading ??
     (input.chinese
       ? `本轮 ${lines.length} 人：`
       : `${lines.length} ${lines.length === 1 ? "person" : "people"} this round:`);
-  const sharedLine = input.chinese ? "所有人都还未核实：" : "Not verified for anyone yet: ";
-  return `${heading}${shared ? `\n${sharedLine}${shared}` : ""}\n\n${lines.join("\n")}`;
+  return `${heading}\n\n${lines.join("\n")}`;
 }
 
 // One line a recruiter reads at a glance; the whole profile and assessment are in Results.
