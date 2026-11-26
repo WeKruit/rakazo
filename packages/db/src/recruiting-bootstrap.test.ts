@@ -684,6 +684,14 @@ describe("managed recruiting default upgrades", () => {
     expect(f.servers.some((s) => s.slug === "fullenrich")).toBe(true);
     expect(f.assignments.filter((a) => a.serverId === "fullenrich-a")).toHaveLength(2);
   });
+  it("drops a service the product no longer ships from the recorded baseline, leaving the account's rows alone", async () => {
+    const f = await previous();
+    f.state.services.retired = { id: "retired-a", signature: "s", assignments: {} };
+    const rows = JSON.stringify({ servers: f.servers, assignments: f.assignments });
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect((f.presets[0]!.config as ManagedState).services).not.toHaveProperty("retired");
+    expect(JSON.stringify({ servers: f.servers, assignments: f.assignments })).toBe(rows);
+  });
 });
 
 describe("managed recruiting computer policy", () => {
