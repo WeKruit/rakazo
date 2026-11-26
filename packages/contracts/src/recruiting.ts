@@ -750,9 +750,7 @@ export type ReviseRecruitingRoleInput = z.infer<typeof ReviseRecruitingRoleInput
 
 export const RecruitingHumanIntentSchema = z.strictObject({
   basis: z.enum(["direct", "inferred"]),
-  quote: Text.describe(
-    "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
-  ),
+  quote: Text.describe("What the human said, in their words."),
 });
 export type RecruitingHumanIntent = z.infer<typeof RecruitingHumanIntentSchema>;
 

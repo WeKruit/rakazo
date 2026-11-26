@@ -219,9 +219,6 @@ async function recordRecruitingFeedback(
       ? {}
       : { roleId: feedback.roleId, expectedRoleRevision: feedback.expectedRoleRevision }),
     ...(feedback.target === "candidate" ? { candidateKeys: feedback.candidateKeys } : {}),
-    ...(feedback.target === "round" && feedback.operation === "approve"
-      ? { acceptEarlierQuote: true }
-      : {}),
     ...((feedback.target === "round" && feedback.operation === "scope") ||
     (feedback.target === "candidate" && feedback.operation === "review")
       ? { recordKeeping: true }

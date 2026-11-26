@@ -255,7 +255,6 @@ import {
   publishMailReplyCard,
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
-  RecruitingIntentQuoteError,
   RecruitingSourceCheckError,
   RecruitingSourceValidationError,
   readHistory,
@@ -929,14 +928,13 @@ function feedbackInputError(result: unknown): boolean {
 
 /**
  * What the agent is told when a feedback save is refused. A check that says what to change
- * (the exact quote, a source reference) is passed on, so the next call can fix it.
+ * (a source reference) is passed on, so the next call can fix it.
  */
 export function feedbackSaveRefused(error: Error): string {
-  const named =
-    error instanceof RecruitingIntentQuoteError || error instanceof RecruitingSourceCheckError;
-  const fix = named
-    ? error.message
-    : "The quote must be the recruiter's exact words from their message, roleId the conversation's current role, candidateKeys saved people on it, and sourceRefs only references this conversation's tools returned (or none).";
+  const fix =
+    error instanceof RecruitingSourceCheckError
+      ? error.message
+      : "roleId must be the conversation's current role, candidateKeys saved people on it, and sourceRefs only references this conversation's tools returned (or none).";
   return `${FEEDBACK_NOT_SAVED} ${fix} Either way, carry on with the rest of the recruiter's request now; a failed save never holds it up.`;
 }
 
@@ -4918,43 +4916,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const current = roleRevisions.current(roleId ?? undefined, args[revisionKey], saved);
             if (current !== args[revisionKey]) args = { ...args, [revisionKey]: current };
           }
-          // A brief save whose intent is missing or not copied from the recruiter's current
-          // message acts on that message, so the save never fails on the quote.
-          // A message the recruiter sent while this turn ran is the current one, so it is read now.
-          const latestHuman =
-            name === "recruiting_role" && args.operation === "update"
-              ? await deps.prisma.message.findFirst({
-                  where: { threadId: thread.id, role: "user" },
-                  orderBy: { seq: "desc" },
-                  select: { blocks: true },
-                })
-              : null;
-          const textsOf = (blocks: unknown) =>
-            (Array.isArray(blocks) ? (blocks as MessageBlock[]) : []).flatMap((block) =>
-              block.kind === "text" && block.text.trim() ? [block.text] : [],
-            );
-          // The latest message may belong to another teammate's run, so a quote from this turn's
-          // own message also stands; a quote from neither takes this turn's message.
-          const latestTexts = textsOf(latestHuman?.blocks);
-          const ownTexts = textsOf(currentTurnMessage?.blocks);
-          const turnTexts = [...ownTexts, ...latestTexts];
+          // A brief save that names no intent acts on this turn's message.
           const givenQuote = (args.intent as { quote?: unknown } | undefined)?.quote;
-          // A server repeat already carries the quote the save check named, so it is kept.
+          const turnText = (
+            Array.isArray(currentTurnMessage?.blocks)
+              ? (currentTurnMessage.blocks as MessageBlock[])
+              : []
+          ).flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))[0];
           if (
             name === "recruiting_role" &&
             args.operation === "update" &&
-            !executionId.includes(":repaired") &&
-            turnTexts[0] &&
-            !(
-              typeof givenQuote === "string" &&
-              givenQuote &&
-              turnTexts.some((text) => text.includes(givenQuote))
-            )
+            turnText &&
+            !(typeof givenQuote === "string" && givenQuote)
           )
-            args = {
-              ...args,
-              intent: { basis: "direct", quote: turnTexts[0] },
-            };
+            args = { ...args, intent: { basis: "direct", quote: turnText } };
           if (name === "recruiting_role" && args.operation !== "read")
             args = await fillRecruitingRoleArgs(
               deps.prisma,
@@ -6929,10 +6904,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             const retry =
               "Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.";
-            if (
-              error instanceof RecruitingIntentQuoteError ||
-              error instanceof RecruitingSourceCheckError
-            )
+            if (error instanceof RecruitingSourceCheckError)
               return { error: `${error.message} ${retry}` };
             if (error instanceof IsolationError)
               return {
@@ -8735,26 +8707,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const delivered = await deliverRecruitingFeedbackResult(result);
               return candidateDecision ? delivered : finish(delivered);
             } catch (error) {
-              // A quote not copied exactly is repeated once with the words the check named, so
-              // the recruiter's feedback is never lost over the citation.
-              if (
-                error instanceof RecruitingIntentQuoteError &&
-                error.quote &&
-                !executionId.includes(":repaired") &&
-                args.intent &&
-                typeof args.intent === "object"
-              ) {
-                const repeated: unknown = await applyTool(
-                  name,
-                  {
-                    ...args,
-                    intent: { ...(args.intent as object), quote: error.quote },
-                  },
-                  `${executionId}:repaired`,
-                );
-                if (!(repeated && typeof repeated === "object" && "error" in repeated))
-                  return candidateDecision ? repeated : finish(repeated);
-              }
               if (error instanceof IsolationError) {
                 getLogger().warn("recruiting.tool.rejected", {
                   runId,
@@ -9190,28 +9142,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               const refused = await finish(roleError(error));
               // A save refused over its citations is repeated once by the server with them as
-              // plain locators and the recruiter's own words as the intent, so it never stops
-              // the work. Ownership checks still apply to the repeat. A recruiter message that
-              // arrives during the repeat makes it the current one, so a refused quote gets one
-              // more repeat with that message's words.
+              // plain locators, so it never stops the work. Ownership checks still apply to the
+              // repeat.
               const repeat = repairedRoleSave(args, error);
-              const again = executionId.endsWith(":repaired");
-              if (
-                !repeat ||
-                executionId.endsWith(":again") ||
-                (again && !(error instanceof RecruitingIntentQuoteError))
-              )
-                return refused;
+              if (!repeat || executionId.endsWith(":repaired")) return refused;
               getLogger().warn("recruiting.role.save_repaired", {
                 runId,
                 operation: args.operation,
                 error: error instanceof Error ? error.name : String(error),
               });
-              const repeated: unknown = await applyTool(
-                name,
-                repeat,
-                again ? `${executionId}:again` : `${executionId}:repaired`,
-              );
+              const repeated: unknown = await applyTool(name, repeat, `${executionId}:repaired`);
               return repeated && typeof repeated === "object" && "error" in repeated
                 ? refused
                 : repeated;

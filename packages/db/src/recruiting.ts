@@ -129,20 +129,6 @@ type RoleSnapshot = {
   revision: RecruitingRoleRevision;
 };
 
-/** The intent quote is not in the recruiter's current message; says which words to copy. */
-export class RecruitingIntentQuoteError extends IsolationError {
-  /** A quote the current message does contain, so a save can be repeated without the model. */
-  readonly quote: string;
-  constructor(text: string, quote = text) {
-    const excerpt = text.length > 300 ? `${text.slice(0, 300)}…` : text;
-    super(
-      `intent.quote must be exact words copied from the recruiter's current message, not from a system or agent message. Their current message reads: ${JSON.stringify(excerpt)}`,
-    );
-    this.name = "RecruitingIntentQuoteError";
-    this.quote = quote;
-  }
-}
-
 /**
  * A source reference that is the actor's own but does not check out. Still an IsolationError
  * for every caller; its message says what to change so the save can be repeated at once.
@@ -531,8 +517,8 @@ function validateBriefAuthorship(
 
 /**
  * Brief facts may cite a recruiter message by its runtime id ("human-message:<messageId>")
- * without repeating the full reference. Supply that reference from the native message itself,
- * quoting its first text block; later validation still checks the quote and human authorship.
+ * without repeating the full reference. Supply that reference from the native message itself;
+ * later validation still checks human authorship.
  */
 async function citedHumanMessageSources(
   tx: Tx,
@@ -562,20 +548,7 @@ async function citedHumanMessageSources(
   return [...missing].flatMap(([id, messageId]) => {
     const message = messages.find((row) => row.id === messageId);
     if (!message || !isNativeHumanMessage(message)) return [];
-    const blocks = message.blocks as { kind: string; text?: string }[];
-    const blockIndex = blocks.findIndex((block) => block.kind === "text" && block.text?.trim());
-    const quote = blocks[blockIndex]?.text;
-    if (!quote) return [];
-    return [
-      {
-        id,
-        kind: "original_material" as const,
-        anchor: { kind: "message" as const, messageId, locator: `blocks[${blockIndex}].text` },
-        readState: "read" as const,
-        readAt,
-        quote,
-      },
-    ];
+    return [{ ...humanMessageSource(message), id, readAt }];
   });
 }
 
@@ -1771,10 +1744,7 @@ async function requireCurrentHumanSource(
     "id" | "botId" | "threadId" | "sourceMessageId" | "trigger"
   >,
   sourceMessageId: string | null,
-  quote: string,
-  allowOriginalIntent = false,
   ancestors = new Set<string>(),
-  acceptEarlierQuote = false,
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage }> {
   if (ancestors.has(run.id)) throw new IsolationError();
   ancestors.add(run.id);
@@ -1810,10 +1780,7 @@ async function requireCurrentHumanSource(
         actor,
         delegator,
         delegator.sourceMessageId,
-        quote,
-        allowOriginalIntent,
         ancestors,
-        acceptEarlierQuote,
       );
       if (
         human.message.threadId !== delegator.threadId ||
@@ -1843,10 +1810,7 @@ async function requireCurrentHumanSource(
       actor,
       sender,
       inheritedLatest?.id ?? sender.sourceMessageId,
-      quote,
-      allowOriginalIntent,
       ancestors,
-      acceptEarlierQuote,
     );
     if (human.message.threadId !== latest.threadId || human.message.seq >= latest.seq)
       throw new IsolationError();
@@ -1859,37 +1823,13 @@ async function requireCurrentHumanSource(
           where: { id: run.sourceMessageId ?? "" },
           include: humanMessageInclude,
         });
-  if (allowOriginalIntent && original && answers.some((answer) => answer.seq <= original.seq))
-    throw new IsolationError();
-  const hasQuote = (message: SourceMessage) =>
-    (message.blocks as { kind: string; text?: string }[]).some(
-      (block) =>
-        block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
-    );
-  const latestHasQuote = hasQuote(latest);
-  // An acceptance stays the recruiter's decision when they write again right after it, such as
-  // "also prioritize the Bay Area": it may cite their own earlier message from this run.
-  const earlier =
-    acceptEarlierQuote && !latestHasQuote
-      ? [hint, original, ...steering.map((item) => item.message), ...answers].find(
-          (message): message is SourceMessage =>
-            !!message &&
-            message.threadId === run.threadId &&
-            isNativeHumanMessage(message) &&
-            hasQuote(message),
-        )
-      : undefined;
-  const source =
-    earlier ??
-    (!latestHasQuote &&
-    allowOriginalIntent &&
-    original?.threadId === run.threadId &&
-    isNativeHumanMessage(original) &&
-    hasQuote(original)
-      ? original
-      : latest);
+  // A message the recruiter sent while the run worked is the one it acts for now.
+  const source = steering
+    .map((item) => item.message)
+    .filter(isNativeHumanMessage)
+    .reduce((current, message) => (message.seq > current.seq ? message : current), latest);
   if (
-    !isNativeHumanMessage(source) ||
+    !MessageBlockSchema.array().safeParse(source.blocks).success ||
     (source.id === run.sourceMessageId &&
       !["user", "follow_up", "reaction"].includes(run.trigger) &&
       !steering.some((item) => item.messageId === source.id) &&
@@ -1897,41 +1837,32 @@ async function requireCurrentHumanSource(
     (original &&
       isNativeHumanMessage(original) &&
       original.threadId === latest.threadId &&
-      original.seq > latest.seq) ||
-    (!acceptEarlierQuote &&
-      steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq))
+      original.seq > latest.seq)
   )
     throw new IsolationError();
-  const sourceBlocks = source.blocks as { kind: string; text?: string }[];
-  const quoteIndex = sourceBlocks.findIndex(
-    (block) =>
-      block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
-  );
-  if (quoteIndex < 0) {
-    const texts = sourceBlocks.flatMap((block) =>
-      block.kind === "text" && block.text ? [block.text] : [],
-    );
-    throw new RecruitingIntentQuoteError(texts.join("\n"), texts[0]);
-  }
-  const humanSource: RecruitingSourceRef = {
-    id: `human-message:${source.id}`,
-    kind: "original_material",
-    anchor: { kind: "message", messageId: source.id, locator: `blocks[${quoteIndex}].text` },
-    readState: "read",
-    readAt: new Date().toISOString(),
-    quote,
-  };
-  return { source: humanSource, message: source };
+  return { source: humanMessageSource(source), message: source };
 }
 
-/**
- * The recruiter's latest message in a conversation as the source of record keeping, quoting the
- * cited words when that message holds them and otherwise its first text.
- */
+/** A recruiter's message as a source: where it is, never what it says. */
+function humanMessageSource(message: SourceMessage): RecruitingSourceRef {
+  const text = (message.blocks as { kind: string }[]).findIndex((block) => block.kind === "text");
+  return {
+    id: `human-message:${message.id}`,
+    kind: "original_material",
+    anchor: {
+      kind: "message",
+      messageId: message.id,
+      locator: text < 0 ? "blocks[0]" : `blocks[${text}].text`,
+    },
+    readState: "read",
+    readAt: new Date().toISOString(),
+  };
+}
+
+/** The recruiter's latest message in a conversation as the source of record keeping. */
 async function latestHumanSource(
   tx: Tx,
   threadId: string,
-  quote: string,
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage } | null> {
   const recent = await tx.message.findMany({
     where: { threadId, role: "user", botId: null },
@@ -1940,24 +1871,7 @@ async function latestHumanSource(
     include: humanMessageInclude,
   });
   const message = recent.find(isNativeHumanMessage);
-  if (!message) return null;
-  const blocks = message.blocks as { kind: string; text?: string }[];
-  const texts = blocks.flatMap((block, index) =>
-    block.kind === "text" && block.text ? [{ index, text: block.text }] : [],
-  );
-  const cited = texts.find((block) => block.text.includes(quote)) ?? texts[0];
-  if (!cited) return null;
-  return {
-    source: {
-      id: `human-message:${message.id}`,
-      kind: "original_material",
-      anchor: { kind: "message", messageId: message.id, locator: `blocks[${cited.index}].text` },
-      readState: "read",
-      readAt: new Date().toISOString(),
-      quote: cited.text.includes(quote) ? quote : cited.text,
-    },
-    message,
-  };
+  return message ? { source: humanMessageSource(message), message } : null;
 }
 
 function verifiedFeedbackChoice(
@@ -2016,16 +1930,9 @@ async function candidateDecisionTarget(
   revisions: { candidateKey: string; expectedRevision: number }[],
   operation: "hold" | "pass" | "resume",
   human: SourceMessage,
-  quote: string,
   allowRecorded = false,
 ) {
-  if (
-    !isNativeHumanMessage(human) ||
-    !(human.blocks as { kind: string; text?: string }[]).some(
-      (block) => block.kind === "text" && block.text?.includes(quote),
-    )
-  )
-    throw new IsolationError();
+  if (!isNativeHumanMessage(human)) throw new IsolationError();
   const candidates = await tx.recruitingCandidate.findMany({
     where: { roleId, candidateKey: { in: [...keys] } },
     select: { candidateKey: true, revision: true, consideration: true },
@@ -2081,7 +1988,6 @@ async function setCandidateDecisionInTransaction(
     revisions,
     operation,
     human,
-    quote,
     allowRecorded,
   );
   if (recorded) return "already_recorded" as const;
@@ -2170,8 +2076,6 @@ export async function readRecruitingFeedbackContext(
     expectedRoleRevision?: number;
     sourceRefs: readonly RecruitingSourceRef[];
     candidateKeys?: readonly string[];
-    /** A round acceptance may cite the recruiter's earlier message from this run. */
-    acceptEarlierQuote?: boolean;
     /**
      * Record keeping (a round's direction, reviews of people) is never refused over which
      * recruiter message it cites: when the run's own message can't be traced, it cites the
@@ -2206,17 +2110,9 @@ async function feedbackContextInTransaction(
     actor,
     run,
     input.sourceMessageId,
-    intent.quote,
-    false,
-    new Set(),
-    input.acceptEarlierQuote,
   ).catch(async (error: unknown) => {
-    if (
-      !input.recordKeeping ||
-      !(error instanceof IsolationError || error instanceof RecruitingIntentQuoteError)
-    )
-      throw error;
-    const latest = await latestHumanSource(tx, run.threadId, intent.quote);
+    if (!input.recordKeeping || !(error instanceof IsolationError)) throw error;
+    const latest = await latestHumanSource(tx, run.threadId);
     if (!latest) throw error;
     return latest;
   });
@@ -2321,7 +2217,6 @@ export async function prepareNativeRecruitingCandidateDecision(
       input.candidateRevisions!,
       operation,
       context.message,
-      input.intent.quote,
       true,
     );
     const profiles = await candidateProfiles(tx, actor, input.roleId, input.candidateKeys);
@@ -2570,8 +2465,6 @@ export async function listRecruitingFeedback(
       const request = RecruitingFeedbackInputSchema.safeParse(row.request);
       if (!parsed.success || !request.success) continue;
       const record = parsed.data;
-      // The source quote is checked against the recruiter's message below. It may differ from the
-      // agent's own summary in intent.quote when the save cited their latest message.
       if (
         (record.feedback.target !== "candidate" && record.feedback.target !== "round") ||
         record.feedback.roleId !== input.roleId ||
@@ -2621,9 +2514,6 @@ export async function listRecruitingFeedback(
         authorizedThreads.add(human.threadId);
       }
       if (
-        !(human.blocks as { kind: string; text?: string }[]).some(
-          (block) => block.kind === "text" && block.text?.includes(record.source.quote!),
-        ) ||
         (record.feedback.target !== "candidate" && record.feedback.target !== "round") ||
         record.choice !==
           verifiedFeedbackChoice(
@@ -2738,7 +2628,6 @@ export async function authorizeRecruitingMemoryCommit(
     actor,
     run,
     request.recruiting.sourceMessageId,
-    feedback.intent.quote,
   );
   await validateSources(tx, actor, feedback.sourceRefs);
   if (thread.activeRecruitingRoleId)
@@ -2883,8 +2772,7 @@ export async function executeRecruitingRoleMutation(
       )
         throw new IsolationError();
       const source = RecruitingSourceRefSchema.parse(saved.source);
-      if (source.anchor.kind !== "message" || source.quote !== input.intent.quote)
-        throw new IsolationError();
+      if (source.anchor.kind !== "message") throw new IsolationError();
       const human = await threadMessage(tx, source.anchor.messageId, run.threadId);
       if (!human || !isNativeHumanMessage(human)) throw new IsolationError();
       await validateReadSources(tx, actor, [source], artifacts);
@@ -2941,26 +2829,16 @@ export async function executeRecruitingRoleMutation(
     requireResearchLease(run, context);
     if (effect.status !== "executing") throw new IsolationError();
     if (!definitionInput && !archiveInput) throw new RecruitingConflictError();
-    // A role stays the recruiter's request when they add a detail while it is being written
-    // ("recent graduates preferred"): the create may cite their earlier message from this run.
-    // An update to a saved role's brief is record keeping too: when the run's own recruiter
-    // message can't be traced, it cites their latest message. Create, bind and archive still need it.
+    // An update to a saved role's brief is record keeping: when the run's own recruiter message
+    // can't be traced, it cites their latest message. Create, bind and archive still need it.
     const { source: humanSource, message: source } = await requireCurrentHumanSource(
       tx,
       actor,
       run,
       context.sourceMessageId,
-      input.intent.quote,
-      input.operation === "create",
-      undefined,
-      input.operation === "create",
     ).catch(async (error: unknown) => {
-      if (
-        input.operation !== "update" ||
-        !(error instanceof IsolationError || error instanceof RecruitingIntentQuoteError)
-      )
-        throw error;
-      const latest = await latestHumanSource(tx, run.threadId, input.intent.quote);
+      if (input.operation !== "update" || !(error instanceof IsolationError)) throw error;
+      const latest = await latestHumanSource(tx, run.threadId);
       if (!latest) throw error;
       return latest;
     });
@@ -3256,9 +3134,9 @@ async function validateReadSources(
   const messageIds = new Set<string>();
   const artifactIds = new Set<string>();
   for (const source of unique.values()) {
-    if (source.readState === "read" && source.quote === undefined) continue;
     if (source.anchor.kind === "message") messageIds.add(source.anchor.messageId);
-    else artifactIds.add(source.anchor.artifact.artifactId);
+    else if (source.readState !== "read" || source.quote !== undefined)
+      artifactIds.add(source.anchor.artifact.artifactId);
   }
   if (messageIds.size)
     await tx.$queryRaw(
@@ -3268,7 +3146,7 @@ async function validateReadSources(
     await tx.$queryRaw(
       Prisma.sql`SELECT "id" FROM "artifacts" WHERE "id" IN (${Prisma.join([...artifactIds].sort())}) ORDER BY "id" FOR SHARE`,
     );
-  // ponytail: reuse locked rows only within this validation call; every quote is checked below.
+  // ponytail: reuse locked rows only within this validation call.
   const loadedMessages = messageIds.size
     ? await tx.message.findMany({
         where: { id: { in: [...messageIds] } },
@@ -3314,14 +3192,6 @@ async function validateReadSources(
           source.id,
           'locator must name a text block of that message, such as "blocks[0].text".',
         );
-      const start = selection?.start ?? block.text.indexOf(source.quote);
-      if (start < 0) throw new RecruitingSourceValidationError(source.id, source.anchor.locator);
-      sourceSelection(
-        block.text,
-        start,
-        selection?.end ?? start + source.quote.length,
-        source.quote,
-      );
     } else {
       let artifact = rows.get(source.anchor.artifact.artifactId);
       if (!artifact) {
@@ -3696,11 +3566,14 @@ export async function fillRecruitingRoleArgs(
   ].filter(looseRecord);
   const known = new Set(sources.map((source) => source.id));
   // The role's material: read pages first, then pasted messages, in the order the role lists them.
-  const quoted = sources.filter(
-    (source) => source.kind === "original_material" && typeof source.quote === "string",
-  );
   const onPage = (source: LooseRecord) =>
     looseRecord(source.anchor) && source.anchor.kind === "artifact";
+  const quoted = sources.filter(
+    (source) =>
+      source.kind === "original_material" &&
+      (typeof source.quote === "string" ||
+        (looseRecord(source.anchor) && source.anchor.kind === "message")),
+  );
   const material = [
     ...new Map(
       [...quoted.filter(onPage), ...quoted.filter((source) => !onPage(source))].map((source) => [
@@ -9575,10 +9448,7 @@ export async function approveRecruitingCalibrationRound(
   });
 }
 
-/**
- * The recruiter accepted the round in their own words; the quote must come from the run's
- * current human message, exactly like other direct recruiting decisions.
- */
+/** The recruiter accepted the round in their own words; it cites the run's current human message. */
 export async function approveRecruitingCalibrationRoundFromMessage(
   prisma: PrismaClient,
   actor: Actor,
@@ -9594,7 +9464,6 @@ export async function approveRecruitingCalibrationRoundFromMessage(
     const { message } = await feedbackContextInTransaction(tx, actor, {
       ...input,
       sourceRefs: [],
-      acceptEarlierQuote: true,
     });
     await requireRole(tx, actor, input.roleId, true);
     return approveLatestCalibrationRound(tx, actor, input.roleId, null, {
