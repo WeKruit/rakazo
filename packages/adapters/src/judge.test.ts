@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { JudgeSettings, typeSafeJudge } from "./judge.js";
-import { criteriaAssessment } from "./recruiting-criteria-check.js";
+import { criteriaAssessment, gradeOf } from "./recruiting-criteria-check.js";
 
 const answer = (body: unknown, status = 200) =>
   vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -43,39 +43,6 @@ describe("typeSafeJudge", () => {
     ]);
     expect(vi.mocked(fetchImpl)).toHaveBeenCalledTimes(1);
     expect(verdicts?.get("spark")).toEqual({ level: "strong", confidence: 0.9, against: 0.01 });
-  });
-
-  it("asks for an overall grade in the same request and returns only a grade it offered", async () => {
-    const grades = { Strong: "all shown", Partial: "one not met" };
-    const fetchImpl = answer({
-      answers: {
-        q0: { choice: "strong", confidence: 0.9 },
-        overall: { choice: "Strong", confidence: 0.7 },
-      },
-    });
-    const verdicts = await typeSafeJudge("key", fetchImpl).criteria?.(
-      { profile: "Spark" },
-      [{ id: "spark", statement: "hands-on Spark" }],
-      undefined,
-      grades,
-    );
-    expect(vi.mocked(fetchImpl)).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(String(vi.mocked(fetchImpl).mock.calls[0]![1]?.body));
-    expect(body.questions.overall).toMatchObject({ type: "choice", criteria: grades });
-    expect(verdicts?.overall).toBe("Strong");
-    const other = answer({
-      answers: { q0: { choice: "strong", confidence: 0.9 }, overall: { choice: "Great" } },
-    });
-    expect(
-      (
-        await typeSafeJudge("key", other).criteria?.(
-          {},
-          [{ id: "a", statement: "a" }],
-          undefined,
-          grades,
-        )
-      )?.overall,
-    ).toBeUndefined();
   });
 });
 
@@ -197,6 +164,17 @@ describe("JudgeSettings", () => {
       apiKey: "good",
       languageUrl: "https://check.example/",
     });
+  });
+
+  it("grades a person from the verdicts, so the grade agrees with the lines", () => {
+    const of = (...levels: string[]) => gradeOf(levels.map((level) => ({ level })));
+    expect(of("strong", "strong")).toBe("Strong");
+    expect(of("strong", "medium")).toBe("Promising");
+    expect(of("strong", "strong", "opposite")).toBe("Partial");
+    expect(of("strong", "silent", "silent")).toBe("Uncertain");
+    expect(of()).toBeUndefined();
+    // A turned-down reason counts only when the profile shows it.
+    expect(gradeOf([{ level: "strong" }, { level: "strong", avoid: true }])).toBe("Strong");
   });
 
   it("writes the verdicts as the assessment lines Results reads", () => {
