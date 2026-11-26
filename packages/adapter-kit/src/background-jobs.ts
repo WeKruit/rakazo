@@ -30,10 +30,6 @@ const payloadSchemas = {
     taskId: z.string().min(1),
     attempt: z.number().int().nonnegative().optional(),
   }),
-  "recruiting_grade.start": z.object({
-    threadId: z.string().min(1),
-    attempt: z.number().int().nonnegative().optional(),
-  }),
   "recruiting_checkin.start": z.object({ threadId: z.string().min(1) }),
   "recruiting_profile.project": z.strictObject({ pageEffectId: z.string().min(1) }),
   "recruiting_inbox.project": z.union([

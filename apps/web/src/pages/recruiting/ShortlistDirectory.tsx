@@ -343,8 +343,8 @@ export function ShortlistDirectory({
               onClick={() => {
                 onAskChat?.(
                   review === "all"
-                    ? t`Ask the Reviewer to review all ${count} shortlisted candidates for ${workspace.role.title} using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals.`
-                    : `${workspace.role.title}\n${t`Ask the Reviewer to review only these ${count} selected candidates using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals.`}\n${names}`,
+                    ? t`Re-check all ${count} shortlisted candidates for ${workspace.role.title} against this role's latest requirements. Save the results; do not send outreach or change approvals.`
+                    : `${workspace.role.title}\n${t`Re-check only these ${count} selected candidates against this role's latest requirements. Save the results; do not send outreach or change approvals.`}\n${names}`,
                 );
                 setReview(null);
               }}

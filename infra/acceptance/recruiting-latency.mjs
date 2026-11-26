@@ -1013,7 +1013,7 @@ async function main() {
     const workspace = await rpc("onboarding/ensureRecruiting", {});
     const home = await rpc("groups/get", { groupId: workspace.groupId });
     const names = new Set(home.members.map((member) => member.name.toLowerCase()));
-    for (const name of ["main", "sourcer", "outreach", "reviewer"])
+    for (const name of ["main", "sourcer", "outreach"])
       if (!names.has(name)) fail("The native recruiting crew is incomplete");
     const group = await rpc("groups/duplicate", { groupId: workspace.groupId });
     groupId = group.id;

@@ -1492,8 +1492,6 @@ export const ListRecruitingCandidatesOutput = z.strictObject({
     assessed: z.number().int().nonnegative(),
     shortlisted: z.number().int().nonnegative(),
   }),
-  /** The Reviewer is scoring this role's people right now; people without a score get one soon. */
-  grading: z.boolean().optional(),
 });
 export type ListRecruitingCandidatesOutput = z.infer<typeof ListRecruitingCandidatesOutput>;
 /** One merged person per row: Autumn search result and/or the role's CRM contact. */

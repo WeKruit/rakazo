@@ -299,7 +299,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("ensureRecruitingWorkspace", () => {
-  it("creates one private five-specialist crew atomically with platform defaults and no credentials or schedules", async () => {
+  it("creates one private four-specialist crew atomically with platform defaults and no credentials or schedules", async () => {
     const f = fixture();
     const result = await recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
       sandboxKind: "fake",
@@ -309,7 +309,6 @@ describe("ensureRecruitingWorkspace", () => {
       "Sourcer",
       "Outreach",
       "Scheduling",
-      "Reviewer",
     ]);
     expect(f.prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(
@@ -397,7 +396,7 @@ describe("ensureRecruitingWorkspace", () => {
       sandboxKind: "fake",
     });
     expect(again).toEqual(first);
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
     expect(native.group).toHaveBeenCalledTimes(2);
     expect(f.bots[0]!.instructions).toBe("My private instructions");
     expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
@@ -448,7 +447,7 @@ describe("ensureRecruitingWorkspace", () => {
     const custom = structuredClone(f.bots[0]);
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
     expect(f.bots.find((bot) => bot.id === "custom")).toEqual(custom);
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
     expect(native.group).toHaveBeenCalledWith(
       f.tx,
       actor,
@@ -464,7 +463,7 @@ describe("ensureRecruitingWorkspace", () => {
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     f.getGroup()!.archivedAt = new Date();
     await expect(recruiting.ensureRecruitingWorkspace(f.prisma, actor, options)).rejects.toThrow();
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
   });
 
   it("does not replace a customized Autumn endpoint during fresh setup", async () => {
@@ -549,7 +548,7 @@ describe("recruiting bootstrap idempotency and per-user identity", () => {
     const f = fixture();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     const counts = [f.bots.length, f.servers.length, f.assignments.length, f.presets.length];
-    expect(counts[0]).toBe(5);
+    expect(counts[0]).toBe(4);
     expect(counts[3]).toBe(1);
     const before = snapshot(f);
     for (let login = 0; login < 3; login++) {
@@ -587,7 +586,7 @@ describe("recruiting bootstrap idempotency and per-user identity", () => {
     expect(a.presets[0]!.userId).toBe(actor.userId);
     expect(b.presets[0]!.userId).toBe(other.userId);
     const keys = [...a.bots, ...b.bots].map((bot) => bot.spawnKey);
-    expect(new Set(keys).size).toBe(10);
+    expect(new Set(keys).size).toBe(8);
     expect(a.bots.every((bot) => bot.spawnKey.includes(actor.userId))).toBe(true);
     expect(b.bots.every((bot) => bot.spawnKey.includes(other.userId))).toBe(true);
     expect(JSON.stringify(a.presets)).not.toContain(other.userId);
@@ -738,7 +737,7 @@ describe("managed recruiting computer policy", () => {
       if (stage === "new-role") {
         const removed = f.bots.pop()!;
         const baseline = f.presets[0]!.config as ManagedState;
-        delete baseline.bots.reviewer;
+        delete baseline.bots.scheduling;
         f.getGroup()!.members = f
           .getGroup()!
           .members.filter((member) => member.botId !== removed.id);
@@ -746,7 +745,7 @@ describe("managed recruiting computer policy", () => {
         f.presets[0]!.digest = "before-new-role";
         await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
       }
-      expect(f.bots).toHaveLength(5);
+      expect(f.bots).toHaveLength(4);
       for (const bot of f.bots) expect(bot.disabledBuiltinTools).toEqual(disabled);
     },
   );
@@ -775,7 +774,7 @@ describe("managed recruiting computer policy", () => {
       expect(bot.modelId).toBe("private-model");
     }
     expect(unrelated.disabledBuiltinTools).toEqual([]);
-    expect(f.tx.bot.updateMany).toHaveBeenCalledTimes(5);
+    expect(f.tx.bot.updateMany).toHaveBeenCalledTimes(4);
     f.tx.bot.updateMany.mockClear();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
@@ -830,7 +829,7 @@ it("adds a new maintained role using the configured native sandbox, without revi
     expect.objectContaining({ name: "Outreach" }),
     "desktop",
   );
-  expect(native.bot).toHaveBeenCalledTimes(6);
+  expect(native.bot).toHaveBeenCalledTimes(5);
   expect(f.bots[1]!.archivedAt).not.toBeNull();
   expect(f.assignments.filter((row) => row.serverId === "fullenrich-a")).toHaveLength(2);
 });
@@ -857,7 +856,7 @@ it("does not resurrect a deleted managed workspace or apply another actor's ledg
   await expect(recruiting.ensureRecruitingWorkspace(f.prisma, actor, options)).rejects.toThrow(
     "removed",
   );
-  expect(native.bot).toHaveBeenCalledTimes(5);
+  expect(native.bot).toHaveBeenCalledTimes(4);
 });
 
 it("preserves a simultaneous private edit when the native field compare-and-set loses", async () => {
@@ -926,7 +925,7 @@ it("defers before writes when native computer quota maintenance already holds it
     expect(JSON.stringify({ bots: f.bots, assignments: f.assignments, presets: f.presets })).toBe(
       before,
     );
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
   } finally {
     vi.unstubAllEnvs();
   }
@@ -941,7 +940,7 @@ describe("managed first-party recruiting CRM installation", () => {
     const server = f.servers.find((row) => row.slug === "recruiting-crm");
     expect(server).toMatchObject({ endpoint, transport: "streamable_http" });
     expect(server?.secretId).toBeUndefined();
-    expect(f.bots).toHaveLength(5);
+    expect(f.bots).toHaveLength(4);
     const assignments = f.assignments.filter((row) => row.serverId === server!.id);
     expect(assignments).toHaveLength(2);
     const main = assignments.find((row) => row.botId === f.bots[0]!.id)!;

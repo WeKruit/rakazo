@@ -51,7 +51,6 @@ import { verifyGlobalRecruiting } from "./global-recruiting.mjs";
 import { verifyGlobalRecruitingChat } from "./global-recruiting-chat.mjs";
 import { checkNotificationPolicy } from "./notification-policy.mjs";
 import { restartTestApp } from "./restart-test-app.mjs";
-import { checkReviewerGrading } from "./reviewer-grading.mjs";
 import { assertSlowToolPromotion } from "./slow-tool.mjs";
 import { checkBackgroundTiming, checkToolTiming } from "./tool-timing.mjs";
 import {
@@ -822,8 +821,6 @@ try {
       scaleReportChecks(messages, failures, report.milestones?.scale_sent);
       checkToolTiming(messages);
       checkBackgroundTiming(await rpc("threads/get", { groupId: report.groupId }));
-      const grading = await checkReviewerGrading(rpc, report.groupId, readEvents);
-      fs.writeFileSync(path.join(OUT, "progress-reviewer.json"), JSON.stringify(grading));
       const events = await readEvents(report.groupId);
       const event = events.find(
         (event) => event.type === "thread.message.created" && event.payload?.role === "bot",

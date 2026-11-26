@@ -33,8 +33,6 @@ import type { RoleCandidate } from "./useRoleCandidates";
 
 export type CandidateDirectoryProps = {
   rows: readonly RoleCandidate[];
-  /** People without a score yet are being scored right now. */
-  grading?: boolean;
   board?: boolean;
   ownerName?: string;
   selection?: { keys: ReadonlySet<string>; set: (keys: Set<string>) => void };
@@ -185,23 +183,13 @@ const Education = memo(function Education({
 const Fit = memo(function Fit({
   sections,
   compact = false,
-  grading = false,
   ranking,
 }: {
   ranking?: DirectoryProfile["ranking"];
   sections: DirectoryProfile["sections"];
   compact?: boolean;
-  grading?: boolean;
 }) {
   const { t } = useLingui();
-  if (grading && (ranking?.group === "unreviewed" || ranking?.group === "unscored"))
-    return (
-      <span className="text-xs text-muted-foreground">
-        <Shimmer>
-          <Trans>Scoring…</Trans>
-        </Shimmer>
-      </span>
-    );
   const score = ranking
     ? ranking.score === null
       ? null
@@ -343,7 +331,6 @@ const Status = memo(function Status({ row }: { row: RoleCandidate }) {
 /** Source-only contact presentation. Loading, permissions, writes and profile navigation stay with the caller. */
 export function CandidateDirectory({
   rows,
-  grading = false,
   board = false,
   ownerName,
   selection,
@@ -664,12 +651,7 @@ export function CandidateDirectory({
                 </td>
                 {showFit ? (
                   <td className="px-3 py-2">
-                    <Fit
-                      ranking={profile.ranking}
-                      sections={profile.sections}
-                      grading={grading}
-                      compact
-                    />
+                    <Fit ranking={profile.ranking} sections={profile.sections} compact />
                   </td>
                 ) : null}
                 {renderActions ? (
@@ -740,7 +722,7 @@ export function CandidateDirectory({
                 ) : null}
                 {showFit ? (
                   <div className="mt-4 flex-1 border-t border-border pt-3">
-                    <Fit ranking={profile.ranking} sections={profile.sections} grading={grading} />
+                    <Fit ranking={profile.ranking} sections={profile.sections} />
                   </div>
                 ) : null}
                 <div className="mt-3">

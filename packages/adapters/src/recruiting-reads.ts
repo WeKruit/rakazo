@@ -3016,26 +3016,6 @@ async function hydrateRecruitingCandidateReports(
   }
 }
 
-/** Whether the Reviewer is scoring a role's people right now: a hint for the screen, never a gate. */
-export async function recruitingRoleGrading(
-  prisma: PrismaClient,
-  actor: Actor,
-  roleId: string,
-): Promise<boolean> {
-  const run = await prisma.run
-    .findFirst({
-      where: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        status: { in: ["queued", "leased", "running"] },
-        clientNonce: { startsWith: recruiting.RECRUITING_GRADE_NONCE_PREFIX },
-        thread: { activeRecruitingRoleId: roleId },
-      },
-      select: { id: true },
-    })
-    .catch(() => null);
-  return run !== null;
-}
 export const listRecruitingCandidates = (
   deps: RecruitingReadDeps,
   actor: Actor,

@@ -15,7 +15,7 @@ const CASES = [
     subject: "received email replies (messages, not distinct senders)",
   },
 ];
-const CREW = ["Main", "Sourcer", "Outreach", "Scheduling", "Reviewer"];
+const CREW = ["Main", "Sourcer", "Outreach", "Scheduling"];
 const textOf = (message) =>
   (message.blocks ?? [])
     .filter((block) => block.kind === "text")

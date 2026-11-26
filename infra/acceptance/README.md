@@ -34,7 +34,7 @@ people in `request-completion.mjs`), `real-user.mjs` (scripted scenarios in
 `replay-messages.mjs`, `playtest/` (instruction scoring loop, see its README).
 
 Search and latency: `recruiting-latency.mjs`, `first10-suite.mjs`, `global-recruiting.mjs`,
-`global-recruiting-chat.mjs`, `reviewer-grading.mjs`, `tool-timing.mjs`, `slow-tool.mjs`.
+`global-recruiting-chat.mjs`, `tool-timing.mjs`, `slow-tool.mjs`.
 
 Runs and recovery: `follow-up.mjs`, `failure-recovery.test.mjs`, `workloop-browser.mjs`,
 `workloop-task-controls.mjs`, `notification-policy.mjs`.

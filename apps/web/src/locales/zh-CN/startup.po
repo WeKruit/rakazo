@@ -616,12 +616,12 @@ msgstr "请助手起草此邮件序列，或改写当前打开的邮件。"
 
 #. placeholder {0}: workspace.role.title
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review all {count} shortlisted candidates for {0} using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
-msgstr "请评审助手根据此岗位已保存的标准和证据，评审 {0} 的全部 {count} 位入选候选人。保存评审结果，不发送邀约，也不更改审批。"
+msgid "Re-check all {count} shortlisted candidates for {0} against this role's latest requirements. Save the results; do not send outreach or change approvals."
+msgstr "请按「{0}」最新的要求重新核对全部 {count} 位入围候选人，保存结果；不要发送外联，也不要改动审批。"
 
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review only these {count} selected candidates using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
-msgstr "请评审助手仅根据此岗位已保存的标准和证据，评审这 {count} 位已选候选人。保存评审结果，不发送邀约，也不更改审批。"
+msgid "Re-check only these {count} selected candidates against this role's latest requirements. Save the results; do not send outreach or change approvals."
+msgstr "请按这个岗位最新的要求只重新核对这 {count} 位选中的候选人，保存结果；不要发送外联，也不要改动审批。"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
@@ -4561,10 +4561,6 @@ msgstr "学校"
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Schools"
 msgstr "学校"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Scoring…"
-msgstr "正在评分…"
 
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Screening"

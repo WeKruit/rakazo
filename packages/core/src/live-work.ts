@@ -790,7 +790,7 @@ export function workTimeline(
 }
 
 /** What a handed-off stage is for, in closed words clients translate; never a member's name. */
-export type WorkStageKind = "sourcing" | "quality" | "outreach" | "scheduling" | "other";
+export type WorkStageKind = "sourcing" | "outreach" | "scheduling" | "other";
 
 export function workStageKind(
   bot: { name?: string | null; spawnKey?: string | null } | undefined,
@@ -798,16 +798,13 @@ export function workStageKind(
   const key = bot ? recruitingBotKey(bot) : undefined;
   return key === "sourcer"
     ? "sourcing"
-    : key === "reviewer"
-      ? "quality"
-      : key === "outreach" || key === "scheduling"
-        ? key
-        : "other";
+    : key === "outreach" || key === "scheduling"
+      ? key
+      : "other";
 }
 
 const STAGE_LABELS: Record<WorkStageKind, string> = {
   sourcing: "Finding candidates",
-  quality: "Checking candidates",
   outreach: "Preparing outreach",
   scheduling: "Scheduling interviews",
   other: "Delegated task",
@@ -1055,7 +1052,6 @@ export const WORK_LABELS_ZH: {
   },
   stage: {
     sourcing: "寻找候选人",
-    quality: "核查候选人",
     outreach: "准备联系候选人",
     scheduling: "安排面试",
     other: "交办的任务",
