@@ -114,10 +114,6 @@ function withoutStraySentinelsAtEdges(
   return { assembled: cleanedAssembled, blocks: cleanedBlocks };
 }
 
-// A label opens a line or follows the end of a sentence ("…经验”。Done when: …").
-const BRIEF_LINE =
-  /(?:^|[.。;；!！?？]\s*)\s*(?:\*\*)?(Goal|Where|Done when|Deliverable|Context|Don't|Do not)(?:\*\*)?\s*[:：]/gim;
-
 // The server's automatic-continuation nudge (turn-end-guard.ts builds it from these phrases).
 export const NEXT_STEP_LEAD = "Continue with the next step:";
 export const UNDONE_PROMISE_LEAD = "Your last message ended with";
@@ -136,34 +132,21 @@ export function withoutNudge(text: string): string {
   return at < 0 ? text : text.slice(0, at).replace(/[\s(（]+$/, "");
 }
 
-/**
- * A handoff brief ("Goal: … Done when: … Context: …") written as the reply. It is for the
- * teammate, never the recruiter; Kruit's reply after a handoff is one line naming the team.
- */
-export function isAgentBrief(text: string): boolean {
-  const labels = new Set(
-    [...text.matchAll(BRIEF_LINE)].map((match) =>
-      (match[1] ?? "").replace(/\s/g, "").toLowerCase(),
-    ),
-  );
-  return labels.has("goal") && labels.size >= 2;
-}
-
-/** The reply without a handoff brief or echoed nudge the model wrote into it; other text stays. */
-export function withoutAgentBrief(
+/** The reply without a continuation nudge the model echoed into it; other text stays. */
+export function withoutEchoedNudge(
   assembled: string,
   blocks: MessageBlock[],
 ): { assembled: string; blocks: MessageBlock[] } {
-  const internal = (text: string) => isAgentBrief(text) || withoutNudge(text) !== text;
-  if (!internal(assembled) && !blocks.some((b) => b.kind === "text" && internal(b.text)))
+  const echoes = (text: string) => withoutNudge(text) !== text;
+  if (!echoes(assembled) && !blocks.some((b) => b.kind === "text" && echoes(b.text)))
     return { assembled, blocks };
   const kept = blocks.flatMap((block): MessageBlock[] => {
     if (block.kind !== "text") return [block];
     const text = withoutNudge(block.text);
-    if (!text.trim() || isAgentBrief(text)) return [];
+    if (!text.trim()) return [];
     return [text === block.text ? block : { ...block, text }];
   });
-  return { assembled: internal(assembled) ? joinedText(kept) : assembled, blocks: kept };
+  return { assembled: echoes(assembled) ? joinedText(kept) : assembled, blocks: kept };
 }
 
 /** Whether a user row holds the person's own words, not a teammate's relayed brief. */
