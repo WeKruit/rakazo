@@ -618,7 +618,6 @@ import {
   RecruitingFeedbackValidationError,
   recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
-import { FULL_PROFILE_READS, withRequirementEvidence } from "./recruiting-full-profile.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -4348,9 +4347,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let briefBump: { from: number; to: number } | undefined;
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
-        // Full profile pages the first round's searches may still read.
-        const fullProfileReads = { left: FULL_PROFILE_READS };
-        const profilePages = new Map<string, string>();
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
@@ -8715,12 +8711,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     userId: run.userId,
                     archivedAt: null,
                   },
-                  select: {
-                    revision: true,
-                    currentRevision: {
-                      select: { brief: true, criteria: true },
-                    },
-                  },
+                  select: { revision: true },
                 });
                 if (!role) return null;
                 const request = {
@@ -8778,15 +8769,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
                       }))
                     : rows;
-                  let people = shown;
-                  // Licences, clearances and the like are rarely in the row; before the first
-                  // pick, lines of the full profile that speak to the must-haves come with it.
-                  if (deps.profileReader && firstRoundPending && Array.isArray(people))
-                    people = await withRequirementEvidence(role.currentRevision, people, {
-                      read: deps.profileReader,
-                      reads: fullProfileReads,
-                      pages: profilePages,
-                    });
                   // Saved is not fit, and fit is not shown: every search states where the
                   // request stands.
                   const counts = await requestCounts(deps.prisma, {
@@ -8805,7 +8787,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         }
                       : {}),
                     ...counts,
-                    people,
+                    people: shown,
                     ...(Array.isArray(rows) && rows.length > AUTOSAVED_PEOPLE_SHOWN
                       ? { notShownHere: rows.length - AUTOSAVED_PEOPLE_SHOWN }
                       : {}),
