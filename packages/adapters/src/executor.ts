@@ -150,12 +150,8 @@ import {
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
-  RECRUITING_INTAKE_SKILL_NAME,
   REPLY_LANGUAGE_NAME,
   RETIRED_APPROVAL_KINDS,
-  RECRUITING_ROUND_NEXT_STEP,
-  RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
-  RECRUITING_SEARCH_SAVED_NEXT_STEP,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
   RUN_EGRESS_RATE_LIMITED,
@@ -586,7 +582,6 @@ import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   loadRecruitingRunContext,
   RECRUITING_PRESENTATION_INSTRUCTION,
-  RECRUITING_ROUND_RULES,
 } from "./recruiting-context.js";
 import type { RecruitingFeedbackResult } from "./recruiting-feedback.js";
 import {
@@ -1276,12 +1271,6 @@ export const questionAlreadyWaiting = (question: string) =>
 export const RESEARCH_SAVE_REFUSED =
   "Not saved: the server refused this save just now. The JD, its file and the people your searches found are still available, so never ask the recruiter for them again. When this conversation's role is not saved yet, save it first with recruiting_role create (title and the JD's requirements), then call this operation once more; otherwise call it once more. If it fails again, say in one line that the people found could not be saved yet, never that the JD or file is unreadable.";
 
-const ROLE_NOT_SAVED_NOTE =
-  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then issue the four calibration people searches from what they wrote (the recruiter sees the first ten before any question; ask first only when they named no title, place or requirement at all). Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
-
-const FILE_JOB_NOTE =
-  "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then issue the calibration people searches from it as written (the recruiter sees the first ten before any question).";
-
 /** A handed-off request has one owner, so the recruiter gets one question about it. */
 /** Model-facing: a turn that recorded its round leaves a newer request to the turn answering it. */
 export const newerRequestElsewhere = (text: string) =>
@@ -1353,15 +1342,14 @@ export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined
   );
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Do what you can yourself, such as a role's campaign with its role_id. Showing a role's saved people is yours (recruiting_candidates list with its roleId, show true); finding new people for a role or changing them runs in that role's conversation (delegate_to_role), as does work a tool says that conversation is doing now; an interview booking for a person named with an email goes to Scheduling here. To open a new role use start_role when offered. A recruiter who asks how to use this or what to do first, or says they have no JD, gets the first step in words once (send the JD, or a job title with a few must-haves), never a question back or a card.";
+  "No recruiting role is selected; earlier role snapshots do not apply.";
 
 /**
  * A role's own conversation whose role is not saved yet. Staging 11-25: Stop landed between
- * opening the conversation and saving the role; on "继续吧" its team read the account-wide text
- * above and told the recruiter the work "needs to happen in the role's conversation".
+ * opening the conversation and saving the role, and the account-wide text above sent the
+ * recruiter to "the role's conversation".
  */
-const ROLE_NOT_SAVED_CONTEXT =
-  "This is a role's own conversation and its role is not saved yet. Save it now with recruiting_role create from the recruiter's requirements in this conversation, then carry on with the first round as intake says. Never send the recruiter to another conversation for it.";
+const ROLE_NOT_SAVED_CONTEXT = "This conversation has no saved role yet.";
 
 const noRoleContext = (groupId: string | null | undefined) =>
   groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
@@ -8086,7 +8074,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ? { notShownHere: rows.length - AUTOSAVED_PEOPLE_SHOWN }
                       : {}),
                     expectedRoleRevision: role.revision,
-                    next: RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
                   };
                 } catch (error) {
                   await completeEffect(deps, saving.effect.id, "executing", {
@@ -8932,9 +8919,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ...(roundShown ? { shownToRecruiter: roundShown } : {}),
                       // Gate 9d632819: the turn began on an English JD, the recruiter went on in
                       // Chinese in the main chat, and the card after the round was English.
-                      next: hideVendors
-                        ? `${RECRUITING_ROUND_NEXT_STEP} The recruiter now writes in ${REPLY_LANGUAGE_NAME[turnLanguage]}.`
-                        : RECRUITING_ROUND_NEXT_STEP,
+                      ...(hideVendors
+                        ? {
+                            next: `The recruiter now writes in ${REPLY_LANGUAGE_NAME[turnLanguage]}.`,
+                          }
+                        : {}),
                     }
                   : round;
               }
@@ -8953,8 +8942,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchInput.data,
                   context,
                 );
-                if (!saved || typeof saved !== "object" || Array.isArray(saved)) return saved;
-                return { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP };
+                return saved;
               }
               if (!applied || !claimedEffect) throw new IsolationError();
               // Internal record keeping: page, rows and effect commit together.
@@ -11508,8 +11496,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             })),
           );
         }
-        // Until the first round, later intake turns go straight to the people searches and carry
-        // the job page the server already read, so the model never fetches it again.
+        // Until the first round, a turn carries the job page the server already read.
         const intakeTurnNote = async (): Promise<{ page?: string } | undefined> => {
           if (!thread.activeRecruitingRoleId || !deps.artifacts) return undefined;
           const [read, round] = await Promise.all([
@@ -11547,7 +11534,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // with no role and the intake note only on one with a role, so at most one does work.
         // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
         // the server before the model's first step, so the first question needs no read or save step.
-        // Recruiting runs carry the intake skill in the turn: reading it cost a model step per run.
         const handedIn =
           run.trigger === "follow_up" &&
           Boolean(run.sourceMessageId) &&
@@ -11572,7 +11558,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return false;
         };
-        const [intake, intakeSkill, replyContext, waitingCards, attached] =
+        const [intake, replyContext, waitingCards, attached] =
           await ownTime(
             "turnNotes",
             Promise.all([
@@ -11582,13 +11568,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
                 return undefined;
               }),
-              tools.some((tool) => tool.name === "recruiting_role")
-                ? skillReadFromTool(
-                    deps.prisma,
-                    { spaceId: run.spaceId, userId: run.userId },
-                    { name: RECRUITING_INTAKE_SKILL_NAME },
-                  ).catch(() => null)
-                : null,
               loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
               run.trigger === "user" && currentTurnMessage?.role === "user"
                 ? waitingCardBlocks(deps.prisma, thread.id)
@@ -11720,19 +11699,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           )[0],
         );
         const languageNote = hideVendors ? replyLanguageNote(turnLanguage, screen) : undefined;
-        const intakeSearchNote =
-          intake &&
-          [
-            "Never search connectors or tools before the people searches. A recruiter who asked for people sees the first ten before any question: issue the four people searches as your very next step, from what the role already holds. A role opened only to email people the recruiter named has no search.",
-            intake.page &&
-              `The role's job page, already read and saved (never fetch it again):\n\n${intake.page}`,
-          ]
-            .filter(Boolean)
-            .join(" ");
-        const intakeSkillNote =
-          typeof intakeSkill?.content === "string"
-            ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
-            : undefined;
+        const jobPageNote = intake?.page
+          ? `The role's job page, already read and saved:\n\n${intake.page}`
+          : undefined;
         const promptParts = [
           replyContext,
           nativeSources?.currentAnswer
@@ -11740,7 +11709,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .filter(Boolean)
                 .join("\n\n")
             : basePrompt,
-          intakeSkillNote,
           fileNote,
           awayNote,
           languageNote,
@@ -11748,25 +11716,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           signingNote,
           mailboxNote,
           sendNowNote,
-          !fileNote &&
-          !thread.groupId?.startsWith("recruiting-global-") &&
-          !thread.activeRecruitingRoleId &&
-          currentTurnMessage?.role === "user" &&
-          currentTurnMessage.blocks.some((block) => block.kind === "file") &&
-          tools.some((tool) => tool.name === "recruiting_role")
-            ? FILE_JOB_NOTE
-            : undefined,
-          !fileNote &&
-          thread.groupId &&
-          !thread.groupId.startsWith("recruiting-global-") &&
-          !thread.activeRecruitingRoleId &&
-          currentTurnMessage?.role === "user" &&
-          !currentTurnMessage.blocks.some((block) => block.kind === "file") &&
-          recruitingBotKey(bot) &&
-          tools.some((tool) => tool.name === "recruiting_role")
-            ? ROLE_NOT_SAVED_NOTE
-            : undefined,
-          intakeSearchNote,
+          jobPageNote,
           handedIn
             ? (await recruiterHasReply())
               ? HANDOFF_ANSWER_NOTE
@@ -11851,12 +11801,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : (initialRecruitingContext?.text ??
               [
                 noRoleContext(thread.groupId),
-                // The turn that saves a role also produces its first round, so it carries the
-                // round rules a saved role's context has: without them it ran one or two searches
-                // with no profile evidence and recorded ten unchecked or unknown people.
-                ...(thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
-                  ? RECRUITING_ROUND_RULES
-                  : []),
                 memoryContext.text,
               ]
                 .filter(Boolean)

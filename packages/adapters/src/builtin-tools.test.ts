@@ -7,11 +7,7 @@ import {
   RecruitingReplyInputSchema,
   RecruitingShortlistToolInputSchema,
 } from "@rakazo/contracts";
-import {
-  RECRUITING_BRIEF_CHECKLIST,
-  RECRUITING_DISABLED_BUILTIN_TOOLS,
-  RECRUITING_UNUSED_BUILTIN_TOOLS,
-} from "@rakazo/core";
+import { RECRUITING_DISABLED_BUILTIN_TOOLS, RECRUITING_UNUSED_BUILTIN_TOOLS } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { builtinAgentTools } from "./builtin-tools.js";
@@ -91,14 +87,6 @@ describe("native recruiting approval tool", () => {
         (tool!.inputSchema.properties as Record<string, unknown>).recruitingFeedback,
       ).toBeUndefined();
     }
-  });
-});
-
-describe("recruiting brief checklist", () => {
-  it("reaches every account through the role tool", () => {
-    const description = (name: string) =>
-      builtinAgentTools.find((tool) => tool.name === name)!.description;
-    expect(description("recruiting_role")).toContain(RECRUITING_BRIEF_CHECKLIST);
   });
 });
 

@@ -9,12 +9,16 @@ import type {
 import {
   buildSkillMd,
   findSkillByName,
+  isRecruitingSkillName,
   isSkillReadOnly,
   mergeBuiltinSkills,
   missingSkillRequirement,
   parseSkillMd,
+  RECRUITING_DEFAULT_SKILLS,
+  RECRUITING_RETIRED_SKILL_NAMES,
   type SkillSource,
   skillRequirements,
+  withoutRecruitingSkillCopies,
 } from "@rakazo/core";
 import { IsolationError, Prisma, type PrismaClient } from "@rakazo/db";
 
@@ -125,6 +129,12 @@ export function resolveSkillContent(input: {
   };
 }
 
+/** Saved names are trimmed, so the page query can leave copies of these out by name. */
+const RECRUITING_SKILL_NAMES = [
+  ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name),
+  ...RECRUITING_RETIRED_SKILL_NAMES,
+];
+
 export function createAgentSkillsService(prisma: PrismaClient) {
   async function owned(actor: Actor, skillId: string) {
     const row = await prisma.agentSkill.findFirst({
@@ -173,7 +183,10 @@ export function createAgentSkillsService(prisma: PrismaClient) {
       if (offset !== undefined) {
         // Builtins precede saved skills, except when an owned saved name overrides them.
         // Check only the finite builtin names; never load every saved skill to find overrides.
-        const names = builtins.map((skill) => skill.name.trim().toLowerCase());
+        // Recruiting skills always follow the release, so a same-named copy never overrides one.
+        const names = withoutRecruitingSkillCopies(builtins).map((skill) =>
+          skill.name.trim().toLowerCase(),
+        );
         const overrides = names.length
           ? await prisma.$queryRaw<{ name: string }[]>(Prisma.sql`
           SELECT DISTINCT lower(btrim("name")) AS name FROM "agent_skills"
@@ -190,7 +203,11 @@ export function createAgentSkillsService(prisma: PrismaClient) {
         const remaining = 200 - prefix.length;
         const rows = remaining
           ? await prisma.agentSkill.findMany({
-              where: { spaceId: actor.spaceId, userId: actor.userId },
+              where: {
+                spaceId: actor.spaceId,
+                userId: actor.userId,
+                NOT: { name: { in: RECRUITING_SKILL_NAMES, mode: "insensitive" } },
+              },
               orderBy: [{ name: "asc" }, { id: "asc" }],
               take: remaining,
               skip: Math.max(0, offset - visible.length),
@@ -202,7 +219,10 @@ export function createAgentSkillsService(prisma: PrismaClient) {
         where: { spaceId: actor.spaceId, userId: actor.userId },
         orderBy: [{ name: "asc" }, { id: "asc" }],
       });
-      return catalog(actor, mergeBuiltinSkills(builtins, rows.map(mapAgentSkill)));
+      return catalog(
+        actor,
+        mergeBuiltinSkills(builtins, withoutRecruitingSkillCopies(rows.map(mapAgentSkill))),
+      );
     },
 
     async listWithContent(actor: Actor): Promise<AgentSkill[]> {
@@ -210,7 +230,10 @@ export function createAgentSkillsService(prisma: PrismaClient) {
         where: { spaceId: actor.spaceId, userId: actor.userId },
         orderBy: [{ name: "asc" }, { id: "asc" }],
       });
-      return mergeBuiltinSkills(builtinCatalog(), rows.map(mapAgentSkill));
+      return mergeBuiltinSkills(
+        builtinCatalog(),
+        withoutRecruitingSkillCopies(rows.map(mapAgentSkill)),
+      );
     },
 
     async get(actor: Actor, input: { skillId?: string; name?: string }): Promise<AgentSkill> {
@@ -230,7 +253,7 @@ export function createAgentSkillsService(prisma: PrismaClient) {
         },
         orderBy: [{ name: "asc" }, { id: "asc" }],
       });
-      const row = findSkillByName(rows, name);
+      const row = findSkillByName(withoutRecruitingSkillCopies(rows), name);
       if (row) return mapAgentSkill(row);
       const builtin = findSkillByName(builtinCatalog(), name);
       if (!builtin) throw new IsolationError();
@@ -251,7 +274,8 @@ export function createAgentSkillsService(prisma: PrismaClient) {
       });
       if (
         clash ||
-        builtinCatalog().some((s) => s.name.toLowerCase() === resolved.name.toLowerCase())
+        builtinCatalog().some((s) => s.name.toLowerCase() === resolved.name.toLowerCase()) ||
+        isRecruitingSkillName(resolved.name)
       ) {
         throw new ORPCError("CONFLICT", { message: "A skill with that name already exists." });
       }
@@ -305,7 +329,8 @@ export function createAgentSkillsService(prisma: PrismaClient) {
         });
         if (
           clash ||
-          builtinCatalog().some((s) => s.name.toLowerCase() === resolved.name.toLowerCase())
+          builtinCatalog().some((s) => s.name.toLowerCase() === resolved.name.toLowerCase()) ||
+          isRecruitingSkillName(resolved.name)
         ) {
           throw new ORPCError("CONFLICT", { message: "A skill with that name already exists." });
         }
