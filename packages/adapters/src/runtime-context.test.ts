@@ -181,7 +181,6 @@ describe("runtime context policy", () => {
     "read_memory",
     "recruiting_role",
     "recruiting_research",
-    "recruiting_assess",
     "recruiting_candidates",
   ])("keeps earlier %s and other tool evidence verbatim while the budget fits", (toolName) => {
     const { request, context } = fixture(2);
@@ -233,97 +232,32 @@ describe("runtime context policy", () => {
     expect(body("shell-2")).toBe(shellOutput);
   });
 
-  it.each([65536, 10000])(
-    "preserves a 267-character assessment quote and all source metadata after a later tool at window %s",
-    (contextWindow) => {
-      const { request, context } = fixture(30);
-      const quote =
-        `  ${"Personally implemented coordinate transformations.\n".repeat(6)}`.slice(0, 265) +
-        "\r\n";
-      const source = {
-        id: "source-original",
-        kind: "candidate_statement",
-        anchor: { kind: "message", messageId: "material-message", locator: "block 0" },
-        readState: "read",
-        readAt: "2026-10-16T00:00:00.000Z",
-        quote,
-        selection: { kind: "message_text", blockIndex: 0, start: 3, end: 3 + quote.length },
-      };
-      const receipt = JSON.stringify({
-        assessment: {
-          facts: Array.from({ length: 40 }, (_, index) => ({
-            id: `fact-${index}`,
-            statement: "Short sourced employment evidence. ".repeat(2),
-            sourceRefIds: [source.id],
-          })),
-          sourceRefs: [source],
-          judgments: { atoms: [], employment: [], criteria: [], hardGate: "unknown" },
-        },
-      });
-      expect(quote).toHaveLength(267);
-      expect(receipt.length).toBeGreaterThan(5000);
-      expect(receipt.length).toBeLessThan(12000);
-      for (const [id, name, body] of [
-        ["assessment-read", "recruiting_assess", receipt],
-        ["later-ask", "recruiting_assess", '{"question":"original-card"}'],
-      ] as const) {
-        context.messages.push(
-          {
-            role: "assistant",
-            content: [{ type: "toolCall", id, name, arguments: {} }],
-            timestamp: 101,
-          } as unknown as Message,
-          {
-            role: "toolResult",
-            toolCallId: id,
-            toolName: name,
-            content: [{ type: "text", text: body }],
-            isError: false,
-            timestamp: 102,
-          } as Message,
-        );
-      }
+  it.each(["read_memory", "recruiting_role", "recruiting_research", "recruiting_candidates"])(
+    "does not silently shorten required %s data to meet a small context window",
+    (toolName) => {
+      const { request, context } = fixture(0);
+      const body = JSON.stringify({ roleContext: "exact saved context ".repeat(2000) });
+      context.messages.push(
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "read", name: toolName, arguments: {} }],
+          timestamp: 101,
+        } as unknown as Message,
+        {
+          role: "toolResult",
+          toolCallId: "read",
+          toolName,
+          content: [{ type: "text", text: body }],
+          isError: false,
+          timestamp: 102,
+        } as Message,
+      );
       const policy = createRuntimeContextPolicy({ ...request, contextStrategy: "retrieval" });
-      const prepared = policy.prepareContext(context, { ...model, contextWindow, maxTokens: 1024 });
-      const result = prepared.messages.find(
-        (message) => message.role === "toolResult" && message.toolCallId === "assessment-read",
-      ) as Extract<Message, { role: "toolResult" }>;
-      const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("");
-      expect(JSON.parse(text).assessment.sourceRefs[0]).toEqual(source);
-      expect(text).toBe(receipt);
-      if (contextWindow === 10000) expect(policy.getDecision()!.droppedMessages).toBeGreaterThan(0);
+      expect(() =>
+        policy.prepareContext(context, { ...model, contextWindow: 8192, maxTokens: 1024 }),
+      ).toThrow(ContextBudgetError);
     },
   );
-
-  it.each([
-    "read_memory",
-    "recruiting_role",
-    "recruiting_research",
-    "recruiting_assess",
-    "recruiting_candidates",
-  ])("does not silently shorten required %s data to meet a small context window", (toolName) => {
-    const { request, context } = fixture(0);
-    const body = JSON.stringify({ roleContext: "exact saved context ".repeat(2000) });
-    context.messages.push(
-      {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "read", name: toolName, arguments: {} }],
-        timestamp: 101,
-      } as unknown as Message,
-      {
-        role: "toolResult",
-        toolCallId: "read",
-        toolName,
-        content: [{ type: "text", text: body }],
-        isError: false,
-        timestamp: 102,
-      } as Message,
-    );
-    const policy = createRuntimeContextPolicy({ ...request, contextStrategy: "retrieval" });
-    expect(() =>
-      policy.prepareContext(context, { ...model, contextWindow: 8192, maxTokens: 1024 }),
-    ).toThrow(ContextBudgetError);
-  });
   it.each(["recruiting_role", "recruiting_research"])(
     "retains the latest %s adopted role after later tool and steering exchanges",
     (toolName) => {

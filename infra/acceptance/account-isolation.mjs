@@ -456,30 +456,12 @@ async function crossReads(viewer, owner, ownerIds, r) {
         "candidates",
       );
       await probe(viewer, owner, ownerIds, "recruiting/listFeedback", { roleId }, "feedback");
-      await probe(viewer, owner, ownerIds, "recruiting/listAssessments", { roleId }, "assessments");
       await probe(viewer, owner, ownerIds, "recruiting/listResearch", { roleId }, "research");
       await probe(viewer, owner, ownerIds, "recruiting/reminders/list", { roleId }, "reminders");
-      if (group.threadId)
-        await probe(
-          viewer,
-          owner,
-          ownerIds,
-          "recruiting/listQuestions",
-          { threadId: group.threadId, roleId },
-          "questions",
-        );
     }
   }
   for (const person of r.candidates.slice(0, 10)) {
     const { roleId, key } = person;
-    await probe(
-      viewer,
-      owner,
-      ownerIds,
-      "recruiting/getAssessment",
-      { roleId, candidateKey: key },
-      "assessment",
-    );
     await probe(
       viewer,
       owner,

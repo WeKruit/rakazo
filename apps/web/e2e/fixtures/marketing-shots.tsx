@@ -631,43 +631,7 @@ async function prepareRecruitingSourceShot() {
     definitionQuestions: [],
     createdAt: "2026-10-16T00:00:00Z",
   };
-  const judgment = {
-    verdict: "unknown",
-    factIds: ["fact-demo"],
-    evidence: [source.id],
-    missing: ["Confirm the candidate's own implementation and employment dates."],
-  };
   demoRpc["recruiting/getWorkspace"] = { role, revision };
-  demoRpc["recruiting/listAssessments"] = [
-    {
-      assessment: {
-        roleId: role.id,
-        roleRevisionId: revision.id,
-        candidateKey: "Synthetic candidate",
-        version: 1,
-        basedOnVersion: null,
-        createdByRunId: "run-demo",
-        createdAt: "2026-10-16T00:00:00Z",
-        facts: [
-          { kind: "statement", id: "fact-demo", statement: quote, sourceRefIds: [source.id] },
-        ],
-        sourceRefs: [source],
-        questions: judgment.missing,
-        judgments: {
-          atoms: [{ atomId: "geometry-atom", ...judgment }],
-          criteria: [{ criterionId: "geometry", ...judgment }],
-          employment: [],
-          hardGate: "unknown",
-        },
-      },
-      isCurrent: true,
-      roleRevision: revision,
-      sourceMessageTargets: [],
-    },
-  ];
-  const assessment = (
-    demoRpc["recruiting/listAssessments"] as { assessment: { createdAt: string } }[]
-  )[0]!;
   const crmTarget = {
     mcpServerId: "synthetic-crm-server",
     serverRevision: 1,
@@ -694,13 +658,6 @@ async function prepareRecruitingSourceShot() {
       discoveryCount: 2,
       firstDiscoveredAt: "2026-10-16T00:00:00Z",
       lastDiscoveredAt: "2026-10-16T00:00:00Z",
-      latestAssessment: {
-        version: 1,
-        roleRevisionId: revision.id,
-        createdAt: assessment.assessment.createdAt,
-        isCurrent: true,
-        hardGate: "unknown",
-      },
       crm: {
         effectId: "synthetic-crm-import-1",
         bindingEffectId: "synthetic-crm-binding",
@@ -735,7 +692,6 @@ async function prepareRecruitingSourceShot() {
       discoveryCount: 1,
       firstDiscoveredAt: "2026-10-16T00:00:00Z",
       lastDiscoveredAt: "2026-10-16T00:00:00Z",
-      latestAssessment: null,
       crm: {
         effectId: "synthetic-crm-import-2",
         bindingEffectId: "synthetic-crm-binding",
@@ -762,7 +718,6 @@ async function prepareRecruitingSourceShot() {
       discoveryCount: 1,
       firstDiscoveredAt: "2026-10-16T00:00:00Z",
       lastDiscoveredAt: "2026-10-16T00:00:00Z",
-      latestAssessment: null,
       crm: null,
     },
   ];
@@ -774,14 +729,7 @@ async function prepareRecruitingSourceShot() {
           [candidate.name, candidate.title, candidate.company, candidate.location].some((value) =>
             value?.toLowerCase().includes(query),
           )) &&
-        (args.shortlisted === undefined || candidate.shortlisted === args.shortlisted) &&
-        (!args.assessmentState ||
-          (args.assessmentState === "unassessed"
-            ? !candidate.latestAssessment
-            : args.assessmentState === "current"
-              ? candidate.latestAssessment?.isCurrent
-              : candidate.latestAssessment && !candidate.latestAssessment.isCurrent)) &&
-        (!args.verdict || candidate.latestAssessment?.hardGate === args.verdict),
+        (args.shortlisted === undefined || candidate.shortlisted === args.shortlisted),
     );
     const offset = typeof args.cursor === "string" ? Number(args.cursor) : 0;
     const page = filtered.slice(offset, offset + 2);
@@ -796,13 +744,10 @@ async function prepareRecruitingSourceShot() {
         sourceRows: 4,
         candidates: 3,
         identifiedCandidates: 2,
-        unassessed: 2,
-        assessed: 1,
         shortlisted: candidates.filter((candidate) => candidate.shortlisted).length,
       },
     };
   };
-  demoRpc["recruiting/getAssessment"] = () => assessment;
   demoRpc["recruiting/setCandidateShortlist"] = (args: Record<string, unknown>) => {
     const candidate = candidates.find((candidate) => candidate.candidateKey === args.candidateKey)!;
     candidate.shortlisted = args.shortlisted === true;
@@ -911,7 +856,6 @@ async function prepareRecruitingSourceShot() {
       })),
     };
   };
-  demoRpc["recruiting/listQuestions"] = { questions: [] };
   const profileArtifact = {
     id: "profile-demo",
     botId: "bot-inbox",

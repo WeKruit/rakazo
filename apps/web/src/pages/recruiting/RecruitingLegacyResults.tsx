@@ -3,7 +3,6 @@ import { Button, Card, CardContent, Checkbox } from "@rakazo/ui-web";
 import { ListPager } from "../../components/ListPager";
 import { readRecruitingPanelState } from "../../lib/right-panel-state";
 import {
-  CandidateAssessment,
   CandidateContactFields,
   CandidateCriteria,
   CandidateDecision,
@@ -45,7 +44,6 @@ export function RecruitingLegacyResults({
     shortlistPending,
     shortlistFailed,
     workspace,
-    showInternalAssessments,
     candidateFresh,
     showCrm,
     selectCandidate,
@@ -183,7 +181,6 @@ export function RecruitingLegacyResults({
                             roleRevisionId={workspace?.revision.id}
                             showDiagnostics={showDiagnostics}
                           />
-                          <CandidateAssessment candidate={candidate} />
                           {showCrm ? (
                             <p className="text-xs text-muted-foreground">
                               <Trans>Pipeline</Trans> · <CrmStatus sync={candidate.crm} />
@@ -233,7 +230,6 @@ export function RecruitingLegacyResults({
                         ...(presentation !== "workspace" ? [t`Profile`] : []),
                         t`Research match`,
                         ...(candidateTableDetails ? [t`Criteria`] : []),
-                        ...(showInternalAssessments ? [t`Internal assessment`] : []),
                         ...(candidateTableDetails ? [t`Research round`, t`Feedback`] : []),
                         ...(showCrm ? [t`Pipeline`] : []),
                         ...(candidateTableDetails ? [t`Provider status`] : []),
@@ -302,11 +298,6 @@ export function RecruitingLegacyResults({
                     {candidateTableDetails ? (
                       <td className="min-w-48 py-2 pe-3 text-xs">
                         <CandidateCriteria candidate={candidate} />
-                      </td>
-                    ) : null}
-                    {showInternalAssessments ? (
-                      <td className="py-2 pe-3">
-                        <CandidateAssessment candidate={candidate} />
                       </td>
                     ) : null}
                     {candidateTableDetails ? (

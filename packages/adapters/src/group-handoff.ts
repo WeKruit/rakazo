@@ -23,8 +23,6 @@ import { getLogger } from "@rakazo/logging";
 import { COMPLETION_EMAIL_OFFER, completionEmailAnswered } from "./completion-email.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { blocksText } from "./reply-suggestion.js";
-import { newRoleNote, newRoleOpening, roleRef } from "./role-reference.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
@@ -139,34 +137,6 @@ export async function handoffToGroupBot(
         targetKey !== "scheduling"
       )
         return { error: GLOBAL_HANDOFF_ROLE_WORK } as const;
-      // Work in a role the recruiter names is Main's own: it reads that role's records and writes,
-      // sends and books itself (#1545). Staging 11-16, team-has-no-email: this refusal once sent
-      // Main to delegate_to_role, so the recruiter got "still checking" twice while the role's
-      // team picked the wrong person.
-      if (groupId.startsWith("recruiting-global-")) {
-        // A request steered into a running turn is not its source message; the brief quotes it.
-        const asked = roleTitleText(
-          `${JSON.stringify(activeSource.sourceMessage?.blocks ?? [])}\n${input.message}`,
-        );
-        const roles = await tx.recruitingRole.findMany({
-          where: { userId: run.userId, spaceId: run.spaceId, archivedAt: null },
-          select: { id: true, title: true },
-        });
-        const named =
-          roles.find((role) => namesRole(asked, role.title) === "full") ??
-          roles.find((role) => namesRole(asked, role.title) === "core");
-        if (named)
-          return {
-            error: `Not handed off: do this yourself, in this reply. The recruiter named the role "${named.title}" (role_id "${named.id}"): read its people, emails and sends with your own tools and that role_id, and write, send or book from their own Gmail and calendar on its card. Only a new search, round or feedback on its people goes to its conversation (delegate_to_role).`,
-          } as const;
-        // Staging 11-16: a new role's request went to Outreach as a one-off campaign outside any
-        // role, so its later "stop it" and "who got it" had nothing to act on.
-        const opening = newRoleOpening(asked);
-        if (opening)
-          return {
-            error: newRoleNote(opening.ref ?? "none given"),
-          } as const;
-      }
       // A search stage saves people into the conversation's role; without one the sourcing
       // teammate has nowhere to put them, so the coordinator sets the role up first.
       const source = group.members.find((member) => member.bot.id === run.botId);
@@ -325,21 +295,6 @@ async function confirmedSend(
   return sent !== null;
 }
 
-/** Whether the recruiter's latest message in the thread is a question. */
-async function latestUserMessageAsks(
-  tx: Pick<PrismaClient, "message">,
-  threadId: string,
-): Promise<boolean> {
-  const latest = await tx.message.findFirst({
-    where: { threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    select: { blocks: true },
-  });
-  const parsed = MessageBlock.array().safeParse(latest?.blocks ?? []);
-  if (!parsed.success) return false;
-  return /[?？]\s*$/.test(blocksText(parsed.data).trim());
-}
-
 /** Whether a card in the thread is still waiting for the recruiter's answer. */
 async function cardWaitsOnRecruiter(
   tx: Pick<PrismaClient, "message">,
@@ -424,10 +379,6 @@ export async function reportGroupHandoffOutcome(
       if (botMessageHopExhausted(hop)) return undefined;
       const mail = await readMailReplyOutcomeReport(tx, run);
       const posted = outcome.status === "completed" && !mail && (await postedResult(tx, run.id));
-      // Staging 11-13: a teammate answered the recruiter's question, then the sender restated it
-      // or handed it back for proof, so one question got two or three answers. An answered
-      // question needs nothing more from the sender.
-      if (posted && (await latestUserMessageAsks(tx, run.threadId))) return undefined;
       // Staging 11-13: after the recruiter confirmed a send and Outreach said it went out, the
       // report woke Main, which listed the account's roles unasked. A confirmed send is done.
       if (posted && (await confirmedSend(tx, run.id))) return undefined;
@@ -812,24 +763,3 @@ export async function watchOpenStages(
   return sent;
 }
 
-/** Lower-case text with full-width punctuation and runs of spaces folded, for title matching. */
-function roleTitleText(text: string): string {
-  return text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ");
-}
-
-/**
- * Whether the text names a role: its full title, or the title without a trailing qualifier such
- * as "(Seattle)", which briefs often write as "Senior Data Engineer（Seattle）" or leave out.
- */
-export function namesRole(asked: string, title: string): "full" | "core" | undefined {
-  // A ref the recruiter gives picks the role: "Senior Data Engineer … ref 12181" is not an older
-  // "Senior Data Engineer (Seattle)" with no ref or another one (staging 11-14).
-  const opening = newRoleOpening(asked);
-  const askedRef = roleRef(asked) ?? opening?.ref;
-  if (askedRef && askedRef !== roleRef(title)) return undefined;
-  if (opening && !askedRef) return undefined;
-  const full = roleTitleText(title).trim();
-  if (full.length > 1 && asked.includes(full)) return "full";
-  const core = full.replace(/\s*\([^)]*\)$/, "").trim();
-  return core.length >= 6 && asked.includes(core) ? "core" : undefined;
-}

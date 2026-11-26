@@ -36,7 +36,6 @@ export const BUILTIN_TOOL_NAMES = [
   "save_shared_memory",
   "save_group_memory",
   "recruiting_role",
-  "recruiting_assess",
   "recruiting_candidates",
   "recruiting_shortlist",
   "recruiting_research",

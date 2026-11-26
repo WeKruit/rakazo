@@ -135,7 +135,6 @@ describe("usage diagnostic authorization", () => {
         unansweredInputs: 0,
         inputs: 0,
       },
-      memory: { correctedAfterCompaction: { count: 0, of: 0 } },
       collaboration: { handoffs: 0, teammateTurns: 0, replied: 0, silent: 0 },
       automation: { fired: 0, skipped: 0, completed: 0, failed: 0 },
     };

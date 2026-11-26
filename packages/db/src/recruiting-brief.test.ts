@@ -9,7 +9,6 @@ import { ReviseRecruitingRoleInput } from "@rakazo/contracts";
 import {
   boundDirectApprovalRequest,
   normalizeRecruitingCandidateRow,
-  qualifiedEmploymentMonths,
   RecruitingPlaybookValidationError,
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
@@ -671,21 +670,6 @@ describe("native human criterion editing", () => {
       ...f.revisions[0]!.criteria[0]!,
       expression: { kind: "any", items: [leaf, { kind: "not", item: leaf }] },
     };
-    const evaluate = (minimumMonths: number) =>
-      qualifiedEmploymentMonths({
-        ...employmentRule,
-        minimumMonths,
-        cutoff,
-        historyComplete: true,
-        intervals: [
-          {
-            start: { precision: "day", year: 2020, month: 1, day: 1 },
-            end: { precision: "day", year: 2025, month: 12, day: 31 },
-            qualifyingFullTime: "met",
-          },
-        ],
-      });
-    expect(evaluate(60)).toMatchObject({ verdict: "met", lowerMonths: 72 });
     const updatedRule = { ...employmentRule, minimumMonths: 84 };
     const saved = await recruiting.editRecruitingCriteria(f.prisma, actor, {
       ...f.input,
@@ -699,13 +683,6 @@ describe("native human criterion editing", () => {
     expect(saved.revision.criteria[0]!.expression).toEqual({
       kind: "any",
       items: [expectedLeaf, { kind: "not", item: expectedLeaf }],
-    });
-    const actual = saved.revision.criteria[0]!.expression;
-    if (actual.kind !== "any" || actual.items[0]!.kind !== "atom")
-      throw new Error("Expected employment atom");
-    expect(evaluate(actual.items[0]!.employmentRule!.minimumMonths)).toMatchObject({
-      verdict: "unmet",
-      upperMonths: 72,
     });
     expect(f.revisions[0]!.criteria[0]!.expression).toEqual({
       kind: "any",

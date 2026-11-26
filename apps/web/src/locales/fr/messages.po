@@ -662,10 +662,6 @@ msgstr ""
 msgid "Assessment"
 msgstr ""
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Assessment unavailable"
-msgstr ""
-
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Associated roles"
 msgstr ""
@@ -957,10 +953,6 @@ msgstr "Annulé"
 msgid "Candidate"
 msgstr "Candidat"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Candidate assessment"
-msgstr ""
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Candidate conversations"
 msgstr ""
@@ -971,10 +963,6 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Candidate details unavailable"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Candidate facts"
 msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
@@ -991,10 +979,6 @@ msgstr ""
 
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 msgid "Candidate pipeline"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Candidate question"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
@@ -1834,10 +1818,6 @@ msgstr "Impossible de charger les règles d'approbation"
 msgid "Could not load artifacts."
 msgstr "Impossible de charger les artefacts."
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Could not load assessment"
-msgstr ""
-
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Could not load backup models"
 msgstr "Impossible de charger les modèles de secours."
@@ -2232,10 +2212,6 @@ msgstr ""
 
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Criteria"
-msgstr ""
-
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Criterion"
 msgstr ""
 
 #. placeholder {0}: index + 1
@@ -3297,12 +3273,6 @@ msgstr ""
 msgid "Interested"
 msgstr ""
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-#: src/pages/recruiting/CandidatePresentation.tsx
-#: src/pages/recruiting/RecruitingLegacyResults.tsx
-msgid "Internal assessment"
-msgstr ""
-
 #: src/pages/SettingsOverlay.tsx
 msgid "Internal Costs"
 msgstr ""
@@ -4229,10 +4199,6 @@ msgstr ""
 msgid "No runs yet"
 msgstr "Aucune exécution pour le moment"
 
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "No saved assessments"
-msgstr ""
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No saved calendar records matched this candidate."
 msgstr ""
@@ -4549,10 +4515,6 @@ msgstr "Ouvrir la navigation"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open original email"
 msgstr ""
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Open original question"
-msgstr "Ouvrir la question d’origine"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open the conversation to review its history, or ask WeKruit to prepare drafts from saved candidate evidence."
@@ -5716,10 +5678,6 @@ msgstr ""
 msgid "Saved emails"
 msgstr ""
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Saved facts"
-msgstr ""
-
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Saved feedback for this role"
 msgstr ""
@@ -6041,10 +5999,6 @@ msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Send totals are not available from these records."
-msgstr ""
-
-#: src/components/AskCard.tsx
-msgid "Send when I say send"
 msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx

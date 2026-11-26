@@ -35,6 +35,28 @@ const isAgentBehaviour = (path) =>
   AGENT_TEXT_FILES.includes(path) ||
   (AGENT_BEHAVIOUR_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
     !/\.test\.[cm]?[jt]s$/.test(path));
+/**
+ * Product code, where a person's or the agent's own words pass through. P9: human-written text
+ * goes only to the model; code handles structured facts. A new pattern that looks for words in
+ * text is how code starts deciding what someone meant.
+ */
+export const PRODUCT_CODE = /^(?:packages|apps)\/.+\.(?:[cm]?[jt]sx?)$/;
+const TEST_CODE = /\.test\.[cm]?[jt]sx?$|\/e2e\/|^packages\/testkit\//;
+const REGEX_LITERAL =
+  /(?<![\w)\]])\/(?![/*\s])((?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\\n])+)\/[dgimsuvy]*/g;
+const REGEXP_CALL = /new RegExp\(\s*(["'`])((?:\\.|(?!\1).)*)\1/g;
+/** Chinese, Japanese or Korean characters, or two or more whole words offered as alternatives. */
+const WORDS = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]|[a-z]{4,}[^|()]*\|[^|()]*[a-z]{4,}/i;
+/** The word-matching patterns a line of code adds: the patterns' own text. */
+export function wordPatterns(line) {
+  if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return [];
+  const bodies = [
+    ...[...line.matchAll(REGEX_LITERAL)].map((match) => match[1]),
+    ...[...line.matchAll(REGEXP_CALL)].map((match) => match[2]),
+  ];
+  // Escapes (\\b, \\s, \\p{L}) are not words.
+  return bodies.filter((body) => WORDS.test(body.replace(/\\(?:[pP]\{[^}]*\}|.)/g, " ")));
+}
 /** Where reusable test and ops entry points live; a new one must be wired in, not left orphaned. */
 export const ENTRY_POINT_DIRS = ["infra/acceptance/", "scripts/"];
 
@@ -52,7 +74,7 @@ export function exceptions(body) {
 
 /**
  * @param {object} pr
- * @param {{path: string, status: string, added: number, deleted: number, baseLines: number}[]} pr.files
+ * @param {{path: string, status: string, added: number, deleted: number, baseLines: number, addedLines?: string[]}[]} pr.files
  * @param {string | undefined} pr.body PR description; undefined when checking a local branch.
  * @param {(path: string) => boolean} pr.isReferenced whether another tracked file names this file.
  * @returns {{rule: string, message: string}[]}
@@ -86,6 +108,20 @@ export function evaluate({ files, body, isReferenced }) {
         "rewrite",
         `${file.path} has ${file.deleted} of its ${file.baseLines} lines replaced. Other threads ` +
           "edit this file too: keep the diff to the lines you mean to change (format only what you touched).",
+      );
+    }
+  }
+
+  for (const file of files) {
+    if (!PRODUCT_CODE.test(file.path) || TEST_CODE.test(file.path)) continue;
+    const patterns = (file.addedLines ?? []).flatMap(wordPatterns);
+    if (patterns.length > 0) {
+      fail(
+        "human-text-regex",
+        `${file.path} adds a pattern that looks for words in text (/${patterns[0].slice(0, 60)}/). ` +
+          "Code never reads a person's or the agent's words to decide anything (AGENTS.md P9): give " +
+          "the model the text and let it pass a structured field, and check that field. If this " +
+          "pattern reads a structured value (a mime type, a URL, a tool name), say so in the exception.",
       );
     }
   }
@@ -141,7 +177,21 @@ function changedFiles(base, head) {
     if (status === "M") {
       baseLines = git("show", `${mergeBase}:${path}`).split("\n").length - 1;
     }
-    files.push({ path, status, added: Number(added), deleted: Number(deleted), baseLines });
+    const addedLines =
+      status === "D" || !PRODUCT_CODE.test(path)
+        ? []
+        : git("diff", "-U0", "--no-renames", `${base}...${head}`, "--", path)
+            .split("\n")
+            .filter((row) => row.startsWith("+") && !row.startsWith("+++"))
+            .map((row) => row.slice(1));
+    files.push({
+      path,
+      status,
+      added: Number(added),
+      deleted: Number(deleted),
+      baseLines,
+      addedLines,
+    });
   }
   return files;
 }

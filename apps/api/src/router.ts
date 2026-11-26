@@ -362,19 +362,16 @@ import {
   deleteRecruitingCandidateNote,
   deleteRecruitingReminder,
   editRecruitingCriteria,
-  getRecruitingAssessment,
   getRecruitingCorrespondence,
   getRecruitingCrmData,
   getRecruitingRoleCampaign,
   getRecruitingRoleCandidates,
   getRecruitingWorkspace,
-  listRecruitingAssessments,
   listRecruitingCandidateNotes,
   listRecruitingCandidateSources,
   listRecruitingCandidates,
   listRecruitingFeedback,
   listRecruitingProfileActivity,
-  listRecruitingQuestions,
   listRecruitingReminders,
   listRecruitingResearch,
   notifyRecruitingChange,
@@ -4476,12 +4473,6 @@ export function createRouter(deps: RouterDeps) {
         await notifyRecruitingChange(deps, context.actor, input.threadId);
         return saved;
       }),
-      listQuestions: authed.recruiting.listQuestions.handler(({ context, input }) =>
-        listRecruitingQuestions(deps.prisma, context.actor, {
-          ...input,
-          offset: input.offset ?? 0,
-        }),
-      ),
       createRole: authed.recruiting.createRole.handler(async ({ context, input }) => {
         const saved = await createRecruitingRole(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
@@ -4551,12 +4542,6 @@ export function createRouter(deps: RouterDeps) {
           recordRecruitingProfileView(deps.prisma, context.actor, input),
         ),
       },
-      listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>
-        listRecruitingAssessments(deps.prisma, context.actor, {
-          ...input,
-          offset: input.offset ?? 0,
-        }),
-      ),
       calibrationRound: authed.recruiting.calibrationRound.handler(async ({ context, input }) =>
         readRecruitingCalibrationRound(deps.prisma, context.actor, {
           threadId: (await resolveThreadTarget(deps.prisma, context.actor, input)).threadId,
@@ -4574,9 +4559,6 @@ export function createRouter(deps: RouterDeps) {
       ),
       searchQuality: authed.recruiting.searchQuality.handler(({ context, input }) =>
         readRecruitingSearchQuality(deps.prisma, context.actor, input),
-      ),
-      getAssessment: authed.recruiting.getAssessment.handler(({ context, input }) =>
-        getRecruitingAssessment(deps.prisma, context.actor, input),
       ),
       listResearch: authed.recruiting.listResearch.handler(async ({ context, input }) => {
         const result = await listRecruitingResearch(deps.prisma, context.actor, {

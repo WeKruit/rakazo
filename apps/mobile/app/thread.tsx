@@ -1682,14 +1682,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       hasAttachments: attachments.length > 0,
     });
     if (plan.isNoOp) return;
-    const typedSwitch =
-      initialBotTarget && attachments.length === 0
-        ? findSwitchTarget(plan.trimmed, mentionBotsRef.current)
-        : undefined;
-    if (typedSwitch && typedSwitch.id !== initialBotTarget) {
-      openBotChat(typedSwitch, false);
-      return;
-    }
     preparingSend.current = true;
     try {
       await prepareUnsentSends();

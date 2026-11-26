@@ -468,14 +468,6 @@ msgid "All contacts"
 msgstr "全部联系人"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal assessments"
-msgstr "全部内部评估"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal verdicts"
-msgstr "全部内部结论"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All matches"
 msgstr "全部匹配"
 
@@ -1292,10 +1284,6 @@ msgstr "复制"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
 msgstr "复制 .env 示例"
-
-#: src/pages/WorkMetricsSettingsPanel.tsx
-msgid "Corrected after compaction"
-msgstr "压缩后已纠正"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Cost"
@@ -2500,34 +2488,6 @@ msgstr "感兴趣"
 msgid "Interjection picked up p50 · p95"
 msgstr "插话响应 p50 · p95"
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment"
-msgstr "内部评估"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: current"
-msgstr "内部评估：最新"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: outdated"
-msgstr "内部评估：已过期"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict"
-msgstr "内部结论"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: met"
-msgstr "内部结论：符合"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unknown"
-msgstr "内部结论：未知"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unmet"
-msgstr "内部结论：不符合"
-
 #: src/pages/shell/ShellConversation.tsx
 msgid "Interrupted, resuming…"
 msgstr "已中断，正在恢复…"
@@ -2842,7 +2802,6 @@ msgid "Meeting completed"
 msgstr "面试已完成"
 
 #: src/pages/RecruitingPanel.tsx
-#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Memory"
 msgstr "记忆"
 
@@ -3142,10 +3101,6 @@ msgstr "还没有发出邮件。"
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "No evidence provided."
 msgstr "未提供证据。"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "No internal assessment"
-msgstr "暂无内部评估"
 
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No loaded candidates match these filters."

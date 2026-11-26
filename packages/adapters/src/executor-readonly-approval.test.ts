@@ -23,13 +23,13 @@ import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 import { parametersFor } from "./pi-runtime.js";
-import type * as RecruitingAssessmentModule from "./recruiting-assessment.js";
+import type * as RecruitingCandidatesToolModule from "./recruiting-candidates-tool.js";
 import type * as ScheduleToolsModule from "./schedule-tools.js";
 import { RoutineUpdateError } from "./schedule-tools.js";
 
 const candidateReads = vi.hoisted(() => vi.fn());
-vi.mock("./recruiting-assessment.js", async (original) => ({
-  ...(await original<typeof RecruitingAssessmentModule>()),
+vi.mock("./recruiting-candidates-tool.js", async (original) => ({
+  ...(await original<typeof RecruitingCandidatesToolModule>()),
   executeRecruitingCandidatesTool: candidateReads,
 }));
 const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));

@@ -9,7 +9,6 @@ import {
   createRunExecutor,
   createRunWorkspaceCheckpoint,
   dockerComputerToolInstruction,
-  gmailCardNeedsDraft,
   isTerminalModelSetupError,
   loadCurrentTurnImages,
   missingTurnImagesInstruction,
@@ -3951,38 +3950,5 @@ describe("ticket board tool capability", () => {
     }).map((tool) => tool.name);
     for (const name of ["message_bot", "handoff_to_bot", "message_agent"])
       expect(backgroundNames).not.toContain(name);
-  });
-});
-
-describe("gmailCardNeedsDraft", () => {
-  it("asks for the email in chat before the Gmail card", () => {
-    // Staging 11-13: the card said the email was above when none had been shown.
-    const ask = "给 Wei Zhang 写封邮件，fintech 那个职位。wei.zhang.test@example.com";
-    expect(gmailCardNeedsDraft("gmail", ask, "我先查找现有的 fintech 职位。")).toBe(true);
-    expect(gmailCardNeedsDraft("gmail", ask, "**Subject:** Backend Go\n\nHi Wei,")).toBe(false);
-    expect(gmailCardNeedsDraft("gmail", ask, "**主题：** Go 后端工程师\n\nWei 你好，")).toBe(false);
-    expect(gmailCardNeedsDraft("google_calendar", ask, "")).toBe(false);
-    expect(gmailCardNeedsDraft("gmail", "连一下我的日历", "")).toBe(false);
-    // One-off-email x5 on ce4a9c24: the facts and "直接写" got the card, which ends the turn.
-    expect(
-      gmailCardNeedsDraft(
-        "gmail",
-        "后端 Go 做支付，纽约，base 190-230k，wei@example.com，直接写",
-        "",
-      ),
-    ).toBe(true);
-    // first-timer-no-gmail 11-25: a question about sending asks for no email, so its card shows.
-    expect(gmailCardNeedsDraft("gmail", "不连邮箱能发候选人邮件吗", "不能。")).toBe(false);
-    expect(gmailCardNeedsDraft("gmail", "Can I email candidates without Gmail?", "No.")).toBe(
-      false,
-    );
-    expect(gmailCardNeedsDraft("gmail", "能帮我给 wei@example.com 写封邮件吗？", "")).toBe(true);
-  });
-
-  // one-off-email 11-25: a shown "Hi Wei," was refused as lacking "Zhang", so no card came; once
-  // an email is shown, whether it needs newer facts is the model's call.
-  it("shows the card once an email is in the conversation", () => {
-    const generic = "**Subject: Exploring a Fintech Opportunity**\n\nHi Wei,\n\nBest,\nAlex Morgan";
-    expect(gmailCardNeedsDraft("gmail", "发给 Wei Zhang", "", generic)).toBe(false);
   });
 });

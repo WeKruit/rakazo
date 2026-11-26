@@ -1047,7 +1047,6 @@ export const WorkMetricsSchema = z.object({
     unansweredInputs: z.number().int(),
     inputs: z.number().int(),
   }),
-  memory: z.object({ correctedAfterCompaction: RatioSchema }),
   collaboration: z.object({
     handoffs: z.number().int(),
     teammateTurns: z.number().int(),

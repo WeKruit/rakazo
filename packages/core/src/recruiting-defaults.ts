@@ -38,8 +38,6 @@ export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
   "spawn_bot",
   "update_bot",
   "archive_bot",
-  // Never called by a recruiting bot in a week of production runs; the search grades people.
-  "recruiting_assess",
   "render_view",
 ] as const;
 
@@ -120,36 +118,8 @@ export const RECRUITING_REFERENCE_MATERIAL = `Material that steers the search (a
 
 export const RECRUITING_ROUND_NEXT_STEP = `calibration_round already lists the round's people in chat, each with what was looked up in their profile (shownToRecruiter is that message, word for word): never list them again, and say nothing about them that it does not say. When it shows a point the recruiter stressed as not stated or not met for someone, never call that person a match on it. While the request is still short of the number the recruiter asked for (a first round is ten, whatever they called it), search on now with no question. After a later round there is no brief save, card or question: end on one line saying how many are still missing, if any (the list already ends with the count), and add nothing when a next-step card is already open, as when a check comes back after it. After the first round, your next step, with no text, starts the deep searches of the Behind-the-first-ten rule and, in that same step, completes the brief saved with the searches: one recruiting_role update with the round's expectedRevision and brief.fields only (short English labels; origin jd or user_instruction, inferred for a range you propose), for any requirement stated and not yet saved. When the recruiter asked for more than ten, the step after is the search for the rest, and the card below waits until their number is reached: a card stops all work until it is answered. Otherwise the step after is only one ask_user card in the recruiter's language: the one open fact that most changes who is searched for, else the next step ("Find 20 more similar people", "Draft the outreach emails", "Run another round"). Never end a first round on a bare list or "any feedback?".`;
 
-/** Any version of the next-step card, whatever number it offers: its answer is not an intake answer. */
-export function isRecruitingNextStepCard(text: string): boolean {
-  return /^(?:下一步怎么做？|What's next\?|合格的人不到十个。|Fewer than ten fit\.)/.test(
-    text.trim(),
-  );
-}
-
 export const RECRUITING_SCALE_START = `The recruiter accepts a round with the panel's accept control, the card's find-more option, or their own words to find more, scale up or go ahead ("find 100", "just search"). Record it at once with recruiting_feedback target "round" operation "approve" and their words; never ask again or show an approval card. A message that turns anyone down or changes who to look for is feedback for the next round of ten, even when it also says find more; judge by the recruiter's quoted words, also in a handoff from the global conversation. A note that conflicts with a confirmed requirement never holds the scale: scale first, then ask.
 Once accepted, in the same turn carry on to the number they named as the Short-round rule says (20 more when they named none; "more" with 100 or more held: ask how many with ask_user, 50 or 100 more plus custom). The number is people shown in rounds and not turned down, never how many Results hold: every search and round result gives it as counted. Scaling never starts an email draft.`;
-
-/**
- * A recruiter message asking for contacts, an email draft or a send. Round 1 of the playtest saw
- * the lead answer these itself and decline; they belong to Outreach.
- */
-/** A role opened to email people the recruiter named with addresses has no search. */
-export function namesPeopleToEmail(texts: readonly string[]): boolean {
-  // A reply to someone's email stays a reply card, never a new send (staging gate 60b7e937).
-  return texts.some(
-    (text) =>
-      /[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(text) &&
-      asksForOutreach(text) &&
-      !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(text),
-  );
-}
-
-export function asksForOutreach(text: string): boolean {
-  return /\b(?:send|e-?mails?|contacts?|outreach|campaign|draft)\b|发(?:\s*\d+|给|送|邮件|出去)|邮件|邮箱|联系方式|草稿|外联/i.test(
-    text,
-  );
-}
 
 /**
  * Typical credits per step, from 14 days of the usage ledger (200 credits = $1 of cost; p50 to
@@ -206,17 +176,6 @@ export function isEnglishText(text: string): boolean {
 export function recruiterLanguageText(newestFirst: string[]): string {
   return newestFirst.find((text) => textLanguage(text)) ?? newestFirst[0] ?? "";
 }
-
-/** A request for one email template naming no one: the coordinator writes it in its reply. */
-export function asksForTemplate(text: string): boolean {
-  return (
-    /模板|template/i.test(text) && !/序列|系列|三封|sequence|campaign|这些人|these/i.test(text)
-  );
-}
-
-/** Model-facing, in a new role's conversation opened to email people the recruiter named. */
-export const NAMED_SEND_ROLE_NOTE =
-  "The recruiter named the people to email, with their addresses: this role has no search unless they ask for one. Never run people searches, never ask whether to look for others and never show or record a round; save the role from what they wrote and put the email for exactly those people on its send card.";
 
 /** What a recruiter may see. The executor adds this to every recruiting run's instructions. */
 /**
@@ -429,7 +388,7 @@ export const RECRUITING_PDF_RENDERING =
  * Delivered in the role context so every account gets it.
  */
 export const RECRUITING_INTAKE_FLOW =
-  "Search first: the recruiter sees the first ten before any question. When they name the people to email (names with addresses), there is no search: save the role from what they wrote and write those emails now. When the turn says the JD is already saved as the role, your first step is the calibration searches from the JD and their words as written, with no question, read or progress message before them, and any must-haves their message states saved in that same step. Otherwise read the JD and the intake skill first, then issue the searches with one small recruiting_role create (title, JD source, their words, stated must-haves at priority hard). Ask first only when no title, place or requirement is given. Search what is stated and leave the rest open (no years limit unless stated; the location's own language is not required); every stated must-have is hard for all ten. Then record the ten, save the brief and end on the one card beside them. Never refetch the JD, search connectors first, ask twice, or ask to proceed or confirm: their request is the approval. A failed save never means searching again. Role documents (JD, PDF, deck) come after the first ten, shared in chat, never on an approval card; if a PDF fails its readback, share the readable version and say it is being fixed.";
+  "Search first: the recruiter sees the first ten before any question. When they name the people to email (names with addresses), there is no search: save the role from what they wrote and write those emails now. Read the JD and the intake skill first, then issue the searches with one small recruiting_role create (title, JD source, their words, stated must-haves at priority hard). Ask first only when no title, place or requirement is given. Search what is stated and leave the rest open (no years limit unless stated; the location's own language is not required); every stated must-have is hard for all ten. Then record the ten, save the brief and end on the one card beside them. Never refetch the JD, search connectors first, ask twice, or ask to proceed or confirm: their request is the approval. A failed save never means searching again. Role documents (JD, PDF, deck) come after the first ten, shared in chat, never on an approval card; if a PDF fails its readback, share the readable version and say it is being fixed.";
 
 export const RECRUITING_BRIEF_CHECKLIST =
   "Before saving a brief, make it state: target titles and acceptable adjacent titles; company type, example companies and companies to avoid; the two to four core duties a profile must show evidence of; the years of experience exactly as stated (a minimum stays a minimum); locations in priority order with the exact scope (city or metro, commute radius, onsite or remote), left open when the JD leaves it open; the language requirement as required, preferred or not required; and exclusions (seniority above the role, wrong-fit profile types); fill these from the JD and the recruiter's words; draft the titles, company types, example companies and wrong fits with the Sourcing map skill and one live web search for the hiring company's peers, as suggestions the recruiter confirms with the brief; read that skill and run that search beside the calibration people searches; when the language requirement is unstated, ask about language only when the JD, the location or the recruiter's words point to a second language (a bilingual or cross-border role, or a recruiter writing in a language other than the location's); otherwise record the location's own language as not a requirement without asking. The brief holds only what the JD or the recruiter said: a limit, tenure rule or requirement you would add yourself (an experience maximum, months in the current role) is never saved, and after a round the brief changes only when the recruiter changed something.";
@@ -584,7 +543,7 @@ export const RECRUITING_DEFAULT_SKILLS = [
 
 Reads you answer here: a role's status (match it by title from recruiting_candidates operation roles; ask only when two fit equally); interviews, shortlist, replies and sequences across roles (recruiting_candidates operations interviews, shortlist, replies and sequences; follow pagination before totals; an unconnected source is a stated gap, never "can't"); who is in a role (list with its roleId, pages of 10 or the number asked); new people, repeats or whether feedback was used (operation round); why someone fits (sources, one line each with the evidence or "not shown"); something said elsewhere (search_history scope:"mine", then answer with the link).
 
-Finding or changing a role's people, rounds or feedback goes to that role with delegate_to_role in the recruiter's own words, adding no number they did not say; say in one line which role took it. Its round appears here by itself when ready; never retell, recount or judge it. Everything else (showing a role's saved people, emails, templates, contacts, sends, bookings, sender setup with ensure_sender read first) you do here. A new role: call start_role once as your first step with a short title (their message and files go to it as written; never retype the JD or look up roles first); never say a role was created unless start_role returned ok, and leave its questions to its conversation.`,
+Finding or changing a role's people, rounds or feedback goes to that role with delegate_to_role in the recruiter's own words, adding no number they did not say; its line, shown at once, says in one line what is being done for which role. Its round appears here by itself when ready; never retell, recount or judge it. Everything else (showing a role's saved people, emails, templates, contacts, sends, bookings, sender setup with ensure_sender read first) you do here. A new role: call start_role once as your first step with a short title (their message and files go to it as written; never retype the JD or look up roles first); never say a role was created unless start_role returned ok, and leave its questions to its conversation.`,
   },
   {
     name: RECRUITING_INTAKE_SKILL_NAME,

@@ -2256,7 +2256,7 @@ describe("Pi connector tool dispatch", () => {
     expect(result.content[2]).toEqual({ type: "text", text: "bbbbb…" });
   });
 
-  it.each(["skill_read", "recruiting_assess"])(
+  it.each(["skill_read"])(
     "delivers a %s read larger than the tool result bound verbatim",
     async (toolName) => {
       const skill = {

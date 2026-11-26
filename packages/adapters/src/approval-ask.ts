@@ -40,8 +40,8 @@ export function buildApprovalAskBlock(
   options?: {
     reviewReason?: string;
     oneTimeOnly?: boolean;
-    /** An email send: offer the recruiter's "send when I say send" preference. */
-    sendPreference?: boolean;
+    /** An email send: confirmed on its card each time. */
+    emailSend?: boolean;
     crmOperation?: CrmApprovalOperation;
     recruiting?: RecruitingApprovalDisplay;
     crmImportTarget?: RecruitingCrmTarget;
@@ -200,40 +200,34 @@ export function buildApprovalAskBlock(
           },
           { id: "deny", label: "Change the address", outcome: "cancelled" },
         ]
-      : options?.sendPreference
+      : options?.emailSend || options?.instantlyActivation || options?.instantlyReply
         ? [
             { id: "allow", label: "Confirm and send" },
-            { id: "always", label: "Send when I say send" },
             { id: "deny", label: "Cancel" },
           ]
-        : options?.instantlyActivation || options?.instantlyReply
+        : !crmOperation && toolName === "create_space"
           ? [
-              { id: "allow", label: "Confirm and send" },
-              { id: "deny", label: "Cancel" },
+              { id: "allow", label: "Create space", outcome: "created" },
+              { id: "deny", label: "Cancel", outcome: "cancelled" },
             ]
-          : !crmOperation && toolName === "create_space"
+          : recruitingApproval
             ? [
-                { id: "allow", label: "Create space", outcome: "created" },
-                { id: "deny", label: "Cancel", outcome: "cancelled" },
+                {
+                  id: "allow",
+                  label:
+                    args.stage === "brief"
+                      ? "Looks good, start searching"
+                      : args.stage === "documents"
+                        ? "Approve documents"
+                        : "Approve calibration",
+                },
+                { id: "deny", label: args.stage === "brief" ? "Needs changes" : "Deny" },
               ]
-            : recruitingApproval
-              ? [
-                  {
-                    id: "allow",
-                    label:
-                      args.stage === "brief"
-                        ? "Looks good, start searching"
-                        : args.stage === "documents"
-                          ? "Approve documents"
-                          : "Approve calibration",
-                  },
-                  { id: "deny", label: args.stage === "brief" ? "Needs changes" : "Deny" },
-                ]
-              : [
-                  { id: "allow", label: "Allow once" },
-                  ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
-                  { id: "deny", label: "Deny" },
-                ],
+            : [
+                { id: "allow", label: "Allow once" },
+                ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
+                { id: "deny", label: "Deny" },
+              ],
   };
 }
 

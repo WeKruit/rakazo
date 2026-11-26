@@ -41,6 +41,9 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   14: "0080544f7957fff29512ddc4b5c0dd244ba91a53c0c6a5a3f2b738c4398375b7",
   // 15: a profile view's candidateKey is "sourced:<key>"; views stored as "autumn:<key>" still read.
   15: "0e016fa898d6d612cf71d65112dcaee5daadeac3f73aefbdfc774e04fb42d36a",
+  // 16: a file card's source preview no longer names a local assessment (previews are added on
+  // read, never stored).
+  16: "cc984f209987fa0fd463736cc20ce7f0acbb57c842c17aacbaac987fc7b3d8b5",
 };
 
 const OLD_ROWS: unknown[] = [

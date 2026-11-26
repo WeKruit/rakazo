@@ -300,7 +300,9 @@ try {
     const composer = page.locator('fieldset[aria-label="Message composer"] textarea').first();
     await composer.waitFor({ timeout: 20_000 });
     // The request goes in while the card answer's reply is still being written.
-    const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`;
+    // The pass counts LinkedIn links, so the request asks for them (gate 42cc9f8f: three saved
+    // people were listed with grades and no links, and the check failed a correct answer).
+    const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人和他们的 LinkedIn 链接。`;
     // The thread finishes painting first; a click on a card that is re-rendering is lost.
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(2_000);

@@ -468,14 +468,6 @@ msgid "All contacts"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal assessments"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal verdicts"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All matches"
 msgstr ""
 
@@ -1291,10 +1283,6 @@ msgstr "Copier"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
-msgstr ""
-
-#: src/pages/WorkMetricsSettingsPanel.tsx
-msgid "Corrected after compaction"
 msgstr ""
 
 #: src/pages/InternalCostsSettingsPanel.tsx
@@ -2500,34 +2488,6 @@ msgstr ""
 msgid "Interjection picked up p50 · p95"
 msgstr ""
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: current"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: outdated"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: met"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unknown"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unmet"
-msgstr ""
-
 #: src/pages/shell/ShellConversation.tsx
 msgid "Interrupted, resuming…"
 msgstr ""
@@ -2842,7 +2802,6 @@ msgid "Meeting completed"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
-#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Memory"
 msgstr "Mémoire"
 
@@ -3141,10 +3100,6 @@ msgstr ""
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "No evidence provided."
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "No internal assessment"
 msgstr ""
 
 #: src/pages/recruiting/InboxTab.tsx

@@ -352,12 +352,6 @@ export function ShellPanelContent({
               onDiscussCandidate={discussCandidate}
               onCandidateFeedback={feedbackCandidate}
               candidateFeedbackRecipients={candidateFeedbackRecipients}
-              onRevealMessage={(target) => {
-                navigate({
-                  pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
-                  search: `?${new URLSearchParams({ m: target.messageId })}`,
-                });
-              }}
             />
           ) : null}
           {panel === "create-group" ? roleCreationForm : null}

@@ -118,8 +118,6 @@ describe("candidate listing and shortlist boundaries", () => {
           sourceRows: 500n,
           candidates: 200n,
           identifiedCandidates: 190n,
-          unassessed: 180n,
-          assessed: 20n,
           shortlisted: 10n,
         },
       ]),
@@ -161,8 +159,6 @@ describe("candidate listing and shortlist boundaries", () => {
           sourceRows: 0n,
           candidates: 0n,
           identifiedCandidates: 0n,
-          unassessed: 0n,
-          assessed: 0n,
           shortlisted: 0n,
         },
       ]),
@@ -203,7 +199,6 @@ describe("candidate listing and shortlist boundaries", () => {
           CREATE TEMP TABLE recruiting_candidate_pages ("effectId" text, "roleId" text, "roleRevisionId" text, "observedAt" timestamptz, "actionId" text);
           CREATE TEMP TABLE runs (id text, "clientNonce" text);
           CREATE TEMP TABLE external_effects (id text, kind text, status text, request jsonb, result jsonb, "runId" text);
-          CREATE TEMP TABLE recruiting_assessments ("roleId" text, "candidateKey" text, version int, "roleRevisionId" text, "createdAt" timestamptz, judgments jsonb);
           CREATE TEMP TABLE recruiting_candidate_occurrences ("roleId" text, "candidateKey" text, "pageId" text, "rowIndex" int, "matchFields" jsonb, name text, title text, company text, location text, "linkedinUrl" text, "resumeUrl" text, "evidenceUrls" jsonb, issues jsonb DEFAULT '[]');
           INSERT INTO recruiting_roles VALUES ('role', 'revision');
           INSERT INTO recruiting_candidate_pages VALUES ('current', 'role', 'revision', '2026-01-03', null), ('old', 'role', 'old-revision', '2026-01-02', null), ('provider', 'role', 'revision', '2026-01-04', null);
@@ -249,8 +244,6 @@ describe("candidate listing and shortlist boundaries", () => {
                 sourceRows: 0n,
                 candidates: 0n,
                 identifiedCandidates: 0n,
-                unassessed: 0n,
-                assessed: 0n,
                 shortlisted: 0n,
               },
             ]),
@@ -283,8 +276,6 @@ describe("candidate listing and shortlist boundaries", () => {
               rankingProjection: 2,
               rankingGroup: "worth_talking",
               query: "",
-              assessmentState: null,
-              verdict: null,
               shortlisted: null,
               actionId: null,
               sourceEffectId: null,
@@ -314,8 +305,6 @@ describe("candidate listing and shortlist boundaries", () => {
       sourceRows: 0n,
       candidates: 0n,
       identifiedCandidates: 0n,
-      unassessed: 0n,
-      assessed: 0n,
       shortlistedCount: 0n,
       candidateKey: null,
     };
@@ -377,10 +366,6 @@ describe("candidate listing and shortlist boundaries", () => {
         countIdentified: false,
         firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
         lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
-        assessmentVersion: null,
-        assessmentRoleRevisionId: null,
-        assessmentCreatedAt: null,
-        hardGate: null,
         sortValue: key,
       });
       f.tx.$queryRaw.mockResolvedValueOnce(
@@ -394,8 +379,6 @@ describe("candidate listing and shortlist boundaries", () => {
               sourceRows: 30n,
               candidates: 20n,
               identifiedCandidates: 4n,
-              unassessed: 19n,
-              assessed: 1n,
               shortlisted: 2n,
             },
           ],
@@ -444,8 +427,6 @@ describe("candidate listing and shortlist boundaries", () => {
         sourceRows: 30,
         candidates: 20,
         identifiedCandidates: 4,
-        unassessed: 19,
-        assessed: 1,
         shortlisted: 2,
       });
       expect(page.items.map((item) => item.candidateKey)).toEqual(["a"]);
@@ -483,8 +464,6 @@ describe("candidate listing and shortlist boundaries", () => {
             sort: "name",
             sourceProjection: 2,
             query: search,
-            assessmentState: null,
-            verdict: null,
             shortlisted: null,
             actionId: null,
             sourceEffectId: "native-read",
@@ -537,8 +516,6 @@ describe("candidate listing and shortlist boundaries", () => {
             sourceRows: 0n,
             candidates: 0n,
             identifiedCandidates: 0n,
-            unassessed: 0n,
-            assessed: 0n,
             shortlisted: 0n,
           },
         ],
@@ -585,8 +562,6 @@ describe("candidate listing and shortlist boundaries", () => {
               sourceRows: 3n,
               candidates: 2n,
               identifiedCandidates: 2n,
-              unassessed: 2n,
-              assessed: 0n,
               shortlisted: 1n,
             },
           ],
@@ -646,8 +621,6 @@ describe("candidate listing and shortlist boundaries", () => {
             sourceRows: 0n,
             candidates: 0n,
             identifiedCandidates: 0n,
-            unassessed: 0n,
-            assessed: 0n,
             shortlisted: 0n,
           },
         ],
@@ -682,8 +655,6 @@ describe("candidate listing and shortlist boundaries", () => {
             sort,
             ...(sort === "rank" ? { rankProjection: 2 } : {}),
             query: "",
-            assessmentState: null,
-            verdict: null,
             shortlisted: null,
             actionId: null,
             sourceEffectId: "historical-page",
@@ -701,8 +672,6 @@ describe("candidate listing and shortlist boundaries", () => {
               sourceRows: 0n,
               candidates: 0n,
               identifiedCandidates: 0n,
-              unassessed: 0n,
-              assessed: 0n,
               shortlisted: 0n,
             },
           ],
@@ -747,8 +716,6 @@ describe("candidate listing and shortlist boundaries", () => {
             ...(sort === "score" ? { scoreProjection: 1 } : {}),
             ...(sourceEffectId !== undefined ? { sourceProjection: 2 } : {}),
             query: "",
-            assessmentState: null,
-            verdict: null,
             shortlisted: null,
             actionId: null,
             sourceEffectId: sourceEffectId ?? null,
@@ -769,8 +736,6 @@ describe("candidate listing and shortlist boundaries", () => {
               sourceRows: 0n,
               candidates: 0n,
               identifiedCandidates: 0n,
-              unassessed: 0n,
-              assessed: 0n,
               shortlisted: 0n,
             },
           ],
@@ -801,8 +766,6 @@ describe("candidate listing and shortlist boundaries", () => {
             ...(sort === "rank" ? { rankProjection: 2 } : {}),
             sourceProjection: 2,
             query: "",
-            assessmentState: null,
-            verdict: null,
             shortlisted: null,
             actionId: null,
             sourceEffectId: "selected-result",
@@ -848,10 +811,6 @@ describe("candidate listing and shortlist boundaries", () => {
         profileSourcePageIds: [],
         firstDiscoveredAt: null,
         lastDiscoveredAt: null,
-        assessmentVersion: null,
-        assessmentRoleRevisionId: null,
-        assessmentCreatedAt: null,
-        hardGate: null,
         sortValue,
         matchValue: sortValue ? Number(sortValue) : null,
       });
@@ -864,8 +823,6 @@ describe("candidate listing and shortlist boundaries", () => {
           sourceRows: 3n,
           candidates: 3n,
           identifiedCandidates: 0n,
-          unassessed: 3n,
-          assessed: 0n,
           shortlisted: 0n,
         },
       ];
@@ -1060,6 +1017,7 @@ describe("candidate listing and shortlist boundaries", () => {
     f.tx.$queryRaw
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           name: "Synthetic Avery",
@@ -1109,6 +1067,14 @@ describe("candidate listing and shortlist boundaries", () => {
       type: "recruiting.changed",
       payload: { roleId: "role" },
     });
+    // The conversation is locked before the role, the order event appends take (staging 11-26
+    // deadlocks between role writes and live runs).
+    const locks = f.tx.$queryRaw.mock.calls.map(([query]) => (query as { sql: string }).sql);
+    const roleLock = locks.findIndex((sql) =>
+      /^SELECT "id" FROM "recruiting_roles".*FOR UPDATE$/s.test(sql),
+    );
+    expect(roleLock).toBeGreaterThan(0);
+    expect(locks[roleLock - 1]).toMatch(/^SELECT "id" FROM "threads".*FOR NO KEY UPDATE$/s);
     const profileQuery = f.tx.$queryRaw.mock.lastCall![0] as { values: unknown[] };
     expect(profileQuery.values.slice(-2)).toEqual(["role", f.candidate.candidateKey]);
   });
@@ -1116,6 +1082,7 @@ describe("candidate listing and shortlist boundaries", () => {
     const f = fixture();
     Object.assign(f.candidate, { shortlisted: true, revision: 1 });
     f.tx.$queryRaw
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -4299,8 +4266,6 @@ describe("native CRM binding and source import", () => {
             sourceRows: 1n,
             candidates: 1n,
             identifiedCandidates: 1n,
-            unassessed: 1n,
-            assessed: 0n,
             shortlisted: 0n,
           },
         ],
@@ -4315,10 +4280,6 @@ describe("native CRM binding and source import", () => {
             profileSourcePageIds: [],
             firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
             lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
-            assessmentVersion: null,
-            assessmentRoleRevisionId: null,
-            assessmentCreatedAt: null,
-            hardGate: null,
             sortValue: "example",
           },
         ],
@@ -5136,8 +5097,6 @@ describe("native candidate source provenance", () => {
             sourceRows: 1n,
             candidates: 1n,
             identifiedCandidates: 1n,
-            unassessed: 1n,
-            assessed: 0n,
             shortlisted: 0n,
           },
         ],
@@ -5154,10 +5113,6 @@ describe("native candidate source provenance", () => {
             discoveryCount: 1,
             firstDiscoveredAt: f.page.observedAt.toISOString(),
             lastDiscoveredAt: f.page.observedAt.toISOString(),
-            assessmentVersion: null,
-            assessmentRoleRevisionId: null,
-            assessmentCreatedAt: null,
-            hardGate: null,
             sortValue: "example",
           },
         ],
@@ -5735,10 +5690,6 @@ describe("native candidate source provenance", () => {
         discoveryCount: 2,
         firstDiscoveredAt: f.page.observedAt.toISOString(),
         lastDiscoveredAt: f.page.observedAt.toISOString(),
-        assessmentVersion: null,
-        assessmentRoleRevisionId: null,
-        assessmentCreatedAt: null,
-        hardGate: null,
         sortValue: "example",
       };
       const queryRaw = f.tx.$queryRaw.getMockImplementation()!;
@@ -5759,8 +5710,6 @@ describe("native candidate source provenance", () => {
                 sourceRows: 2n,
                 candidates: 1n,
                 identifiedCandidates: 1n,
-                unassessed: 1n,
-                assessed: 0n,
                 shortlisted: 0n,
               },
             ],
@@ -6216,10 +6165,6 @@ describe("native candidate source provenance", () => {
         discoveryCount: 1,
         firstDiscoveredAt: f.page.observedAt.toISOString(),
         lastDiscoveredAt: f.page.observedAt.toISOString(),
-        assessmentVersion: null,
-        assessmentRoleRevisionId: null,
-        assessmentCreatedAt: null,
-        hardGate: null,
         sortValue: "example",
       };
       f.tx.$queryRaw.mockResolvedValueOnce(
@@ -6233,8 +6178,6 @@ describe("native candidate source provenance", () => {
               sourceRows: 1n,
               candidates: 1n,
               identifiedCandidates: 1n,
-              unassessed: 1n,
-              assessed: 0n,
               shortlisted: 0n,
             },
           ],

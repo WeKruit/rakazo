@@ -51,9 +51,6 @@ beforeEach(() => {
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 /** The events double of the most recent runWithModel call. */
-// The newest run's database mock, for checks while that run still works.
-let lastPrisma: { message: { create: { mock: { calls: unknown[][] } } } } | undefined;
-let lastRuntimeRun: { mock: { calls: Array<[AgentRunRequest]> } } | undefined;
 let lastExecutorEvents:
   | {
       append: ReturnType<typeof vi.fn>;
@@ -484,8 +481,6 @@ async function runWithModel(
       ]),
     },
   };
-  lastPrisma = prisma as never;
-  lastRuntimeRun = runtimeRun as never;
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
   const events = {
     claimSteering: vi.fn(async () => []),
@@ -783,23 +778,6 @@ describe("handed-in stage", () => {
       }),
     );
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
-  });
-
-  // Gate acd31504, one-off-email: the Gmail card was refused for want of the email, and the
-  // agent's next call, still with no email written, went through.
-  it("refuses the Gmail card again while the email is still not written", async () => {
-    const { requestConnection } = await import("./request-connection.js");
-    vi.mocked(requestConnection).mockClear();
-    await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      currentText: "给 Wei Zhang 写封邮件，fintech 那个职位",
-      recruitingRoleId: "role-1",
-      finalText: "",
-      toolCalls: [
-        ["request_connection", { provider: "gmail", reason: "send it" }],
-        ["request_connection", { provider: "gmail", reason: "send it" }],
-      ],
-    });
-    expect(requestConnection).not.toHaveBeenCalled();
   });
 
   // Gate 01e9467c, change-mind-mid-run: the recruiter changed the ask, this bot handed the

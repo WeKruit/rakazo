@@ -662,10 +662,6 @@ msgstr "Assessing candidates"
 msgid "Assessment"
 msgstr "Assessment"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Assessment unavailable"
-msgstr "Assessment unavailable"
-
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Associated roles"
 msgstr "Associated roles"
@@ -957,10 +953,6 @@ msgstr "Cancelled"
 msgid "Candidate"
 msgstr "Candidate"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Candidate assessment"
-msgstr "Candidate assessment"
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Candidate conversations"
 msgstr "Candidate conversations"
@@ -972,10 +964,6 @@ msgstr "Candidate details"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Candidate details unavailable"
 msgstr "Candidate details unavailable"
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Candidate facts"
-msgstr "Candidate facts"
 
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Candidate interview status"
@@ -992,10 +980,6 @@ msgstr "Candidate messages"
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 msgid "Candidate pipeline"
 msgstr "Candidate pipeline"
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Candidate question"
-msgstr "Candidate question"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Candidate record"
@@ -1834,10 +1818,6 @@ msgstr "Could not load approval rules"
 msgid "Could not load artifacts."
 msgstr "Could not load artifacts."
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Could not load assessment"
-msgstr "Could not load assessment"
-
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Could not load backup models"
 msgstr "Could not load backup models"
@@ -2233,10 +2213,6 @@ msgstr "Credits"
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Criteria"
 msgstr "Criteria"
-
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Criterion"
-msgstr "Criterion"
 
 #. placeholder {0}: index + 1
 #: src/pages/recruiting/RecruitingRoleTab.tsx
@@ -3298,12 +3274,6 @@ msgstr "Interest"
 msgid "Interested"
 msgstr "Interested"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-#: src/pages/recruiting/CandidatePresentation.tsx
-#: src/pages/recruiting/RecruitingLegacyResults.tsx
-msgid "Internal assessment"
-msgstr "Internal assessment"
-
 #: src/pages/SettingsOverlay.tsx
 msgid "Internal Costs"
 msgstr "Internal Costs"
@@ -4230,10 +4200,6 @@ msgstr "No runs match these filters."
 msgid "No runs yet"
 msgstr "No runs yet"
 
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "No saved assessments"
-msgstr "No saved assessments"
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No saved calendar records matched this candidate."
 msgstr "No saved calendar records matched this candidate."
@@ -4550,10 +4516,6 @@ msgstr "Open navigation"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open original email"
 msgstr "Open original email"
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Open original question"
-msgstr "Open original question"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open the conversation to review its history, or ask WeKruit to prepare drafts from saved candidate evidence."
@@ -5719,10 +5681,6 @@ msgstr "Saved email"
 msgid "Saved emails"
 msgstr "Saved emails"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Saved facts"
-msgstr "Saved facts"
-
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Saved feedback for this role"
 msgstr "Saved feedback for this role"
@@ -6045,10 +6003,6 @@ msgstr "Send to"
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Send totals are not available from these records."
 msgstr "Send totals are not available from these records."
-
-#: src/components/AskCard.tsx
-msgid "Send when I say send"
-msgstr "Send when I say send"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"

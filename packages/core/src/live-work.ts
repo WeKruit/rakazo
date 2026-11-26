@@ -107,7 +107,6 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   recruiting_role: "role",
   recruiting_candidates: "candidates",
   recruiting_shortlist: "candidates",
-  recruiting_assess: "candidates",
   recruiting_research: "research",
   recruiting_feedback: "feedback",
   recruiting_profiles: "candidates",
@@ -150,7 +149,6 @@ const OPERATION_ACTIVITIES: Record<string, Record<string, WorkActivity>> = {
     replies: "replies",
     resolve: "candidate_lookup",
   },
-  recruiting_assess: { ask: "question" },
   recruiting_profiles: { save: "profiles_save", save_many: "profiles_save" },
 };
 
@@ -882,21 +880,6 @@ export function formatWorkDuration(ms: number): string {
   return `${minutes}m ${total % 60}s`;
 }
 
-/**
- * A short "how is it going?" sent while an agent works. Like a side question it is answered
- * from the live work itself, so the work is neither interrupted nor told about it.
- */
-export function isStatusQuestion(text: string | undefined): boolean {
-  const trimmed = text?.trim() ?? "";
-  return (
-    trimmed.length > 0 &&
-    trimmed.length <= 40 &&
-    /进度|到哪|怎么样了|好了吗|好了没|还要多久|多久好|做完了吗|how(?:['’]s| is) it going|any (?:update|progress)|status\??$|progress\??$|how long|are you done|done yet|eta\??$/i.test(
-      trimmed,
-    )
-  );
-}
-
 const STATUS_LABELS: Record<WorkActivity, string> = {
   files: "reading files",
   search: "searching the web",
@@ -933,31 +916,6 @@ const STATUS_LABELS: Record<WorkActivity, string> = {
   thinking: "deciding the next step",
   working: "running a step",
 };
-
-/** The middle of past durations of the same kind of work, or undefined with fewer than three. */
-export function typicalDurationMs(durations: readonly number[]): number | undefined {
-  if (durations.length < 3) return undefined;
-  const sorted = [...durations].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
-}
-
-/**
- * The reply to a status question: what is running now, for how long, and, when past runs of the
- * same kind give a typical length, roughly how much is left.
- */
-export function statusAnswer(input: {
-  activity: WorkActivity;
-  elapsedMs: number;
-  typicalMs?: number;
-}): string {
-  const now = `Still working: ${STATUS_LABELS[input.activity]}, ${formatWorkDuration(input.elapsedMs)} so far.`;
-  if (input.typicalMs === undefined) return `${now} The result will appear here when it's ready.`;
-  const left = input.typicalMs - input.elapsedMs;
-  if (left <= 0)
-    return `${now} This is taking longer than usual; the result will appear here when it's ready.`;
-  const minutes = Math.ceil(left / 60_000);
-  return `${now} Usually done in ${left < 60_000 ? "under a minute" : `about ${minutes} min`}.`;
-}
 
 /** Closed role words: runtime names and task text stay in diagnostics. */
 export function specialistWorkLabel(status: "running" | "completed" | "failed"): string {

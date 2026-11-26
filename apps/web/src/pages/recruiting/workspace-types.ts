@@ -95,7 +95,6 @@ export type Props = {
   view?: "results" | "shortlist" | "contacts";
   tab?: RecruitingPanelState["tab"];
   onTabChange?: (tab: RecruitingPanelState["tab"]) => void;
-  onRevealMessage?: (target: { botId?: string; groupId?: string; messageId: string }) => void;
   onDiscussCandidate?: (candidate: CandidateDiscussionContext) => void;
   candidateFeedbackRecipients?: { id: string; name: string }[];
   onCandidateFeedback?: (
@@ -104,14 +103,10 @@ export type Props = {
     clientNonce: string,
   ) => Promise<boolean>;
 };
-export type SourceReadTarget =
-  | Omit<Extract<ReadRecruitingSourceInput, { kind: "role" }>, "sourceRefId">
-  | Omit<Extract<ReadRecruitingSourceInput, { kind: "assessment" }>, "sourceRefId">;
+export type SourceReadTarget = Omit<ReadRecruitingSourceInput, "sourceRefId">;
 export type SourceContent = Awaited<ReturnType<typeof rpc.recruiting.readSource>>;
 export type Snapshot = {
   workspace: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
-  assessments: Awaited<ReturnType<typeof rpc.recruiting.listAssessments>>;
   research: Awaited<ReturnType<typeof rpc.recruiting.listResearch>>;
-  questions: Awaited<ReturnType<typeof rpc.recruiting.listQuestions>>["questions"];
   documents: MemoryDocument[];
 };

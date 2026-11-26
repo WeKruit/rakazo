@@ -373,12 +373,8 @@ export async function recruitingChatFixture(
           counts: { total: 0, shortlisted: 0, unscored: 0 },
           source: null,
         });
-      case "recruiting/listAssessments":
-        return reply([]);
       case "recruiting/listResearch":
         return reply({ tasks: [], actions: [], observations: [] });
-      case "recruiting/listQuestions":
-        return reply({ questions: [] });
       case "recruiting/crmData":
         return reply({ operation: "memberships", sources: [] });
       case "voice/status":

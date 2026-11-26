@@ -66,9 +66,6 @@ function noSelfSetup(ownEmail: boolean) {
   return "No sending email yet: we set this account's mailbox up ourselves and have just been notified that it is needed. Tell the recruiter once, in one line, in their language, that this account cannot email candidates yet and that we have been notified to turn it on; then keep drafting and finding contacts. Never give an email address, never tell them to contact anyone, and do not repeat this in later replies unless they ask. Never ask for a company name or propose an address.";
 }
 
-/** A recruiter asking to send from their own email account. */
-export const OWN_EMAIL_REQUEST =
-  /gmail|outlook|(?:my|own) (?:e-?mail|mailbox|inbox)|自己的?(?:邮箱|邮件)|我的邮箱/i;
 export const SEND_NOW_WITHOUT_GMAIL_NOTE =
   "For an email (never a send on another channel): when send_message is not among your tools, Gmail is not connected, so nothing can go out yet. When they ask whether email can go out without Gmail, the answer is no: say so in one line of your reply, that each email goes out from their own Gmail after they press Send on its card, so Gmail is the one step; there is no other sending account. A question is answered in words, with no card: the connect card comes when they ask to send. Once an email is written and the recruiter asks to send it, what to press or whether the draft is kept, say in one short reply in their language, before any tool call: it has not been sent; the one step is pressing Connect on the card below, so it goes out from their own address; the draft is kept (in those words) and comes back on one Send card here once Gmail is connected. Call request_connection with provider gmail beside that line, with a reason that also says it has not been sent. Never say you are sending or connecting it yourself, or that the draft is not saved. With nothing written yet, write it first.";
 export const OUTREACH_MAILBOX_ONLY_NOTE =
