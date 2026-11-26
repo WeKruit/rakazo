@@ -43,8 +43,13 @@ export interface TextJudge {
     state: Record<string, unknown>,
     requirements: readonly CriterionQuestion[],
     signal?: AbortSignal,
-  ): Promise<Map<string, CriterionVerdict> | undefined>;
+    /** Also asked in the same request: which of these named grades fits the person overall. */
+    overall?: Readonly<Record<string, string>>,
+  ): Promise<CriteriaVerdicts | undefined>;
 }
+
+/** The verdict on each requirement, and the overall grade when one was asked for and answered. */
+export type CriteriaVerdicts = Map<string, CriterionVerdict> & { overall?: string };
 
 /** A requirement to look for in a profile, in the words it was saved in. */
 export type CriterionQuestion = {
@@ -197,7 +202,7 @@ export function typeSafeJudge(
         return undefined;
       }
     },
-    async criteria(state, requirements, signal) {
+    async criteria(state, requirements, signal, overall) {
       try {
         const timeout = AbortSignal.timeout(CRITERIA_TIMEOUT_MS);
         const response = await fetchImpl("https://api.typesafe.ai/v1/systemone", {
@@ -206,22 +211,33 @@ export function typeSafeJudge(
           body: JSON.stringify({
             model: "jev-latest",
             state,
-            questions: Object.fromEntries(
-              requirements.map((requirement, index) => [
-                `q${index}`,
-                requirement.place
-                  ? {
+            questions: {
+              ...Object.fromEntries(
+                requirements.map((requirement, index) => [
+                  `q${index}`,
+                  requirement.place
+                    ? {
+                        type: "choice",
+                        instructions: `Where is this person now, relative to the place this requirement states: "${requirement.statement}"? Judge the current location first; a past job or school in that place matters only when the person is now somewhere else.`,
+                        criteria: PLACE_TAGS,
+                      }
+                    : {
+                        type: "choice",
+                        instructions: `Does this person's profile show: ${requirement.statement}?`,
+                        criteria: CRITERION_CHOICES,
+                      },
+                ]),
+              ),
+              ...(overall
+                ? {
+                    overall: {
                       type: "choice",
-                      instructions: `Where is this person now, relative to the place this requirement states: "${requirement.statement}"? Judge the current location first; a past job or school in that place matters only when the person is now somewhere else.`,
-                      criteria: PLACE_TAGS,
-                    }
-                  : {
-                      type: "choice",
-                      instructions: `Does this person's profile show: ${requirement.statement}?`,
-                      criteria: CRITERION_CHOICES,
+                      instructions: `How well does this person's profile fit a role that asks for all of the following? ${requirements.map((requirement) => requirement.statement).join("; ")}`,
+                      criteria: overall,
                     },
-              ]),
-            ),
+                  }
+                : {}),
+            },
           }),
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
@@ -236,7 +252,9 @@ export function typeSafeJudge(
             }
           >;
         };
-        const verdicts = new Map<string, CriterionVerdict>();
+        const verdicts: CriteriaVerdicts = new Map<string, CriterionVerdict>();
+        const grade = body.answers?.overall?.choice;
+        if (overall && typeof grade === "string" && grade in overall) verdicts.overall = grade;
         for (const [index, requirement] of requirements.entries()) {
           const answer = body.answers?.[`q${index}`];
           if (requirement.place) {

@@ -410,7 +410,7 @@ export const JOURNEYS = [
       "When the first people show, tell Kruit which two or three are not a fit and why, in one short message.",
       "Check Kruit says plainly what it changed for the next people, without asking you to rate everyone.",
       "Ask for a few more people and check none of the rejected ones come back and the new ones follow your feedback.",
-      "Open the role's Results page; type one rejected person's name in its search box and check that row's status says Passed (the first screen holds only the best matches, and people you turned down sort below them), then check the new people show.",
+      "Yourself, without asking Kruit, open the role's Results page; type one rejected person's name in its search box and check that row's status says Passed (the first screen holds only the best matches, and people you turned down sort below them), then check the new people show.",
     ],
   },
   {
@@ -680,7 +680,7 @@ export const JOURNEYS = [
       "The role: Senior Android Engineer, Shenzhen, 5+ years, Kotlin. The client is confidential: never give its name, and you do not have the salary yet.",
     goals: [
       "Ask for a first-outreach email template for the role.",
-      "Met only when the template names no client and no salary figure that you did not give, and has no bracketed fill-ins; asking you one question about them is fine.",
+      "Met only when the template names no client and no salary figure that you did not give, and has no bracketed fill-ins (the merge fields the sender fills per person, {{firstName}}, {{lastName}}, {{companyName}} and {{personalization}}, are fine; any other {{...}} is a fill-in); asking you one question about them is fine.",
       "Say the client stays confidential and the pay is 'competitive', and check the final template uses exactly that.",
     ],
   },

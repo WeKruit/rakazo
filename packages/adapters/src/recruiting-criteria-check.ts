@@ -1,6 +1,12 @@
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import type { CriterionQuestion, CriterionVerdict, LanguageSignal, TextJudge } from "./judge.js";
+import type {
+  CriteriaVerdicts,
+  CriterionQuestion,
+  CriterionVerdict,
+  LanguageSignal,
+  TextJudge,
+} from "./judge.js";
 import type { PageReader } from "./keyless-http-web.js";
 import type { RoundCriterion } from "./recruiting-round-check.js";
 import { roundCriteria } from "./recruiting-round-check.js";
@@ -32,6 +38,17 @@ export type CriteriaCheck = {
   /** The search service's grade, when it gave one. */
   match_tier?: string;
   match_score?: number;
+};
+
+/**
+ * The grades the people search gives (its own definitions, recruiting-research.ts), asked of the
+ * judge for a person no search graded: a quick search returns people without one.
+ */
+const OVERALL_GRADES = {
+  Strong: "Every requirement is shown on the profile",
+  Promising: "Most requirements are shown and none is contradicted",
+  Uncertain: "The profile does not show enough to tell",
+  Partial: "A requirement is clearly not met",
 };
 
 const ASSESSED = {
@@ -221,8 +238,15 @@ export async function checkPeopleCriteria(
           const profile = profileState(entry.row);
           if (!profile) return;
           const verdicts =
-            (questions.length ? await judge.criteria?.(profile, questions, deadline) : undefined) ??
-            new Map<string, CriterionVerdict>();
+            (questions.length
+              ? await judge.criteria?.(
+                  profile,
+                  questions,
+                  deadline,
+                  // A person no search graded is graded here, in the same words the search uses.
+                  typeof entry.row.match_tier === "string" ? undefined : OVERALL_GRADES,
+                )
+              : undefined) ?? (new Map<string, CriterionVerdict>() as CriteriaVerdicts);
           const index = String(entries.indexOf(entry));
           for (const [id, signals] of speaks) {
             const signal = signals.get(index);
@@ -248,7 +272,9 @@ export async function checkPeopleCriteria(
             ),
             ...(typeof tier === "string" && typeof score === "number"
               ? { match_tier: tier, match_score: score }
-              : {}),
+              : verdicts.overall
+                ? { match_tier: verdicts.overall }
+                : {}),
           };
           entry.row.requirements_assessment = criteriaAssessment(entry.check.criteria);
           const place = entry.check.criteria.find((item) => item.place)?.place;
