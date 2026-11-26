@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import type { CriterionQuestion, TextJudge } from "./judge.js";
+import type { CriterionQuestion, CriterionVerdict, LanguageSignal, TextJudge } from "./judge.js";
 import type { PageReader } from "./keyless-http-web.js";
 import { roundCriteria } from "./recruiting-round-check.js";
 
@@ -69,14 +69,22 @@ const STATES_A_PLACE = (statement: string) =>
 
 const STATES_A_LANGUAGE = (statement: string) =>
   `Does this requirement state a language the person must speak or work in, rather than a skill, a place or a programming language? Requirement: "${statement}"`;
+/** A requirement on the person; a language they must speak goes to the deployment's language check. */
+type PersonRequirement = CriterionQuestion & { language?: boolean };
+
 /**
- * Profiles rarely list languages, so a language requirement asked plainly came back "not stated"
- * for nearly everyone (Mandarin for engineers who studied and work in Shanghai, 11-26). It is read
- * the way the deployment's language check reads it (infra/cloudflare/language-judge.js), inside
- * the one request that judges the person's other requirements.
+ * How the language check's answer reads as a requirement's level. Profiles rarely list languages,
+ * so the check also counts a school or job where the language is spoken; asked like any other
+ * requirement, Mandarin came back "not stated" for engineers who studied and work in Shanghai
+ * (11-26). "no sign" is a profile that shows nothing, not one that shows the opposite.
  */
-const SHOWN_LANGUAGE =
-  "Count what the text states: a Languages entry, posts or other content written in that language, a degree, school or job in a place where it is spoken, or work stated to use it.";
+const SPOKEN_LEVEL: Record<LanguageSignal, CriterionVerdict["level"]> = {
+  confirmed: "strong",
+  strong: "medium",
+  possible: "weak",
+  unknown: "silent",
+  "no sign": "silent",
+};
 
 /**
  * The requirements a profile can be judged on, one fact each: a field holding several ("Shanghai;
@@ -87,7 +95,7 @@ const SHOWN_LANGUAGE =
 async function personRequirements(
   judge: TextJudge,
   criteria: readonly { id: string; statement: string }[],
-): Promise<CriterionQuestion[]> {
+): Promise<PersonRequirement[]> {
   const turnedDown = criteria
     .filter(({ id }) => id.startsWith("turned-down:"))
     .map(({ id, statement }) => ({
@@ -126,7 +134,7 @@ async function personRequirements(
       (about?.get(`place:${fact.id}`) ?? 0) >= 0.5
         ? { ...fact, place: true }
         : (about?.get(`language:${fact.id}`) ?? 0) >= 0.5
-          ? { ...fact, rule: SHOWN_LANGUAGE }
+          ? { ...fact, language: true }
           : fact,
     ),
     ...turnedDown,
@@ -212,17 +220,50 @@ export async function checkPeopleCriteria(
       getLogger().info("recruiting.criteria.check skipped", { requirements: 0 });
       return;
     }
-    const questions = requirements.map((requirement) =>
-      asksYears(requirement) ? { ...requirement, rule: COUNTED_YEARS } : requirement,
-    );
+    // The recruiter's choice (11-25, again 11-26): a language goes to the deployment's own
+    // language check, a second request per person, when the deployment has one.
+    const spoken = judge.language ? requirements.filter((requirement) => requirement.language) : [];
+    const questions = requirements
+      .filter((requirement) => !spoken.includes(requirement))
+      .map(({ language: _language, ...requirement }) =>
+        asksYears(requirement) ? { ...requirement, rule: COUNTED_YEARS } : requirement,
+      );
     await readMissingProfiles(readProfile, entries);
     const deadline = AbortSignal.timeout(12_000);
+    const rows = entries.flatMap(({ row }, index) =>
+      typeof row._profile_text === "string" && row._profile_text
+        ? [
+            {
+              id: String(index),
+              ...(typeof row.name === "string" ? { name: row.name } : {}),
+              profile: row._profile_text.slice(0, PROFILE_CHARS),
+            },
+          ]
+        : [],
+    );
+    const speaks = new Map(
+      await Promise.all(
+        spoken.map(
+          async (requirement) =>
+            [requirement.id, await judge.language!(requirement.statement, rows, deadline)] as const,
+        ),
+      ),
+    );
     for (let at = 0; at < entries.length && !deadline.aborted; at += TOGETHER)
       await Promise.all(
         entries.slice(at, at + TOGETHER).map(async (entry) => {
           const profile = profileState(entry.row);
-          const verdicts = profile && (await judge.criteria?.(profile, questions, deadline));
-          if (!verdicts) return;
+          if (!profile) return;
+          const verdicts =
+            (questions.length ? await judge.criteria?.(profile, questions, deadline) : undefined) ??
+            new Map<string, CriterionVerdict>();
+          const index = String(entries.indexOf(entry));
+          for (const [id, signals] of speaks) {
+            const signal = signals.get(index);
+            if (signal)
+              verdicts.set(id, { level: SPOKEN_LEVEL[signal], confidence: 1, against: 0 });
+          }
+          if (!verdicts.size) return;
           for (const requirement of requirements) {
             const verdict = verdicts.get(requirement.id);
             if (verdict && asksYears(requirement) && verdict.confidence < SURE)
@@ -232,7 +273,7 @@ export async function checkPeopleCriteria(
           const { match_tier: tier, match_score: score } = entry.row;
           entry.check = {
             requirementsRevision: role.revision,
-            criteria: answered.map(({ place: _place, rule: _rule, ...requirement }) => {
+            criteria: answered.map(({ place: _place, language: _language, ...requirement }) => {
               const verdict = verdicts.get(requirement.id)!;
               return {
                 ...requirement,

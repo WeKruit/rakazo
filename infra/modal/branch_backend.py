@@ -11,6 +11,7 @@ the paid plays (feedback rounds, long searches). --web builds and serves this br
 through a second tunnel, for --ui and page plays. A second fresh account stands in for staging's
 copied "batch" account, so its plays start empty here.
 
+--env RAKAZO_LANGUAGE_CHECK_URL=<url> (with --search) gives the judge the deployment's language check.
 --env RAKAZO_SIM_SANDBOX=desktop runs the agent's shell commands inside this Sandbox (default: fake).
 
 Without simulated-customer args it plays the free journeys that need no mailbox, copied account or
@@ -71,7 +72,7 @@ def inside():
     env.update(INTEGRATION_DATABASE_URL=DATABASE_URL, API_PORT=str(PORT), HARNESS_HOST="0.0.0.0",
                WEB_PORT=str(WEB_PORT))
     if search:
-        env["HARNESS_LIVE_HOSTS"] = ",".join(SEARCH_HOSTS)
+        env["HARNESS_LIVE_HOSTS"] = ",".join(SEARCH_HOSTS + language_hosts(os.environ))
     os.chdir("/app")
     if os.environ.get("BRANCH_WEB") == "1":
         # The caller writes the web tunnel's URL once the Sandbox is up; sign-in checks that origin.
@@ -167,6 +168,13 @@ from events where type = 'agent.tool.completed' and coalesce(payload->>'error', 
 group by 2, 3 order by 1 desc"""
 
 
+def language_hosts(settings):
+    """The host of the deployment's language check, when --env RAKAZO_LANGUAGE_CHECK_URL names it."""
+    from urllib.parse import urlparse
+    host = urlparse(settings.get("RAKAZO_LANGUAGE_CHECK_URL", "")).hostname
+    return [host] if host else []
+
+
 def main(argv):
     import modal
     split = argv.index("--") if "--" in argv else len(argv)
@@ -188,7 +196,7 @@ def main(argv):
                  *([modal.Secret.from_name(JUDGE_SECRET, environment_name=ENVIRONMENT)] if search else []),
                  modal.Secret.from_dict({**extra, "SIGNUP_ALLOWLIST": "@example.com",
                                          "BRANCH_SEARCH": "1" if search else "0", "BRANCH_WEB": "1" if web else "0"})],
-        outbound_domain_allowlist=MODEL_HOSTS + (SEARCH_HOSTS if search else []),
+        outbound_domain_allowlist=MODEL_HOSTS + (SEARCH_HOSTS + language_hosts(extra) if search else []),
         encrypted_ports=[PORT, *([WEB_PORT] if web else [])],
         timeout=minutes * 60, cpu=2.0, memory=4096,
     )
