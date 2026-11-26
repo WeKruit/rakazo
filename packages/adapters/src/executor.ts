@@ -158,6 +158,7 @@ import {
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
+  RECRUITING_GLOBAL_SKILL_NAME,
   RECRUITING_INTAKE_SKILL_NAME,
   REPLY_LANGUAGE_NAME,
   RECRUITING_ROUND_NEXT_STEP,
@@ -11921,6 +11922,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
         // the server before the model's first step, so the first question needs no read or save step.
         // Recruiting runs carry the intake skill in the turn: reading it cost a model step per run.
+        // Kruit's own conversation carries its overview instead: it opens a new role with
+        // start_role, and the intake rules there made it search and ask itself (gate 42cc9f8f,
+        // jd-upload-pdf: a card before any role existed).
+        const turnSkillName = thread.groupId?.startsWith("recruiting-global-")
+          ? RECRUITING_GLOBAL_SKILL_NAME
+          : RECRUITING_INTAKE_SKILL_NAME;
         const handedIn =
           run.trigger === "follow_up" &&
           Boolean(run.sourceMessageId) &&
@@ -11959,7 +11966,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? skillReadFromTool(
                     deps.prisma,
                     { spaceId: run.spaceId, userId: run.userId },
-                    { name: RECRUITING_INTAKE_SKILL_NAME },
+                    { name: turnSkillName },
                   ).catch(() => null)
                 : null,
               loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
@@ -12111,7 +12118,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           intake && namesPeopleToEmail(recruiterTexts) ? NAMED_SEND_ROLE_NOTE : intakeSearchNote;
         const intakeSkillNote =
           typeof intakeSkill?.content === "string"
-            ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
+            ? `Skill "${turnSkillName}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
             : undefined;
         const promptParts = [
           replyContext,

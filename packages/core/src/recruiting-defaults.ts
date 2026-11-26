@@ -538,6 +538,9 @@ export function recruitingBotKey(bot: {
 /** The intake skill every recruiting run carries in its turn, so no step goes to reading it. */
 export const RECRUITING_INTAKE_SKILL_NAME = "Recruitment intake and handoff";
 
+/** The skill Kruit's own conversation carries in its turn instead: it opens roles, never runs their intake. */
+export const RECRUITING_GLOBAL_SKILL_NAME = "Global recruiting overview";
+
 /** Read when drafting a brief's titles and companies; a starting map, never a rule. */
 export const RECRUITING_SOURCING_MAP_SKILL_NAME = "Sourcing map";
 
@@ -576,7 +579,7 @@ export const RECRUITING_DEFAULT_SKILLS = [
     body: RECRUITING_SOURCING_MAP,
   },
   {
-    name: "Global recruiting overview",
+    name: RECRUITING_GLOBAL_SKILL_NAME,
     description: "Interviews, shortlist, replies, email stats and status across roles.",
     body: `In the global conversation you work across all the recruiter's roles; each role's own conversation owns its people, rounds and feedback.
 
