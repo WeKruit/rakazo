@@ -53,10 +53,6 @@ import { KruitWorkMenu } from "../recruiting/KruitWorkMenu";
 import { RetryNotice } from "../recruiting/RetryNotice";
 import { RoleDetailsMenu } from "../recruiting/RoleDetailsMenu";
 
-const RoleSetupCard = lazyPanel(() =>
-  import("../recruiting/RoleSetup").then((m) => m.RoleSetupCard),
-);
-
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
 import { TabLoading, useKeyedRead } from "../recruiting/shared";
 import { Composer } from "../shell/Composer";
@@ -364,14 +360,6 @@ export function ShellConversation({
         !activeSnapshot &&
         !(workspaceCandidates && knownThreadId) ? (
         <MessageSkeleton label={t`Loading…`} />
-      ) : null}
-      {!primaryPage && roleChatWorkspace && (inGroup ? groupId : active?.id) ? (
-        <RoleSetupCard
-          conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
-          refreshSignal={recruitingRefresh}
-          readCache={recruitingReadCache.current}
-          readCacheScope={recruitingCacheScope}
-        />
       ) : null}
       {openingCrmRole ? (
         <div className="px-6 py-3">

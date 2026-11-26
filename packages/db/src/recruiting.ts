@@ -100,7 +100,6 @@ import {
   SaveRecruitingAssessmentInput,
   SetRecruitingCandidateShortlistInput,
 } from "@rakazo/contracts";
-import type { RecruitingPlaybookStage, RecruitingPlaybookStep } from "@rakazo/core";
 import {
   applyRecruitingPreferenceEdit,
   boundDirectApprovalDetails,
@@ -111,14 +110,10 @@ import {
   evaluateRecruitingAssessment,
   extractLinksFromText,
   extractRecruitingCrmTarget,
-  isRecruitingPlaybookStage,
-  laterPlaybookStage,
   mergeRecruitingReassessment,
-  nextPlaybookStep,
   normalizeRecruitingCandidateRow,
   parseRecruitingCrmImportReceipt,
   projectRecruitingCandidateReport,
-  RECRUITING_PLAYBOOK_STAGES,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingBriefClarifications,
@@ -158,121 +153,7 @@ type Tx = Prisma.TransactionClient;
 type RoleSnapshot = {
   role: RecruitingRole;
   revision: RecruitingRoleRevision;
-  /** Short Chinese label of the agent's next playbook step; null when the human owns the move. */
-  nextStep?: string | null;
 };
-
-/** Stages only advance (playbook S1→S12); a stale writer never regresses a role. */
-export async function advanceRecruitingPlaybookStage(
-  tx: Pick<Tx, "recruitingRole">,
-  roleId: string,
-  next: RecruitingPlaybookStage,
-): Promise<void> {
-  // One conditional write: only a role still at an earlier stage moves.
-  const earlier = RECRUITING_PLAYBOOK_STAGES.slice(0, RECRUITING_PLAYBOOK_STAGES.indexOf(next));
-  if (!earlier.length) return;
-  await tx.recruitingRole.updateMany({
-    where: { id: roleId, playbookStage: { in: [...earlier] } },
-    data: { playbookStage: next },
-  });
-}
-
-/** In-memory monotonic step for writers that already hold the role row and its CAS write. */
-function stageAfter(role: { playbookStage?: string }, next: RecruitingPlaybookStage) {
-  const current = isRecruitingPlaybookStage(role.playbookStage) ? role.playbookStage : "intake";
-  return laterPlaybookStage(current, next);
-}
-
-const CALIBRATION_FEEDBACK_THRESHOLD = 10;
-/** The scale step's target when the recruiter names none (the scale prompt's default). */
-const RECRUITING_SCALE_DEFAULT_TARGET = 100;
-
-/** After candidates are saved: ten or more saved people move the role into the feedback loop. */
-/** Saved people reach the feedback stage only once a calibration round has shown ten of them. */
-// Runs inside the save's locked transaction, where each statement is a round trip: before the
-// first round there is nothing to advance, so the count is skipped.
-async function advanceStageAfterSave(tx: Tx, roleId: string) {
-  const round = await tx.recruitingCalibrationRound.findFirst({
-    where: { roleId },
-    select: { id: true },
-  });
-  if (!round) return;
-  const saved = await tx.recruitingCandidate.count({ where: { roleId } });
-  if (saved >= CALIBRATION_FEEDBACK_THRESHOLD)
-    await advanceRecruitingPlaybookStage(tx, roleId, "feedback");
-}
-
-/** Stage plus the next playbook step for a role; used by snapshots and the run turn-end guard. */
-export async function readRecruitingPlaybookStep(
-  tx: Pick<
-    Tx,
-    | "recruitingRole"
-    | "recruitingRoleRevision"
-    | "recruitingCandidate"
-    | "recruitingCalibrationRound"
-    | "recruitingCandidatePage"
-  >,
-  roleId: string,
-): Promise<{
-  stage: RecruitingPlaybookStage;
-  step: RecruitingPlaybookStep | null;
-  savedCandidates: number;
-} | null> {
-  const role = await tx.recruitingRole.findUnique({
-    where: { id: roleId },
-    select: { title: true, playbookStage: true, currentRevisionId: true, archivedAt: true },
-  });
-  if (!role || role.archivedAt) return null;
-  const [revision, savedCandidates, acceptedRound, anyRound] = await Promise.all([
-    tx.recruitingRoleRevision.findUnique({
-      where: { id: role.currentRevisionId },
-      select: { brief: true },
-    }),
-    tx.recruitingCandidate.count({ where: { roleId } }),
-    tx.recruitingCalibrationRound.findFirst({
-      where: { roleId, approvedAt: { not: null } },
-      orderBy: { approvedAt: "asc" },
-      select: { approvedAt: true },
-    }),
-    tx.recruitingCalibrationRound.findFirst({ where: { roleId }, select: { id: true } }),
-  ]);
-  const brief = revision?.brief ? RecruitingBriefDraftSchema.safeParse(revision.brief) : null;
-  // The stored stage only moves forward from writes made after it shipped. A role that already
-  // has a confirmed brief, saved people or an accepted round is at least at that stage, so it
-  // is never pushed back to a fresh calibration search.
-  let stage = isRecruitingPlaybookStage(role.playbookStage) ? role.playbookStage : "intake";
-  const confirmed = (revision?.brief as { confirmation?: unknown } | null)?.confirmation;
-  if (confirmed && typeof confirmed === "object")
-    stage = laterPlaybookStage(stage, "calibration_10");
-  // Saved people mean the brief was searched; feedback starts only once a round showed ten.
-  if (savedCandidates >= CALIBRATION_FEEDBACK_THRESHOLD)
-    stage = laterPlaybookStage(stage, anyRound ? "feedback" : "calibration_10");
-  if (stage === "feedback" && !anyRound) stage = "calibration_10";
-  if (acceptedRound) stage = laterPlaybookStage(stage, "scale");
-  const openClarifications = brief?.success ? recruitingBriefClarifications(brief.data).length : 0;
-  // Scale is delivered once people were saved after the round was accepted, or the pool already
-  // holds the default target; the next move is then the recruiter's, so nothing is pushed.
-  const scaled =
-    stage === "scale" &&
-    (savedCandidates >= RECRUITING_SCALE_DEFAULT_TARGET ||
-      (acceptedRound?.approvedAt != null &&
-        (await tx.recruitingCandidatePage.findFirst({
-          where: { roleId, observedAt: { gt: acceptedRound.approvedAt } },
-          select: { effectId: true },
-        })) !== null));
-  return {
-    stage,
-    savedCandidates,
-    step: scaled
-      ? null
-      : nextPlaybookStep(stage, {
-          title: role.title,
-          hasBrief: Boolean(revision?.brief),
-          openClarifications,
-          savedCandidates,
-        }),
-  };
-}
 
 export type { RecruitingAssessmentSnapshot } from "@rakazo/contracts";
 
@@ -841,7 +722,6 @@ async function createRoleInTransaction(
       title: input.title,
       revision: 1,
       currentRevisionId: randomUUID(),
-      playbookStage: input.brief && input.title ? "calibration_10" : "intake",
     },
   });
   await tx.recruitingRoleRevision.create({
@@ -1353,10 +1233,7 @@ export async function getRecruitingRoleSnapshot(
       const thread = await requireThread(tx, actor, input.threadId);
       if (!thread.activeRecruitingRoleId) return null;
       const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
-      const snapshot = await roleSnapshot(tx, actor, role, thread);
-      // Additive display hint; a partial test double without the candidate delegate still snapshots.
-      const playbook = await readRecruitingPlaybookStep(tx, role.id).catch(() => null);
-      return { ...snapshot, nextStep: playbook?.step?.label ?? null };
+      return roleSnapshot(tx, actor, role, thread);
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
@@ -1441,8 +1318,6 @@ async function reviseRoleInTransaction(
   const revision = await tx.recruitingRoleRevision.create({
     data: { roleId: role.id, revision: role.revision + 1, ...definitionData(input) },
   });
-  const revisedStage =
-    input.brief && input.title ? stageAfter(role, "calibration_10") : role.playbookStage;
   const title = keepNumberedTitle(input.title, role.title);
   const changed = await tx.recruitingRole.updateMany({
     where: {
@@ -1456,7 +1331,6 @@ async function reviseRoleInTransaction(
       title,
       revision: revision.revision,
       currentRevisionId: revision.id,
-      playbookStage: revisedStage,
     },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
@@ -1471,7 +1345,6 @@ async function reviseRoleInTransaction(
       title,
       revision: revision.revision,
       currentRevisionId: revision.id,
-      playbookStage: revisedStage,
     },
     authorizedThread,
   );
@@ -1579,7 +1452,6 @@ async function confirmRecruitingBriefInTransaction(
       brief: brief as Prisma.InputJsonValue,
     },
   });
-  const confirmedStage = stageAfter(role, "calibration_10");
   const changed = await tx.recruitingRole.updateMany({
     where: {
       id: role.id,
@@ -1588,7 +1460,7 @@ async function confirmRecruitingBriefInTransaction(
       revision: role.revision,
       currentRevisionId: role.currentRevisionId,
     },
-    data: { revision: nextRevision, currentRevisionId: saved.id, playbookStage: confirmedStage },
+    data: { revision: nextRevision, currentRevisionId: saved.id },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
   await recordRecruitingChange(tx, actor, thread, role.id);
@@ -1596,7 +1468,6 @@ async function confirmRecruitingBriefInTransaction(
     ...role,
     revision: nextRevision,
     currentRevisionId: saved.id,
-    playbookStage: confirmedStage,
   });
 }
 
@@ -5862,7 +5733,6 @@ export async function executeRecruitingApproval(
           approvalSource: { kind: "approval", effectId: effect.id },
         },
       });
-      await advanceRecruitingPlaybookStage(tx, input.roleId, "scale");
     }
     const result: RecruitingApprovalResult = {
       status: "approved",
@@ -7397,7 +7267,6 @@ async function indexRecruitingCandidateRows(
     })),
     skipDuplicates: true,
   });
-  await advanceStageAfterSave(tx, task.roleId);
   await tx.recruitingCandidateOccurrence.createMany({ data: rows });
   await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${effect.id}`);
   return rows.map(({ rowIndex, candidateKey }) => ({ rowIndex, candidateKey }));
@@ -8135,7 +8004,6 @@ async function saveUnassessedCandidatePage(
   if (rows.length) {
     await tx.recruitingCandidateOccurrence.createMany({ data: rows });
     await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${saving.id}`);
-    await advanceStageAfterSave(tx, role.id);
   }
   const result = {
     status: "saved",
@@ -12294,7 +12162,6 @@ export async function saveRecruitingCalibrationRound(
         statusAt: now,
       },
     });
-    await advanceRecruitingPlaybookStage(tx, role.id, "feedback");
     const result = {
       status: "saved",
       roleId: role.id,
@@ -12453,7 +12320,6 @@ async function approveLatestCalibrationRound(
     data: { approvedAt, approvedByUserId: actor.userId, approvalSource: source },
   });
   if (updated.count !== 1) throw new RecruitingConflictError();
-  await advanceRecruitingPlaybookStage(tx, roleId, "scale");
   return { round: latest.round, approvedAt: approvedAt.toISOString(), already: false };
 }
 

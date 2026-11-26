@@ -7536,18 +7536,6 @@ describe("role campaign read", () => {
       expect(f.calls).toEqual([]);
     }
   });
-
-  it("role setup reads only the saved playbook stage, never a connector", async () => {
-    const f = fixture({
-      spaceId: actor.spaceId,
-      status: "completed",
-      result: { campaignId: CAMPAIGN, campaignName: "Staff [role]", leads: {} },
-    });
-    expect(await api.getRecruitingRoleSetup(f.deps.prisma, actor, target)).toEqual({
-      playbookStage: { stage: "intake", next: null },
-    });
-    expect(f.calls).toEqual([]);
-  });
 });
 
 describe("role candidates (Autumn + CRM merged list)", () => {

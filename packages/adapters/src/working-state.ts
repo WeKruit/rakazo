@@ -369,7 +369,6 @@ export async function loadWorkingState(
           select: {
             id: true,
             title: true,
-            playbookStage: true,
             _count: { select: { candidates: true } },
           },
         })
@@ -612,7 +611,6 @@ export async function loadWorkingState(
         `- ${[
           role?.title || group.name,
           role ? `roleId ${role.id}` : `groupId ${group.id}, no saved role yet`,
-          role ? `stage ${role.playbookStage}` : undefined,
           role ? `${role._count.candidates} people saved` : undefined,
           roundLine(roleId ? roundOf.get(roleId) : undefined, now),
           teamState(latestRun.get(threadId), now),

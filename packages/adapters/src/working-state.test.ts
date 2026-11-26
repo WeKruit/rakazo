@@ -90,13 +90,11 @@ const roles = [
   {
     id: "role-1",
     title: "Agent Engineer Ref 0153",
-    playbookStage: "calibration_10",
     _count: { candidates: 12 },
   },
   {
     id: "role-2",
     title: "Payments Go Engineer Ref 0303",
-    playbookStage: "intake",
     _count: { candidates: 0 },
   },
 ];
@@ -185,7 +183,7 @@ describe("loadWorkingState", () => {
       "Done in this conversation in the last 24 h (tool receipts): FAILED save_template (1 min ago).",
     );
     expect(card).toContain(
-      "stage calibration_10 · 12 people saved · team waiting on the recruiter since 5 min ago",
+      "12 people saved · team waiting on the recruiter since 5 min ago",
     );
     expect(card).toContain(
       "Role teams: 1175 active roles in all; the 2 most recently active are below",

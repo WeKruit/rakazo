@@ -285,7 +285,6 @@ import {
   readHistory,
   readNativeCrmWriteApproval,
   readNativeReplyEmailProof,
-  readRecruitingPlaybookStep,
   recordUsage,
   remainingUsageCredits,
   resolveRecruitingCampaignLead,
@@ -14701,21 +14700,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
               const budgetLimit = runBudgetExceeded(spent);
               if (budgetLimit) {
-                const savedProgress = thread.activeRecruitingRoleId
-                  ? await readRecruitingPlaybookStep(deps.prisma, thread.activeRecruitingRoleId)
-                  : null;
-                await stopRunEarly(
-                  runBudgetStopText(
-                    budgetLimit,
-                    spent,
-                    savedProgress
-                      ? {
-                          savedCandidates: savedProgress.savedCandidates,
-                          nextStep: savedProgress.step?.label ?? null,
-                        }
-                      : undefined,
-                  ),
-                );
+                await stopRunEarly(runBudgetStopText(budgetLimit, spent));
                 return;
               }
               runToolCalls += 1;

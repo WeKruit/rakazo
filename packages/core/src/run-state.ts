@@ -143,14 +143,10 @@ export function runBudgetExceeded(
 export function runBudgetStopText(
   limit: RunBudgetLimit,
   spent: { costUsd: number; elapsedMs: number; toolCalls: number },
-  progress?: { savedCandidates: number; nextStep: string | null },
 ): string {
   const reason =
     limit === "cost"
       ? `this run reached its cost limit (about $${spent.costUsd.toFixed(2)} spent)`
       : `this run reached its time limit (${Math.round(spent.elapsedMs / 60_000)} minutes)`;
-  const saved = progress
-    ? ` This role has ${progress.savedCandidates} saved candidate profile${progress.savedCandidates === 1 ? "" : "s"}.${progress.nextStep ? ` Next step: ${progress.nextStep}.` : ""}`
-    : " Everything completed so far is above and stays done.";
-  return `I stopped early because ${reason} after ${spent.toolCalls} tool call${spent.toolCalls === 1 ? "" : "s"}.${saved} Nothing after this point was started. Tell me to continue if you want me to pick up where I left off.`;
+  return `I stopped early because ${reason} after ${spent.toolCalls} tool call${spent.toolCalls === 1 ? "" : "s"}. Everything completed so far is above and stays done. Nothing after this point was started. Tell me to continue if you want me to pick up where I left off.`;
 }

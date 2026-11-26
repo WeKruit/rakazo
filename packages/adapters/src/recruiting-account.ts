@@ -200,7 +200,6 @@ export async function readRecruitingAccountView(
         id: true,
         title: true,
         sourceThreadId: true,
-        playbookStage: true,
         sourceThread: {
           select: {
             id: true,
@@ -220,7 +219,6 @@ export async function readRecruitingAccountView(
         id: true,
         title: true,
         sourceThreadId: true,
-        playbookStage: true,
         sourceThread: { select: { groupId: true, botId: true } },
       },
     });
@@ -230,7 +228,6 @@ export async function readRecruitingAccountView(
       threadId: row.sourceThreadId,
       groupId: row.sourceThread.groupId,
       ...(row.sourceThread.botId ? { botId: row.sourceThread.botId } : {}),
-      stage: row.playbookStage,
     }));
     if (input.view === "routines") {
       const threadId = input.roleId

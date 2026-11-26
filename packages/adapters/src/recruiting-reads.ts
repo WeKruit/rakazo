@@ -25,7 +25,6 @@ import type {
   RecruitingRoleCampaign,
   RecruitingRoleCandidate,
   RecruitingRoleCandidatesOutput,
-  RecruitingRoleSetup,
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
@@ -57,8 +56,6 @@ import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
   INSTANTLY_MCP_ENDPOINT,
-  isRecruitingPlaybookStage,
-  type RecruitingPlaybookStage,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingCalibrationIdentity,
@@ -948,28 +945,6 @@ export async function getRecruitingRoleCampaign(
       });
     }
     return result;
-  });
-}
-
-/** Where a role is in the playbook and what comes next; a saved-record read, nothing external. */
-export async function getRecruitingRoleSetup(
-  prisma: PrismaClient,
-  actor: Actor,
-  target: ThreadTarget,
-): Promise<RecruitingRoleSetup> {
-  return authenticated(async () => {
-    const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
-      threadId: target.threadId,
-    });
-    if (!workspace) return {};
-    const playbook = await recruiting
-      .readRecruitingPlaybookStep(prisma, workspace.role.id)
-      .catch(() => null);
-    const rawStage = playbook?.stage ?? workspace.role.playbookStage;
-    const stage: RecruitingPlaybookStage = isRecruitingPlaybookStage(rawStage)
-      ? rawStage
-      : "intake";
-    return { playbookStage: { stage, next: playbook?.step?.next ?? null } };
   });
 }
 
