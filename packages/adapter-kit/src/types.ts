@@ -308,6 +308,8 @@ export interface MemorySnapshot {
     id: string;
     path: string;
     content: string;
+    /** The structured form saved with the document, when its writer saved one. */
+    data?: unknown;
     revision: number;
     updatedAt?: string;
   }>;
@@ -345,6 +347,11 @@ export interface MemoryCommitRequest {
   groupId?: string;
   path: string;
   content: string;
+  /**
+   * The structured form of this content, for a document the server reads back. A save without
+   * it clears the stored one, so data never outlives the text it described.
+   */
+  data?: unknown;
   /** Revision used to prepare this replacement; 0 creates a new document. */
   expectedRevision: number;
   sourceRunId?: string;

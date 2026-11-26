@@ -44,7 +44,7 @@ const reply = (id: string, body: string, subject = "Re: Platform lead"): Recruit
 function fixture(options: {
   busy?: boolean;
   replies?: RecruitingRoleReply[];
-  earlier?: Array<{ createdAt: Date; task: { prompt: string } }>;
+  earlier?: Array<{ createdAt: Date; checkinReplyIds: unknown }>;
 }) {
   const runCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({
     id: "checkin-run",
@@ -117,7 +117,12 @@ describe("startRecruitingCheckin", () => {
     await start(deps);
     expect(deps.runCreate).toHaveBeenCalledTimes(1);
     const run = deps.runCreate.mock.calls[0]![0].data;
-    expect(run).toMatchObject({ botId: "main", trigger: "recruiting_checkin", status: "queued" });
+    expect(run).toMatchObject({
+      botId: "main",
+      trigger: "recruiting_checkin",
+      status: "queued",
+      checkinReplyIds: ["a", "b"],
+    });
     expect(String(run.clientNonce)).toMatch(
       new RegExp(`^${RECRUITING_CHECKIN_NONCE_PREFIX}thread:`),
     );
@@ -166,9 +171,7 @@ describe("startRecruitingCheckin", () => {
       earlier: [
         {
           createdAt: new Date(now - 30 * 60_000),
-          task: {
-            prompt: '- Person a <a@example.test>, x, subject "y" (reply id: a)\n  > Interested!',
-          },
+          checkinReplyIds: ["a"],
         },
       ],
     });

@@ -145,10 +145,12 @@ function outageError(error: unknown): boolean {
   return OUTAGE.test(text) && !INVALID_INPUT.test(text);
 }
 
-/** A failed save that a retry can fix: a revision race or a passing outage, not bad input. */
-export function transientSaveError(error: unknown): boolean {
-  const text = errorText(error);
-  return /conflict|revision/i.test(text) ? !INVALID_INPUT.test(text) : outageError(text);
+/**
+ * A failed save that a retry can fix: a conflict the save itself reported by its code, or a
+ * passing outage, not bad input.
+ */
+export function transientSaveError(result: unknown, error: unknown): boolean {
+  return savedPayload(result)?.code === "CONFLICT" || outageError(error);
 }
 
 /**

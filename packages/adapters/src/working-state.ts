@@ -444,11 +444,7 @@ export async function loadWorkingState(
     const lastHanded = handoffs
       .map((event) => (event.payload ?? {}) as Record<string, unknown>)
       .filter((payload) => payload.name === "delegate_to_role")
-      .map((payload) =>
-        typeof payload.argsSummary === "string"
-          ? /\broleId=([^,\s…]+)/.exec(payload.argsSummary)?.[1]
-          : undefined,
-      )
+      .map((payload) => (typeof payload.roleId === "string" ? payload.roleId : undefined))
       .find((id): id is string => Boolean(id && roleById.has(id)));
     if (lastHanded) {
       lines.push(

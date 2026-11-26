@@ -210,9 +210,7 @@ describe("loadWorkingState", () => {
           groups,
           roles,
           recruiter: [text("#8 不行，再找类似的")],
-          called: [
-            { payload: { name: "delegate_to_role", argsSummary: "roleId=role-2, message=x" } },
-          ],
+          called: [{ payload: { name: "delegate_to_role", roleId: "role-2" } }],
           round,
         }) as never,
         scope,
@@ -366,7 +364,7 @@ describe("loadWorkingState", () => {
     const sends = [
       { result: { error: "paused", campaignId: "c-2" }, updatedAt: new Date(now) },
       {
-        result: { content: [{ text: '{"queued":true,"campaignId":"c-1"}' }] },
+        result: { structuredContent: { result: { queued: true, campaignId: "c-1" } } },
         updatedAt: new Date(now - 13 * 60_000),
       },
     ];
@@ -396,7 +394,7 @@ describe("loadWorkingState", () => {
         recruiter: [text("ok go ahead and send them now please")],
         called: [
           { payload: { name: "recruiting_candidates", argsSummary: "operation=roles" } },
-          { payload: { name: "delegate_to_role", argsSummary: "roleId=role-1, message=send" } },
+          { payload: { name: "delegate_to_role", roleId: "role-1" } },
         ],
       }) as never,
       scope,

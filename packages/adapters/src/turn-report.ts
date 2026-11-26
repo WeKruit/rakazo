@@ -79,6 +79,17 @@ function isContactLookup(result: unknown): boolean {
     .some((value) => value?.source === "local_contact_lookup");
 }
 
+/** Whether a call's structured result says it created what it ensured. */
+function createdByCall(result: unknown): boolean {
+  const object = (value: unknown) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  return [result, object(result)?.details, object(result)?.result]
+    .map((value) => object(object(value)?.structuredContent))
+    .some((value) => value?.created === true || object(value?.result)?.created === true);
+}
+
 /** Tool operations that only read, by their leading verb. */
 const READ_ACTION =
   /^(?:native_[a-z]+_)?(?:(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview)(?:_|$)|whoami$|me$)/;
@@ -150,7 +161,7 @@ export function turnWork(
   if (
     action.startsWith("ensure_") &&
     !("steps" in (nestedArgs(args) ?? args)) &&
-    !/"created"\s*:\s*true/.test(JSON.stringify(settled?.result ?? null))
+    !createdByCall(settled?.result)
   )
     return undefined;
   if (/draft|campaign|lead/.test(action)) return "draft";

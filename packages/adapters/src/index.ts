@@ -11,6 +11,7 @@ export * from "./billing-emulator.js";
 export * from "./bot-avatar.js";
 export * from "./bot-messages.js";
 export {
+  BotSecretInputError,
   forgetBotSecret,
   getBotSecretMetadata,
   listBotSecretMetadata,

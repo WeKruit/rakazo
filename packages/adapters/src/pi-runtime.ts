@@ -111,6 +111,7 @@ import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { deliverFinishedShells } from "./shell-command-stream.js";
+import type { HelperTurn } from "./structured-output.js";
 import { outputSchema, structuredTurn } from "./structured-output.js";
 import type { SubagentSession } from "./subagent-delivery.js";
 import {
@@ -2191,7 +2192,7 @@ async function executeSubagent(
   const withPrevious = (text: string) => (previous ? `${previous}\n\n${text}` : text);
   const work = schema
     ? structuredTurn((prompt) => helper.turn(prompt), task, args.output_schema, schema)
-    : helper.turn(task);
+    : helper.turn(task).then((result) => result.text);
   if (args.background !== true) {
     const result = await work;
     return withPrevious(`${result}\n\n(helper handle: ${helper.handle})`);
@@ -2224,8 +2225,8 @@ async function subagentResultsBeforePause(
 }
 
 interface SubagentHelper extends SubagentSession {
-  /** One prompt to this helper; resolves with its result text and never rejects. */
-  turn(task: string): Promise<string>;
+  /** One prompt to this helper; resolves with its result and never rejects. */
+  turn(task: string): Promise<HelperTurn>;
 }
 
 async function createSubagent(
@@ -2482,7 +2483,7 @@ async function createSubagent(
   });
 
   let started = false;
-  const turn = async (prompt: string): Promise<string> => {
+  const turn = async (prompt: string): Promise<HelperTurn> => {
     session.busy = true;
     await host.subagentGate.acquire();
     if (started) {
@@ -2508,7 +2509,7 @@ async function createSubagent(
       session.busy = false;
     }
   };
-  const subagentTurn = async (prompt: string): Promise<string> => {
+  const subagentTurn = async (prompt: string): Promise<HelperTurn> => {
     try {
       if (host.signal.aborted) {
         host.queue.push({
@@ -2519,7 +2520,7 @@ async function createSubagent(
           status: "failed",
           result: "stopped",
         });
-        return "stopped";
+        return { text: "stopped", ended: true };
       }
       const onAbort = () => nested.abort();
       host.signal.addEventListener("abort", onAbort);
@@ -2549,7 +2550,7 @@ async function createSubagent(
           status: "failed",
           result: message,
         });
-        return `Subagent failed: ${message}`;
+        return { text: `Subagent failed: ${message}`, ended: true };
       }
       const budgetMessage = budgetExceeded
         ? toolCallBudgetExceededMessage(host.toolCallBudget.limit)
@@ -2567,7 +2568,7 @@ async function createSubagent(
         status: "completed",
         result: clipped,
       });
-      return clipped;
+      return { text: clipped, ended: false };
     } catch (error) {
       const message = sanitizeError(error instanceof Error ? error.message : String(error));
       host.queue.push({
@@ -2578,7 +2579,7 @@ async function createSubagent(
         status: "failed",
         result: message,
       });
-      return `Subagent failed: ${message}`;
+      return { text: `Subagent failed: ${message}`, ended: true };
     }
   };
   const session: SubagentHelper = {

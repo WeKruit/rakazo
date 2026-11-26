@@ -99,6 +99,8 @@ export async function deliverSend(
       text: plan.trimmed || undefined,
       uiLocale: getActiveUiLocale(),
       mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
+      // A send queued on disk by an earlier app version has no such list.
+      connectorNames: plan.connectorNames?.length ? plan.connectorNames : undefined,
       artifactIds: artifactIds.length ? artifactIds : undefined,
       replyToMessageId: reroutedToGroup ? undefined : payload.replyTargetId,
       replyQuote: reroutedToGroup ? undefined : (payload.replyQuote ?? undefined),

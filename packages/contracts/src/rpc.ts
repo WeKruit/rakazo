@@ -294,6 +294,8 @@ const threadSendInput = threadTarget
       .array(z.union([Id, structuredMentionTarget]))
       .max(64)
       .optional(),
+    /** Mentioned connectors that have no connection row yet, so no mention id: by display name. */
+    connectorNames: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
     replyToMessageId: Id.optional(),
     replyQuote: z.string().trim().min(1).max(REPLY_QUOTE_MAX_LENGTH).optional(),
     clientNonce: z.string().min(1).max(200).optional(),

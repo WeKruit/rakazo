@@ -120,17 +120,11 @@ export function connectorIntentLine(names: readonly string[]): string {
   return `Use these connectors if relevant: ${unique.join(", ")}.`;
 }
 
-/** Names that need a client-side connector line (not yet a owned connection row). */
+/** Mentioned connectors with no owned connection row yet, which a mention id cannot name. */
 export function needsAuthConnectorNames(mentions: readonly ComposerMention[]): string[] {
   return mentions
     .filter((mention) => mention.kind === "connector" && mention.authStatus === "needs_auth")
     .map((mention) => mention.name);
-}
-
-export function appendConnectorIntent(text: string, names: readonly string[]): string {
-  const line = connectorIntentLine(names);
-  if (!line) return text;
-  return text.trim() ? `${text}\n\n${line}` : line;
 }
 
 export function routineScheduleSubtitle(crons: readonly string[], botName?: string): string {
@@ -236,6 +230,7 @@ export function resolveComposerSendPlan(input: {
   rerouteGroupId: string | null;
   rerouteGroupName: string | null;
   mentionPayload: ReturnType<typeof toThreadMentionPayload>;
+  connectorNames: string[];
   shouldSend: boolean;
   shouldOpenGroup: boolean;
   shouldRunRoutines: boolean;
@@ -244,7 +239,7 @@ export function resolveComposerSendPlan(input: {
   const parts = partitionComposerMentions(input.mentions);
   const mentionedGroup = parts.groups[0];
   let trimmed = stripMentionKinds(input.text, input.mentions, ["group", "routine", "connector"]);
-  trimmed = appendConnectorIntent(trimmed, needsAuthConnectorNames(input.mentions));
+  const connectorNames = needsAuthConnectorNames(input.mentions);
   if (!trimmed.trim() && parts.connectors.length) {
     trimmed = parts.connectors.map((mention) => `@${mention.name}`).join(" ");
   }
@@ -260,6 +255,7 @@ export function resolveComposerSendPlan(input: {
     mentionPayload: toThreadMentionPayload(
       input.mentions.filter((mention) => mention.kind !== "group" && mention.kind !== "routine"),
     ),
+    connectorNames,
     shouldSend,
     shouldOpenGroup,
     shouldRunRoutines,

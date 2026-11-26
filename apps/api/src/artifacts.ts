@@ -9,6 +9,7 @@ import type {
 import { ATTACHMENT_MAX_COUNT } from "@rakazo/contracts";
 import {
   AttachmentValidationError,
+  connectorIntentLine,
   decodeAttachmentBase64,
   inferAttachmentMimeType,
   messageBlockForArtifact,
@@ -733,19 +734,7 @@ export function buildSendPrompt(
     undefined,
     recruitingContext,
   );
-  if (connectorNames.length === 0) return prompt;
-  const marker = "Use these connectors if relevant:";
-  const existing = new RegExp(`^${marker} (.*)\\.$`, "m").exec(prompt);
-  const names = [
-    ...new Set([
-      ...(existing?.[1]
-        ?.split(",")
-        .map((name) => name.trim())
-        .filter(Boolean) ?? []),
-      ...connectorNames.map((name) => name.trim()).filter(Boolean),
-    ]),
-  ];
-  const line = `${marker} ${names.join(", ")}.`;
-  if (existing) return prompt.replace(existing[0], () => line);
+  const line = connectorIntentLine(connectorNames);
+  if (!line) return prompt;
   return prompt ? `${prompt}\n\n${line}` : line;
 }

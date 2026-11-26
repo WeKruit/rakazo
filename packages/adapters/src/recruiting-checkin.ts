@@ -32,7 +32,6 @@ const REPORTED_CHECKINS = 50;
 const MAX_REPLIES = 20;
 const PREVIEW_CHARS = 500;
 const BUSY_STATUSES = ["queued", "leased", "running"];
-const REPLY_ID_LINE = /\(reply id: ([^)\s]+)\)$/;
 
 /** Offer each recently worked role conversation that emails people, or has a CRM link, to the check-in job. */
 export async function sweepRecruitingCheckins(deps: {
@@ -83,15 +82,13 @@ export async function sweepRecruitingCheckins(deps: {
   return offered;
 }
 
-/** The reply ids an earlier check-in's prompt listed. */
-function reportedReplyIds(prompts: readonly string[]): Set<string> {
-  const ids = new Set<string>();
-  for (const prompt of prompts)
-    for (const line of prompt.split("\n")) {
-      const id = REPLY_ID_LINE.exec(line.trim())?.[1];
-      if (id) ids.add(id);
-    }
-  return ids;
+/** The reply ids earlier check-ins recorded as reported. */
+function reportedReplyIds(recorded: readonly unknown[]): Set<string> {
+  return new Set(
+    recorded.flatMap((ids) =>
+      Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [],
+    ),
+  );
 }
 
 function oneLine(text: string | null, max: number): string {
@@ -290,7 +287,7 @@ export async function startRecruitingCheckin(
     },
     orderBy: { createdAt: "desc" },
     take: REPORTED_CHECKINS,
-    select: { createdAt: true, task: { select: { prompt: true } } },
+    select: { createdAt: true, checkinReplyIds: true },
   });
   const since = new Date(
     earlier[0] ? earlier[0].createdAt.getTime() - OVERLAP_MS : now - FIRST_LOOKBACK_MS,
@@ -325,7 +322,7 @@ export async function startRecruitingCheckin(
     // The next sweep tries again; a check-in never reports a failed read as "no replies".
     return skipped("read failed", { error: String(error) });
   }
-  const reported = reportedReplyIds(earlier.map((run) => run.task?.prompt ?? ""));
+  const reported = reportedReplyIds(earlier.map((run) => run.checkinReplyIds));
   const fresh = read.replies.filter((reply) => !reported.has(reply.id));
   if (!fresh.length) return skipped("nothing new");
   const automatic = fresh.filter((reply) => automaticReplyVerdict(reply));
@@ -379,6 +376,7 @@ export async function startRecruitingCheckin(
         status: "queued",
         trigger: "recruiting_checkin" satisfies RunTrigger,
         clientNonce,
+        checkinReplyIds: left.map((reply) => reply.id),
       },
     });
     return run.id;
