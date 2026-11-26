@@ -91,7 +91,7 @@ import { MarkdownMemoryStore } from "@rakazo/memory";
 
 // Recent messages get meaning vectors for history search; about US$0.10 a day at most.
 const EMBED_INTERVAL_MS = 60_000;
-const EMBED_LATE_TEXT_MS = 60 * 60_000;
+const EMBED_LATE_TEXT_MS = 24 * 60 * 60_000;
 const EMBED_MAX_TOKENS_PER_DAY = 5_000_000;
 
 const staging = hostedStagingConfig(process.env);
@@ -396,7 +396,7 @@ async function main() {
   reconciler.start();
   if (embedder) {
     let embedding = false;
-    // After one full sweep a pass reads only messages since it, less a margin for a bot reply
+    // After one full sweep a pass reads only messages since it, less a day for a bot reply
     // whose text lands after it was created: a message with no text is never embedded, so a full
     // sweep each minute re-read every recent message.
     let sweptAt: Date | undefined;
