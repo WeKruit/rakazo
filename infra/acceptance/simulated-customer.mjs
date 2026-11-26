@@ -407,7 +407,7 @@ async function runsLeft(rpc, since) {
   return left;
 }
 const CAMPAIGN_CODES =
-  "saved: people the role chat has stored (its Results count); finds: times the searches returned a person; foundAgain: finds of a person the role already held; sameLinkedIn: extra rows for a LinkedIn profile already listed; fit: how many of them the grader rated Strong or Promising; passed / onHold: the people its Results page marks Passed (不合适, not a fit) or On hold; otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
+  "saved: people the role chat has stored (its Results count); finds: times the searches returned a person; foundAgain: finds of a person the role already held; a person in a list is new when no earlier list showed them, so a round can show new people the role already held while saved and finds stay the same; sameLinkedIn: extra rows for a LinkedIn profile already listed; fit: how many of them the grader rated Strong or Promising; passed / onHold: the people its Results page marks Passed (不合适, not a fit) or On hold; otherCampaigns: the role's other campaigns besides its main one (such as a copy made for a new send), and a send can go out from any of them; campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
 
 // What the recruiter can read: messages with text, in chats they wrote in or were answered in.
 const visible = (chats) =>
