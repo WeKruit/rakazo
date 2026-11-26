@@ -2128,7 +2128,7 @@ describe("owner approval answer admission", () => {
 });
 
 describe("approval ownership across conversations", () => {
-  it("accepts a G0 human confirmation created in another owned bound conversation", async () => {
+  it("accepts a human brief confirmation created in another owned bound conversation", async () => {
     const f = approvalFixture();
     const find = f.tx.message.findUnique.getMockImplementation()!;
     f.tx.message.findUnique.mockImplementation(async (args) => {
@@ -2442,7 +2442,7 @@ async function nativeCalibrationFixture() {
     })),
   };
   tx.recruitingAssessment.findFirst.mockImplementation(() => {
-    throw new Error("Native G2 must not evaluate or load assessments");
+    throw new Error("The round review must not evaluate or load assessments");
   });
   return {
     ...f,

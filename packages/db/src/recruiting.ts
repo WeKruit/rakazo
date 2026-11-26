@@ -62,7 +62,6 @@ import {
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
-  RecruitingBriefDraftSchema,
   RecruitingCandidateConsiderationSchema,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateReportSchema,
