@@ -1554,7 +1554,7 @@ export const builtinAgentTools: ConnectorTool[] = [
         line: {
           type: "string",
           description:
-            "One line for the recruiter, in your own words and the language of their newest message: which role's team took it and what it is doing now. It is shown at once, while the call waits for the team; your answer from the result then takes its place.",
+            "One line for the recruiter, in your own words and the language of their newest message: what is being done for them now and for which role (for example finding the next people for it), never a word about handing over, teams or conversations. It is shown at once, while the call waits; your answer from the result follows it.",
         },
       },
       required: ["message", "line"],
