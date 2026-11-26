@@ -9,8 +9,13 @@ import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
 import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
-import { IsolationError, listRecruitingSchedulingPlans } from "@rakazo/db";
+import {
+  IsolationError,
+  listRecruitingSchedulingPlans,
+  otherCampaignsThatEmailed,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import addressparser from "nodemailer/lib/addressparser";
 import { saveEmailAttachments } from "./email-attachments.js";
 import { readInstantlyEmail } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
@@ -50,6 +55,8 @@ type CalendarEntry = {
   refreshing?: boolean;
 };
 const calendarCache = new Map<string, CalendarEntry>();
+/** Other campaigns of the account read for a role's replies, at most; more marks the read partial. */
+const OTHER_CAMPAIGNS = 10;
 
 export async function refreshRecruitingCorrespondence(
   deps: {
@@ -113,6 +120,40 @@ export async function refreshRecruitingCorrespondence(
     if (saved.length < email.attachment_json.files.length)
       void saveEmailAttachments(store, owner, email, { download: true }).catch(() => undefined);
     return saved;
+  };
+  const mailRow = async (
+    source: Source,
+    email: NonNullable<ReturnType<typeof readInstantlyEmail>>,
+    campaignId: string,
+  ) => {
+    const text =
+      email.body.text ||
+      (email.body.html ? htmlToPlainText(email.body.html) : (email.content_preview ?? ""));
+    const row = RecruitingCorrespondenceSchema.shape.emails.element.parse({
+      id: `${source.id}:${email.id}`,
+      sourceId: source.id,
+      sourceName: source.name,
+      providerMessageId: email.id,
+      providerThreadId: email.thread_id ?? null,
+      campaignId,
+      eaccount: email.eaccount,
+      savedRead: null,
+      direction: email.ue_type === 2 ? "received" : email.ue_type === 1 ? "sent" : null,
+      sender: email.from_address_email ?? null,
+      recipients: [email.to_address_email_list],
+      subject: email.subject,
+      body: text,
+      snippet:
+        !!email.body_fallback_reason ||
+        !(email.body.text || email.body.html) ||
+        (!scope.message && text.length > 50000),
+      date: email.timestamp_email,
+      url: null,
+    });
+    if (!scope.message) row.body = row.body.slice(0, 50000);
+    const attachments = await inboxAttachments(source, email);
+    if (attachments.length) row.attachments = attachments;
+    return row;
   };
   const execute = async (
     source: Source,
@@ -408,35 +449,7 @@ export async function refreshRecruitingCorrespondence(
                 output.partial = true;
                 continue;
               }
-              const text =
-                email.body.text ||
-                (email.body.html
-                  ? htmlToPlainText(email.body.html)
-                  : (email.content_preview ?? ""));
-              const row = RecruitingCorrespondenceSchema.shape.emails.element.parse({
-                id: `${source.id}:${email.id}`,
-                sourceId: source.id,
-                sourceName: source.name,
-                providerMessageId: email.id,
-                providerThreadId: email.thread_id ?? null,
-                campaignId,
-                eaccount: email.eaccount,
-                savedRead: null,
-                direction: email.ue_type === 2 ? "received" : email.ue_type === 1 ? "sent" : null,
-                sender: email.from_address_email ?? null,
-                recipients: [email.to_address_email_list],
-                subject: email.subject,
-                body: text,
-                snippet:
-                  !!email.body_fallback_reason ||
-                  !(email.body.text || email.body.html) ||
-                  (!scope.message && text.length > 50000),
-                date: email.timestamp_email,
-                url: null,
-              });
-              if (!scope.message) row.body = row.body.slice(0, 50000);
-              const attachments = await inboxAttachments(source, email);
-              if (attachments.length) row.attachments = attachments;
+              const row = await mailRow(source, email, campaignId);
               emails.set(row.id, row);
               observed.push(row);
             }
@@ -480,6 +493,41 @@ export async function refreshRecruitingCorrespondence(
           } while (cursor && fetched <= (scope.pageEnd ?? 200));
           output.partial ||= !!cursor;
           output.status = "ready";
+        }
+        // The mail service files a person's reply under their newest campaign. A reply in another
+        // of this account's own campaigns is the role's when the role emailed that person: the
+        // rule the reply anchor and get_email use. Only campaigns a confirmed send of this account
+        // emailed one of those people from can hold such a reply, so only those are read.
+        if (!scope.message && readCampaigns.size) {
+          const emailed = new Set(contactEmails);
+          for (const row of emails.values())
+            if (row.direction === "sent" && row.campaignId && readCampaigns.has(row.campaignId))
+              for (const to of row.recipients)
+                for (const entry of addressparser(to))
+                  if (entry.address) emailed.add(entry.address.trim().toLowerCase());
+          const others = await otherCampaignsThatEmailed(
+            deps.prisma,
+            actor,
+            [...readCampaigns],
+            [...emailed],
+            OTHER_CAMPAIGNS,
+          );
+          output.partial ||= others.length > OTHER_CAMPAIGNS;
+          for (const campaignId of others.slice(0, OTHER_CAMPAIGNS)) {
+            const body = record(
+              await execute(source, tool, { campaign_id: campaignId, limit: 100 }),
+            );
+            if (!Array.isArray(body?.items)) throw new Error("Invalid mail page");
+            output.partial ||= typeof body.next_starting_after === "string";
+            for (const value of body.items) {
+              const email = readInstantlyEmail(value);
+              const from = (email?.lead ?? email?.from_address_email)?.trim().toLowerCase();
+              if (email?.campaign_id !== campaignId || email.ue_type !== 2 || !from) continue;
+              if (!emailed.has(from)) continue;
+              const row = await mailRow(source, email, campaignId);
+              emails.set(row.id, row);
+            }
+          }
         }
         // Instantly was checked: a role without a campaign has no replies, not an unknown count.
         if (output.status === "not_checked") output.status = "ready";

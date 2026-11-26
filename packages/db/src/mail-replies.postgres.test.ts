@@ -10,6 +10,7 @@ import {
   earlierConfirmedSends,
   findSameMailReply,
   findWaitingCampaignSend,
+  otherCampaignsThatEmailed,
   projectMailReplyCards,
   publishMailReplyCard,
 } from "./mail-replies.js";
@@ -410,6 +411,27 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
       "ada@example.test",
     ]);
     expect([...found.keys()]).toEqual(["noah@example.test"]);
+    // A role whose campaign emailed Noah finds the other campaign his reply may be filed under,
+    // never its own, never for someone else, and never another user's.
+    const owner = { spaceId: identity.spaceId, userId: identity.userId };
+    expect(
+      await otherCampaignsThatEmailed(prisma, owner, ["campaign-b"], [" NOAH@example.test"], 10),
+    ).toEqual(["campaign-a"]);
+    expect(
+      await otherCampaignsThatEmailed(prisma, owner, ["campaign-a"], ["noah@example.test"], 10),
+    ).toEqual([]);
+    expect(
+      await otherCampaignsThatEmailed(prisma, owner, ["campaign-b"], ["ada@example.test"], 10),
+    ).toEqual([]);
+    expect(
+      await otherCampaignsThatEmailed(
+        prisma,
+        { ...owner, userId: "someone-else" },
+        ["campaign-b"],
+        ["noah@example.test"],
+        10,
+      ),
+    ).toEqual([]);
     // The same campaign sending its own people again is not a second first email.
     expect(
       (await earlierConfirmedSends(prisma, identity.spaceId, "campaign-a", ["noah@example.test"]))

@@ -56,6 +56,8 @@ function fixture() {
     },
     botMcpServer: { findFirst: assignment },
     thread: { findFirst: vi.fn(async () => ({ id: "thread" })) },
+    // The account's other campaigns that emailed the role's people; none unless a test says so.
+    $queryRaw: vi.fn(async () => [] as { campaign_id: string }[]),
   } as unknown as PrismaClient;
   return { prisma, assignment };
 }
@@ -362,6 +364,56 @@ describe("live role correspondence", () => {
     expect(output.emails.every((email) => email.direction === "received")).toBe(true);
     expect(execute).toHaveBeenCalledTimes(3);
     expect(execute.mock.calls[1]?.[0].args.starting_after).toBe("100");
+  });
+  it("shows a reply the mail service filed under another of the account's campaigns when the role emailed that person", async () => {
+    // The service files a person's reply under their newest campaign: Ada, emailed by the role and
+    // then by a one-off from the main conversation, answered there, and the role's Inbox was empty.
+    const { prisma } = fixture();
+    const oneOff = "00000000-0000-4000-8000-0000000000c2";
+    const email = (id: number, campaign: string, ue_type: 1 | 2, lead: string) => ({
+      id: `00000000-0000-4000-8000-${String(id).padStart(12, "0")}`,
+      timestamp_created: "2026-10-30T12:00:00Z",
+      timestamp_email: "2026-10-30T12:00:00Z",
+      message_id: `msg-${id}`,
+      subject: "Data role",
+      from_address_email: ue_type === 2 ? lead : "recruiter@example.test",
+      to_address_email_list: ue_type === 2 ? "recruiter@example.test" : lead,
+      body: { text: ue_type === 2 ? "Not looking." : "Hi" },
+      organization_id: "00000000-0000-4000-8000-000000000002",
+      campaign_id: campaign,
+      lead,
+      eaccount: "recruiter@example.test",
+      ue_type,
+    });
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ campaign_id: oneOff }] as never);
+    const execute = vi.fn(async function* (call: { args: Record<string, unknown> }) {
+      const items =
+        call.args.campaign_id === campaignId
+          ? [email(1, campaignId, 1, "ada@example.test")]
+          : [
+              email(2, oneOff, 2, "ada@example.test"),
+              // Someone the role never emailed stays out of the role's Inbox.
+              email(3, oneOff, 2, "stranger@example.test"),
+            ];
+      yield { type: "result", data: { structuredContent: { items } } } as const;
+    });
+    const output = empty();
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      { ...actor, userId: "cross-campaign" },
+      { roleId: "role", threadId: "thread", view: "inbox", pageEnd: 50 },
+      [source("instantly")],
+      output,
+    );
+    const calls = execute.mock.calls as unknown as [{ args: Record<string, unknown> }][];
+    expect(calls.map((call) => call[0].args.campaign_id)).toEqual([campaignId, oneOff]);
+    expect(output.status).toBe("ready");
+    expect(
+      output.emails.map((row) => [row.sender, row.direction, row.campaignId]).toSorted(),
+    ).toEqual([
+      ["ada@example.test", "received", oneOff],
+      ["recruiter@example.test", "sent", campaignId],
+    ]);
   });
   it("reads the role's imported campaign beside its own", async () => {
     const { prisma } = fixture();
