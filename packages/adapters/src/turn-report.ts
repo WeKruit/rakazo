@@ -391,30 +391,6 @@ export type Teammate = { id: string; name: string; about: string };
 export type DeclineRetry = { sentence: string; note: string; keep?: string; card?: string };
 
 /**
- * The recruiter asked for a template: named it, or asked for an email about a role without naming
- * anyone ("write me a short cold outreach email for a senior data engineer role in Seattle").
- */
-export function askedTemplate(request: string): boolean {
-  if (
-    /template|模板|模版|템플릿|テンプレート|\{\{\s*first_?name\s*\}\}|placeholder|자리표시자|占位/i.test(
-      request,
-    )
-  )
-    return true;
-  return (
-    /\b(?:e-?mail|message|note)\b|邮件|이메일|메일|メール/i.test(request) &&
-    // A role named by its title, or a first touch, is about the role too (gate 7b5230e4:
-    // 「Staff Frontend Engineer 的首次触达邮件」).
-    /\b(?:role|position|job|opening|engineer|developer|designer|manager|scientist|analyst|architect|director|first[- ]touch|outreach)s?\b|职位|岗位|工程师|经理|总监|设计师|架构师|首次|首封|触达|포지션|직무|ポジション|求人/i.test(
-      request,
-    ) &&
-    !/@|\b(?:these|those|them|him|her|each|everyone|people|candidates?)\b|这些|他们|候选人|这位/i.test(
-      request,
-    )
-  );
-}
-
-/**
  * Whether a brief carries the recruiter's message: most of the message's character pairs, spaces
  * and punctuation aside, appear in the brief, as they do when it is quoted.
  */

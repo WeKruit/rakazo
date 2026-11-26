@@ -11,33 +11,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
-import { askedTemplate } from "./turn-report.js";
 import { ROLE_START_NONCE } from "./working-state.js";
-
-/**
- * A request for an email template only, with no ask to find people: simulated 11-14, "write me a
- * short first outreach email … and keep it as my template" opened a role whose first card asked
- * about hybrid attendance, and the draft never came.
- */
-export function templateOnlyRequest(text: string): boolean {
-  return askedTemplate(text) && !FIND_PEOPLE.test(text);
-}
-
-const FIND_PEOPLE =
-  /\b(?:find|search|source|sourcing|look for|candidates? like)\b|找人|找候选|搜|寻访|物色|찾아|検索|探して/i;
-
-/**
- * A request to write to people the recruiter names with their addresses, with no ask to find
- * people: simulated 11-15, "Noah … and Ada … 写第一封，今晚发" opened a role whose team asked a
- * location question and listed ten strangers before the two emails.
- */
-export function writesToNamedPeople(text: string): boolean {
-  return /[^\s@<>()]+@[^\s@<>()]+\.[a-z]{2,}/i.test(text) && !FIND_PEOPLE.test(text);
-}
-
-/** Model-facing: start_role refused for a template-only request. */
-export const TEMPLATE_NOT_ROLE_NOTE =
-  "Not opened: the recruiter asked for an email template, not for people. Write the template in your reply now, from the recruiter to the candidate with {{firstName}} and the role details they gave, and keep it where it can be found: for a saved role they name, save it to that role with ensure_role_campaign and say it is on that role's Sequence tab; with no saved role, save it to memory and say it is kept for when they ask for it by role name, naming no page. Open a role only when they ask to find people.";
 
 /** The parts of a recruiter's own message that a new role conversation starts from. */
 function recruiterBlocks(message: {

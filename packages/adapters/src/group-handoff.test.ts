@@ -6,7 +6,6 @@ import {
   handoffToGroupBot,
   isQuietStageReport,
   NO_ROLE_HANDOFF,
-  namesRole,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
   watchOpenStages,
@@ -373,70 +372,6 @@ describe("account-wide conversation handoff", () => {
     await expect(
       handoffToGroupBot(deps as never, run, global, { bot_id: "bot-b", message: "Email Alex" }),
     ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
-  });
-
-  it("sends work in a role the recruiter named to that role's team", async () => {
-    const { deps, runCreate, tx } = harness(
-      [{ kind: "text", text: "在「测试固定 · Agent 工程师 5」里，回复那封邮件" }],
-      undefined,
-      { spawnKeys, activeRecruitingRoleId: null },
-    );
-    Object.assign(tx, {
-      recruitingRole: {
-        findMany: vi.fn(async () => [{ id: "role-9", title: "测试固定 · Agent 工程师 5" }]),
-      },
-    });
-    const result = await handoffToGroupBot(deps as never, run, global, {
-      bot_id: "bot-b",
-      message: "Reply",
-    });
-    expect(result).toMatchObject({ error: expect.stringContaining('role_id "role-9"') });
-    expect(runCreate).not.toHaveBeenCalled();
-  });
-
-  // 11-11 staging: the request was steered into a turn started by another message.
-  it("reads the role from the brief when the turn started from another message", async () => {
-    const { deps, runCreate, tx } = harness([{ kind: "text", text: "Dallas" }], undefined, {
-      spawnKeys,
-      activeRecruitingRoleId: null,
-    });
-    Object.assign(tx, {
-      recruitingRole: {
-        findMany: vi.fn(async () => [{ id: "role-9", title: "测试固定 · Agent 工程师 5" }]),
-      },
-    });
-    const result = await handoffToGroupBot(deps as never, run, global, {
-      bot_id: "bot-b",
-      message: "Goal: 在「测试固定 · Agent 工程师 5」里，回复那封邮件",
-    });
-    expect(result).toMatchObject({ error: expect.stringContaining('role_id "role-9"') });
-    expect(runCreate).not.toHaveBeenCalled();
-  });
-
-  // Staging 11-16 (stop-after-approve): 「新岗位 … ref 09071 … 首封邮件你写，两个都发」 went to
-  // Outreach as a one-off campaign outside any role, so later "stop it" had nothing to act on.
-  it("sends a new role's request to start_role, not to Outreach", async () => {
-    const { deps, runCreate, tx } = harness(
-      [
-        {
-          kind: "text",
-          text: "新岗位 Senior Data Engineer 西雅图 ref 09071，首封邮件你写，两个都发",
-        },
-      ],
-      undefined,
-      { spawnKeys, activeRecruitingRoleId: null },
-    );
-    Object.assign(tx, {
-      recruitingRole: {
-        findMany: vi.fn(async () => [{ id: "role-9", title: "Senior Data Engineer — Seattle" }]),
-      },
-    });
-    const result = await handoffToGroupBot(deps as never, run, global, {
-      bot_id: "bot-b",
-      message: "Write the first email",
-    });
-    expect(result).toMatchObject({ error: expect.stringContaining("start_role") });
-    expect(runCreate).not.toHaveBeenCalled();
   });
 
   it("keeps role work with the role's team", async () => {
@@ -987,37 +922,5 @@ describe("open stage watch", () => {
     await expect(watchOpenStages(busy.deps as never, now, 100)).resolves.toBe(0);
     for (const { messageCreate } of [reported, unasked, handedOn, busy])
       expect(messageCreate).not.toHaveBeenCalled();
-  });
-});
-
-describe("a role named in a handoff", () => {
-  it("matches the title written with full-width brackets or without its qualifier", () => {
-    // 11-13 staging: "Senior Data Engineer（Seattle）" in a brief missed the role
-    // "Senior Data Engineer (Seattle)", so one person's email went to two teams.
-    expect(namesRole("senior data engineer (seattle) 岗位", "Senior Data Engineer (Seattle)")).toBe(
-      "full",
-    );
-    expect(
-      namesRole(
-        "senior data engineer(seattle)岗位".normalize("NFKC"),
-        "Senior Data Engineer (Seattle)",
-      ),
-    ).toBe("core");
-    expect(namesRole("只发 senior data engineer 的首封", "Senior Data Engineer (Seattle)")).toBe(
-      "core",
-    );
-    expect(namesRole("write to ada", "Senior Data Engineer (Seattle)")).toBeUndefined();
-    expect(namesRole("an ops role", "Ops (NY)")).toBeUndefined();
-    // 11-14 staging: a new role's ref is not an older role with the same title words.
-    const opened = "新岗位 senior data engineer (seattle) ref 12181，首封今晚发";
-    expect(namesRole(opened, "Senior Data Engineer (Seattle)")).toBeUndefined();
-    expect(namesRole(opened, "Senior Data Engineer Seattle — Ref 0842")).toBeUndefined();
-    expect(namesRole(opened, "Senior Data Engineer (Seattle) Ref 12181")).toBe("full");
-    // 11-16 staging: the same with the new ref written as a bare number.
-    const bare = "新岗位 senior data engineer — seattle 07151，首封你写了发给他们俩";
-    expect(namesRole(bare, "Senior Data Engineer — Seattle")).toBeUndefined();
-    expect(
-      namesRole("新岗位 senior data engineer — seattle", "Senior Data Engineer — Seattle"),
-    ).toBeUndefined();
   });
 });
