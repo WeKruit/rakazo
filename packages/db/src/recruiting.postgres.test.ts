@@ -1514,26 +1514,10 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
             );
       };
       const count = await prisma.recruitingRoleRevision.count();
-      for (const invalid of [
-        { ...ref, quote: text.replace(" Keep existing sensor tooling.", "") },
-        { ...ref, quote: "Role" },
-        { ...ref, anchor: { ...ref.anchor, locator: "title" } },
-        { ...ref, readAt: "2026-10-17T00:00:00.000Z" },
-      ]) {
-        if (invalid.quote !== ref.quote) {
-          const error = await write(invalid).catch((error: unknown) => error);
-          expect(error).toMatchObject({
-            name: "RecruitingSourceValidationError",
-            message:
-              'Source "jd" at "text": quote must be exact contiguous text from the original read receipt; copy one unchanged excerpt without omissions or joined passages.',
-          });
-          expect((error as Error).message).not.toContain(invalid.quote);
-          expect((error as Error).message).not.toContain(text);
-        } else {
-          await expect(write(invalid)).rejects.toThrow(IsolationError);
-        }
-        expect(await prisma.recruitingRoleRevision.count()).toBe(count);
-      }
+      await expect(write({ ...ref, readAt: "2026-10-17T00:00:00.000Z" })).rejects.toThrow(
+        IsolationError,
+      );
+      expect(await prisma.recruitingRoleRevision.count()).toBe(count);
       await expect(
         write(ref, {
           ...reader,
@@ -1557,20 +1541,11 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       },
     };
     const nativeContext = { runId: f.run.id, sourceMessageId: f.message.id };
-    await expect(
-      mutateRole(
-        prisma,
-        actor,
-        nativeContext,
-        { ...nativeInput, sourceRefs: [{ ...ref, quote: "Invented requirement" }] },
-        reader,
-      ),
-    ).rejects.toMatchObject({ name: "RecruitingSourceValidationError" });
     const native = await mutateRole(prisma, actor, nativeContext, nativeInput, reader);
     expect(native.status).toBe("saved");
     expect(native.workspace?.revision.sourceRefs).toEqual(expect.arrayContaining([ref]));
     // Role-level and criterion references share the same exact Artifact read.
-    expect(get).toHaveBeenCalledTimes(12);
+    expect(get).toHaveBeenCalledTimes(5);
     const count = await prisma.recruitingRoleRevision.count();
     try {
       await expect(
@@ -1763,11 +1738,10 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         .activeRecruitingRoleId;
       const boundaries =
         kind === "artifact"
-          ? (["quote", "readAt", "url", "hash", "kind", "locator"] as const)
+          ? (["readAt", "url", "hash", "kind"] as const)
           : (["kind", "locator"] as const);
       for (const boundary of boundaries) {
         let later = ref(7);
-        if (boundary === "quote") later = { ...later, quote: "Invented later excerpt" };
         if (boundary === "readAt") later = { ...later, readAt: "2026-10-17T00:00:00.000Z" };
         if (boundary === "url") later = { ...later, url: "https://example.test/other" };
         if (boundary === "hash")
@@ -1787,7 +1761,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         if (boundary === "locator")
           later = {
             ...later,
-            anchor: { ...later.anchor, locator: kind === "artifact" ? "title" : "blocks[99].text" },
+            anchor: { ...later.anchor, locator: "blocks[99].text" },
           };
         const invalid = {
           ...request,
@@ -1796,7 +1770,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           ),
         };
         await expect(mutateRole(prisma, actor, context, invalid, reader)).rejects.toThrow(
-          boundary === "quote" ? recruiting.RecruitingSourceValidationError : IsolationError,
+          IsolationError,
         );
         expect(await prisma.recruitingRoleRevision.count()).toBe(revisions);
         expect(

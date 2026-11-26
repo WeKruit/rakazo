@@ -885,7 +885,7 @@ export const appContract = {
           kind: z.literal("text"),
           text: z.string(),
           start: z.number().int().nonnegative(),
-          end: z.number().int().positive(),
+          end: z.number().int().nonnegative(),
         }),
         z.strictObject({ kind: z.literal("report"), report: RecruitingCandidateReportSchema }),
       ]),

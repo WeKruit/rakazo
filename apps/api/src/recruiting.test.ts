@@ -10,11 +10,7 @@ import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type * as DbExports from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import * as db from "@rakazo/db";
-import {
-  IsolationError,
-  RecruitingConflictError,
-  RecruitingSourceValidationError,
-} from "@rakazo/db";
+import { IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./recruiting.js";
 import type { RouterDeps } from "./router.js";
@@ -3716,31 +3712,32 @@ describe("readable recruiting sources", () => {
       },
     );
 
-    it.each(["quote", "processor"])(
-      "fails closed on a PDF %s error without returning raw bytes or processor details",
-      async (boundary) => {
-        const f = fixture(pdf, "application/pdf");
-        vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
-          revision: {
-            id: "revision",
-            sourceRefs: [
-              {
-                ...f.source,
-                quote: boundary === "quote" ? "Invented evidence" : quote,
-              },
-            ],
-            criteria: [],
-          },
-        } as never);
-        if (boundary === "processor")
-          vi.mocked(extractPdfText).mockRejectedValueOnce(new Error("private processor path"));
-        await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
-          code: "NOT_FOUND",
-          message: "Resource not found",
-        });
-        expect(extractPdfText).toHaveBeenCalledOnce();
-      },
-    );
+    it("shows the file without a highlight when the saved quote is not its wording", async () => {
+      const f = fixture(pdf, "application/pdf");
+      vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+        revision: {
+          id: "revision",
+          sourceRefs: [{ ...f.source, quote: "The agent's own copy" }],
+          criteria: [],
+        },
+      } as never);
+      expect(await api.readRecruitingSource(f.deps, actor, roleInput)).toEqual({
+        kind: "text",
+        text,
+        start: 0,
+        end: 0,
+      });
+    });
+
+    it("fails closed on a PDF processor error without returning raw bytes or processor details", async () => {
+      const f = fixture(pdf, "application/pdf");
+      vi.mocked(extractPdfText).mockRejectedValueOnce(new Error("private processor path"));
+      await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
+        code: "NOT_FOUND",
+        message: "Resource not found",
+      });
+      expect(extractPdfText).toHaveBeenCalledOnce();
+    });
   });
 });
 
@@ -3778,20 +3775,11 @@ describe("authenticated recruiting API", () => {
       api.getRecruitingWorkspace(prisma, actor, { threadId: "other-thread" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
   });
-  it("maps authorized quote errors to actionable BAD_REQUEST without exposing material", async () => {
-    const error = new RecruitingSourceValidationError("jd", "text");
+  it("maps a role save's refused source to the generic not-found response", async () => {
     for (const [domain, wrapper] of [
       [db.createRecruitingRole, api.createRecruitingRole],
       [db.reviseRecruitingRole, api.reviseRecruitingRole],
     ] as const) {
-      vi.mocked(domain).mockRejectedValueOnce(error);
-      const response = await wrapper(prisma, actor, {} as never).catch((error: unknown) => error);
-      expect(response).toMatchObject({ code: "BAD_REQUEST", message: error.message });
-      expect(JSON.parse(JSON.stringify(response))).toMatchObject({
-        code: "BAD_REQUEST",
-        message:
-          'Source "jd" at "text": quote must be exact contiguous text from the original read receipt; copy one unchanged excerpt without omissions or joined passages.',
-      });
       vi.mocked(domain).mockRejectedValueOnce(new IsolationError("Private source details"));
       await expect(wrapper(prisma, actor, {} as never)).rejects.toMatchObject({
         code: "NOT_FOUND",
@@ -4120,10 +4108,9 @@ it("uses trusted RPC identity and artifact context for closed human criterion ed
   expect(db.editRecruitingCriteria).toHaveBeenCalledTimes(writesBefore);
 });
 
-it("retains the existing safe mappings for criterion conflict, source and input failures", async () => {
+it("retains the existing safe mappings for criterion conflict and input failures", async () => {
   for (const [error, code] of [
     [new RecruitingConflictError(), "CONFLICT"],
-    [new RecruitingSourceValidationError("source", "text"), "BAD_REQUEST"],
     [Object.assign(new Error("Private input"), { name: "ZodError" }), "BAD_REQUEST"],
   ] as const) {
     vi.mocked(db.editRecruitingCriteria).mockRejectedValueOnce(error);

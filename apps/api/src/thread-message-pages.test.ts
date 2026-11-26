@@ -455,6 +455,23 @@ describe("thread message pages", () => {
     ).toBe(false);
   });
 
+  it("forwards data changes from peer and background runs, which never reach the transcript", () => {
+    // A role search delegated by Kruit (peer) or left running (background) saves people; the open
+    // Results page refreshes on these events, so dropping them left it stale until the run ended.
+    const saved = {
+      type: "effect.recorded",
+      payload: { tool: "recruiting_research", status: "saved" },
+    };
+    for (const event of [saved, { type: "recruiting.changed", payload: {} }]) {
+      expect(shouldForwardPeerThreadEvent(event)).toBe(true);
+      expect(shouldForwardBackgroundThreadEvent(event)).toBe(true);
+    }
+    // Their steps still stay off the transcript.
+    const step = { type: "agent.tool.completed", payload: {} };
+    expect(shouldForwardPeerThreadEvent(step)).toBe(false);
+    expect(shouldForwardBackgroundThreadEvent(step)).toBe(false);
+  });
+
   it("caches background-run classification for live events", async () => {
     const findUnique = vi.fn(async () => ({ trigger: "tickets" }));
     const prisma = { run: { findUnique } } as unknown as PrismaClient;

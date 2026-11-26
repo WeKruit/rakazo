@@ -28,7 +28,6 @@ import {
   Prisma,
   prepareNativeRecruitingCandidateDecision,
   RecruitingConflictError,
-  RecruitingSourceValidationError,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ArtifactReadModule from "./artifact-read.js";
@@ -2699,7 +2698,7 @@ describe("native recruiting role effect delivery", () => {
   it("repeats a role save refused over its citations once, without the quotes", async () => {
     const f = fixture("role-source-repeat");
     vi.mocked(executeRecruitingRoleTool)
-      .mockRejectedValueOnce(new RecruitingSourceValidationError("jd", "text"))
+      .mockRejectedValueOnce(new IsolationError("Private source details"))
       .mockImplementationOnce(async (prisma, trusted, input) => {
         expect(JSON.stringify((input as { criteria: unknown }).criteria)).not.toContain('"quote"');
         return roleReceipt(f, receipt)(prisma, trusted);
@@ -2712,22 +2711,17 @@ describe("native recruiting role effect delivery", () => {
     expect(f.effects.map((effect) => effect.status)).toEqual(["completed", "completed"]);
   });
 
-  it.each(["quote", "scope"])(
+  it.each(["scope"])(
     "settles native role source %s errors without repeating the mutation",
     async (kind) => {
       const f = fixture(`role-source-${kind}`);
-      const failure =
-        kind === "quote"
-          ? new RecruitingSourceValidationError("jd", "text")
-          : new IsolationError("Private source details");
+      const failure = new IsolationError("Private source details");
       vi.mocked(executeRecruitingRoleTool).mockRejectedValue(failure);
       f.setCalls([{ name: "recruiting_role", args, executionId: `source-${kind}` }]);
       await f.run();
       const result = {
         error:
-          kind === "quote"
-            ? `${failure.message} Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.`
-            : "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.",
+          "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.",
       };
       expect(f.results).toEqual([result]);
       expect(f.effects[0]).toMatchObject({ status: "completed", result });
