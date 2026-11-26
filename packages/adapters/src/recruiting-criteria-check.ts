@@ -70,7 +70,8 @@ const STATES_A_PLACE = (statement: string) =>
 const STATES_A_LANGUAGE = (statement: string) =>
   `Does this requirement state a language the person must speak or work in, rather than a skill, a place or a programming language? Requirement: "${statement}"`;
 /** A requirement on the person; a language they must speak goes to the deployment's language check. */
-type PersonRequirement = CriterionQuestion & { language?: boolean };
+type PersonRequirement = CriterionQuestion & { language?: boolean; shown?: string };
+const FIELD_KEY = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
 
 /**
  * How the language check's answer reads as a requirement's level. Profiles rarely list languages,
@@ -92,7 +93,7 @@ const SPOKEN_LEVEL: Record<LanguageSignal, CriterionVerdict["level"]> = {
  * profile shows them. Each reason the
  * recruiter turned people down is asked the other way round: does this profile show it too.
  */
-async function personRequirements(
+export async function personRequirements(
   judge: TextJudge,
   criteria: readonly { id: string; statement: string }[],
 ): Promise<PersonRequirement[]> {
@@ -114,6 +115,9 @@ async function personRequirements(
       return parts.map((part, index) => ({
         id: parts.length > 1 ? `${id}#${index + 1}` : id,
         statement: label ? `${label[1]}: ${part}` : part,
+        // A brief field's own key (target_role, data_warehouse_modeling) is not the recruiter's
+        // words: the judge reads it for context, the recruiter is shown the requirement alone.
+        ...(label && FIELD_KEY.test(label[1]!) ? { shown: part } : {}),
       }));
     })
     .slice(0, 16);
@@ -225,7 +229,7 @@ export async function checkPeopleCriteria(
     const spoken = judge.language ? requirements.filter((requirement) => requirement.language) : [];
     const questions = requirements
       .filter((requirement) => !spoken.includes(requirement))
-      .map(({ language: _language, ...requirement }) =>
+      .map(({ language: _language, shown: _shown, ...requirement }) =>
         asksYears(requirement) ? { ...requirement, rule: COUNTED_YEARS } : requirement,
       );
     await readMissingProfiles(readProfile, entries);
@@ -273,15 +277,18 @@ export async function checkPeopleCriteria(
           const { match_tier: tier, match_score: score } = entry.row;
           entry.check = {
             requirementsRevision: role.revision,
-            criteria: answered.map(({ place: _place, language: _language, ...requirement }) => {
-              const verdict = verdicts.get(requirement.id)!;
-              return {
-                ...requirement,
-                level: verdict.level,
-                confidence: verdict.confidence,
-                ...(verdict.place ? { place: verdict.place } : {}),
-              };
-            }),
+            criteria: answered.map(
+              ({ place: _place, language: _language, shown, ...requirement }) => {
+                const verdict = verdicts.get(requirement.id)!;
+                return {
+                  ...requirement,
+                  ...(shown ? { statement: shown } : {}),
+                  level: verdict.level,
+                  confidence: verdict.confidence,
+                  ...(verdict.place ? { place: verdict.place } : {}),
+                };
+              },
+            ),
             ...(typeof tier === "string" && typeof score === "number"
               ? { match_tier: tier, match_score: score }
               : {}),
