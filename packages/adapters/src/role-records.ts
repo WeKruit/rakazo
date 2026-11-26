@@ -1,5 +1,4 @@
 import type { PrismaClient } from "@rakazo/db";
-import { COMMUTE_MILES, localRolePlace } from "./recruiting-location.js";
 
 /**
  * What a role holds on record, for the working-state card: the requirements saved on its current
@@ -16,8 +15,6 @@ const RUNS_READ = 60;
 
 export type RoleRecord = {
   requirements?: string;
-  /** A local role's place as the recruiter's words name it; the server holds its people to it. */
-  place?: string;
   savedEmail?: { steps: number; first: string; at: Date };
   /** The role's campaign as this product recorded it; delivery itself is the provider's to say. */
   campaign?: {
@@ -108,18 +105,7 @@ export async function loadRoleRecords(
     const requirements =
       requirementsText(role.currentRevision?.criteria, role.currentRevision?.preferences) ??
       sourceWords(role.currentRevision?.sourceRefs);
-    const criteria = role.currentRevision?.criteria;
-    const place = localRolePlace([
-      ...sourceQuotes(role.currentRevision?.sourceRefs),
-      ...(Array.isArray(criteria) ? criteria : []).flatMap((row) =>
-        statements((row as { expression?: Expression }).expression),
-      ),
-    ]);
-    const record: RoleRecord = {
-      ...(requirements ? { requirements } : {}),
-      ...(place ? { place: `${place.label}, within ${COMMUTE_MILES} miles` } : {}),
-    };
-    if (requirements || place) records.set(role.id, record);
+    if (requirements) records.set(role.id, { requirements });
   }
   const effects = runs.length
     ? await prisma.externalEffect.findMany({

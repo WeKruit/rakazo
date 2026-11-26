@@ -8544,7 +8544,6 @@ it("shows sourced brief prose and unresolved confirmation questions in Role and 
   expect([...definition.querySelectorAll("p")].map((item) => item.textContent)).toEqual([
     brief.questions[0]!.question,
     brief.questions[1]!.question,
-    "What location or remote work scope applies?",
   ]);
   await view.click("Role");
   await view.render("thread-1", 0, true);
