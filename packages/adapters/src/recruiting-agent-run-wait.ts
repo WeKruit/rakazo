@@ -57,12 +57,12 @@ export function recruitingAgentRunWaitPrompt(
   countdown?: { estimateMs: number },
 ): string {
   const quiet = countdown
-    ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over. Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, tell the recruiter in one line how many people the role has in Results now and that the search keeps going, about ${minutes(countdown.estimateMs)} more minutes; ask nothing.`
+    ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over. Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, tell the recruiter in one line that the search keeps going, about ${minutes(countdown.estimateMs)} more minutes; ask nothing.`
     : `Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, end the turn with an empty reply: you are woken again later, and the recruiter hears nothing until it finishes.`;
   return [
     `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message; you are continuing your own work.`,
     quiet,
-    "When it has finished, have its new people checked as the round rule says, then say in one line how many new people fit; if the request is still short, say why in plain words, as the provider's own summary explains it, and carry on as the Short-round rule says. Start no unrelated search.",
+    "When it has finished, show its new people who fit as the round rule says; if the request is still short, say why in plain words, as the provider's own summary explains it, and carry on as the Short-round rule says. Start no unrelated search.",
   ].join("\n");
 }
 
