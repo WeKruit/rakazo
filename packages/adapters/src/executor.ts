@@ -239,7 +239,6 @@ import {
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
-  countRecruitingRoleGrades,
   createRecruitingSchedulingPlan,
   createRunHistoryCache,
   createSpaceForMember,
@@ -652,7 +651,12 @@ import {
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
 import { checkPeopleCriteria } from "./recruiting-criteria-check.js";
-import { checkRound, roundCriteria, withoutShownBefore } from "./recruiting-round-check.js";
+import {
+  checkRound,
+  requestCounts,
+  roundCriteria,
+  withoutShownBefore,
+} from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -9388,14 +9392,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       },
                     );
                   const people = checked.rows;
-                  // Saved is not fit: the lead counted 60 saved as "60 found" with 36 graded as
-                  // fitting (big-ask play, 11-24), so each search states all three counts.
-                  const [peopleInResults, grades] = await Promise.all([
-                    deps.prisma.recruitingCandidate.count({
-                      where: { roleId },
-                    }),
-                    countRecruitingRoleGrades(deps.prisma, roleId),
-                  ]);
+                  // Saved is not fit, and fit is not shown: every search states where the
+                  // request stands.
+                  const counts = await requestCounts(deps.prisma, roleId);
                   // This search's own yield: how many it added, so a wave that adds few is seen.
                   const added = (saved as { newPeople?: unknown }).newPeople;
                   return {
@@ -9406,9 +9405,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           alreadyInResults: rows.length - added,
                         }
                       : {}),
-                    peopleInResults,
-                    gradedStrongOrPromising: grades.fit,
-                    notGradedYet: peopleInResults - grades.checked,
+                    ...counts,
                     people,
                     // People whose profile shows no sign of a required language are in Results
                     // but never offered for the pick.
@@ -10255,6 +10252,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return round && typeof round === "object" && !Array.isArray(round)
                   ? {
                       ...round,
+                      ...(typeof recorded?.roleId === "string"
+                        ? await requestCounts(deps.prisma, recorded.roleId).catch(() => ({}))
+                        : {}),
                       // Gate 9d632819: the turn began on an English JD, the recruiter went on in
                       // Chinese in the main chat, and the card after the round was English.
                       next: hideVendors
@@ -10547,15 +10547,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : thread.activeRecruitingRoleId
                   : null;
               const counts = listedRoleId
-                ? await Promise.all([
-                    deps.prisma.recruitingCandidate.count({ where: { roleId: listedRoleId } }),
-                    countRecruitingRoleGrades(deps.prisma, listedRoleId),
-                  ])
-                    .then(([saved, grades]) => ({
-                      gradedStrongOrPromising: grades.fit,
-                      notGradedYet: saved - grades.checked,
-                    }))
-                    .catch(() => ({}))
+                ? await requestCounts(deps.prisma, listedRoleId).catch(() => ({}))
                 : {};
               return finish(
                 redactConnectorPayload(

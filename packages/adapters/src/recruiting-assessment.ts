@@ -67,7 +67,7 @@ type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; bot
  * after saying nothing was new since yesterday.
  */
 const ROLE_STATUS_NOTE =
-  "status.savedPeople counts everyone saved in the role's Results, checked or not (how many fit is gradedStrongOrPromising on a list read of that role); status.shortlisted counts only the shortlist page's people, so name which one you give. status.lastActivityAt is the last message in the role's chat (a check or a question counts), not a new person, send or reply: for what is new since a time, read operation activity.";
+  "status.savedPeople counts everyone saved in the role's Results, checked or not (a list read of that role gives fitShown, the people who fit that the recruiter has been shown, and fitNotShownYet); status.shortlisted counts only the shortlist page's people, so name which one you give. status.lastActivityAt is the last message in the role's chat (a check or a question counts), not a new person, send or reply: for what is new since a time, read operation activity.";
 
 export const NOTHING_SAVED_IS_NO_BLOCKER =
   "Nothing saved is not a blocker: when the recruiter's own words describe the work (an email to a person they name, a role they describe), do it now from those words, and ask only the one missing fact the result still needs (such as the address to send to) beside it.";
