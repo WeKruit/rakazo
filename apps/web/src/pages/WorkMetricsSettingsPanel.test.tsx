@@ -51,7 +51,6 @@ const data: WorkMetrics = {
     unansweredInputs: 1,
     inputs: 6,
   },
-  memory: { correctedAfterCompaction: { count: 1, of: 2 } },
   collaboration: { handoffs: 3, teammateTurns: 4, replied: 3, silent: 1 },
   automation: { fired: 10, skipped: 2, completed: 7, failed: 1 },
 };
@@ -76,7 +75,6 @@ it("shows every Workloop metric from the operator summary", async () => {
   expect(text).toContain("Resumed after restart50%");
   expect(text).toContain("First reply p50 · p95900 ms · 4.0 s");
   expect(text).toContain("Unanswered messages1 / 6");
-  expect(text).toContain("Corrected after compaction50% (1 / 2)");
   expect(text).toContain("Nothing to add25%");
   expect(text).toContain("Skipped20%");
   expect(text).toContain("Succeeded88%");

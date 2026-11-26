@@ -10,15 +10,6 @@ type MetricsDb = Pick<PrismaClient, "$queryRaw">;
 const DAY_MS = 86_400_000;
 /** A person's message still without any reply after this long counts as unanswered. */
 const UNANSWERED_AFTER_MS = 10 * 60_000;
-/** How long after a compaction a person's correction is attributed to it. */
-const CORRECTION_WINDOW = "24 hours";
-/**
- * A person repeating a constraint the agent should already know. Deliberately narrow: it
- * undercounts rather than flags ordinary feedback as a memory failure.
- */
-const CORRECTION_PATTERN =
-  "(我(之前|刚才|已经|早就)?(说|讲|提)过|不是说(了|过)|(跟|和)你说过|你(又)?忘了|I (already )?(said|told you|mentioned)|as I said|you forgot)";
-
 type Percentiles = { count: number; p50: number | null; p95: number | null };
 
 function latency(row: Percentiles | undefined) {
@@ -141,20 +132,6 @@ export async function summarizeWorkMetrics(
     FROM "steering_messages"
     WHERE "createdAt" >= ${since} AND "createdAt" < ${now} AND "claimedAt" IS NOT NULL`;
 
-  const [corrected] = await prisma.$queryRaw<{ count: number; of: number }[]>`
-    WITH c AS (
-      SELECT DISTINCT ON (COALESCE(u."operationId", u."id")) r."threadId", u."createdAt"
-      FROM "usage_records" u JOIN "runs" r ON r."id" = COALESCE(u."parentRunId", u."runId")
-      WHERE u."operationKind" = 'compaction' AND u."createdAt" >= ${since} AND u."createdAt" < ${now}
-    )
-    SELECT COUNT(*)::int AS "of", COUNT(*) FILTER (WHERE EXISTS (
-      SELECT 1 FROM "messages" m
-      WHERE m."threadId" = c."threadId" AND m."role" = 'user' AND m."createdAt" > c."createdAt"
-        AND m."createdAt" < c."createdAt" + ${CORRECTION_WINDOW}::interval
-        AND m."blocks"::text ~* ${CORRECTION_PATTERN}
-    ))::int AS "count"
-    FROM c`;
-
   const [collaboration] = await prisma.$queryRaw<
     { handoffs: number; turns: number; replied: number }[]
   >`
@@ -206,7 +183,6 @@ export async function summarizeWorkMetrics(
       unansweredInputs: inputs?.unanswered ?? 0,
       inputs: inputs?.inputs ?? 0,
     },
-    memory: { correctedAfterCompaction: { count: corrected?.count ?? 0, of: corrected?.of ?? 0 } },
     collaboration: {
       handoffs: collaboration?.handoffs ?? 0,
       teammateTurns: collaboration?.turns ?? 0,

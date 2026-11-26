@@ -134,7 +134,6 @@ postgres("work metrics (PostgreSQL)", () => {
     expect(metrics.experience).toMatchObject({ inputs: 3, unansweredInputs: 1 });
     expect(metrics.experience.firstReply).toMatchObject({ count: 2, p50Ms: 33_000 });
     expect(metrics.experience.interject).toMatchObject({ count: 2, p50Ms: 3_300 });
-    expect(metrics.memory.correctedAfterCompaction).toEqual({ count: 1, of: 1 });
     expect(metrics.collaboration).toEqual({
       handoffs: 1,
       teammateTurns: 2,
