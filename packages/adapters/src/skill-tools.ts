@@ -1,11 +1,13 @@
 import {
   buildSkillMd,
   findSkillByName,
+  isRecruitingSkillName,
   isSkillReadOnly,
   mergeBuiltinSkills,
   parseSkillMd,
   type SkillRecord,
   type SkillSource,
+  withoutRecruitingSkillCopies,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { BUILTIN_AGENT_SKILLS } from "./builtin-skills.js";
@@ -90,8 +92,11 @@ export async function listAgentSkillRecords(
     where: { spaceId: owner.spaceId, userId: owner.userId },
     orderBy: [{ name: "asc" }, { id: "asc" }],
   });
-  return mergeBuiltinSkills(builtinRecords(), rows.map(toRecord));
+  return mergeBuiltinSkills(builtinRecords(), withoutRecruitingSkillCopies(rows.map(toRecord)));
 }
+
+const RECRUITING_NAME_TAKEN =
+  "That name belongs to a built-in recruiting skill; pick another name.";
 
 async function findOwnedSkill(
   prisma: PrismaClient,
@@ -153,6 +158,7 @@ export async function skillCreateFromTool(
   const oversized = rejectOversizedContent(content);
   if (oversized) return { error: oversized };
 
+  if (isRecruitingSkillName(name)) return { error: RECRUITING_NAME_TAKEN };
   const existing = await findOwnedSkill(prisma, owner, { name });
   if (existing) return { error: `A skill named "${existing.name}" already exists.` };
 
@@ -234,6 +240,7 @@ export async function skillUpdateFromTool(
   if (oversized) return { error: oversized };
 
   if (nextName.toLowerCase() !== existing.name.toLowerCase()) {
+    if (isRecruitingSkillName(nextName)) return { error: RECRUITING_NAME_TAKEN };
     const clash = await findOwnedSkill(prisma, owner, { name: nextName });
     if (clash && clash.id !== existing.id) {
       return { error: `A skill named "${clash.name}" already exists.` };
