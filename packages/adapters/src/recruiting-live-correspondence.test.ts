@@ -1,4 +1,4 @@
-import type { ConnectorProvider } from "@rakazo/adapter-kit";
+import type { ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -385,7 +385,11 @@ describe("live role correspondence", () => {
       eaccount: "recruiter@example.test",
       ue_type,
     });
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ campaign_id: oneOff }] as never);
+    vi.mocked(prisma.$queryRaw)
+      .mockResolvedValueOnce([{ campaign_id: oneOff }] as never)
+      // The role's own confirmed send emailed Ada.
+      .mockResolvedValueOnce([{ email: "ada@example.test" }] as never);
+    const jobs = { enqueue: vi.fn(async (_job: { payload: unknown }) => undefined) };
     const execute = vi.fn(async function* (call: { args: Record<string, unknown> }) {
       const items =
         call.args.campaign_id === campaignId
@@ -399,7 +403,11 @@ describe("live role correspondence", () => {
     });
     const output = empty();
     await refreshRecruitingCorrespondence(
-      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      {
+        prisma,
+        connectors: { execute } as Pick<ConnectorProvider, "execute">,
+        jobs: jobs as unknown as JobPublisher,
+      },
       { ...actor, userId: "cross-campaign" },
       { roleId: "role", threadId: "thread", view: "inbox", pageEnd: 50 },
       [source("instantly")],
@@ -414,6 +422,16 @@ describe("live role correspondence", () => {
       ["ada@example.test", "received", oneOff],
       ["recruiter@example.test", "sent", campaignId],
     ]);
+    // The account Inbox stores Ada's reply for the role too, as read from that campaign.
+    const stored = jobs.enqueue.mock.calls
+      .map(
+        ([job]) =>
+          (job.payload as { observation: { campaignId: string; emails: { sender: string }[] } })
+            .observation,
+      )
+      .find((observation) => observation.campaignId === oneOff);
+    expect(stored).toMatchObject({ roleId: "role", threadId: "thread", sourceId: "instantly" });
+    expect(stored?.emails.map((row) => row.sender)).toEqual(["ada@example.test"]);
   });
   it("reads the role's imported campaign beside its own", async () => {
     const { prisma } = fixture();

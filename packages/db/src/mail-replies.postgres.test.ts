@@ -7,12 +7,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Prisma, type PrismaClient } from "./client.js";
 import { answerRunInput } from "./events.js";
 import {
+  confirmedSendRecipients,
   earlierConfirmedSends,
   findSameMailReply,
   findWaitingCampaignSend,
   otherCampaignsThatEmailed,
   projectMailReplyCards,
   publishMailReplyCard,
+  roleRepliesCampaignMailbox,
 } from "./mail-replies.js";
 import { createThreadMessage } from "./messages.js";
 import { provisionMessagingIdentity } from "./messaging.js";
@@ -432,6 +434,66 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
         10,
       ),
     ).toEqual([]);
+    // Which of these people a confirmed send of this user from these campaigns emailed.
+    expect([
+      ...(await confirmedSendRecipients(
+        prisma,
+        owner,
+        ["campaign-a"],
+        ["noah@example.test", "ada@example.test"],
+      )),
+    ]).toEqual(["noah@example.test"]);
+    expect(
+      (await confirmedSendRecipients(prisma, owner, ["campaign-b"], ["noah@example.test"])).size,
+    ).toBe(0);
+    expect(
+      (
+        await confirmedSendRecipients(
+          prisma,
+          { ...owner, userId: "someone-else" },
+          ["campaign-a"],
+          ["noah@example.test"],
+        )
+      ).size,
+    ).toBe(0);
+    // A reply in another campaign this user created is the role's when the role emailed the sender.
+    const tag = `${Date.now()}`;
+    for (const [key, request, result] of [
+      ["role", { roleId: "role-x", serverId: "mail" }, { campaignId: "campaign-a" }],
+      [
+        "one-off",
+        { serverId: "mail", direct: true },
+        { campaignId: "campaign-c", eaccount: "Me@Example.test" },
+      ],
+    ] as const)
+      await prisma.externalEffect.create({
+        data: {
+          spaceId: identity.spaceId,
+          runId: earlier.effect.runId,
+          kind: "instantly_role_campaign",
+          idempotencyKey: `test-${key}-${tag}`,
+          status: "completed",
+          request,
+          result,
+        },
+      });
+    const reply = {
+      serverId: "mail",
+      roleId: "role-x",
+      threadId: identity.threadId,
+      campaignId: "campaign-c",
+      senders: ["Noah@example.test"],
+    };
+    expect(await roleRepliesCampaignMailbox(prisma, owner, reply)).toBe("me@example.test");
+    expect(
+      await roleRepliesCampaignMailbox(prisma, owner, { ...reply, senders: ["ada@example.test"] }),
+    ).toBeNull();
+    expect(
+      await roleRepliesCampaignMailbox(prisma, owner, { ...reply, roleId: "another-role" }),
+    ).toBeNull();
+    expect(
+      await roleRepliesCampaignMailbox(prisma, { ...owner, userId: "someone-else" }, reply),
+    ).toBeNull();
     // The same campaign sending its own people again is not a second first email.
     expect(
       (await earlierConfirmedSends(prisma, identity.spaceId, "campaign-a", ["noah@example.test"]))

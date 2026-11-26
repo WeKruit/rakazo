@@ -71,6 +71,7 @@ import {
   RecruitingConflictError,
   RecruitingSourceValidationError,
   rememberRecruitingSequenceObservation,
+  roleRepliesCampaignMailbox,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
@@ -4819,18 +4820,32 @@ export async function projectRecruitingInboxJob(
             : ((await read(`${key}:campaign:${observation.campaignId}`)) ?? bound);
         const result = correspondenceRecord(binding?.result);
         const request = correspondenceRecord(binding?.request);
-        const mailbox =
-          typeof result?.eaccount === "string" ? result.eaccount.trim().toLowerCase() : null;
+        const roleCampaign =
+          binding?.kind === "instantly_role_campaign" &&
+          binding.status === "completed" &&
+          binding.spaceId === actor.spaceId &&
+          binding.run.userId === actor.userId &&
+          binding.run.spaceId === actor.spaceId &&
+          binding.run.threadId === thread.id &&
+          request?.roleId === roleId &&
+          request?.serverId === sourceId &&
+          result?.campaignId === observation.campaignId;
+        // A reply filed under another campaign of this user is the role's when the role's own
+        // confirmed send emailed its sender.
+        const mailbox = roleCampaign
+          ? typeof result?.eaccount === "string"
+            ? result.eaccount.trim().toLowerCase()
+            : null
+          : observation.emails.every((email) => email.direction === "received" && email.sender)
+            ? await roleRepliesCampaignMailbox(prisma, actor, {
+                serverId: sourceId,
+                roleId,
+                threadId: thread.id,
+                campaignId: observation.campaignId,
+                senders: observation.emails.map((email) => email.sender!),
+              })
+            : null;
         if (
-          binding?.kind !== "instantly_role_campaign" ||
-          binding.status !== "completed" ||
-          binding.spaceId !== actor.spaceId ||
-          binding.run.userId !== actor.userId ||
-          binding.run.spaceId !== actor.spaceId ||
-          binding.run.threadId !== thread.id ||
-          request?.roleId !== roleId ||
-          request?.serverId !== sourceId ||
-          result?.campaignId !== observation.campaignId ||
           !mailbox ||
           observation.emails.some(
             (email) =>
