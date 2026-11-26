@@ -8,7 +8,6 @@ import type { PrismaClient } from "@rakazo/db";
  * job. Both were on record; nothing put them in front of the agent.
  */
 
-const REQUIREMENTS_CHARS = 500;
 const EMAIL_CHARS = 400;
 /** Recent runs whose saves are read; a role's email is saved from its own or Kruit's runs. */
 const RUNS_READ = 60;
@@ -43,8 +42,12 @@ function statements(expression: Expression | undefined): string[] {
   return (expression.items ?? []).flatMap(statements);
 }
 
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 function capped(text: string, max: number): string {
-  const line = text.replace(/\s+/g, " ").trim();
+  const line = oneLine(text);
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
@@ -60,7 +63,7 @@ export function requirementsText(criteria: unknown, preferences: unknown): strin
     (item): item is string => typeof item === "string" && item.trim().length > 0,
   );
   const all = [...parts, ...liked.map((item) => `preference: ${item}`)];
-  return all.length ? capped(all.join("; "), REQUIREMENTS_CHARS) : undefined;
+  return all.length ? oneLine(all.join("; ")) : undefined;
 }
 
 function sourceQuotes(sourceRefs: unknown): string[] {
@@ -73,9 +76,7 @@ function sourceQuotes(sourceRefs: unknown): string[] {
 /** Before any requirement is saved, the recruiter's own words the role was opened from. */
 function sourceWords(sourceRefs: unknown): string | undefined {
   const quotes = sourceQuotes(sourceRefs);
-  return quotes.length
-    ? `the recruiter's words: "${capped(quotes.join(" / "), REQUIREMENTS_CHARS)}"`
-    : undefined;
+  return quotes.length ? `the recruiter's words: "${oneLine(quotes.join(" / "))}"` : undefined;
 }
 
 export async function loadRoleRecords(
