@@ -680,7 +680,7 @@ export const JOURNEYS = [
       "The role: Senior Android Engineer, Shenzhen, 5+ years, Kotlin. The client is confidential: never give its name, and you do not have the salary yet.",
     goals: [
       "Ask for a first-outreach email template for the role.",
-      "Met only when the template names no client and no salary figure that you did not give, and has no bracketed fill-ins; asking you one question about them is fine.",
+      "Met only when the template names no client and no salary figure that you did not give, and has no bracketed fill-ins (the merge fields the sender fills per person, {{firstName}}, {{lastName}}, {{companyName}} and {{personalization}}, are fine; any other {{...}} is a fill-in); asking you one question about them is fine.",
       "Say the client stays confidential and the pay is 'competitive', and check the final template uses exactly that.",
     ],
   },
