@@ -23,6 +23,15 @@ describe("recruiting reminder contracts", () => {
         .candidateKey,
     ).toBe("sourced:k1");
   });
+  it("reads a key given as a list shows it as that saved person", () => {
+    expect(
+      CreateRecruitingReminderInput.parse({
+        title: "Call",
+        dueAt,
+        candidateKey: "linkedin:/in/k1",
+      }).candidateKey,
+    ).toBe("sourced:linkedin:/in/k1");
+  });
   it("lists by several candidate keys, at most ten, in the tool input too", () => {
     const keys = ["sourced:k1", "crm:2"];
     expect(ListRecruitingRemindersInput.parse({ candidateKeys: keys }).candidateKeys).toEqual(keys);
