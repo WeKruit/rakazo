@@ -4,6 +4,7 @@ import {
   formatSkillsCatalogInstruction,
   memoryTidyRoutinePrompt,
   parseSkillMd,
+  SKILL_CATALOG_DESCRIPTION_MAX,
 } from "@rakazo/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_AGENT_SKILLS } from "./builtin-skills.js";
@@ -229,9 +230,13 @@ describe("skill tools", () => {
     for (const skill of BUILTIN_AGENT_SKILLS) {
       const parsed = parseSkillMd(skill.content);
       expect(parsed).toMatchObject({ name: skill.name, description: skill.description });
-      // / picker truncates at 72; keep descriptions short so "review only" stays visible.
-      expect(skill.description.length).toBeLessThanOrEqual(72);
+      // The catalog cuts a longer description, and the model routes by it.
+      expect(skill.description.length).toBeLessThanOrEqual(SKILL_CATALOG_DESCRIPTION_MAX);
     }
+    // / picker truncates at 72; keep this one short so "review only" stays visible.
+    expect(
+      BUILTIN_AGENT_SKILLS.find((skill) => skill.name === "Interrogate")!.description.length,
+    ).toBeLessThanOrEqual(72);
 
     const records = await listAgentSkillRecords(prisma as never, owner);
     const interrogate = records.find((row) => row.name === "Interrogate");

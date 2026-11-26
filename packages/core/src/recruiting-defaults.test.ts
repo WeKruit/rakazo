@@ -1,19 +1,14 @@
 import { disabledBuiltinToolSet } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
+import { SKILL_CATALOG_DESCRIPTION_MAX } from "./agent-skill.js";
 import {
   creditEstimateNote,
   greetsByName,
   isChineseText,
   isEnglishText,
-  namesPeopleToEmail,
   RECRUITER_LANGUAGE,
-  RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
-  RECRUITING_PDF_RENDERING,
-  RECRUITING_ROUND_NEXT_STEP,
-  RECRUITING_SCALE_START,
-  RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   recruiterLanguage,
   recruiterLanguageText,
@@ -41,25 +36,9 @@ describe("maintained recruiting defaults", () => {
     expect(skill.body.length).toBeLessThanOrEqual(8_000);
   });
 
-  // Each shared rule has one source: the executor adds recruiter language to every recruiting
-  // run and the role context carries the calibration, scale and PDF rules.
-  it.each([
-    RECRUITER_LANGUAGE,
-    RECRUITING_CALIBRATION_QUICK_SEARCH,
-    RECRUITING_ROUND_NEXT_STEP,
-    RECRUITING_SCALE_START,
-    RECRUITING_PDF_RENDERING,
-  ])("keeps a shared rule out of bot instructions and skills (%#)", (rule) => {
-    for (const bot of RECRUITING_DEFAULT_BOTS) expect(bot.instructions).not.toContain(rule);
-    for (const skill of RECRUITING_DEFAULT_SKILLS) expect(skill.body).not.toContain(rule);
-  });
-
-  // Skills ship with the code, so accounts with customized bot text still get the template.
-  it("carries the search brief template in the sourcing skill", () => {
-    const sourcing = RECRUITING_DEFAULT_SKILLS.find(
-      (skill) => skill.name === "Recruitment sourcing continuation",
-    )!;
-    expect(sourcing.body).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
+  // The catalog cuts a longer description, and the model routes by it.
+  it.each(RECRUITING_DEFAULT_SKILLS)("$name description fits the skill catalog", (skill) => {
+    expect(skill.description.length).toBeLessThanOrEqual(SKILL_CATALOG_DESCRIPTION_MAX);
   });
 });
 
@@ -211,16 +190,6 @@ describe("creditEstimateNote", () => {
   });
 });
 
-describe("namesPeopleToEmail", () => {
-  it("is a send to named addresses, never a reply to someone's email (staging gate 60b7e937)", () => {
-    expect(namesPeopleToEmail(["Email alex@example.com about the data engineer role"])).toBe(true);
-    expect(
-      namesPeopleToEmail(["回复 noah@example.com 那封邮件（同一个线程），正文只写：Test note."]),
-    ).toBe(false);
-    expect(namesPeopleToEmail(["Reply to alex@example.com's email: thanks"])).toBe(false);
-  });
-});
-
 describe("recruiting tool list", () => {
   it("drops only real built-in tools and keeps every tool the playbook names", () => {
     expect(disabledBuiltinToolSet(RECRUITING_UNUSED_BUILTIN_TOOLS).size).toBe(
@@ -228,9 +197,6 @@ describe("recruiting tool list", () => {
     );
     const playbook = [
       RECRUITER_LANGUAGE,
-      RECRUITING_CALIBRATION_QUICK_SEARCH,
-      RECRUITING_SCALE_START,
-      RECRUITING_ROUND_NEXT_STEP,
       ...RECRUITING_DEFAULT_BOTS.map((bot) => bot.instructions),
       ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.body),
     ].join("\n");

@@ -16,6 +16,7 @@ import {
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
+  RECRUITING_RETIRED_SKILL_NAMES,
   recruitingBotKey,
 } from "@rakazo/core";
 import type { Bot, BotMcpServer, CapabilityInstall, McpServer, PrismaClient } from "./client.js";
@@ -322,7 +323,11 @@ const LEGACY_PRESET_VERSION = "legacy";
 const TURN_IN_FLIGHT_STATUSES = ["queued", "leased", "running"] as const;
 const LEGACY_BOT_FIELDS = ["title", "description", "instructions"] as const;
 const legacyDigest = (firstPartyMcpUrl?: string) =>
-  digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS]);
+  digest([
+    catalogDigest(firstPartyMcpUrl),
+    RECRUITING_DEFAULT_SKILLS,
+    RECRUITING_RETIRED_SKILL_NAMES,
+  ]);
 
 /**
  * Adopt a crew set up before the managed preset (bots named after the default roles, recorded
@@ -396,8 +401,12 @@ async function adoptLegacyCrew(
     if (changed.count !== 1)
       throw new IsolationError("A recruiting assistant changed during the upgrade");
   }
-  // User copies of the built-in recruiting skills would shadow the maintained ones.
-  const names = RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name);
+  // User copies of the built-in recruiting skills would shadow the maintained ones, and copies of
+  // retired ones would stay in the catalog beside the skills that replaced them.
+  const names = [
+    ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name),
+    ...RECRUITING_RETIRED_SKILL_NAMES,
+  ];
   await tx.agentSkill.deleteMany({
     where: { ...scope, source: "user", name: { in: names, mode: "insensitive" } },
   });

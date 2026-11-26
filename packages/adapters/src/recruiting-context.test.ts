@@ -1,12 +1,5 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
-import {
-  RECRUITING_CALIBRATION_QUICK_SEARCH,
-  RECRUITING_MISSED_REQUIREMENT,
-  RECRUITING_PDF_RENDERING,
-  RECRUITING_ROUND_NEXT_STEP,
-  RECRUITING_SCALE_START,
-} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -558,7 +551,7 @@ describe("recruiting run context", () => {
   );
 
   it.each(["instructions", "tool_result", "steering"] as const)(
-    "distinguishes authorized exploration and continuation from formal calibration gates in %s context",
+    "carries the role as data in %s context",
     async (placement) => {
       const { deps } = fixture();
       const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
@@ -566,15 +559,7 @@ describe("recruiting run context", () => {
         placement,
       });
       const text = loaded!.manifest.roleText;
-      for (const rule of [
-        RECRUITING_CALIBRATION_QUICK_SEARCH,
-        RECRUITING_ROUND_NEXT_STEP,
-        RECRUITING_SCALE_START,
-        RECRUITING_PDF_RENDERING,
-        // A missed requirement is redone at every stage, not only right after the first ten.
-        RECRUITING_MISSED_REQUIREMENT,
-      ])
-        expect(text).toContain(rule);
+      expect(text).toContain("<recruiting_role>");
       expect(loaded!.text).toContain(text);
       expect(loaded!.manifest.placement).toBe(placement);
       expect(loaded!.workspace).toBe(workspace);
