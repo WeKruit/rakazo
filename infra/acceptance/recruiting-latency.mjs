@@ -358,19 +358,6 @@ async function handleCards(groupId, phase) {
     }
     if (block.approvalEffectId) {
       const label = block.actions?.find((action) => action.id === "allow")?.label ?? "";
-      if (
-        /confirm requirements|确认要求|确认需求/i.test(label) ||
-        /brief|岗位要求/i.test(block.text)
-      ) {
-        mark("brief_card_shown");
-        await answer(groupId, ask, "allow", label || "allow");
-        mark("brief_confirmed");
-        continue;
-      }
-      if (/approve documents|材料|文件/i.test(`${label} ${block.text}`)) {
-        await answer(groupId, ask, "deny", "deny (documents deferred)");
-        continue;
-      }
       handled.add(key);
       if (/confirm and send|确认发送/i.test(label)) {
         report.cards.push({
@@ -1081,17 +1068,6 @@ async function main() {
     await readMessages(groupId).catch((error) => log(`read failed: ${error.message}`));
     threadId ??= messages[0]?.threadId ?? null;
     scanText();
-    // With no requirements card, the server's own confirmation record marks the brief confirmed.
-    if (
-      messages.some(
-        (message) =>
-          message.role === "user" &&
-          message.blocks.some(
-            (block) => block.kind === "text" && /^Confirm recruiting brief/.test(block.text),
-          ),
-      )
-    )
-      mark("brief_confirmed");
     // Read the round first: once ten are recorded, the next-step card is left for the recruiter.
     const round = await readRound(groupId);
     if (phase === "intake" && round && round.candidates.length >= 10) {

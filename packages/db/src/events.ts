@@ -28,6 +28,7 @@ import {
   isWorkActivity,
   messagingChannelId,
   resolveAskChoice,
+  RETIRED_APPROVAL_KINDS,
   runsBesidePerson,
   sanitizeJsonValue,
   takesPersonMessages,
@@ -48,10 +49,7 @@ import {
   RunHistoryWriteError,
 } from "./messages.js";
 import { syncMirroredAsksInTransaction } from "./mirrored-asks.js";
-import {
-  authorizeRecruitingApprovalAnswerInTransaction,
-  authorizeRecruitingFeedbackMessage,
-} from "./recruiting.js";
+import { authorizeRecruitingFeedbackMessage } from "./recruiting.js";
 import { retriedReplyInTransaction } from "./retried-reply.js";
 import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
@@ -1206,17 +1204,7 @@ async function commitAnswerRunInput(
       }
     }
 
-    if (
-      approvalEffect.kind === "recruiting_request_approval" &&
-      (answerText === "always" ||
-        (answerText === "allow" &&
-          !(await authorizeRecruitingApprovalAnswerInTransaction(
-            tx,
-            input,
-            approvalEffect.request,
-          ))))
-    )
-      return null;
+    if (RETIRED_APPROVAL_KINDS.has(approvalEffect.kind) && answerText !== "deny") return null;
     if (answerText === "always") {
       if (run.userId !== input.answeredByUserId) return null;
       approvalUserId = input.answeredByUserId;

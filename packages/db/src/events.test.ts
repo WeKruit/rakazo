@@ -574,21 +574,14 @@ describe("native approval answer provenance", () => {
     },
   );
 
-  it("never stores an always-allow rule for recruiting gate approvals", async () => {
-    const f = approvalAnswerFixture();
-    f.effect.kind = "recruiting_request_approval";
-    await expect(answerRunInput(f.prisma, { ...f.input, answer: "always" })).resolves.toBe(false);
-    expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
-    expect(f.tx.actionApprovalRule.upsert).not.toHaveBeenCalled();
-  });
-
-  it.each(["brief", "documents"])(
-    "rejects an invalid %s allow but leaves stale cards usable for deny",
-    async (stage) => {
-      const f = approvalAnswerFixture({ stage, roleId: "missing-role" });
+  it.each(["allow", "always"])(
+    "refuses %s on a waiting card of the retired recruiting approval step, which can still be declined",
+    async (answer) => {
+      const f = approvalAnswerFixture({ stage: "brief", roleId: "role" });
       f.effect.kind = "recruiting_request_approval";
-      await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" })).resolves.toBe(false);
+      await expect(answerRunInput(f.prisma, { ...f.input, answer })).resolves.toBe(false);
       expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+      expect(f.tx.actionApprovalRule.upsert).not.toHaveBeenCalled();
       await expect(answerRunInput(f.prisma, { ...f.input, answer: "deny" })).resolves.toBe(true);
       expect(f.effect.status).toBe("denied");
     },

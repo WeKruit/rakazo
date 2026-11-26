@@ -2657,12 +2657,6 @@ async function replyFixture() {
       searchFilters: [],
       questions: [],
       rules: [],
-      confirmation: {
-        revision: 1,
-        userId: actor.userId,
-        messageId: "human",
-        confirmedAt: "2026-10-16T00:00:00Z",
-      },
     },
   });
   const mailRoute = {
@@ -3413,7 +3407,6 @@ describe("durable recruiting reply linkage", () => {
     "lease",
     "email-proof",
     "crm-proof",
-    "brief",
   ])("rejects the invalid %s context before admission", async (boundary) => {
     const f = await replyFixture();
     if (boundary === "role")
@@ -3439,7 +3432,6 @@ describe("durable recruiting reply linkage", () => {
     if (boundary === "lease") f.trusted.leaseFence += 1;
     if (boundary === "email-proof") f.email.status = "uncertain";
     if (boundary === "crm-proof") f.crm.status = "executing";
-    if (boundary === "brief") Object.assign(f.revision, { brief: null });
     await expect(
       recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input),
     ).rejects.toThrow();

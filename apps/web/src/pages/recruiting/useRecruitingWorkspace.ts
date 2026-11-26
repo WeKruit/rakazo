@@ -74,8 +74,6 @@ export function useRecruitingWorkspace({
   const [feedbackRefresh, setFeedbackRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [confirmationFailed, setConfirmationFailed] = useState(false);
   const [candidateList, setCandidateList] = useState(() =>
     readRecruitingPanelState(initialStorageKey),
   );
@@ -960,10 +958,6 @@ export function useRecruitingWorkspace({
     setFeedbackRefresh,
     loading,
     failed,
-    confirming,
-    setConfirming,
-    confirmationFailed,
-    setConfirmationFailed,
     setCandidateList,
     activeTab,
     contactsView,
@@ -996,7 +990,6 @@ export function useRecruitingWorkspace({
     workspace,
     criteria,
     brief,
-    briefClarifications,
     briefFieldLabels,
     unphrasedBriefFields,
     roleQuestions,

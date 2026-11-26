@@ -226,7 +226,6 @@ export function normalizeRecruitingRoleArgs(
     if (!Object.hasOwn(result, key)) result[key] = brief[key];
     delete brief[key];
   }
-  delete brief.confirmation;
   return { ...result, brief };
 }
 

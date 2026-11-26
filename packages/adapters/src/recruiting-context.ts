@@ -40,7 +40,7 @@ import type { LoadedAgentMemoryContext } from "./memory-context.js";
  */
 // Calibration runs from code so accounts with older customized bots or skills get it too.
 export const RECRUITING_ROUND_RULES = [
-  `${RECRUITING_CALIBRATION_QUICK_SEARCH} Start the first round in the same turn the brief is confirmed. Never hand a calibration round to a teammate; one without the people search hands it back to Main.`,
+  `${RECRUITING_CALIBRATION_QUICK_SEARCH} Never hand a calibration round to a teammate; one without the people search hands it back to Main.`,
   RECRUITING_ROUND_NEXT_STEP,
 ];
 
@@ -338,7 +338,7 @@ export function verdictPatternText(
       "What the people the recruiter judged have in common, as counts of people from their saved profiles:",
       ...(role ? [role] : []),
       ...(all ? [all] : []),
-      "Word the next search toward what the praised people share and away from what the turned-down people share, within the confirmed brief. A pattern is a preference, never a requirement: ask the recruiter before making one a rule, and never reject anyone for it.",
+      "Word the next search toward what the praised people share and away from what the turned-down people share, within the saved brief. A pattern is a preference, never a requirement: ask the recruiter before making one a rule, and never reject anyone for it.",
     ].join("\n"),
   );
 }

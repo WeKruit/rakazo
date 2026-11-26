@@ -90,29 +90,4 @@ describe("partial recruiting role update", () => {
     expect(merged.criteria.map((item) => item.id)).toEqual(["go", "pg"]);
     expect(merged.preferences).toEqual([]);
   });
-
-  it("starts the new revision's saved brief unconfirmed", () => {
-    const confirmed = structuredClone(current) as typeof current;
-    (confirmed.revision as { brief: unknown }).brief = {
-      searchFilters: [],
-      questions: [],
-      fields: [],
-      rules: [],
-      confirmation: {
-        revision: 3,
-        userId: "human",
-        messageId: "m",
-        confirmedAt: "2026-10-22T00:00:00.000Z",
-      },
-    };
-    const merged = mergeRecruitingRoleUpdate(confirmed, {
-      operation: "update",
-      roleId: "role",
-      expectedRevision: 3,
-      intent,
-      title: "Staff Backend Engineer",
-    });
-    expect(merged.title).toBe("Staff Backend Engineer");
-    expect(merged.brief).not.toHaveProperty("confirmation");
-  });
 });
