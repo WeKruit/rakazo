@@ -17,8 +17,8 @@ import type { PauseRunForInput } from "@rakazo/db";
 import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
-import { changedPaths } from "./campaign-send-card.js";
 import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
+import { changedPaths } from "./campaign-send-card.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
@@ -2173,17 +2173,13 @@ describe("recruiter-instructed email send", () => {
     instruction = "可以，发吧",
     rules: ActionApprovalRule[] = [],
     args: Record<string, unknown> = replyArgs,
+    route = { connectorId: "mcp", toolName: "reply_to_email" },
   ) {
     const f = fixture({
-      name: "reply_to_email",
+      name: route.toolName,
       rules,
       readOnly: false,
-      route: {
-        connectorId: "mcp",
-        resourceId: "resource-1",
-        resourceRevision: 1,
-        toolName: "reply_to_email",
-      },
+      route: { ...route, resourceId: "resource-1", resourceRevision: 1 },
       inputSchema: { type: "object" },
     });
     Object.assign(await f.prisma.run.findUnique(), { sourceMessageId: "human-1" });
@@ -2218,6 +2214,27 @@ describe("recruiter-instructed email send", () => {
     expect(f.execute).not.toHaveBeenCalled();
   });
 
+  // "先发给我看看" (send it to me first) read as an order to send it to the candidate: every
+  // send of a new email waits for its own card, whatever the recruiter's words were.
+  it.each(["先发给我看看", "发吧"])(
+    "keeps the card for a new email after %s",
+    async (instruction) => {
+      const f = await instructedSend(
+        "To: candidate@example.test\nSubject: Seattle role\n\nPublic synthetic draft.",
+        instruction,
+        [],
+        {
+          recipient_email: "candidate@example.test",
+          subject: "Seattle role",
+          body: "Public synthetic draft.",
+        },
+        { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
+      );
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    },
+  );
+
   it("keeps the card when the exact text was never shown", async () => {
     const f = await instructedSend("我会回复他周二可以。");
     expect(f.execute).not.toHaveBeenCalled();
@@ -2231,7 +2248,7 @@ describe("recruiter-instructed email send", () => {
   });
 
   // A candidate's reply can ask the agent to "also bcc" an outside address.
-  it("keeps the card for an injected bcc, even with send when I say send saved", async () => {
+  it("keeps the card for an injected bcc, even with an always-allow rule saved", async () => {
     const f = await instructedSend(
       "收件人：candidate@example.test\n草稿：\n> Public synthetic draft.",
       "发吧",

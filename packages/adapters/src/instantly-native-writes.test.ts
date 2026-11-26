@@ -1033,7 +1033,7 @@ describe("emulated outreach mail service", () => {
       from_address_email: "ada@x.test",
       to_address_email_list: "me@mail.test",
     });
-    const [lead] = (await rest("POST", "/leads/list", { campaign: campaign.id })).items;
-    expect(lead).toMatchObject({ email_reply_count: 1 });
+    const leads = await rest("POST", "/leads/list", { campaign: campaign.id });
+    expect(leads.items).toMatchObject([{ email_reply_count: 1 }]);
   });
 });
