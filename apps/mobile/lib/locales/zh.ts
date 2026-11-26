@@ -70,7 +70,6 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Could not load background tasks. Try again.": "无法加载后台任务，请重试。",
   "Could not cancel task": "无法取消任务",
   "Try again": "重试",
-  "Stop research updates": "停止研究更新",
   "Couldn't refresh — showing the last loaded messages.": "无法刷新——显示最近加载的消息。",
   "Try Again": "重试",
   "Too many unsent messages": "未发送消息过多",

@@ -1676,61 +1676,6 @@ function mcpFetch(
   });
 }
 
-describe("official Autumn task dispatch", () => {
-  it.each(["get_task", "get_rows", "reply", "stop_task", "list_tasks"])(
-    "denies an unowned %s call before connecting to the provider",
-    async (toolName) => {
-      const fetch = vi.fn();
-      vi.stubGlobal("fetch", fetch);
-      const load = vi.fn();
-      const connector = new McpConnector(
-        {
-          botMcpServer: {
-            findFirst: vi.fn().mockResolvedValue({
-              ...ASSIGNMENT,
-              server: { ...SERVER, endpoint: "https://api.autumn.ai/mcp" },
-            }),
-          },
-          recruitingResearchTask: { findFirst: vi.fn().mockResolvedValue(null) },
-          $queryRaw: vi.fn().mockResolvedValue([]),
-        } as never,
-        { load } as never,
-        { network: TEST_NETWORK },
-      );
-      const events = [];
-      try {
-        for await (const event of connector.execute(
-          {
-            tool: `mcp__autumn__${toolName}`,
-            executionId: "isolated-call",
-            route: { connectorId: "mcp", resourceId: SERVER.id, resourceRevision: 1, toolName },
-            args: { task_id: "foreign-task" },
-          },
-          {
-            spaceId: "w1",
-            userId: "u1",
-            botId: "bot-1",
-            signal: new AbortController().signal,
-          } as never,
-        ))
-          events.push(event);
-        expect(events).toEqual([
-          expect.objectContaining({
-            type: "error",
-            message: expect.stringMatching(
-              /scoped research history|Listing all research is unavailable/i,
-            ),
-          }),
-        ]);
-        expect(fetch).not.toHaveBeenCalled();
-        expect(load).not.toHaveBeenCalled();
-      } finally {
-        await connector.close();
-      }
-    },
-  );
-});
-
 it("denies an unowned FullEnrich job before connecting or loading credentials", async () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
@@ -3798,7 +3743,6 @@ describe("deployment contact enrichment", () => {
 });
 
 describe.each([
-  ["Autumn", "https://api.autumn.ai/mcp", "AUTUMN_API_KEY", "Recruiting research"],
   ["FullEnrich", "https://mcp.fullenrich.com/mcp", "FULLENRICH_API_KEY", "Contact enrichment"],
 ])("deployment %s credentials", (name, endpoint, env, label) => {
   afterEach(() => vi.unstubAllEnvs());
@@ -3830,10 +3774,7 @@ describe.each([
   });
 
   it.each([
-    "https://api.autumn.ai/mcp?redirect=other",
-    "https://api.autumn.ai.example.test/mcp",
     "https://other.example.test/mcp",
-    "http://api.autumn.ai/mcp",
     "https://mcp.fullenrich.com/mcp?redirect=other",
     "https://mcp.fullenrich.com.example.test/mcp",
     "http://mcp.fullenrich.com/mcp",
@@ -3850,7 +3791,7 @@ describe.each([
 
   it("preserves actor-scoped personal credentials and refuses a missing owned secret", async () => {
     // FullEnrich ships with the product: a configured platform key replaces a saved one (below).
-    vi.stubEnv(env, name === "FullEnrich" ? " " : "platform-service-key");
+    vi.stubEnv(env, " ");
     const row = { id: "personal-secret", ciphertext: "encrypted-reference" };
     const findFirst = vi.fn().mockResolvedValueOnce(row).mockResolvedValueOnce(null);
     const load = vi.fn().mockResolvedValue('{"secret":"personal-service-key"}');
@@ -3904,13 +3845,9 @@ describe.each([
       await expect(connector.discoverTools(scoped as never)).resolves.toEqual([
         expect.objectContaining({ name: `mcp__${name.toLowerCase()}__echo` }),
         // The contact lookup rides on the enrichment connection.
-        ...(official.endpoint === "https://mcp.fullenrich.com/mcp"
-          ? [
-              expect.objectContaining({
-                route: expect.objectContaining({ toolName: "native_find_emails" }),
-              }),
-            ]
-          : []),
+        expect.objectContaining({
+          route: expect.objectContaining({ toolName: "native_find_emails" }),
+        }),
       ]);
       expect(
         state.headers.every((headers) => headers.authorization === "Bearer platform-service-key"),

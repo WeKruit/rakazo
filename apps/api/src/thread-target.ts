@@ -4,7 +4,6 @@ import { recruitingAgentRunWaitJob, runContinueJob } from "@rakazo/adapter-kit";
 import {
   agentRunWaitTarget,
   cancelComputerRunWork,
-  recruitingResearchWakeNonce,
   screenLeaseIdForRun,
   toComputerRef,
 } from "@rakazo/adapters";
@@ -1676,7 +1675,7 @@ export async function cancelThreadBackgroundTask(
   prisma: PrismaClient,
   actor: Actor,
   target: ThreadTarget,
-  task: { kind: "research" | "cloud_agent" | "agent_run" | "run"; id: string },
+  task: { kind: "cloud_agent" | "agent_run" | "run"; id: string },
 ) {
   const scope = { spaceId: actor.spaceId, userId: actor.userId, threadId: target.threadId };
   return prisma.$transaction(async (tx) => {
@@ -1723,43 +1722,18 @@ export async function cancelThreadBackgroundTask(
       });
       return wakes.map((wake) => wake.id);
     }
-    if (task.kind === "research") {
-      const owned = await tx.recruitingResearchTask.findFirst({
-        where: { id: task.id, createdByRun: scope },
-        select: { id: true, providerTaskId: true },
-      });
-      if (!owned) throw new IsolationError();
-      // ponytail: research exposes no cancel operation; close native updates. Add remote
-      // cancellation here when the existing provider interface supports it.
-      await tx.recruitingResearchTask.updateMany({
-        where: { id: task.id, state: "active", createdByRun: scope },
-        data: { state: "closed" },
-      });
-      if (!owned.providerTaskId) return [];
-      const nonce = recruitingResearchWakeNonce(owned.id, owned.providerTaskId);
-      const wakes = await tx.run.findMany({
-        where: {
-          ...scope,
-          status: { in: [...ACTIVE_RUN_STATUSES] },
-          OR: [{ clientNonce: nonce }, { clientNonce: { startsWith: `${nonce}:` } }],
-        },
-        select: { id: true },
-      });
-      return wakes.map((wake) => wake.id);
-    } else {
-      const owned = await tx.cloudAgent.findFirst({
-        where: { id: task.id, ...scope },
-        select: { id: true },
-      });
-      if (!owned) throw new IsolationError();
-      // Reuse the cloud-agent outbox: its reconciler asks the provider to cancel and only
-      // records cancellation once the provider confirms it.
-      await tx.cloudAgent.updateMany({
-        where: { id: task.id, ...scope, status: "running" },
-        data: { cancelRequested: true, version: { increment: 1 }, nextPollAt: new Date() },
-      });
-      return [];
-    }
+    const owned = await tx.cloudAgent.findFirst({
+      where: { id: task.id, ...scope },
+      select: { id: true },
+    });
+    if (!owned) throw new IsolationError();
+    // Reuse the cloud-agent outbox: its reconciler asks the provider to cancel and only
+    // records cancellation once the provider confirms it.
+    await tx.cloudAgent.updateMany({
+      where: { id: task.id, ...scope, status: "running" },
+      data: { cancelRequested: true, version: { increment: 1 }, nextPollAt: new Date() },
+    });
+    return [];
   });
 }
 
@@ -1809,18 +1783,13 @@ export async function stopThreadRuns(
         },
         data: { status: "cancelled" },
       });
-      // A provider reply still arriving for an earlier stopped turn must not re-arm research.
+      // An earlier stopped turn no longer keeps what its searches bring back.
       await tx.run.updateMany({
         where: { threadId: target.threadId, status: "cancelled", error: STOPPED_TURN },
         data: { error: null },
       });
-      // Stopping the conversation also ends what would wake it later. Research the provider is
-      // still running is closed here, so its poll ignores the completion; a later reply on the
-      // same research reopens it. Pending one-shot reminders are disarmed, not deleted.
-      await tx.recruitingResearchTask.updateMany({
-        where: { state: "active", createdByRun: { threadId: target.threadId } },
-        data: { state: "closed" },
-      });
+      // Stopping the conversation also ends what would wake it later. Pending one-shot
+      // reminders are disarmed, not deleted.
       await tx.routine.updateMany({
         where: {
           threadId: target.threadId,

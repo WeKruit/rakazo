@@ -16,7 +16,6 @@ import {
   countRecruitingPeopleFoundSince,
   createThreadMessageInTransaction,
   mirrorAskInTransaction,
-  type Prisma,
   type PrismaClient,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -24,7 +23,6 @@ import { getLogger } from "@rakazo/logging";
 import { sleep } from "./background-wait.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
 import { ROLE_START_NONCE } from "./working-state.js";
 
@@ -575,7 +573,7 @@ export async function teamProgress(
       ? `The next round is being posted right now. Read it with recruiting_candidates round and roleId ${roleId} in a moment and show its people here; never say it is not ready, never mention records, and never send the recruiter to another chat.`
       : recorded
         ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
-          : `${working.bot.name} has been working on the recruiter's request for ${started}; the next round comes back here when it is picked. Say in one line that it is being searched and how long it has run; never say it has not started, and give no count of people found or saved: the recruiter counts the people a round shows them.`,
+        : `${working.bot.name} has been working on the recruiter's request for ${started}; the next round comes back here when it is picked. Say in one line that it is being searched and how long it has run; never say it has not started, and give no count of people found or saved: the recruiter counts the people a round shows them.`,
   };
 }
 
@@ -964,11 +962,6 @@ export async function returnDelegatedTeamOutcome(
   });
   // The chain is still going: its last turn returns the result, and so does the reconciler.
   if (busy) return "later";
-  if (
-    thread.activeRecruitingRoleId &&
-    (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId))
-  )
-    return "later";
   // The team's replies since the request, up to the recruiter's next own message there.
   const later = await deps.prisma.message.findMany({
     where: { threadId: run.threadId, seq: { gt: delegated.seq } },

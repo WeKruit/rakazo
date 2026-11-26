@@ -4,9 +4,8 @@ import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 
 /**
- * Work still running behind a conversation, scoped to the conversation owner: research the
- * provider is doing, cloud agents, teammates' handed-off and automation runs, and large
- * people searches. The Background tasks panel and the agent's wait tool read the same list.
+ * Work still running behind a conversation, scoped to the conversation owner: cloud agents,
+ * teammates' handed-off and automation runs, and large people searches. The Background tasks panel and the agent's wait tool read the same list.
  */
 export async function listThreadBackgroundWork(
   prisma: Pick<PrismaClient, "$queryRaw">,
@@ -26,21 +25,6 @@ export async function listThreadBackgroundWork(
     WITH owned AS (
       SELECT id, "spaceId", "userId" FROM threads WHERE id = ${threadId}
     )
-    SELECT q.id, 'research' AS kind, 'running' AS status,
-      COALESCE(r."startedAt", r."createdAt") AS "startedAt", NULL::int AS "estimateMs"
-    FROM recruiting_research_tasks q
-    JOIN recruiting_roles rr ON rr.id = q."roleId"
-    JOIN owned o ON rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"
-    -- Each task's own run by its key. Joined freely, an account with hundreds of roles had
-    -- every task scan the account's runs (about 1 s per chat open).
-    CROSS JOIN LATERAL (
-      SELECT r."startedAt", r."createdAt" FROM runs r
-      WHERE r.id = q."createdByRunId" AND r."threadId" = o.id
-        AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
-      LIMIT 1
-    ) r
-    WHERE q.state = 'active'
-    UNION ALL
     SELECT c.id, 'cloud_agent' AS kind, CASE WHEN c."cancelRequested" THEN 'cancelling' ELSE 'running' END AS status,
       c."createdAt" AS "startedAt", NULL::int AS "estimateMs"
     FROM cloud_agents c

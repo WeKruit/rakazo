@@ -35,7 +35,6 @@ const CONNECTOR_CATALOG = [
     endpoint: "https://mcp.fullenrich.com/mcp",
     aliases: [],
   },
-  { slug: "autumn", name: "Autumn", endpoint: "https://api.autumn.ai/mcp", aliases: [] },
 ];
 
 const key = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");

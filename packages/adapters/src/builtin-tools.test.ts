@@ -80,13 +80,6 @@ describe("native recruiting approval tool", () => {
     expect(tool?.description).toContain("reuse the exact candidateKey");
     expect(tool?.description).toContain("candidateRows entry for that rowIndex");
   });
-  it("offers optional native result saving without making it a search prerequisite", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
-    expect(tool?.description).toContain("save_results");
-    expect(tool?.description).toContain("same run");
-    expect(tool?.description).toContain("research provider's own research and reply tools");
-    expect(tool?.description).toContain("linkedin_url");
-  });
 
   it("guides reusable preferences through one exact edit without confusing it with a full document", () => {
     const feedback = builtinAgentTools.find((tool) => tool.name === "recruiting_feedback");

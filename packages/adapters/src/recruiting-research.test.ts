@@ -16,7 +16,6 @@ import {
   prepareAgentRun,
   projectRecruitingCandidateReport,
   recordAgentRunCost,
-  requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   requireRoleForPeopleSearch,
   savedContactLookups,
@@ -347,7 +346,7 @@ describe("people-search agent runs", () => {
       ],
     });
     const read = (raw: unknown) =>
-      classifyRecruitingResearchResult(raw, { operation: "rows", providerTaskId: "agent_run_1" });
+      classifyRecruitingResearchResult(raw, { providerTaskId: "agent_run_1" });
     expect(read(result("completed"))).toMatchObject({ rows, deliveryState: "accepted" });
     expect(read(result("running")).rows).toBeUndefined();
     expect(read(result("completed", "agent_run_2")).rows).toBeUndefined();
@@ -572,130 +571,6 @@ describe("FullEnrich job ownership", () => {
   });
 });
 
-describe("Autumn task ownership", () => {
-  const actor = { userId: "owner", spaceId: "space" };
-  const server = {
-    id: "autumn-server",
-    revision: 2,
-    transport: "streamable_http",
-    endpoint: "https://api.autumn.ai/mcp",
-  };
-  const route = {
-    connectorId: "mcp",
-    resourceId: server.id,
-    resourceRevision: 2,
-    toolName: "research",
-  };
-  const direct = ["__rakazoCatalogTool", "direct", { route, args: { prompt: "Find engineers" } }];
-  function fixture(
-    request: unknown = direct,
-    result: unknown = { structuredContent: { task_id: "owned-task" } },
-  ) {
-    return {
-      recruitingResearchTask: { findFirst: vi.fn(async () => null) },
-      $queryRaw: vi.fn(
-        receiptQuery((scope) =>
-          scope.spaceId === actor.spaceId && scope.userId === actor.userId
-            ? [{ request, result }]
-            : [],
-        ),
-      ),
-    };
-  }
-  const authorize = (
-    db: ReturnType<typeof fixture>,
-    tool = "get_task",
-    args: Record<string, unknown> = { task_id: "owned-task" },
-    context = actor,
-    connection = server,
-  ) => requireAutumnTaskOwnership(db as never, context, connection, tool, args);
-
-  it.each(["get_task", "get_rows", "reply", "stop_task", "continue_with_file"])(
-    "reuses an owned native creation receipt for %s",
-    async (tool) => {
-      await expect(authorize(fixture(), tool)).resolves.toBeUndefined();
-    },
-  );
-  it.each(["connectors_execute_tool", "mcp_execute_tool"])(
-    "accepts the canonical %s creation receipt",
-    async (tool) => {
-      const request = [
-        "__rakazoCatalogTool",
-        tool,
-        { id: `${server.id}:research`, arguments: { prompt: "Find engineers" } },
-        route,
-      ];
-      await expect(authorize(fixture(request))).resolves.toBeUndefined();
-    },
-  );
-  it.each(["user", "space", "task", "connection", "revision", "read", "error", "malformed"])(
-    "does not grant ownership from %s mismatch",
-    async (change) => {
-      const request = structuredClone(direct);
-      const body = request[2] as { route: typeof route };
-      if (change === "connection") body.route.resourceId = "other-server";
-      if (change === "revision") body.route.resourceRevision = 1;
-      if (change === "read") body.route.toolName = "get_task";
-      const db = fixture(
-        request,
-        change === "error"
-          ? { isError: true, structuredContent: { task_id: "owned-task" } }
-          : change === "malformed"
-            ? { content: [{ type: "text", text: "Task owned-task" }] }
-            : undefined,
-      );
-      await expect(
-        authorize(
-          db,
-          "get_rows",
-          { task_id: change === "task" ? "foreign-task" : "owned-task" },
-          {
-            userId: change === "user" ? "other-user" : actor.userId,
-            spaceId: change === "space" ? "other-space" : actor.spaceId,
-          },
-        ),
-      ).rejects.toThrow();
-    },
-  );
-  it("accepts an existing actor-scoped native research task", async () => {
-    const db = fixture();
-    db.recruitingResearchTask.findFirst.mockResolvedValue({ id: "native-task" } as never);
-    await expect(authorize(db)).resolves.toBeUndefined();
-    expect(db.recruitingResearchTask.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          providerTaskId: "owned-task",
-          mcpServerId: server.id,
-          serverRevision: 2,
-          role: actor,
-          createdByRun: actor,
-        }),
-      }),
-    );
-    expect(db.$queryRaw).not.toHaveBeenCalled();
-  });
-  it.each(["list_tasks", "get_team", "get_usage", "invite_member", "unknown"])(
-    "denies account-wide or unsupported %s before querying receipts",
-    async (tool) => {
-      const db = fixture();
-      await expect(authorize(db, tool, {})).rejects.toThrow(/Listing all research is unavailable/i);
-      expect(db.$queryRaw).not.toHaveBeenCalled();
-    },
-  );
-  it("does not constrain other MCP providers or require a task for a new research call", async () => {
-    const db = fixture();
-    await expect(authorize(db, "research", { prompt: "Find engineers" })).resolves.toBeUndefined();
-    await expect(authorize(db, "credits", {})).resolves.toBeUndefined();
-    await expect(
-      authorize(db, "list_tasks", {}, actor, { ...server, endpoint: "https://mcp.example.test" }),
-    ).resolves.toBeUndefined();
-    expect(db.$queryRaw).not.toHaveBeenCalled();
-    await expect(
-      authorize(db, "research", { prompt: "Find engineers", task_id: "foreign-task" }),
-    ).rejects.toThrow();
-  });
-});
-
 const source: RecruitingSourceRef = {
   id: "human-message:human",
   kind: "original_material",
@@ -798,134 +673,22 @@ const _request = {
 const mcp = (body: unknown) => ({ content: [{ type: "text", text: JSON.stringify(body) }] });
 const _sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-describe("recruiting MCP result observations", () => {
-  it("accepts a real task ID from structured content or a complete JSON text block", () => {
-    for (const raw of [
-      { structuredContent: { task_id: "provider-task", status: "accepted" } },
-      mcp({ task_id: "provider-task", state: "submitted", done: false }),
-    ]) {
-      expect(classifyRecruitingResearchResult(raw, { operation: "create" })).toMatchObject({
-        deliveryState: "accepted",
-        providerTaskId: "provider-task",
-        done: false,
-        providerApplicationConfirmed: false,
-        automaticRetry: false,
-      });
-    }
-  });
-
-  it.each([
-    { content: [{ type: "text", text: "Created task_id=provider-task; it is working." }] },
-    { content: [{ type: "text", text: 'prefix {"task_id":"provider-task"}' }] },
-    { task_id: "provider-task" },
-    mcp({ task_id: " " }),
-    mcp({ status: "accepted" }),
-    { isError: true, structuredContent: { task_id: "provider-task", status: "accepted" } },
-    {
-      structuredContent: { task_id: "first" },
-      content: [{ type: "text", text: '{"task_id":"second"}' }],
-    },
-  ])("keeps an unproven or conflicting creation unknown %#", (raw) => {
-    expect(classifyRecruitingResearchResult(raw, { operation: "create" })).toMatchObject({
-      deliveryState: "unknown",
-      providerApplicationConfirmed: false,
-      automaticRetry: false,
-    });
-  });
-
-  it("accepts an explicit queued continuation without claiming completion or application", () => {
-    expect(
-      classifyRecruitingResearchResult(mcp({ status: "accepted", activity: "queued" }), {
-        operation: "continue",
-        providerTaskId: "original-task",
-      }),
-    ).toMatchObject({
-      deliveryState: "accepted",
-      providerTaskId: "original-task",
-      observedProviderState: "queued",
-      done: false,
-      providerApplicationConfirmed: false,
-    });
-    expect(
-      classifyRecruitingResearchResult(mcp({ task_id: "different", status: "accepted" }), {
-        operation: "continue",
-        providerTaskId: "original-task",
-      }).deliveryState,
-    ).toBe("unknown");
-    expect(
-      classifyRecruitingResearchResult(mcp({ message: "Queued" }), {
-        operation: "continue",
-        providerTaskId: "original-task",
-      }).deliveryState,
-    ).toBe("unknown");
-  });
-
-  it("does not label a queued acknowledgement completed", () => {
-    expect(
-      classifyRecruitingResearchResult(mcp({ status: "accepted", done: true }), {
-        operation: "continue",
-        providerTaskId: "task",
-      }).deliveryState,
-    ).toBe("unknown");
-  });
-
-  it("requires creation-specific non-delivery proof for ambiguous server errors", () => {
-    const raw = mcp({ error: "internal_error", task_created: false });
-    expect(classifyRecruitingResearchResult(raw, { operation: "create" }).deliveryState).toBe(
-      "rejected",
-    );
-    expect(
-      classifyRecruitingResearchResult(raw, { operation: "continue", providerTaskId: "task" })
-        .deliveryState,
-    ).toBe("unknown");
-    expect(
-      classifyRecruitingResearchResult(
-        mcp({ error: "internal_error", task_created: false, task_id: "task" }),
-        { operation: "create" },
-      ).deliveryState,
-    ).toBe("unknown");
-  });
-
-  it.each([
-    ["submitted", false],
-    ["working", false],
-    ["input-required", true],
-    ["completed", true],
-    ["canceled", true],
-    ["failed", true],
-  ])("records explicit %s status without treating acceptance as completion", (state, done) => {
-    expect(
-      classifyRecruitingResearchResult(mcp({ task_id: "task", state, done }), {
-        operation: "status",
-        providerTaskId: "task",
-      }),
-    ).toMatchObject({
-      deliveryState: "accepted",
-      observedProviderState: state,
-      done,
-      providerApplicationConfirmed: false,
-    });
-  });
-
-  it("rejects contradictory status, foreign identity and narrative completion", () => {
+describe("stored result page observations", () => {
+  it("keeps a page that names another task, or holds no rows, unknown", () => {
     for (const body of [
-      { task_id: "task", state: "working", done: true },
-      { task_id: "other", state: "completed", done: true },
+      { task_id: "other", rows: [] },
+      { task_id: "task", state: "working", done: true, rows: [] },
       { task_id: "task", message: "Completed" },
     ])
       expect(
-        classifyRecruitingResearchResult(mcp(body), { operation: "status", providerTaskId: "task" })
-          .deliveryState,
+        classifyRecruitingResearchResult(mcp(body), { providerTaskId: "task" }).deliveryState,
       ).toBe("unknown");
   });
 
   it("retains malformed rows alongside valid candidates for explicit unresolved indexing", () => {
     const rows = [{ name: { value: "Example", source_id: "source" } }, null, "malformed"];
     expect(
-      classifyRecruitingResearchResult(mcp({ rows }), {
-        operation: "rows",
-        providerTaskId: "task",
-      }),
+      classifyRecruitingResearchResult(mcp({ rows }), { providerTaskId: "task" }),
     ).toMatchObject({ deliveryState: "accepted", rows });
   });
 
@@ -940,10 +703,7 @@ describe("recruiting MCP result observations", () => {
     const body = { rows, next_cursor: "  opaque/游标==  ", output_id: "actual-output" };
     const raw = mcp(body);
     const before = JSON.stringify(raw);
-    const first = classifyRecruitingResearchResult(raw, {
-      operation: "rows",
-      providerTaskId: "task",
-    });
+    const first = classifyRecruitingResearchResult(raw, { providerTaskId: "task" });
     expect(first).toMatchObject({
       deliveryState: "accepted",
       providerTaskId: "task",
@@ -957,110 +717,26 @@ describe("recruiting MCP result observations", () => {
         ...body,
         rows: [{ ...rows[0], geometry: { value: "New material", source_id: "s1" } }],
       }),
-      { operation: "rows", providerTaskId: "task" },
+      { providerTaskId: "task" },
     );
     expect(changed.rows).not.toEqual(first.rows);
     expect(changed.nextCursor).toBe(first.nextCursor);
   });
 
-  it.each(["12", -1, Number.POSITIVE_INFINITY, null])(
-    "does not invent numeric or per-person usage from %j",
-    (credits_used) => {
-      expect(
-        classifyRecruitingResearchResult(
-          { structuredContent: { task_id: "task", credits_used } },
-          { operation: "create" },
-        ).usage,
-      ).toBeNull();
-    },
-  );
-
-  it("records only explicitly reported task credits", () => {
+  it("reads a stored refusal as rejected only for its own task", () => {
     expect(
-      classifyRecruitingResearchResult(
-        mcp({ task_id: "task", credits_used: 12, progress: { rows: 4 } }),
-        { operation: "create" },
-      ).usage,
-    ).toEqual([{ scope: "task", unit: "credits", amount: 12 }]);
-  });
-
-  it.each([
-    "out_of_credits",
-    "invalid_request",
-    "unauthorized",
-    "task_executing",
-    "task_in_cron_mode",
-    "task_not_found",
-    "task_exists",
-    "auth_unavailable",
-  ])("recognizes a structured %s refusal without scheduling retries", (error) => {
-    expect(
-      classifyRecruitingResearchResult(
-        mcp({
-          error,
-          message: "Request refused",
-          retryable: true,
-          request_id: "synthetic-request",
-          retry_after: 5,
-        }),
-        { operation: "create" },
-      ),
-    ).toMatchObject({
-      deliveryState: "rejected",
-      refusalCode: error,
-      retryAfterSeconds: 5,
-      automaticRetry: false,
-    });
-  });
-
-  it.each([
-    { error: "out_of_credits", task_id: "not-created" },
-    { error: "invalid_request", task_id: "not-created", task_created: false },
-    { error: "internal_error", task_id: "not-created", task_created: false },
-    { task_id: "not-created", task_created: false },
-  ])("never binds a returned task ID from refused or unproven creation %#", (body) => {
-    const result = classifyRecruitingResearchResult(mcp(body), { operation: "create" });
-    expect(result.providerTaskId).toBeNull();
-    expect(result.deliveryState).not.toBe("accepted");
-    expect(result.automaticRetry).toBe(false);
-  });
-
-  it.each(["continue", "status", "rows"] as const)(
-    "retains only the known original task ID on a refused %s",
-    (operation) => {
-      expect(
-        classifyRecruitingResearchResult(mcp({ error: "out_of_credits", task_id: "known-task" }), {
-          operation,
-          providerTaskId: "known-task",
-        }),
-      ).toMatchObject({
-        deliveryState: "rejected",
+      classifyRecruitingResearchResult(mcp({ error: "out_of_credits", task_id: "known-task" }), {
         providerTaskId: "known-task",
-        automaticRetry: false,
-      });
-      expect(
-        classifyRecruitingResearchResult(
-          mcp({ error: "out_of_credits", task_id: "unrelated-task" }),
-          {
-            operation,
-            providerTaskId: "known-task",
-          },
-        ),
-      ).toMatchObject({ deliveryState: "unknown", providerTaskId: "known-task" });
-    },
-  );
-
-  it.each([
-    { error: "Connection interrupted" },
-    mcp({ error: "internal_error", task_id: "known-task", retryable: true }),
-    mcp({ error: "service_unavailable", retryable: true }),
-    mcp({ error: "out_of_credits", task_created: true }),
-    { isError: true, content: [{ type: "text", text: "out_of_credits" }] },
-  ])("retains uncertain dispatched failures as unknown %#", (raw) => {
-    expect(classifyRecruitingResearchResult(raw, { operation: "create" })).toMatchObject({
-      deliveryState: "unknown",
-      automaticRetry: false,
-    });
+      }),
+    ).toMatchObject({ deliveryState: "rejected", providerTaskId: "known-task" });
+    expect(
+      classifyRecruitingResearchResult(
+        mcp({ error: "out_of_credits", task_id: "unrelated-task" }),
+        {
+          providerTaskId: "known-task",
+        },
+      ),
+    ).toMatchObject({ deliveryState: "unknown", providerTaskId: "known-task" });
   });
 });
 

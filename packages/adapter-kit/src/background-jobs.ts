@@ -26,10 +26,6 @@ const payloadSchemas = {
   }),
   "messaging.deliver": z.object({ runId: z.string().min(1).optional() }),
   "cloud_agent.poll": z.object({ agentId: z.string().min(1) }),
-  "recruiting_research.poll": z.object({
-    taskId: z.string().min(1),
-    attempt: z.number().int().nonnegative().optional(),
-  }),
   "recruiting_checkin.start": z.object({ threadId: z.string().min(1) }),
   "recruiting_profile.project": z.strictObject({ pageEffectId: z.string().min(1) }),
   "recruiting_inbox.project": z.union([
@@ -219,22 +215,6 @@ export function cloudAgentPollJob(
     name: "cloud_agent.poll",
     payload,
     replaceKey: cloudAgentPollJobKey(payload.agentId),
-    ...(availableAt ? { availableAt } : {}),
-  };
-}
-
-export function recruitingResearchPollJobKey(taskId: string): string {
-  return `recruiting_research.poll:${taskId}`;
-}
-
-export function recruitingResearchPollJob(
-  payload: BackgroundJobPayloads["recruiting_research.poll"],
-  availableAt?: Date,
-): BackgroundJob {
-  return {
-    name: "recruiting_research.poll",
-    payload,
-    replaceKey: recruitingResearchPollJobKey(payload.taskId),
     ...(availableAt ? { availableAt } : {}),
   };
 }

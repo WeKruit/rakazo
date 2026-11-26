@@ -42,7 +42,7 @@ function fixture(count = 30) {
 }
 describe("runtime context policy", () => {
   it.each([272_000, 4096])(
-    "retains a saved page after save_results only while its token budget fits (%s)",
+    "retains a saved page after its save only while its token budget fits (%s)",
     (contextWindow) => {
       const { request, context } = fixture(0);
       const rows = Array.from({ length: 5 }, (_, rowIndex) => ({
@@ -68,8 +68,8 @@ describe("runtime context policy", () => {
           timestamp: 102,
         }) as Message;
       context.messages.push(
-        call("rows", "get_rows"),
-        result("rows", "get_rows", page),
+        call("rows", "agent_run"),
+        result("rows", "agent_run", page),
         call("save", "recruiting_research"),
         result(
           "save",

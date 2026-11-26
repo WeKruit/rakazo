@@ -90,9 +90,7 @@ import {
   lookedUpContacts,
   prepareAgentRun,
   recordAgentRunCost,
-  requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
-  requireQuickSearchBeforeResearch,
   requireRoleForPeopleSearch,
   savedContactLookups,
 } from "./recruiting-research.js";
@@ -694,8 +692,6 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
     return server.secretId ? undefined : { key, label: "Contact enrichment" };
   }
   if (server.secretId) return undefined;
-  if (server.endpoint === "https://api.autumn.ai/mcp")
-    return { key: process.env.AUTUMN_API_KEY?.trim(), label: "Recruiting research" };
   // People search also works keyless at a lower rate limit, so a missing key is not a setup gap.
   if (server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
     return { key: process.env.EXA_API_KEY?.trim(), label: "People search", keyless: true };
@@ -1068,7 +1064,7 @@ export class McpConnector implements ConnectorProvider {
           for (const tool of tools) if (core.has(coreName(tool))) directTools.add(tool);
           return tools;
         };
-        // A grant of no tools (a retired platform service) needs no listing call.
+        // A grant of no tools needs no listing call.
         if (
           !assignment.allowAllTools &&
           Array.isArray(assignment.allowedTools) &&
@@ -1372,21 +1368,7 @@ export class McpConnector implements ConnectorProvider {
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === "https://mcp.fullenrich.com/mcp" &&
         call.route.toolName === "get_enrichment_results";
-      await requireAutumnTaskOwnership(
-        this.prisma,
-        context,
-        assignment.server,
-        call.route.toolName,
-        call.args,
-      );
       const ownedArgs = await requireFullEnrichJobOwnership(
-        this.prisma,
-        context,
-        assignment.server,
-        call.route.toolName,
-        call.args,
-      );
-      await requireQuickSearchBeforeResearch(
         this.prisma,
         context,
         assignment.server,

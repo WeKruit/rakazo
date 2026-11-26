@@ -97,90 +97,6 @@ async function* nativeMcpCreationReceipts(
   }
 }
 
-/** A shared provider account never grants access to another product user's research. */
-export async function requireAutumnTaskOwnership(
-  prisma: PrismaClient,
-  actor: Pick<AdapterContext, "userId" | "spaceId">,
-  server: Pick<McpServer, "id" | "revision" | "transport" | "endpoint">,
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<void> {
-  if (server.transport !== "streamable_http" || server.endpoint !== "https://api.autumn.ai/mcp")
-    return;
-  if (["research", "credits"].includes(toolName) && args.task_id === undefined) return;
-  if (
-    !["get_task", "get_rows", "reply", "stop_task", "continue_with_file"].includes(toolName) ||
-    typeof args.task_id !== "string" ||
-    !args.task_id.trim()
-  )
-    throw new IsolationError(
-      "Listing all research is unavailable. Continue this role's research with get_task or reply on the task id from this conversation's earlier research calls, or start new research in this conversation.",
-    );
-  const task = await prisma.recruitingResearchTask.findFirst({
-    where: {
-      providerTaskId: args.task_id,
-      mcpServerId: server.id,
-      serverRevision: server.revision,
-      role: { spaceId: actor.spaceId, userId: actor.userId },
-      createdByRun: { spaceId: actor.spaceId, userId: actor.userId },
-    },
-    select: { id: true },
-  });
-  if (task) return;
-  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, "research")) {
-    if (!nonblank(receipt.args.prompt) || receipt.args.task_id !== undefined) continue;
-    const observation = classifyRecruitingResearchResult(receipt.result, { operation: "create" });
-    if (observation.deliveryState === "accepted" && observation.providerTaskId === args.task_id)
-      return;
-  }
-  throw new IsolationError(
-    "This research is not available in your workspace. Use scoped research history or start new research in this conversation.",
-  );
-}
-
-/**
- * A role's first calibration rounds come from the built-in people search, which answers in
- * seconds. Before any round is accepted, a new research task on a role that has none yet starts
- * only after a people search ran in this run (to top up a short one). Roles that already have
- * research keep their existing flow.
- */
-export async function requireQuickSearchBeforeResearch(
-  prisma: PrismaClient,
-  context: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
-  server: Pick<McpServer, "transport" | "endpoint">,
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<void> {
-  if (
-    server.transport !== "streamable_http" ||
-    server.endpoint !== "https://api.autumn.ai/mcp" ||
-    toolName !== "research" ||
-    args.task_id !== undefined ||
-    !context.runId
-  )
-    return;
-  const scope = { spaceId: context.spaceId, userId: context.userId };
-  const run = await prisma.run.findFirst({
-    where: { id: context.runId, ...scope },
-    select: { trigger: true, thread: { select: { activeRecruitingRoleId: true } } },
-  });
-  const roleId = run?.thread.activeRecruitingRoleId;
-  if (!roleId) return;
-  const [searchAssigned, earlierResearch, acceptedRound] = await Promise.all([
-    prisma.botMcpServer.count({
-      where: { ...scope, server: { ...scope, slug: "people-search", enabled: true } },
-    }),
-    prisma.recruitingResearchTask.count({ where: { roleId } }),
-    prisma.recruitingCalibrationRound.count({ where: { roleId, approvedAt: { not: null } } }),
-  ]);
-  if (!searchAssigned || earlierResearch || acceptedRound) return;
-  const calls = await listRunToolResults(prisma, { ...scope } as Actor, context.runId);
-  if (calls.some((call) => isPeopleSearchEndpoint(call.endpoint))) return;
-  throw new IsolationError(
-    "Calibration rounds use the built-in people search, not a research task: call web_search_advanced_exa yourself (four searches in one step; each saves itself to Results), then calibration_round, in this turn. If you do not have the people search, hand the round back to Main. Research starts after a round is accepted, or to top up a short people search in the same run.",
-  );
-}
-
 /** Schools on the public profile, so Results can show education without another lookup. */
 const EDUCATION_SCHEMA = {
   type: ["array", "null"],
@@ -894,8 +810,7 @@ const lifecycle = new Map([
   ["canceled", true],
   ["failed", true],
 ]);
-// These codes explicitly refuse admission in the public Task API ErrorResponse contract.
-// Server/transport failures need task_created:false before they prove non-delivery.
+// These codes explicitly refuse a request in the provider's public ErrorResponse contract.
 const refusalCodes = new Set([
   "invalid_request",
   "unauthorized",
@@ -906,23 +821,18 @@ const refusalCodes = new Set([
   "task_in_cron_mode",
   "task_exists",
 ]);
-const serverErrorCodes = new Set([
-  "service_unavailable",
-  "at_capacity",
-  "internal_error",
-  "bad_gateway",
-]);
 
+/**
+ * Re-reads a stored page of result rows the way it was classified when it was saved, so an older
+ * role's saved people can be checked against their retained receipt.
+ */
 export function classifyRecruitingResearchResult(
   raw: unknown,
-  options: { operation: "create" | "continue" | "status" | "rows"; providerTaskId?: string },
+  options: { providerTaskId?: string },
 ): RecruitingResearchObservation {
   const observation: RecruitingResearchObservation = {
     deliveryState: "unknown",
-    providerTaskId:
-      options.operation !== "create" && nonblank(options.providerTaskId)
-        ? options.providerTaskId
-        : null,
+    providerTaskId: nonblank(options.providerTaskId) ? options.providerTaskId : null,
     observedProviderState: null,
     done: null,
     providerApplicationConfirmed: false,
@@ -932,7 +842,7 @@ export function classifyRecruitingResearchResult(
   const body = mcpObject(raw);
   if (!body) return observation;
   // A finished people-search agent run that graded people: its structured rows are the page.
-  if (options.operation === "rows" && options.providerTaskId?.startsWith("agent_run_")) {
+  if (options.providerTaskId?.startsWith("agent_run_")) {
     const rows = record(record(body.output)?.structured)?.rows;
     if (body.id !== options.providerTaskId || body.status !== "completed" || !Array.isArray(rows))
       return observation;
@@ -954,21 +864,13 @@ export function classifyRecruitingResearchResult(
       body.retry_after >= 0
     )
       observation.retryAfterSeconds = body.retry_after;
-    if (
-      body.task_created !== true &&
-      (refusalCodes.has(body.error) ||
-        (options.operation === "create" &&
-          !taskId &&
-          body.task_created === false &&
-          serverErrorCodes.has(body.error)))
-    )
+    if (body.task_created !== true && refusalCodes.has(body.error))
       observation.deliveryState = "rejected";
     return observation;
   }
   if (record(raw)?.isError === true || (body.error != null && body.state !== "failed"))
     return observation;
-  if (options.operation === "create" && body.task_created === false) return observation;
-  if (options.operation !== "create" && !nonblank(options.providerTaskId)) return observation;
+  if (!nonblank(options.providerTaskId)) return observation;
   const state = nonblank(body.state) ? body.state : null;
   const queued = body.status === "accepted" || body.activity === "queued";
   if (queued && body.done === true) return observation;
@@ -981,34 +883,25 @@ export function classifyRecruitingResearchResult(
     return observation;
   observation.observedProviderState = state ?? (queued ? "queued" : null);
   observation.done = typeof body.done === "boolean" ? body.done : queued ? false : null;
-  if (options.operation === "create") {
-    if (!taskId) return observation;
-  } else if (options.operation === "continue") {
-    if (!taskId && !queued) return observation;
-  } else if (options.operation === "status") {
-    if (!state || !lifecycle.has(state) || typeof body.done !== "boolean") return observation;
-  } else {
-    if (!Array.isArray(body.rows)) return observation;
-    if (
-      body.next_cursor !== undefined &&
-      body.next_cursor !== null &&
-      typeof body.next_cursor !== "string"
-    )
-      return observation;
-    const outputId = body.output_id ?? record(body.output)?.id;
-    if (outputId != null && !nonblank(outputId)) return observation;
-    if (
-      body.output_id != null &&
-      record(body.output)?.id != null &&
-      body.output_id !== record(body.output)?.id
-    )
-      return observation;
-    observation.rows = body.rows;
-    if (body.next_cursor !== undefined) observation.nextCursor = body.next_cursor as string | null;
-    if (outputId !== undefined) observation.outputId = outputId as string | null;
-  }
+  if (!Array.isArray(body.rows)) return observation;
+  if (
+    body.next_cursor !== undefined &&
+    body.next_cursor !== null &&
+    typeof body.next_cursor !== "string"
+  )
+    return observation;
+  const outputId = body.output_id ?? record(body.output)?.id;
+  if (outputId != null && !nonblank(outputId)) return observation;
+  if (
+    body.output_id != null &&
+    record(body.output)?.id != null &&
+    body.output_id !== record(body.output)?.id
+  )
+    return observation;
+  observation.rows = body.rows;
+  if (body.next_cursor !== undefined) observation.nextCursor = body.next_cursor as string | null;
+  if (outputId !== undefined) observation.outputId = outputId as string | null;
   observation.deliveryState = "accepted";
-  if (options.operation === "create") observation.providerTaskId = taskId;
   if (
     typeof body.credits_used === "number" &&
     Number.isFinite(body.credits_used) &&
@@ -1115,7 +1008,6 @@ export function createRecruitingCandidateReportReader(
           )
             throw new IsolationError();
           observation = classifyRecruitingResearchResult(snapshot.providerResult, {
-            operation: "rows",
             providerTaskId: args.task_id,
           });
           requestCursor = "cursor" in args ? args.cursor : null;
@@ -1139,7 +1031,6 @@ export function createRecruitingCandidateReportReader(
           if (snapshot.operation !== "rows" || snapshot.effectId !== source.effectId)
             throw new IsolationError();
           observation = classifyRecruitingResearchResult(snapshot.providerResult, {
-            operation: "rows",
             providerTaskId: task.providerTaskId ?? undefined,
           });
           if (!isDeepStrictEqual(snapshot.observation, observation)) throw new IsolationError();

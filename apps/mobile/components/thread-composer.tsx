@@ -549,9 +549,7 @@ export function ThreadComposer({
                     ? t("Cancelling…")
                     : task.kind === "agent_run"
                       ? t("Stop following")
-                      : task.kind === "research"
-                        ? t("Stop research updates")
-                        : t("Cancel task"),
+                      : t("Cancel task"),
                 attributes: { disabled: sending || task.status === "cancelling" },
               })),
             ]}

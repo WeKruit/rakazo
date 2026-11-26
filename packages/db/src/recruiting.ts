@@ -29,8 +29,6 @@ import type {
   RecruitingQuestion,
   RecruitingReadPayload,
   RecruitingReplyTarget,
-  RecruitingResearchAction,
-  RecruitingResearchPurpose,
   RecruitingResearchToolInput,
   RecruitingRole,
   RecruitingRoleRevision,
@@ -5803,21 +5801,6 @@ export async function authorizeRecruitingApprovalAnswerInTransaction(
   }
 }
 
-export type RecruitingResearchContextInput = {
-  runId: string;
-  sourceMessageId?: string | null;
-  intent?: RecruitingHumanIntent;
-  expectedRoleRevision?: number;
-  mcpServerId?: string;
-  taskId?: string;
-  actionId?: string;
-  clientNonce?: string;
-  toolName?: "research" | "reply" | "get_task" | "get_rows";
-  historical?: boolean;
-  purpose?: RecruitingResearchPurpose;
-  approvalEffectId?: string;
-};
-
 export function recruitingResearchSnapshot(task: ResearchTaskRow, action: ResearchActionRow) {
   return {
     task: RecruitingResearchTaskSchema.parse(task),
@@ -6098,211 +6081,86 @@ async function requireResearchHandoff(
   return { ...block, sender };
 }
 
-async function requireResearchSource(
+/**
+ * The saved research action an older page was read under, with its run, task, source message and
+ * effect checked against the actor. Research tasks are no longer started; this only proves pages
+ * that older roles already hold.
+ */
+async function savedResearchAction(
   tx: Tx,
   actor: Actor,
-  run: Awaited<ReturnType<typeof lockLiveRecruitingRun>>["run"],
-  sourceMessageId: string | null,
-  quote: string,
-) {
-  const { source, answers } = await requireRunSource(tx, actor, run, sourceMessageId);
-  if (isNativeHumanMessage(source) || answers.some((answer) => answer.seq > source.seq))
-    return requireCurrentHumanSource(tx, actor, run, sourceMessageId, quote);
-  const handoff = await requireResearchHandoff(tx, actor, run, source, true);
-  if (!handoff.text.includes(quote)) throw new IsolationError();
-  return {
-    message: source,
-    source: RecruitingSourceRefSchema.parse({
-      id: `group-handoff:${source.id}`,
-      kind: "original_material",
-      anchor: { kind: "message", messageId: source.id, locator: "blocks[0].text" },
-      readState: "read",
-      readAt: new Date().toISOString(),
-      quote,
-    }),
-  };
-}
-
-async function researchContextInTransaction(
-  tx: Tx,
-  actor: Actor,
-  input: RecruitingResearchContextInput,
-  requireLive = false,
-  // Internal only (never from caller input): page-provenance reads skip re-validating the
-  // action's request/context/receipt/output artifacts; run, thread, role, task, action, source
-  // message and effect isolation checks below still run.
+  input: { runId: string; actionId: string },
+  // Page-provenance reads skip re-validating the action's request/context/receipt/output
+  // artifacts; run, thread, role, task, action, source message and effect checks still run.
   skipActionArtifacts = false,
 ) {
-  const live =
-    input.historical && !requireLive ? null : await lockLiveRecruitingRun(tx, actor, input.runId);
-  if (!live) await requireRun(tx, actor, input.runId);
-  const run =
-    live?.run ??
-    (await tx.run.findUniqueOrThrow({
-      where: { id: input.runId },
-      include: { bot: { select: { spaceId: true, userId: true } } },
-    }));
-  const thread = live?.thread ?? (await requireThread(tx, actor, run.threadId));
-  let action =
-    input.actionId || input.clientNonce
-      ? await tx.recruitingResearchAction.findFirst({
-          where: {
-            ...(input.actionId ? { id: input.actionId } : { clientNonce: input.clientNonce }),
-          },
-        })
-      : null;
-  if ((input.actionId || input.clientNonce) && !action) {
-    if (input.actionId) throw new IsolationError();
-  }
-  if (action && input.taskId && action.taskId !== input.taskId) throw new IsolationError();
-  const taskId = action?.taskId ?? input.taskId;
-  let task = taskId ? await tx.recruitingResearchTask.findUnique({ where: { id: taskId } }) : null;
-  const roleId = input.historical && task ? task.roleId : thread.activeRecruitingRoleId;
-  if (!roleId) throw new IsolationError();
-  const role = await requireRole(tx, actor, roleId, true, thread);
-  if (action)
-    action = await tx.recruitingResearchAction.findUniqueOrThrow({ where: { id: action.id } });
-  if (task) task = await tx.recruitingResearchTask.findUniqueOrThrow({ where: { id: task.id } });
-  if (!action && task && !input.actionId && !input.clientNonce) {
-    action = task.pendingActionId
-      ? await tx.recruitingResearchAction.findUnique({ where: { id: task.pendingActionId } })
-      : await tx.recruitingResearchAction.findFirst({
-          where: { taskId: task.id },
-          orderBy: { id: "desc" },
-        });
-    if (!action || action.taskId !== task.id) throw new IsolationError();
-  }
-  if (input.expectedRoleRevision !== undefined && role.revision !== input.expectedRoleRevision)
-    throw new RecruitingConflictError();
-  const workspace = await roleSnapshot(tx, actor, role, thread, run);
-  const source = input.intent
-    ? (
-        await requireResearchSource(
-          tx,
-          actor,
-          run,
-          input.sourceMessageId === undefined ? run.sourceMessageId : input.sourceMessageId,
-          RecruitingHumanIntentSchema.parse(input.intent).quote,
-        )
-      ).source
-    : null;
-  if ((taskId && !task) || (task && task.roleId !== role.id)) throw new IsolationError();
-  if (task && task.createdByRunId !== run.id)
-    await requireRun(tx, actor, task.createdByRunId, thread);
-  const boundServerId = task?.mcpServerId;
-  if (input.mcpServerId && boundServerId && input.mcpServerId !== boundServerId)
+  await requireRun(tx, actor, input.runId);
+  const run = await tx.run.findUniqueOrThrow({
+    where: { id: input.runId },
+    include: { bot: { select: { spaceId: true, userId: true } } },
+  });
+  const thread = await requireThread(tx, actor, run.threadId);
+  const found = await tx.recruitingResearchAction.findFirst({ where: { id: input.actionId } });
+  if (!found) throw new IsolationError();
+  const foundTask = await tx.recruitingResearchTask.findUnique({ where: { id: found.taskId } });
+  if (!foundTask) throw new IsolationError();
+  const role = await requireRole(tx, actor, foundTask.roleId, true, thread);
+  const action = await tx.recruitingResearchAction.findUniqueOrThrow({ where: { id: found.id } });
+  const task = await tx.recruitingResearchTask.findUniqueOrThrow({ where: { id: foundTask.id } });
+  if (task.roleId !== role.id) throw new IsolationError();
+  if (task.createdByRunId !== run.id) await requireRun(tx, actor, task.createdByRunId, thread);
+  scoped(
+    actor,
+    await tx.mcpServer.findFirst({
+      where: { id: task.mcpServerId, spaceId: actor.spaceId, userId: actor.userId },
+      select: { id: true, spaceId: true, userId: true },
+    }),
+  );
+  if (
+    !(await tx.recruitingRoleRevision.findFirst({
+      where: { id: action.roleRevisionId, roleId: role.id },
+    }))
+  )
     throw new IsolationError();
-  const serverId = boundServerId ?? input.mcpServerId;
-  const server = serverId
-    ? scoped(
-        actor,
-        await tx.mcpServer.findFirst({
-          where: {
-            id: serverId,
-            spaceId: actor.spaceId,
-            userId: actor.userId,
-            ...(input.historical ? {} : { enabled: true }),
-          },
-          select: {
-            id: true,
-            spaceId: true,
-            userId: true,
-            enabled: true,
-            revision: true,
-            slug: true,
-          },
-        }),
-      )
-    : null;
-  if (server && !input.historical) {
-    const assignment = await tx.botMcpServer.findFirst({
-      where: {
-        serverId: server.id,
-        botId: run.botId,
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-      },
+  const origin = action.runId === run.id ? run : await requireRun(tx, actor, action.runId, thread);
+  const message = await tx.message.findUnique({
+    where: { id: action.sourceMessageId },
+    include: humanMessageInclude,
+  });
+  if (!message || message.threadId !== origin.threadId) throw new IsolationError();
+  if (!isNativeHumanMessage(message))
+    await requireResearchHandoff(
+      tx,
+      actor,
+      await tx.run.findUniqueOrThrow({ where: { id: origin.id } }),
+      message,
+      false,
+    );
+  const snapshot = recruitingResearchSnapshot(task, action).action;
+  if (!skipActionArtifacts)
+    for (const ref of [
+      snapshot.requestArtifact,
+      snapshot.contextArtifact,
+      ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
+      ...snapshot.outputArtifacts,
+    ])
+      await validateArtifact(tx, actor, ref, { run, thread });
+  await tx.artifact.findUniqueOrThrow({ where: { id: action.requestArtifactId } });
+  if (action.effectId) {
+    const effect = await tx.externalEffect.findFirst({
+      where: { id: action.effectId, spaceId: actor.spaceId },
     });
-    const toolName = input.toolName ?? (action?.kind === "continue" ? "reply" : "research");
     if (
-      !assignment ||
-      (!assignment.allowAllTools &&
-        (!Array.isArray(assignment.allowedTools) || !assignment.allowedTools.includes(toolName)))
-    )
-      throw new IsolationError();
-    if (task && task.serverRevision !== server.revision) throw new RecruitingConflictError();
-  }
-  let effect: ResearchEffectRow | null = null;
-  let requestArtifact: Prisma.ArtifactGetPayload<Record<string, never>> | null = null;
-  if (action) {
-    if (
-      !task ||
-      !(await tx.recruitingRoleRevision.findFirst({
-        where: { id: action.roleRevisionId, roleId: role.id },
+      !effect ||
+      effect.idempotencyKey !== `recruiting-research:${action.id}` ||
+      (await tx.recruitingResearchAction.findFirst({
+        where: { effectId: effect.id, id: { not: action.id } },
       }))
     )
       throw new IsolationError();
-    const origin =
-      action.runId === run.id ? run : await requireRun(tx, actor, action.runId, thread);
-    const message = await tx.message.findUnique({
-      where: { id: action.sourceMessageId },
-      include: humanMessageInclude,
-    });
-    if (!message || message.threadId !== origin.threadId) throw new IsolationError();
-    if (!isNativeHumanMessage(message))
-      await requireResearchHandoff(
-        tx,
-        actor,
-        await tx.run.findUniqueOrThrow({ where: { id: origin.id } }),
-        message,
-        !input.historical,
-      );
-    const snapshot = recruitingResearchSnapshot(task, action).action;
-    if (!skipActionArtifacts)
-      for (const ref of [
-        snapshot.requestArtifact,
-        snapshot.contextArtifact,
-        ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
-        ...snapshot.outputArtifacts,
-      ])
-        await validateArtifact(tx, actor, ref, { run, thread });
-    requestArtifact = await tx.artifact.findUniqueOrThrow({
-      where: { id: action.requestArtifactId },
-    });
-    if (action.effectId) {
-      effect = await tx.externalEffect.findFirst({
-        where: { id: action.effectId, spaceId: actor.spaceId },
-      });
-      if (
-        !effect ||
-        effect.idempotencyKey !== `recruiting-research:${action.id}` ||
-        (await tx.recruitingResearchAction.findFirst({
-          where: { effectId: effect.id, id: { not: action.id } },
-        }))
-      )
-        throw new IsolationError();
-      if (effect.runId !== run.id) await requireRun(tx, actor, effect.runId, thread);
-    }
+    if (effect.runId !== run.id) await requireRun(tx, actor, effect.runId, thread);
   }
-  return {
-    run,
-    thread,
-    workspace,
-    server,
-    task,
-    action,
-    effect,
-    requestArtifact,
-    source,
-  };
-}
-
-export async function readRecruitingResearchContext(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: RecruitingResearchContextInput,
-) {
-  return prisma.$transaction((tx) => researchContextInTransaction(tx, actor, input));
+  return { task, action };
 }
 
 async function requireResearchAdoption(
@@ -6415,24 +6273,6 @@ function requireResearchLease(
   )
     throw new IsolationError();
 }
-
-export type RecruitingResearchObservationInput = {
-  runId: string;
-  actionId: string;
-  effectId: string;
-  request: Prisma.InputJsonValue;
-  rawResult: Prisma.InputJsonValue;
-  toolName: "get_task" | "get_rows";
-  outputArtifact: RecruitingResearchArtifactInput;
-  observedProviderState?: string;
-  taskState?: "active" | "completed" | "closed" | "unknown";
-  usage?: RecruitingResearchAction["usage"];
-  cursor?: string | null;
-  historicalBackfill?: boolean;
-  /** Classified by the native adapter from the exact effect result; raw bytes stay in ArtifactStore. */
-  rows?: readonly unknown[];
-  outputId?: string | null;
-};
 
 type ResearchReadBinding = Extract<RecruitingReadPayload, { phase: "bound" }>;
 type ResearchReadRecorded = Extract<RecruitingReadPayload, { phase: "recorded" }>;
@@ -6560,7 +6400,6 @@ async function researchReadBinding(
   tx: Tx,
   actor: Actor,
   effect: ResearchEffectRow,
-  lease?: ResearchLease,
   memo: ProofMemo = unmemoized,
   pageOnly = false,
 ) {
@@ -6597,20 +6436,13 @@ async function researchReadBinding(
   if (bindings.length !== 1 || recorded.length > 1) throw new IsolationError();
   const { event, payload } = bindings[0]!;
   const binding = payload as ResearchReadBinding;
-  if (lease && effect.runId !== lease.runId) throw new IsolationError();
   if (event.runId !== owner.id || event.threadId !== owner.threadId || event.botId !== owner.botId)
     throw new IsolationError();
-  const context = {
-    runId: owner.id,
-    actionId: binding.actionId,
-    toolName: binding.toolName,
-    historical: !lease,
-  };
+  const context = { runId: owner.id, actionId: binding.actionId };
   const saved = await memo(`context:${pageOnly}:${stableJsonValue(context)}`, () =>
-    researchContextInTransaction(tx, actor, context, false, pageOnly),
+    savedResearchAction(tx, actor, context, pageOnly),
   );
-  if (lease) requireResearchLease(saved.run, lease);
-  if (!saved.task || !saved.action || saved.task.id !== binding.taskId) throw new IsolationError();
+  if (saved.task.id !== binding.taskId) throw new IsolationError();
   const call = researchReadRequest(effect.request, saved.task, binding.toolName);
   const materialized = recorded[0];
   if (
@@ -6661,7 +6493,7 @@ async function recordedResearchReadArtifact(
     payload.outputArtifact.artifactId !== artifact.id ||
     payload.outputArtifact.sha256 !== artifact.hash ||
     !RecruitingArtifactRefSchema.array()
-      .parse(read.saved.action!.outputArtifacts)
+      .parse(read.saved.action.outputArtifacts)
       .some((ref) => ref.artifactId === artifact.id && ref.sha256 === artifact.hash)
   )
     throw new IsolationError();
@@ -6669,291 +6501,6 @@ async function recordedResearchReadArtifact(
     validateArtifact(tx, actor, payload.outputArtifact),
   );
   return artifact;
-}
-
-export async function bindRecruitingResearchReadEffect(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: ResearchLease & { actionId: string; effectId: string; request: Prisma.InputJsonValue },
-) {
-  return prisma.$transaction(async (tx) => {
-    let effect = await tx.externalEffect.findFirst({
-      where: { id: input.effectId, spaceId: actor.spaceId, runId: input.runId },
-    });
-    if (!effect || stableJsonValue(effect.request) !== stableJsonValue(input.request))
-      throw new IsolationError();
-    const existing = await researchReadBinding(
-      tx,
-      actor,
-      effect,
-      effect.status === "completed" ? undefined : input,
-    );
-    if (existing) {
-      if (
-        input.actionId !== existing.binding.actionId &&
-        !(await tx.recruitingResearchAction.findFirst({
-          where: { id: input.actionId, taskId: existing.binding.taskId },
-        }))
-      )
-        throw new IsolationError();
-      await recordedResearchReadArtifact(tx, actor, existing);
-      return { saved: existing.saved, effect, binding: existing.binding };
-    }
-    const call = researchReadRequest(input.request);
-    const saved = await researchContextInTransaction(tx, actor, {
-      runId: input.runId,
-      actionId: input.actionId,
-      toolName: call.toolName,
-    });
-    requireResearchLease(saved.run, input);
-    if (!saved.task || !saved.action) throw new IsolationError();
-    researchReadRequest(input.request, saved.task, call.toolName);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${effect.id} FOR UPDATE`,
-    );
-    effect = await tx.externalEffect.findUniqueOrThrow({ where: { id: effect.id } });
-    if (
-      effect.runId !== input.runId ||
-      effect.spaceId !== actor.spaceId ||
-      stableJsonValue(effect.request) !== stableJsonValue(input.request)
-    )
-      throw new IsolationError();
-    const raced = await researchReadBinding(tx, actor, effect);
-    if (raced) {
-      if (raced.binding.taskId !== saved.task.id) throw new IsolationError();
-      return { saved: raced.saved, effect, binding: raced.binding };
-    }
-    if (!["intended", "approved", "executing"].includes(effect.status)) throw new IsolationError();
-    const binding: ResearchReadBinding = {
-      phase: "bound",
-      taskId: saved.task.id,
-      actionId: saved.action.id,
-      effectId: effect.id,
-      toolName: call.toolName,
-    };
-    const event = await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId: saved.run.threadId,
-      botId: saved.run.botId,
-      runId: saved.run.id,
-      type: "recruiting.read",
-      payload: binding,
-    });
-    researchReadPayload(event);
-    return { saved, effect, binding };
-  });
-}
-
-export async function claimRecruitingResearchReadEffect(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: ResearchLease & { effectId: string; from: "intended" | "approved" },
-) {
-  return prisma.$transaction(async (tx) => {
-    const effect = await tx.externalEffect.findFirst({
-      where: {
-        id: input.effectId,
-        spaceId: actor.spaceId,
-        runId: input.runId,
-      },
-    });
-    if (!effect) throw new IsolationError();
-    const read = await researchReadBinding(tx, actor, effect, input);
-    if (!read || !["intended", "approved"].includes(input.from) || effect.status !== input.from)
-      return false;
-    const claimed = await tx.externalEffect.updateMany({
-      where: {
-        id: effect.id,
-        spaceId: actor.spaceId,
-        runId: input.runId,
-        status: input.from,
-        request: { equals: effect.request as Prisma.InputJsonValue },
-      },
-      data: { status: "executing" },
-    });
-    return claimed.count === 1;
-  });
-}
-
-export async function listUnmappedRecruitingResearchReads(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: { runId: string; taskId: string },
-) {
-  return prisma.$transaction(async (tx) => {
-    await requireRun(tx, actor, input.runId);
-    const task = await tx.recruitingResearchTask.findUnique({ where: { id: input.taskId } });
-    if (!task) throw new IsolationError();
-    await requireRole(tx, actor, task.roleId, true);
-    const events = await tx.event.findMany({
-      where: {
-        spaceId: actor.spaceId,
-        type: "recruiting.read",
-        payload: { path: ["taskId"], equals: task.id },
-      },
-    });
-    const pending = [];
-    for (const effectId of new Set(events.map((event) => researchReadPayload(event).effectId))) {
-      const effect = await tx.externalEffect.findFirst({
-        where: { id: effectId, spaceId: actor.spaceId },
-      });
-      if (!effect) throw new IsolationError();
-      const read = await researchReadBinding(tx, actor, effect);
-      if (!read || read.binding.taskId !== task.id) throw new IsolationError();
-      if (effect.status !== "completed") continue;
-      const recorded = await recordedResearchReadArtifact(tx, actor, read);
-      const indexed =
-        read.toolName === "get_rows"
-          ? await tx.recruitingCandidatePage.findUnique({ where: { effectId: effect.id } })
-          : true;
-      if (!recorded || !indexed)
-        pending.push({
-          ...(recorded
-            ? {
-                outputArtifact: {
-                  name: recorded.name,
-                  mimeType: recorded.mimeType,
-                  size: recorded.size,
-                  hash: recorded.hash,
-                  storageKey: recorded.storageKey,
-                  clientNonce: `recruiting-observation:${effect.id}`,
-                },
-              }
-            : {}),
-          saved: read.saved,
-          effect,
-          toolName: read.toolName,
-          args: read.args,
-          route: read.route,
-        });
-    }
-    return pending;
-  });
-}
-
-export async function recordRecruitingResearchObservation(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: RecruitingResearchObservationInput,
-) {
-  return prisma.$transaction(async (tx) => {
-    const capture = await requireRun(tx, actor, input.runId);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${capture.threadId} FOR UPDATE`,
-    );
-    const context = await researchContextInTransaction(tx, actor, { ...input, historical: true });
-    const { run, thread, action, task } = context;
-    if (
-      !action ||
-      !task?.providerTaskId ||
-      (input.usage !== undefined && !action.receiptArtifactId)
-    )
-      throw new IsolationError();
-    const effect = await tx.externalEffect.findFirst({
-      where: { id: input.effectId, spaceId: actor.spaceId, status: "completed" },
-    });
-    if (
-      !effect ||
-      (effect.runId !== run.id && !input.historicalBackfill) ||
-      stableJsonValue(effect.request) !== stableJsonValue(input.request) ||
-      stableJsonValue(effect.result) !== stableJsonValue(input.rawResult) ||
-      input.outputArtifact.clientNonce !== `recruiting-observation:${effect.id}`
-    )
-      throw new IsolationError();
-    researchReadRequest(input.request, task, input.toolName);
-    const read = await researchReadBinding(tx, actor, effect);
-    if (
-      !read ||
-      read.binding.actionId !== action.id ||
-      read.binding.taskId !== task.id ||
-      read.toolName !== input.toolName
-    )
-      throw new IsolationError();
-    const recorded = await recordedResearchReadArtifact(tx, actor, read);
-    if (recorded) {
-      if (recorded.hash !== input.outputArtifact.hash) throw new RecruitingConflictError();
-      const candidateRows = await indexRecruitingCandidateRows(
-        tx,
-        actor,
-        action,
-        task,
-        effect,
-        recorded,
-        read.args,
-        input,
-      );
-      return { task, action, outputArtifact: recorded, candidateRows };
-    }
-    const outputArtifact = await createResearchArtifact(
-      tx,
-      actor,
-      run,
-      thread,
-      input.outputArtifact,
-    );
-    const candidateRows = await indexRecruitingCandidateRows(
-      tx,
-      actor,
-      action,
-      task,
-      effect,
-      outputArtifact,
-      read.args,
-      input,
-    );
-    const outputArtifacts = [
-      ...RecruitingArtifactRefSchema.array().parse(action.outputArtifacts),
-      { artifactId: outputArtifact.id, sha256: outputArtifact.hash },
-    ];
-    const updated = await tx.recruitingResearchAction.update({
-      where: { id: action.id },
-      data: {
-        outputArtifacts,
-        ...(!input.historicalBackfill && input.observedProviderState !== undefined
-          ? { observedProviderState: input.observedProviderState }
-          : {}),
-        ...(!input.historicalBackfill && input.usage !== undefined
-          ? {
-              usage:
-                input.usage === null ? Prisma.JsonNull : (input.usage as Prisma.InputJsonValue),
-            }
-          : {}),
-        ...(!input.historicalBackfill && input.cursor !== undefined
-          ? { cursor: input.cursor }
-          : {}),
-      },
-    });
-    const changedTask =
-      !input.historicalBackfill && task.pendingActionId === action.id && input.taskState
-        ? await tx.recruitingResearchTask.update({
-            where: { id: task.id },
-            data: {
-              state: input.taskState,
-              ...(task.pendingActionId === action.id && input.taskState === "closed"
-                ? { pendingActionId: null }
-                : {}),
-            },
-          })
-        : task;
-    const event = await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      runId: run.id,
-      type: "recruiting.read",
-      allowCancelledRun: true,
-      payload: {
-        phase: "recorded",
-        taskId: task.id,
-        actionId: action.id,
-        effectId: effect.id,
-        outputArtifact: { artifactId: outputArtifact.id, sha256: outputArtifact.hash },
-      },
-    });
-    researchReadPayload(event);
-    recruitingResearchSnapshot(changedTask, updated);
-    return { task: changedTask, action: updated, outputArtifact, candidateRows };
-  });
 }
 
 export async function listRecruitingResearch(
@@ -7093,186 +6640,6 @@ export async function listRecruitingResearch(
   return result;
 }
 
-async function indexRecruitingCandidateRows(
-  tx: Tx,
-  actor: Actor,
-  action: Pick<ResearchActionRow, "id" | "roleRevisionId" | "candidateOutputSchema"> | null,
-  task: Pick<ResearchTaskRow, "id" | "roleId">,
-  effect: ResearchEffectRow,
-  artifact: { id: string; hash: string },
-  request: Prisma.InputJsonObject,
-  input: Pick<RecruitingResearchObservationInput, "toolName" | "rows" | "outputId">,
-  nativeRevisionId?: string,
-) {
-  if (input.toolName !== "get_rows") return [];
-  if (await tx.recruitingCandidatePage.findUnique({ where: { effectId: effect.id } }))
-    return tx.recruitingCandidateOccurrence.findMany({
-      where: { pageId: effect.id },
-      orderBy: { rowIndex: "asc" },
-      select: { rowIndex: true, candidateKey: true },
-    });
-  const schemaKnown =
-    action === null || action.candidateOutputSchema === RECRUITING_CANDIDATE_OUTPUT_SCHEMA;
-  const rows = (input.rows ?? []).map((row, rowIndex) => {
-    const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
-      schemaKnown,
-    });
-    return {
-      pageId: effect.id,
-      rowIndex,
-      roleId: task.roleId,
-      candidateKey: candidateKey ?? `source-row:${effect.id}:${rowIndex}`,
-      ...profile,
-      evidenceUrls: profile.evidenceUrls === null ? Prisma.DbNull : [...profile.evidenceUrls],
-      issues: [...profile.issues],
-    };
-  });
-  const sourceRows = schemaKnown
-    ? (input.rows ?? []).flatMap((row, rowIndex) =>
-        row !== null &&
-        typeof row === "object" &&
-        !Array.isArray(row) &&
-        rows[rowIndex]!.name !== null &&
-        rows[rowIndex]!.candidateKey === `source-row:${effect.id}:${rowIndex}`
-          ? [{ rowIndex, row }]
-          : [],
-      )
-    : [];
-  if (sourceRows.length) {
-    const call = researchReadRequest(
-      effect.request,
-      undefined,
-      "get_rows",
-      agentRunBody(effect.result),
-    );
-    // ponytail: compare this authorized read view in SQL; persist row fingerprints
-    // only if its growing page history outgrows this scoped scan. Caller holds the role lock.
-    const reused = await tx.$queryRaw<Array<{ rowIndex: number; candidateKey: string }>>(
-      Prisma.sql`
-        WITH incoming_source_rows AS (
-          SELECT (item->>'rowIndex')::int AS "rowIndex", item->'row' AS "row",
-            row_number() OVER (PARTITION BY item->'row' ORDER BY (item->>'rowIndex')::int) AS ordinal
-          FROM jsonb_array_elements(${JSON.stringify(sourceRows)}::jsonb) item
-        ), source_pages AS MATERIALIZED (
-          SELECT page."effectId", page."observedAt", previous."result",
-            CASE WHEN previous."request"->>1 = 'direct' THEN previous."request"->2->'args'
-              ELSE previous."request"->2->'arguments' END AS args
-          FROM "recruiting_candidate_pages" page
-          JOIN "external_effects" previous ON previous."id" = page."effectId"
-          JOIN "runs" owner ON owner."id" = previous."runId"
-          JOIN "bots" bot ON bot."id" = owner."botId"
-          JOIN "threads" thread ON thread."id" = owner."threadId"
-          JOIN "artifacts" artifact ON artifact."id" = page."artifactId"
-          WHERE page."roleId" = ${task.roleId} AND page."effectId" <> ${effect.id}
-            AND previous."spaceId" = ${actor.spaceId} AND previous."status" = 'completed'
-            AND owner."spaceId" = ${actor.spaceId} AND owner."userId" = ${actor.userId}
-            AND bot."spaceId" = ${actor.spaceId} AND bot."userId" = ${actor.userId}
-            AND thread."spaceId" = ${actor.spaceId} AND thread."userId" = ${actor.userId}
-            AND artifact."spaceId" = ${actor.spaceId} AND artifact."userId" = ${actor.userId}
-            AND artifact."hash" = page."artifactHash" AND artifact."runId" = owner."id"
-            AND artifact."botId" = bot."id"
-            AND page."outputId" IS NOT DISTINCT FROM ${input.outputId ?? null}::text
-            AND previous."request"->>0 = '__rakazoCatalogTool'
-            AND (
-              (previous."request"->>1 = 'direct'
-                AND jsonb_array_length(CASE WHEN jsonb_typeof(previous."request") = 'array'
-                  THEN previous."request" ELSE '[]'::jsonb END) = 3
-                AND previous."request"->2->'route' = ${JSON.stringify(call.route)}::jsonb
-                AND (previous."request"->2->'args') - 'limit' = ${JSON.stringify(call.args)}::jsonb - 'limit')
-              OR (previous."request"->>1 IN ('connectors_execute_tool', 'mcp_execute_tool')
-                AND jsonb_array_length(CASE WHEN jsonb_typeof(previous."request") = 'array'
-                  THEN previous."request" ELSE '[]'::jsonb END) = 4
-                AND previous."request"->3 = ${JSON.stringify(call.route)}::jsonb
-                AND previous."request"->2->>'id' = ${`${call.route.resourceId}:get_rows`}
-                AND (previous."request"->2->'arguments') - 'limit' = ${JSON.stringify(call.args)}::jsonb - 'limit')
-            )
-        ), read_results AS (
-          SELECT * FROM source_pages
-          UNION ALL
-          SELECT current."id", current."updatedAt", current."result", ${JSON.stringify(call.args)}::jsonb
-          FROM "external_effects" current WHERE current."id" = ${effect.id}
-            AND current."spaceId" = ${actor.spaceId} AND current."status" = 'completed'
-        ), read_views AS MATERIALIZED (
-          SELECT saved.*, envelope.body FROM read_results saved
-          CROSS JOIN LATERAL (
-            SELECT COALESCE(saved."result"->'structuredContent', (
-              SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
-              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(saved."result"->'content') = 'array'
-                THEN saved."result"->'content' ELSE '[]'::jsonb END) block
-              WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
-            )) AS body
-          ) envelope
-        ), matched_source_rows AS (
-          SELECT DISTINCT ON (incoming."row", page."effectId", occurrence."candidateKey")
-            incoming."row", occurrence."candidateKey", page."observedAt", page."effectId",
-            occurrence."rowIndex"
-          FROM read_views page JOIN read_views current ON current."effectId" = ${effect.id}
-          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(page.body->'rows') = 'array'
-            THEN page.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
-          JOIN "recruiting_candidate_occurrences" occurrence ON occurrence."pageId" = page."effectId"
-            AND occurrence."rowIndex" = returned.ordinality - 1
-          JOIN incoming_source_rows incoming ON returned.value = incoming."row"
-          WHERE page."effectId" <> current."effectId" AND (
-              page.args = current.args OR (
-                NOT (page.args ? 'cursor') AND NOT (current.args ? 'cursor')
-                AND page.body->'next_cursor' = 'null'::jsonb
-                AND current.body->'next_cursor' = 'null'::jsonb
-                AND jsonb_typeof(current.body->'rows') = 'array'
-              )
-            )
-            AND occurrence."roleId" = ${task.roleId} AND occurrence."name" IS NOT NULL
-            AND occurrence."candidateKey" LIKE 'source-row:%'
-          ORDER BY incoming."row", page."effectId", occurrence."candidateKey", occurrence."rowIndex"
-        ), selected_source_pages AS (
-          SELECT DISTINCT ON ("row") "row", "effectId"
-          FROM (
-            SELECT "row", "effectId", "observedAt", count(*) AS multiplicity
-            FROM matched_source_rows GROUP BY "row", "effectId", "observedAt"
-          ) pages ORDER BY "row", multiplicity DESC, "observedAt", "effectId"
-        ), prior_source_rows AS (
-          SELECT matched."row", matched."candidateKey", row_number() OVER (
-            PARTITION BY matched."row" ORDER BY matched."rowIndex", matched."candidateKey"
-          ) AS ordinal FROM matched_source_rows matched JOIN selected_source_pages selected
-            ON matched."row" = selected."row" AND matched."effectId" = selected."effectId"
-        )
-        SELECT incoming."rowIndex", prior."candidateKey"
-        FROM incoming_source_rows incoming JOIN prior_source_rows prior
-          ON incoming."row" = prior."row" AND incoming.ordinal = prior.ordinal
-      `,
-    );
-    for (const { rowIndex, candidateKey } of reused) rows[rowIndex]!.candidateKey = candidateKey;
-  }
-  await tx.recruitingCandidatePage.create({
-    data: {
-      effectId: effect.id,
-      roleId: task.roleId,
-      taskId: action ? task.id : null,
-      actionId: action?.id ?? null,
-      roleRevisionId: action?.roleRevisionId ?? nativeRevisionId!,
-      artifactId: artifact.id,
-      artifactHash: artifact.hash,
-      requestCursor: typeof request.cursor === "string" ? request.cursor : null,
-      outputId: input.outputId ?? null,
-      // Native completion time orders historical recovery independently of indexing time.
-      observedAt: effect.updatedAt,
-      rowCount: input.rows === undefined ? null : rows.length,
-    },
-  });
-  if (!rows.length) return [];
-  await tx.recruitingCandidate.createMany({
-    data: [...new Set(rows.map((row) => row.candidateKey))].map((candidateKey) => ({
-      roleId: task.roleId,
-      candidateKey,
-    })),
-    skipDuplicates: true,
-  });
-  await tx.recruitingCandidateOccurrence.createMany({ data: rows });
-  await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${effect.id}`);
-  return rows.map(({ rowIndex, candidateKey }) => ({ rowIndex, candidateKey }));
-}
-
-type NativeCandidateSaveInput = Extract<RecruitingResearchToolInput, { operation: "save_results" }>;
-
 /** The JSON body of an agent run tool result: structured content, else its first JSON text. */
 function agentRunBody(result: unknown): { id?: unknown; status?: unknown } | undefined {
   const value = result as { structuredContent?: unknown; content?: unknown } | null;
@@ -7287,297 +6654,6 @@ function agentRunBody(result: unknown): { id?: unknown; status?: unknown } | und
     } catch {}
   }
   return undefined;
-}
-
-async function nativeCandidatePage(
-  tx: Tx,
-  actor: Actor,
-  runId: string,
-  input: NativeCandidateSaveInput,
-  context?: {
-    run: Awaited<ReturnType<typeof requireRun>>;
-    thread: Awaited<ReturnType<typeof requireThread>>;
-  },
-) {
-  const run = context?.run ?? (await requireRun(tx, actor, runId));
-  const thread = context?.thread ?? (await requireThread(tx, actor, run.threadId));
-  if (run.id !== runId || thread.id !== run.threadId) throw new IsolationError();
-  if (!thread.activeRecruitingRoleId) throw new IsolationError();
-  const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
-  if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
-    throw new RecruitingConflictError();
-  // A people-search agent run that graded people is saved like a research page: its run id
-  // names the finished call in this run, and its structured rows are the page.
-  if (input.providerTaskId.startsWith("agent_run_")) {
-    const calls = await tx.externalEffect.findMany({
-      where: {
-        spaceId: actor.spaceId,
-        runId,
-        status: "completed",
-        request: { path: ["0"], equals: "__rakazoCatalogTool" },
-        OR: [
-          { request: { path: ["2", "route", "toolName"], equals: "agent_run" } },
-          { request: { path: ["3", "toolName"], equals: "agent_run" } },
-        ],
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
-    for (const effect of calls) {
-      if (effect.runId !== run.id || effect.spaceId !== actor.spaceId) continue;
-      const body = agentRunBody(effect.result);
-      if (body?.id !== input.providerTaskId || body.status !== "completed") continue;
-      const request = effect.request as unknown[];
-      const route = (
-        request[1] === "direct" ? (request[2] as { route?: unknown })?.route : request[3]
-      ) as { resourceId?: unknown; resourceRevision?: unknown } | null;
-      if (typeof route?.resourceId !== "string" || typeof route.resourceRevision !== "number")
-        continue;
-      if (input.mcpServerId !== undefined && route.resourceId !== input.mcpServerId) continue;
-      await requireResearchAdoption(
-        tx,
-        actor,
-        run,
-        { id: role.id, currentRevisionId: role.currentRevisionId },
-        undefined,
-        effect.createdAt,
-        { run, thread },
-      );
-      return {
-        role,
-        effect,
-        call: {
-          route: {
-            connectorId: "mcp" as const,
-            resourceId: route.resourceId,
-            resourceRevision: route.resourceRevision,
-            toolName: "get_rows" as ResearchReadTool,
-          },
-          args: { task_id: input.providerTaskId } as Prisma.InputJsonObject,
-        },
-        snapshot: { request: effect.request, providerResult: effect.result },
-      };
-    }
-    throw new IsolationError();
-  }
-  // ponytail: filter the native JSON receipt; keep the full parser and provenance checks below.
-  const effects = await tx.externalEffect.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      runId,
-      status: "completed",
-      request: { path: ["0"], equals: "__rakazoCatalogTool" },
-      OR: ["direct", "connectors_execute_tool", "mcp_execute_tool"].map((tool) => {
-        const route = tool === "direct" ? ["2", "route"] : ["3"];
-        const args = ["2", tool === "direct" ? "args" : "arguments"];
-        return {
-          AND: [
-            { request: { path: ["1"], equals: tool } },
-            { request: { path: [...route, "toolName"], equals: "get_rows" } },
-            { request: { path: [...args, "task_id"], equals: input.providerTaskId } },
-            { request: { path: [...args, "cursor"], equals: input.cursor ?? Prisma.AnyNull } },
-            ...(input.mcpServerId === undefined
-              ? []
-              : [{ request: { path: [...route, "resourceId"], equals: input.mcpServerId } }]),
-          ],
-        };
-      }),
-    },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-  });
-  for (const effect of effects) {
-    if (
-      effect.runId !== run.id ||
-      effect.status !== "completed" ||
-      effect.spaceId !== actor.spaceId
-    )
-      continue;
-    let call: ReturnType<typeof researchReadRequest>;
-    try {
-      call = researchReadRequest(effect.request, undefined, "get_rows");
-    } catch (error) {
-      if (error instanceof IsolationError) continue;
-      throw error;
-    }
-    if (
-      (input.mcpServerId !== undefined && call.route.resourceId !== input.mcpServerId) ||
-      call.args.task_id !== input.providerTaskId ||
-      (call.args.cursor ?? null) !== input.cursor
-    )
-      continue;
-    await requireResearchAdoption(
-      tx,
-      actor,
-      run,
-      { id: role.id, currentRevisionId: role.currentRevisionId },
-      undefined,
-      effect.createdAt,
-      { run, thread },
-    );
-    return {
-      role,
-      effect,
-      call,
-      snapshot: { request: effect.request, providerResult: effect.result },
-    };
-  }
-  throw new IsolationError();
-}
-
-/** Read retained native output only; this never dispatches a provider request. */
-export async function readNativeRecruitingCandidatePage(
-  prisma: PrismaClient,
-  actor: Actor,
-  runId: string,
-  raw: NativeCandidateSaveInput,
-) {
-  const input = RecruitingResearchToolInputSchema.parse(raw);
-  if (input.operation !== "save_results") throw new IsolationError();
-  return prisma.$transaction((tx) => nativeCandidatePage(tx, actor, runId, input));
-}
-
-/** Artifact metadata, candidate projection and the native save effect commit together. */
-export async function saveNativeRecruitingCandidatePage(
-  prisma: PrismaClient,
-  actor: Actor,
-  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
-  raw: NativeCandidateSaveInput,
-  captured: {
-    sourceEffectId: string;
-    rows: readonly unknown[];
-    outputId?: string | null;
-    outputArtifact: RecruitingResearchArtifactInput;
-  },
-) {
-  const input = RecruitingResearchToolInputSchema.parse(raw);
-  if (
-    input.operation !== "save_results" ||
-    stableJsonValue(input) !==
-      stableJsonValue(RecruitingResearchToolInputSchema.parse(trusted.effectRequest))
-  )
-    throw new IsolationError();
-  return prisma.$transaction(async (tx) => {
-    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
-    );
-    const saving = await tx.externalEffect.findFirst({
-      where: {
-        id: trusted.effectId,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        kind: "recruiting_research",
-      },
-    });
-    if (
-      saving?.kind !== "recruiting_research" ||
-      saving.runId !== run.id ||
-      stableJsonValue(RecruitingResearchToolInputSchema.parse(saving.request)) !==
-        stableJsonValue(input)
-    )
-      throw new IsolationError();
-    if (saving.status === "completed") return saving.result;
-    requireResearchLease(run, trusted);
-    if (saving.status !== "executing") throw new IsolationError();
-    const source = await nativeCandidatePage(tx, actor, run.id, input, { run, thread });
-    const bytes = Buffer.from(stableJsonValue(source.snapshot));
-    if (
-      source.effect.id !== captured.sourceEffectId ||
-      captured.outputArtifact.hash !== createHash("sha256").update(bytes).digest("hex") ||
-      captured.outputArtifact.size !== bytes.length ||
-      captured.outputArtifact.clientNonce !== `recruiting-observation:${source.effect.id}`
-    )
-      throw new IsolationError();
-    const previous = await tx.recruitingCandidatePage.findUnique({
-      where: { effectId: source.effect.id },
-    });
-    if (
-      previous &&
-      (previous.taskId !== null ||
-        previous.actionId !== null ||
-        previous.roleId !== source.role.id ||
-        previous.roleRevisionId !== source.role.currentRevisionId ||
-        previous.artifactHash !== captured.outputArtifact.hash)
-    )
-      throw new IsolationError();
-    const artifact = previous
-      ? await candidatePageArtifact(tx, actor, previous)
-      : await createResearchArtifact(tx, actor, run, thread, captured.outputArtifact);
-    const candidateRows = await indexRecruitingCandidateRows(
-      tx,
-      actor,
-      null,
-      { id: source.effect.id, roleId: source.role.id },
-      source.effect,
-      artifact,
-      source.call.args,
-      { toolName: "get_rows", rows: captured.rows, outputId: captured.outputId },
-      source.role.currentRevisionId!,
-    );
-    if (!previous)
-      await appendEventInTransaction(tx, {
-        spaceId: actor.spaceId,
-        threadId: run.threadId,
-        botId: run.botId,
-        runId: run.id,
-        type: "recruiting.candidates.saved",
-        payload: {
-          roleId: source.role.id,
-          roleRevisionId: source.role.currentRevisionId!,
-          effectId: source.effect.id,
-          mcpServerId: source.call.route.resourceId,
-          serverRevision: source.call.route.resourceRevision,
-          providerTaskId: input.providerTaskId,
-          requestCursor: input.cursor,
-          outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-          candidateOutputSchema: RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
-        },
-      });
-    const result = {
-      status: "saved",
-      roleId: source.role.id,
-      roleRevisionId: source.role.currentRevisionId,
-      sourceEffectId: source.effect.id,
-      outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-      profileFactsVersion: 1,
-      candidateRows: candidateRows.map((entry) => {
-        const facts = RecruitingSavedProfileSchema.omit({
-          personKey: true,
-          provider: true,
-          fetchedAt: true,
-        }).safeParse((captured.rows[entry.rowIndex] as { _profile?: unknown } | null)?._profile);
-        return {
-          ...entry,
-          ...(facts.success ? { _profile: facts.data } : {}),
-          _profileSourceEffectId: source.effect.id,
-        };
-      }),
-    };
-    const completed = await tx.externalEffect.updateMany({
-      where: {
-        id: saving.id,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        status: "executing",
-        run: {
-          status: "running",
-          leaseOwner: trusted.leaseOwner,
-          leaseFence: trusted.leaseFence,
-          leaseExpiresAt: { gt: new Date() },
-        },
-      },
-      data: { status: "completed", result },
-    });
-    if (completed.count !== 1) throw new IsolationError();
-    await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      runId: run.id,
-      type: "effect.recorded",
-      payload: { effectId: saving.id, tool: "recruiting_research", ...result },
-    });
-    return result;
-  });
 }
 
 type CsvImportInput = Extract<RecruitingResearchToolInput, { operation: "import_csv" }>;
@@ -8122,13 +7198,13 @@ async function candidatePageArtifact(
     }),
   );
   if (effect?.status !== "completed") throw new IsolationError();
-  const read = await researchReadBinding(tx, actor, effect, undefined, memo, pageOnly);
+  const read = await researchReadBinding(tx, actor, effect, memo, pageOnly);
   if (
     read?.toolName !== "get_rows" ||
     read.binding.taskId !== page.taskId ||
     read.binding.actionId !== page.actionId ||
-    read.saved.task?.roleId !== page.roleId ||
-    read.saved.action?.roleRevisionId !== page.roleRevisionId ||
+    read.saved.task.roleId !== page.roleId ||
+    read.saved.action.roleRevisionId !== page.roleRevisionId ||
     (canonical && read.saved.action.candidateOutputSchema !== RECRUITING_CANDIDATE_OUTPUT_SCHEMA)
   )
     throw new IsolationError();

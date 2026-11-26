@@ -20,7 +20,6 @@ import { performComputerUpdate } from "./computer-update.js";
 import { warmBotDiscovery } from "./discovery-prewarm.js";
 import type { createRunExecutor } from "./executor.js";
 import { sendRunNotification } from "./executor.js";
-import { reportStalledGroupStage } from "./group-handoff.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
@@ -29,7 +28,6 @@ import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import { startRecruitingCheckin } from "./recruiting-checkin.js";
 import { projectRecruitingCandidateProfiles } from "./recruiting-profiles.js";
 import { projectRecruitingInboxJob } from "./recruiting-reads.js";
-import { pollRecruitingResearch } from "./recruiting-research-poll.js";
 import {
   pauseRoutineAfterRepeatedFailures,
   skipRoutineWithoutNewActivity,
@@ -155,17 +153,6 @@ export function createBackgroundJobHandlers(deps: {
           jobs: deps.jobs,
           events: deps.events,
           cloudAgent: deps.cloudAgent,
-        },
-        payload,
-      );
-    },
-    "recruiting_research.poll": async (payload) => {
-      await pollRecruitingResearch(
-        {
-          prisma: deps.prisma,
-          jobs: deps.jobs,
-          connector: deps.connector,
-          onStalled: (run) => reportStalledGroupStage(deps, run),
         },
         payload,
       );

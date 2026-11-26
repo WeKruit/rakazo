@@ -23,7 +23,6 @@ import { getLogger } from "@rakazo/logging";
 import { COMPLETION_EMAIL_OFFER, completionEmailAnswered } from "./completion-email.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { blocksText } from "./reply-suggestion.js";
 import { newRoleNote, newRoleOpening, roleRef } from "./role-reference.js";
 import { NO_RESPONSE } from "./silent-reply.js";
@@ -610,10 +609,8 @@ async function retriedStage(prisma: StageDeps["prisma"], turn: WorkerTurn) {
 }
 
 /**
- * A worker's turn ended in a group. A handed-in turn that leaves its own research running at the
- * provider has not finished the stage, so its report waits. That research's wakes continue the
- * same stage: the first partial-results wake sends the one mid-stage check-in, and the turn that
- * ends with nothing of the worker's still running delivers the final report.
+ * A worker's turn ended in a group: a turn woken to collect its search, or a retried turn,
+ * delivers the stage's report to the teammate that handed it over.
  */
 export async function reportGroupStageOutcome(
   deps: StageDeps,
@@ -623,46 +620,9 @@ export async function reportGroupStageOutcome(
 ): Promise<{ runId: string } | undefined> {
   const wake = turn.trigger === "recruiting_research";
   if (!wake && turn.trigger !== "follow_up") return undefined;
-  const partial = wake && Boolean(turn.clientNonce?.includes(":rows:"));
-  if (partial && outcome.status === "failed") return undefined;
   const stage = wake ? await handedStage(deps.prisma, turn) : await retriedStage(deps.prisma, turn);
   if (!stage) return undefined;
-  if (outcome.status === "completed") {
-    const thread = await deps.prisma.thread.findUnique({
-      where: { id: turn.threadId },
-      select: { activeRecruitingRoleId: true },
-    });
-    const running =
-      thread?.activeRecruitingRoleId &&
-      (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId, Date.now(), {
-        botId: turn.botId,
-        threadId: turn.threadId,
-      }));
-    if (running)
-      return partial
-        ? reportGroupHandoffOutcome(deps, stage, groupId, { status: "progress" })
-        : undefined;
-    if (partial) return undefined;
-  }
   return reportGroupHandoffOutcome(deps, stage, groupId, outcome);
-}
-
-/** The worker's research stopped being followed before the provider finished it. */
-export async function reportStalledGroupStage(
-  deps: StageDeps,
-  worker: Pick<WorkerTurn, "spaceId" | "threadId" | "botId" | "userId">,
-): Promise<void> {
-  const thread = await deps.prisma.thread.findFirst({
-    where: { id: worker.threadId, spaceId: worker.spaceId },
-    select: { groupId: true },
-  });
-  if (!thread?.groupId) return;
-  const stage = await handedStage(deps.prisma, worker);
-  if (!stage) return;
-  await reportGroupHandoffOutcome(deps, stage, thread.groupId, {
-    status: "failed",
-    error: "the search is still not finished at the provider after two hours of checks",
-  });
 }
 
 /** A delegator's turn that reads a teammate's check-in or finished stage may end silently. */
@@ -742,7 +702,7 @@ export async function loadGroupContext(
 
 /** How often an open handed stage checks in with the teammate that handed it over. */
 export const STAGE_WATCH_MS = 10 * 60_000;
-/** Stages older than this are left to the stuck-work and research-stall reports. */
+/** Stages older than this are left to the stuck-work report. */
 const STAGE_WATCH_WINDOW_MS = 24 * 60 * 60_000;
 
 /**
@@ -759,7 +719,7 @@ export async function watchOpenStages(
   const runs = await deps.prisma.run.findMany({
     where: {
       trigger: "follow_up",
-      status: { in: ["queued", "leased", "running", "completed"] },
+      status: { in: ["queued", "leased", "running"] },
       sourceMessageId: { not: null },
       createdAt: {
         gte: new Date(now.getTime() - STAGE_WATCH_WINDOW_MS),
@@ -816,20 +776,6 @@ export async function watchOpenStages(
   let sent = 0;
   for (const { run, asked, groupId } of stages) {
     if (reported.has(`group-report:${run.id}`)) continue;
-    // A finished turn is an open stage only while its own research still runs at the provider.
-    if (
-      run.status === "completed" &&
-      !(
-        run.thread.activeRecruitingRoleId &&
-        (await recruitingResearchInFlight(
-          deps.prisma,
-          run.thread.activeRecruitingRoleId,
-          now.getTime(),
-          { botId: run.botId, threadId: run.threadId },
-        ))
-      )
-    )
-      continue;
     const busy = await deps.prisma.run.count({
       where: {
         threadId: run.threadId,
@@ -844,12 +790,7 @@ export async function watchOpenStages(
           where: { roleId: run.thread.activeRecruitingRoleId },
         })
       : undefined;
-    const doing =
-      run.status === "completed"
-        ? "is waiting for its research results"
-        : run.status === "queued"
-          ? "has not started yet"
-          : "is still running";
+    const doing = run.status === "queued" ? "has not started yet" : "is still running";
     const slot = Math.floor(minutes / (STAGE_WATCH_MS / 60_000));
     // The first check-in of a long stage is where the recruiter is offered an email at the end.
     const offerEmail =

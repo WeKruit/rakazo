@@ -9,10 +9,7 @@ import type {
   SemanticMemoryProvider,
 } from "@rakazo/adapter-kit";
 import type { MessageBlock, RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
-import {
-  RecruitingResearchToolInputSchema,
-  RecruitingRoleToolInputSchema,
-} from "@rakazo/contracts";
+import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
 import {
   boundDirectApprovalRequest,
@@ -27,14 +24,12 @@ import {
 import type * as DatabaseModule from "@rakazo/db";
 import type { RecruitingRoleToolResult, ThreadEvents } from "@rakazo/db";
 import {
-  claimRecruitingResearchReadEffect,
   IsolationError,
   Prisma,
   prepareNativeRecruitingCandidateDecision,
   RecruitingConflictError,
   RecruitingIntentQuoteError,
   RecruitingSourceValidationError,
-  recruitingResearchSnapshot,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ArtifactReadModule from "./artifact-read.js";
@@ -92,14 +87,7 @@ import { loadRecruitingRunContext } from "./recruiting-context.js";
 import type * as RecruitingFeedbackModule from "./recruiting-feedback.js";
 import { executeRecruitingFeedback } from "./recruiting-feedback.js";
 import type * as RecruitingToolsModule from "./recruiting-tools.js";
-import {
-  admitRecruitingResearchCall,
-  bindRecruitingResearchReadCall,
-  completeRecruitingResearchCall,
-  executeRecruitingRoleTool,
-  resolveRecruitingResearchTool,
-  saveNativeRecruitingCandidateResults,
-} from "./recruiting-tools.js";
+import { executeRecruitingRoleTool, importRecruitingCandidateCsv } from "./recruiting-tools.js";
 
 vi.mock("./group-handoff.js", async (importOriginal) => {
   const original = await importOriginal<typeof GroupHandoffModule>();
@@ -121,15 +109,10 @@ vi.mock("./recruiting-assessment.js", () => ({
 vi.mock("./recruiting-tools.js", async (importOriginal) => ({
   ...(await importOriginal<typeof RecruitingToolsModule>()),
   executeRecruitingRoleTool: vi.fn(),
-  resolveRecruitingResearchTool: vi.fn(),
-  admitRecruitingResearchCall: vi.fn(),
-  bindRecruitingResearchReadCall: vi.fn(),
-  completeRecruitingResearchCall: vi.fn(),
-  saveNativeRecruitingCandidateResults: vi.fn(),
+  importRecruitingCandidateCsv: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
-  claimRecruitingResearchReadEffect: vi.fn(),
   prepareNativeRecruitingCandidateDecision: vi.fn(),
 }));
 vi.mock("./recruiting-feedback.js", async (importOriginal) => ({
@@ -2610,7 +2593,7 @@ describe("mutating tool effect idempotency keys", () => {
 describe("native recruiting validation feedback", () => {
   it.each([
     ["recruiting_role", "create", ["preferences", "intent"]],
-    ["recruiting_research", "save_results", ["expectedRoleRevision", "providerTaskId"]],
+    ["recruiting_research", "import_csv", ["expectedRoleRevision", "artifactId"]],
   ] as const)(
     "returns actionable schema fields for %s without dispatch",
     async (name, operation, fields) => {
@@ -4483,106 +4466,27 @@ describe("native recruiting feedback effect dispatch", () => {
   });
 });
 
-describe("native recruiting research executor integration", () => {
-  const route = {
-    connectorId: "mcp",
-    resourceId: "research-server",
-    resourceRevision: 3,
-    toolName: "research",
-  };
-  const providerArgs = {
-    prompt: "Exact current role, actual native memory and this round's request",
-  };
-  const tool: ConnectorTool = {
-    name: "mcp__synthetic__research",
-    description: "Synthetic research tool",
-    route,
-    inputSchema: {
-      type: "object",
-      properties: { prompt: { type: "string" } },
-      required: ["prompt"],
-      additionalProperties: false,
-    },
-  };
-  const task: Parameters<typeof recruitingResearchSnapshot>[0] = {
-    id: "research-task",
+describe("local candidate list save effects", () => {
+  const input = {
+    operation: "import_csv",
     roleId: "role-1",
-    mcpServerId: route.resourceId,
-    serverRevision: 3,
-    providerTaskId: null,
-    pendingActionId: "research-action",
-    state: "active",
-    createdByRunId: "origin-run",
-  };
-  const action: Parameters<typeof recruitingResearchSnapshot>[1] = {
-    id: "research-action",
-    taskId: task.id,
-    roleRevisionId: "role-revision-1",
-    runId: "origin-run",
-    sourceMessageId: "verified-human",
-    clientNonce: "research-round",
-    kind: "create",
-    purpose: "calibration",
-    candidateOutputSchema: "candidate_output_v1",
-    approvalEffectId: "documents-approval",
-    deliveryState: "prepared",
-    observedProviderState: null,
-    requestArtifactId: "research-request-artifact",
-    requestArtifactHash: "b".repeat(64),
-    contextArtifactId: "research-context-artifact",
-    contextArtifactHash: "a".repeat(64),
-    recallScope: null,
-    receiptArtifactId: null,
-    receiptArtifactHash: null,
-    cursor: null,
-    effectId: "research-effect",
-    outputArtifacts: [],
-    usage: null,
-  };
-
-  const completed = {
-    status: "accepted",
-    ...recruitingResearchSnapshot(
-      { ...task, providerTaskId: "provider-task" },
-      { ...action, deliveryState: "accepted" },
-    ),
+    expectedRoleRevision: 1,
+    artifactId: "list-file",
+    mapping: { name: "Name" },
   };
 
   beforeEach(() => {
-    vi.mocked(resolveRecruitingResearchTool)
-      .mockReset()
-      .mockResolvedValue({
-        route,
-        args: providerArgs,
-        actionId: action.id,
-        taskId: task.id,
-        operation: "create",
-      } as never);
-    vi.mocked(admitRecruitingResearchCall).mockReset();
-    vi.mocked(bindRecruitingResearchReadCall)
-      .mockReset()
-      .mockImplementation(async (_deps, _trusted, admitted) => admitted);
-    vi.mocked(completeRecruitingResearchCall).mockReset();
-    vi.mocked(claimRecruitingResearchReadEffect).mockReset();
     vi.mocked(loadRecruitingRunContext).mockReset();
     vi.mocked(runAutoReviewJudge).mockClear();
   });
 
-  it("saves a native candidate page locally and replays its original receipt without dispatch", async () => {
-    const f = fixture("native-candidate-save");
-    const input = {
-      operation: "save_results",
-      expectedRoleRevision: 1,
-      mcpServerId: "research-server",
-      providerTaskId: "native-task",
-      cursor: "original-cursor",
-    };
+  it("saves a candidate list locally and replays its original receipt without dispatch", async () => {
+    const f = fixture("candidate-list-save");
     const saved = {
       status: "saved",
-      sourceEffectId: "native-read",
       candidateRows: [{ rowIndex: 0, candidateKey: "linkedin:/in/example" }],
     };
-    vi.mocked(saveNativeRecruitingCandidateResults)
+    vi.mocked(importRecruitingCandidateCsv)
       .mockReset()
       .mockImplementation(async (deps, trusted, request) => {
         expect(deps).toEqual({ prisma: f.prisma, artifacts: f.artifacts });
@@ -4596,8 +4500,7 @@ describe("native recruiting research executor integration", () => {
     await f.run();
     await f.run();
     expect(f.results).toEqual([saved, saved]);
-    expect(saveNativeRecruitingCandidateResults).toHaveBeenCalledOnce();
-    expect(resolveRecruitingResearchTool).not.toHaveBeenCalled();
+    expect(importRecruitingCandidateCsv).toHaveBeenCalledOnce();
     expect(f.connector.execute).not.toHaveBeenCalled();
     expect(f.effects).toHaveLength(1);
   });
@@ -4605,19 +4508,13 @@ describe("native recruiting research executor integration", () => {
   it.each([false, true])(
     "settles a local P2028 against its authoritative save receipt (committed=%s)",
     async (committed) => {
-      const f = fixture("native-candidate-transaction-error");
-      const input = {
-        operation: "save_results",
-        expectedRoleRevision: 1,
-        providerTaskId: "native-task",
-        cursor: null,
-      };
-      const saved = { status: "saved", sourceEffectId: "native-read", candidateRows: [] };
+      const f = fixture("candidate-list-transaction-error");
+      const saved = { status: "saved", candidateRows: [] };
       const failure = new Prisma.PrismaClientKnownRequestError("Local save transaction ended", {
         code: "P2028",
         clientVersion: "test",
       });
-      vi.mocked(saveNativeRecruitingCandidateResults)
+      vi.mocked(importRecruitingCandidateCsv)
         .mockReset()
         .mockImplementation(async (_deps, trusted) => {
           const effect = f.effects.find((item) => item.id === trusted.effectId)!;
@@ -4638,7 +4535,7 @@ describe("native recruiting research executor integration", () => {
       expect(f.results).toEqual([result, result]);
       expect(JSON.stringify(f.results)).not.toContain(failure.message);
       expect(f.effects).toEqual([expect.objectContaining({ status: "completed", result })]);
-      expect(saveNativeRecruitingCandidateResults).toHaveBeenCalledOnce();
+      expect(importRecruitingCandidateCsv).toHaveBeenCalledOnce();
       expect(f.connector.execute).not.toHaveBeenCalled();
     },
   );
@@ -4646,8 +4543,8 @@ describe("native recruiting research executor integration", () => {
   it.each(["unsettled", "read-failed"])(
     "does not claim a local P2028 save completed when settlement is %s",
     async (outcome) => {
-      const f = fixture("unsettled-native-candidate-save");
-      vi.mocked(saveNativeRecruitingCandidateResults)
+      const f = fixture("unsettled-candidate-list-save");
+      vi.mocked(importRecruitingCandidateCsv)
         .mockReset()
         .mockImplementation(async () => {
           f.prisma.externalEffect.updateMany.mockResolvedValueOnce({ count: 0 });
@@ -4660,18 +4557,7 @@ describe("native recruiting research executor integration", () => {
             clientVersion: "test",
           });
         });
-      f.setCalls([
-        {
-          name: "recruiting_research",
-          args: {
-            operation: "save_results",
-            expectedRoleRevision: 1,
-            providerTaskId: "native-task",
-            cursor: null,
-          },
-          executionId: "save-page",
-        },
-      ]);
+      f.setCalls([{ name: "recruiting_research", args: input, executionId: "save-page" }]);
 
       await f.run(outcome === "read-failed" ? "Save outcome read failed" : undefined);
 
@@ -4684,16 +4570,9 @@ describe("native recruiting research executor integration", () => {
   );
 
   it("recovers an executing local candidate save after interruption before commit", async () => {
-    const f = fixture("interrupted-native-candidate-save");
-    const input = {
-      operation: "save_results",
-      expectedRoleRevision: 1,
-      mcpServerId: "research-server",
-      providerTaskId: "native-task",
-      cursor: null,
-    };
-    const saved = { status: "saved", sourceEffectId: "native-read", candidateRows: [] };
-    vi.mocked(saveNativeRecruitingCandidateResults)
+    const f = fixture("interrupted-candidate-list-save");
+    const saved = { status: "saved", candidateRows: [] };
+    vi.mocked(importRecruitingCandidateCsv)
       .mockReset()
       .mockRejectedValueOnce(new Error("Candidate save interrupted"))
       .mockImplementation(async (_deps, trusted) => {
@@ -4705,354 +4584,11 @@ describe("native recruiting research executor integration", () => {
     await f.run("Candidate save interrupted");
     expect(f.effects[0]?.status).toBe("executing");
     await f.run();
-    expect(saveNativeRecruitingCandidateResults).toHaveBeenCalledTimes(2);
+    expect(importRecruitingCandidateCsv).toHaveBeenCalledTimes(2);
     expect(f.results.at(-1)).toEqual(saved);
     expect(f.effects).toHaveLength(1);
     expect(f.effects[0]?.status).toBe("completed");
     expect(f.connector.execute).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["direct", "always_allow"],
-    ["catalog", "always_allow"],
-    ["direct", "require_approval"],
-    ["catalog", "require_approval"],
-  ] as const)("keeps native %s research on its own %s policy and effect", async (path, policy) => {
-    const actual = await vi.importActual<typeof RecruitingToolsModule>("./recruiting-tools.js");
-    vi.mocked(admitRecruitingResearchCall).mockImplementation(actual.admitRecruitingResearchCall);
-    const f = fixture(`native-research-${path}-${policy}`);
-    const entries = catalogEntries([tool]);
-    const wrappers = lazyCatalogTools("connectors", "mcp", "MCP", entries);
-    const execute = wrappers.find((entry) => entry.route?.toolName === CATALOG_EXECUTE)!;
-    f.connector.discoverTools.mockResolvedValue(path === "direct" ? [tool] : wrappers);
-    f.connector.resolveCall.mockImplementation(async (call) =>
-      call.route?.toolName === CATALOG_EXECUTE ? resolveCatalogCall(call, entries) : undefined,
-    );
-    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-      { effect: policy, matchKind: "tool", matchValue: tool.name },
-    ]);
-    f.setCalls([
-      {
-        name: path === "direct" ? tool.name : execute.name,
-        args: path === "direct" ? providerArgs : { id: entries[0]!.id, arguments: providerArgs },
-        executionId: "native-research",
-      },
-    ]);
-
-    await f.run();
-    expect(f.effects).toHaveLength(1);
-    if (policy === "require_approval") {
-      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
-      expect(f.connector.execute).not.toHaveBeenCalled();
-      expect(f.effects[0]?.status).toBe("intended");
-    } else {
-      expect(f.pauseRunForInput).not.toHaveBeenCalled();
-      expect(f.connector.execute).toHaveBeenCalledOnce();
-      expect(f.connector.execute.mock.calls[0]![0]).toMatchObject({
-        route,
-        args: providerArgs,
-      });
-      expect(f.effects[0]?.status).toBe("completed");
-      await f.run();
-      expect(f.connector.execute).toHaveBeenCalledOnce();
-      expect(f.effects).toHaveLength(1);
-    }
-  });
-
-  it("recovers status completion from the saved raw read result after interrupted snapshot mapping", async () => {
-    const f = fixture("run-research-status-recovery");
-    f.prisma.actionAutoReviewPreference.findUnique.mockResolvedValue({ enabled: true });
-    const readRoute = { ...route, toolName: "get_task" };
-    const readArgs = { task_id: "provider-task", wait_seconds: 0 };
-    const readTool: ConnectorTool = {
-      ...tool,
-      name: "mcp__synthetic__get_task",
-      route: readRoute,
-      readOnly: true,
-      inputSchema: {
-        type: "object",
-        properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
-        required: ["task_id", "wait_seconds"],
-        additionalProperties: false,
-      },
-    };
-    const rawRead = {
-      content: [{ type: "text", text: '{"task_id":"provider-task","status":"completed"}' }],
-    };
-    const readCompleted = { ...completed, observation: { done: true }, providerResult: rawRead };
-    f.connector.discoverTools.mockResolvedValue([readTool]);
-    f.connector.resolveCall.mockImplementation(async (call) =>
-      call.route?.toolName === CATALOG_EXECUTE
-        ? resolveCatalogCall(call, catalogEntries([readTool]))
-        : undefined,
-    );
-    vi.mocked(resolveRecruitingResearchTool).mockResolvedValue({
-      route: readRoute,
-      args: readArgs,
-      taskId: task.id,
-      operation: "status",
-    } as never);
-    vi.mocked(admitRecruitingResearchCall).mockImplementation(async (_deps, _trusted, call) => {
-      expect(call).toEqual(expect.objectContaining({ route: readRoute, args: readArgs }));
-      return {
-        kind: "read",
-        operation: "status",
-        saved: { task: { ...task, providerTaskId: "provider-task" }, action },
-        call,
-      } as never;
-    });
-    f.connector.execute.mockImplementation(async function* () {
-      expect(f.effects[0]!.status).toBe("executing");
-      yield { type: "result", data: rawRead };
-    });
-    vi.mocked(claimRecruitingResearchReadEffect).mockImplementation(
-      async (_deps, _actor, input) => {
-        expect(input).toMatchObject({
-          runId: f.runData.id,
-          leaseOwner: "worker-1",
-          leaseFence: f.runData.leaseFence,
-          effectId: f.effects[0]!.id,
-          from: "intended",
-        });
-        f.effects[0]!.status = "executing";
-        return true;
-      },
-    );
-    vi.mocked(completeRecruitingResearchCall)
-      .mockResolvedValue(readCompleted as never)
-      .mockImplementationOnce(async (_deps, _trusted, _admission, result) => {
-        expect(result).toEqual(rawRead);
-        expect(f.effects).toEqual([
-          expect.objectContaining({ status: "completed", result: rawRead }),
-        ]);
-        throw new Error("status snapshot mapping interrupted");
-      });
-    f.setCalls([
-      {
-        name: "recruiting_research",
-        args: { operation: "status", taskId: task.id },
-        executionId: "status-before-interruption",
-      },
-    ]);
-
-    await f.run("status snapshot mapping interrupted");
-
-    expect(f.results).toEqual([]);
-    f.setCalls([
-      {
-        name: "recruiting_research",
-        args: { operation: "status", taskId: task.id },
-        executionId: "status-after-interruption",
-      },
-    ]);
-
-    await f.run();
-
-    expect(f.results).toEqual([readCompleted]);
-    expect(f.effects).toHaveLength(1);
-    expect(f.connector.execute).toHaveBeenCalledOnce();
-    expect(runAutoReviewJudge).not.toHaveBeenCalled();
-    expect(completeRecruitingResearchCall).toHaveBeenCalledTimes(2);
-    expect(completeRecruitingResearchCall).toHaveBeenLastCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ kind: "read", operation: "status" }),
-      rawRead,
-      expect.anything(),
-      {
-        effectId: f.effects[0]!.id,
-        request: f.effects[0]!.request,
-        historicalBackfill: true,
-      },
-    );
-    expect(bindRecruitingResearchReadCall).toHaveBeenCalledTimes(2);
-    expect(claimRecruitingResearchReadEffect).toHaveBeenCalledOnce();
-  });
-
-  it("returns recovered owned read receipts without live resolution or a new effect", async () => {
-    const f = fixture("run-research-new-read-recovery");
-    const recovered = { status: "recovered", receipts: [completed] };
-    vi.mocked(resolveRecruitingResearchTool).mockResolvedValue({
-      route: { ...route, toolName: "get_rows" },
-      args: { task_id: "provider-task" },
-      taskId: task.id,
-      operation: "rows",
-      recoveredResult: recovered,
-    } as never);
-    f.setCalls([
-      {
-        name: "recruiting_research",
-        args: { operation: "rows", taskId: task.id },
-        executionId: "read-recovered-from-old-run",
-      },
-    ]);
-
-    await f.run();
-
-    expect(f.results).toEqual([recovered]);
-    expect(f.connector.resolveCall).not.toHaveBeenCalled();
-    expect(f.connector.execute).not.toHaveBeenCalled();
-    expect(f.effects).toEqual([]);
-    expect(admitRecruitingResearchCall).not.toHaveBeenCalled();
-    expect(bindRecruitingResearchReadCall).not.toHaveBeenCalled();
-  });
-
-  it("binds the exact native read effect before approval and never dispatches on binding failure", async () => {
-    const f = fixture("run-research-read-binding");
-    const readRoute = { ...route, toolName: "get_task" };
-    const args = { task_id: "provider-task", wait_seconds: 0 };
-    const readTool: ConnectorTool = {
-      ...tool,
-      name: "mcp__synthetic__get_task",
-      route: readRoute,
-      readOnly: true,
-      inputSchema: {
-        type: "object",
-        properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
-        required: ["task_id", "wait_seconds"],
-      },
-    };
-    f.connector.discoverTools.mockResolvedValue([readTool]);
-    vi.mocked(admitRecruitingResearchCall).mockImplementation(
-      async (_deps, _trusted, call) =>
-        ({
-          kind: "read",
-          operation: "status",
-          saved: { task: { ...task, providerTaskId: "provider-task" }, action },
-          call,
-        }) as never,
-    );
-    vi.mocked(bindRecruitingResearchReadCall).mockImplementation(
-      async (_deps, trusted, _admitted, effect) => {
-        expect(trusted).toMatchObject({
-          runId: f.runData.id,
-          leaseOwner: "worker-1",
-          leaseFence: f.runData.leaseFence,
-        });
-        expect(f.effects).toEqual([
-          expect.objectContaining({ id: effect.id, status: "intended", request: effect.request }),
-        ]);
-        expect(effect.request).toEqual(
-          boundDirectApprovalRequest(readRoute, args, "__rakazoCatalogTool"),
-        );
-        expect(f.pauseRunForInput).not.toHaveBeenCalled();
-        expect(f.connector.execute).not.toHaveBeenCalled();
-        throw new IsolationError();
-      },
-    );
-    f.setCalls([{ name: readTool.name, args, executionId: "read-with-missing-binding" }]);
-
-    await f.run("Resource not found");
-
-    expect(bindRecruitingResearchReadCall).toHaveBeenCalledOnce();
-    expect(f.connector.execute).not.toHaveBeenCalled();
-    expect(completeRecruitingResearchCall).not.toHaveBeenCalled();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-  });
-
-  it.each(["intended", "approved"] as const)(
-    "rejects a stale read lease at the final %s dispatch boundary",
-    async (from) => {
-      const f = fixture(`run-research-read-stale-${from}`);
-      const readRoute = { ...route, toolName: "get_task" };
-      const args = { task_id: "provider-task", wait_seconds: 0 };
-      const readTool: ConnectorTool = {
-        ...tool,
-        name: "mcp__synthetic__get_task",
-        route: readRoute,
-        readOnly: true,
-        inputSchema: {
-          type: "object",
-          properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
-          required: ["task_id", "wait_seconds"],
-        },
-      };
-      f.connector.discoverTools.mockResolvedValue([readTool]);
-      vi.mocked(admitRecruitingResearchCall).mockImplementation(
-        async (_deps, _trusted, call) =>
-          ({
-            kind: "read",
-            operation: "status",
-            saved: { task: { ...task, providerTaskId: "provider-task" }, action },
-            call,
-          }) as never,
-      );
-      if (from === "approved") {
-        f.effects.push({
-          id: "approved-read",
-          spaceId: "space-1",
-          runId: f.runData.id,
-          kind: readTool.name,
-          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, readTool.name, args),
-          status: "approved",
-          request: boundDirectApprovalRequest(readRoute, args, "__rakazoCatalogTool"),
-        });
-      }
-      vi.mocked(claimRecruitingResearchReadEffect).mockImplementation(
-        async (_deps, _actor, input) => {
-          expect(bindRecruitingResearchReadCall).toHaveBeenCalledOnce();
-          expect(input).toMatchObject({
-            runId: f.runData.id,
-            leaseOwner: "worker-1",
-            leaseFence: f.runData.leaseFence,
-            effectId: f.effects[0]!.id,
-            from,
-          });
-          throw new IsolationError();
-        },
-      );
-      f.setCalls([{ name: readTool.name, args, executionId: "read-after-lease-loss" }]);
-
-      await f.run("Resource not found");
-
-      expect(claimRecruitingResearchReadEffect).toHaveBeenCalledOnce();
-      expect(f.connector.execute).not.toHaveBeenCalled();
-      expect(completeRecruitingResearchCall).not.toHaveBeenCalled();
-      expect(f.pauseRunForInput).not.toHaveBeenCalled();
-      expect(f.effects).toHaveLength(1);
-      expect(f.effects[0]!.status).toBe(from);
-    },
-  );
-
-  it("does not change completed research domain state after an unknown read transport failure", async () => {
-    const f = fixture("run-research-read-transport");
-    const completedTask = { ...task, providerTaskId: "provider-task", state: "completed" };
-    const acceptedAction = { ...action, deliveryState: "accepted" };
-    const readTool: ConnectorTool = {
-      ...tool,
-      name: "mcp__synthetic__get_task",
-      route: { ...route, toolName: "get_task" },
-      inputSchema: { type: "object" },
-    };
-    f.connector.discoverTools.mockResolvedValue([readTool]);
-    vi.mocked(admitRecruitingResearchCall).mockImplementation(
-      async (_deps, _trusted, call) =>
-        ({
-          kind: "read",
-          operation: "status",
-          saved: { task: completedTask, action: acceptedAction },
-          call,
-        }) as never,
-    );
-    vi.mocked(claimRecruitingResearchReadEffect).mockImplementationOnce(async () => {
-      f.effects[0]!.status = "executing";
-      return true;
-    });
-    f.connector.execute.mockImplementation(async function* () {
-      yield { type: "error", message: "response timed out", outcome: "uncertain" };
-    });
-    f.setCalls([
-      {
-        name: readTool.name,
-        args: { task_id: "provider-task", wait_seconds: 0 },
-        executionId: "read-transport",
-      },
-    ]);
-    await f.run();
-    expect(f.effects[0]).toMatchObject({ status: "uncertain", result: { uncertain: true } });
-    expect(completeRecruitingResearchCall).not.toHaveBeenCalled();
-    expect(completedTask.state).toBe("completed");
-    expect(acceptedAction.deliveryState).toBe("accepted");
   });
 });
 
@@ -6732,17 +6268,8 @@ describe("native recruiting assessment effect delivery", () => {
     expect([...REVISIONED_RESEARCH_OPERATIONS].sort()).toEqual([
       "calibration_round",
       "import_csv",
-      "save_results",
       "save_search",
     ]);
-    for (const operation of ["status", "rows"]) {
-      expect(REVISIONED_RESEARCH_OPERATIONS.has(operation)).toBe(false);
-      const parsed = RecruitingResearchToolInputSchema.safeParse({
-        operation,
-        expectedRoleRevision: 1,
-      });
-      expect(JSON.stringify(parsed.error?.issues)).toContain("unrecognized_keys");
-    }
   });
 
   it("maps a mistyped key to the one saved person it is close to, never an ambiguous one", () => {
