@@ -2787,13 +2787,6 @@ export const listRecruitingResearch = (
   input: Parameters<typeof recruiting.listRecruitingResearch>[2],
 ) => authenticated(() => recruiting.listRecruitingResearch(prisma, actor, input));
 
-export const confirmRecruitingBrief = (
-  prisma: PrismaClient,
-  actor: Actor,
-  input: Parameters<typeof recruiting.confirmRecruitingBrief>[2],
-  material?: RecruitingRoleMaterialContext,
-) => authenticated(() => recruiting.confirmRecruitingBrief(prisma, actor, input, material));
-
 export const editRecruitingCriteria = (
   prisma: PrismaClient,
   actor: Actor,

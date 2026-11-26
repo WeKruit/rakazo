@@ -1,5 +1,5 @@
 import type { AdapterContext, MemoryStore } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type {
   Actor,
   RecruitingCandidateFeedbackSelection,
@@ -9,11 +9,7 @@ import type {
   RecruitingSourceRef,
 } from "@rakazo/contracts";
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
-import {
-  applyRecruitingPreferenceEdit,
-  RECRUITING_SCALE_START,
-  tidyPreferenceDocument,
-} from "@rakazo/core";
+import { applyRecruitingPreferenceEdit, tidyPreferenceDocument } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
   approveRecruitingCalibrationRoundFromMessage,
@@ -23,18 +19,6 @@ import {
 } from "@rakazo/db";
 import type { ZodError } from "zod";
 import { criteriaAssessment } from "./recruiting-criteria-check.js";
-
-/** Why a preference naming the chat's role is not saved to memory shared by every role. */
-export const ROLE_PREFERENCE_ERROR =
-  'Not saved: shared preferences apply to every role, so a requirement for one role goes on that role. Save it with recruiting_role update (or recruiting_feedback target:"role"), and keep only what the recruiter said for all roles as a preference.';
-
-/** Why a pasted job description or new-role request is not saved as a shared preference. */
-export const NEW_ROLE_PREFERENCE_ERROR =
-  "Not saved: this is a role's job description or a new role, not a preference for every role. Open the role first (start_role in the recruiter's own chat, otherwise recruiting_role) and keep its requirements on that role; save a preference only for what the recruiter said applies to all roles.";
-
-/** A job description or new-role request: a title or new-role label at the start, or a "Job Title:" line. */
-const NEW_ROLE_TEXT =
-  /^\s*(?:新(?:的)?(?:岗位|职位)|(?:岗位|职位)(?:名称)?|new (?:role|position|job|opening)|job title)\s*[:：]|(?:^|\n)\s*job title\s*[:：]/i;
 
 /**
  * Round direction marks no one. fosp x5 11-20 (753783e2): "4、5、7不行…" and a turn-down naming three
@@ -235,9 +219,6 @@ async function recordRecruitingFeedback(
       ? {}
       : { roleId: feedback.roleId, expectedRoleRevision: feedback.expectedRoleRevision }),
     ...(feedback.target === "candidate" ? { candidateKeys: feedback.candidateKeys } : {}),
-    ...(feedback.target === "round" && feedback.operation === "approve"
-      ? { acceptEarlierQuote: true }
-      : {}),
     ...((feedback.target === "round" && feedback.operation === "scope") ||
     (feedback.target === "candidate" && feedback.operation === "review")
       ? { recordKeeping: true }
@@ -259,7 +240,6 @@ async function recordRecruitingFeedback(
       ...result,
       status: approved.already ? "already_recorded" : "recorded",
       round: approved.round,
-      next: RECRUITING_SCALE_START,
     };
   }
   if (feedback.target === "round") {
@@ -293,21 +273,6 @@ async function recordRecruitingFeedback(
     throw new RecruitingFeedbackValidationError(
       "Memory target does not match the recruiting preference proposal",
     );
-  // Shared preferences apply to every role; a line naming this chat's role belongs on the role.
-  if (feedback.operation !== "revoke") {
-    if (NEW_ROLE_TEXT.test(feedback.content))
-      throw new RecruitingFeedbackValidationError(NEW_ROLE_PREFERENCE_ERROR);
-    const role = await deps.prisma.thread
-      .findUnique({
-        where: { id: threadId },
-        select: { activeRecruitingRole: { select: { title: true } } },
-      })
-      .then((found) => found?.activeRecruitingRole?.title.trim());
-    if (role && role.length >= 6 && feedback.content.toLowerCase().includes(role.toLowerCase()))
-      throw new RecruitingFeedbackValidationError(
-        `${ROLE_PREFERENCE_ERROR} This one names the role "${role}".`,
-      );
-  }
   const target = {
     scope: feedback.scope,
     path: feedback.path,
@@ -316,7 +281,7 @@ async function recordRecruitingFeedback(
   const snapshot = await deps.memory.read(target, context);
   const document = snapshot.documents[0];
   if ((document?.revision ?? 0) !== feedback.expectedRevision)
-    throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
+    throw new MemoryRevisionConflictError();
   let edited: ReturnType<typeof applyRecruitingPreferenceEdit>;
   try {
     edited = applyRecruitingPreferenceEdit(document?.content ?? "", feedback);

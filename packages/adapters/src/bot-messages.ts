@@ -23,7 +23,7 @@ import { getLogger } from "@rakazo/logging";
 import { sleep } from "./background-wait.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
+import { roundListedNotRecorded } from "./recruiting-round-check.js";
 import { ROLE_START_NONCE } from "./working-state.js";
 
 /**
@@ -557,8 +557,8 @@ export async function teamProgress(
     roleId && !recorded
       ? await Promise.resolve()
           .then(() => roundListedNotRecorded(prisma, { roleId, after: since.toISOString() }))
-          .catch(() => null)
-      : null;
+          .catch(() => false)
+      : false;
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
   // fr/fosp 11-20: "found 35 so far, with 43 saved overall" was stale a minute later and read as
@@ -676,42 +676,22 @@ export async function returnBotMessageOutcome(
 const ROUND_SHOWN_ABOVE =
   "The role's new round is already posted above in this conversation, exactly as recorded, and the recruiter already sees it. Do not list, count, retell or judge the round's people again.";
 
-/** Posts the returned round in the conversation that asked for it, once per request. */
+/** Posts the returned round in the conversation that asked for it, once per round or request. */
 async function showRoundWhereAsked(
   deps: Pick<ExecutorDeps, "prisma" | "events">,
   run: { id: string; spaceId: string },
   root: { returnThreadId: string; fromBotId: string },
   requestId: string,
   text: string,
+  roundId?: string,
 ): Promise<boolean> {
-  const posted = clampBotMessage(text);
-  const blocks: MessageBlock[] = [{ kind: "text", text: posted }];
-  const clientNonce = `delegated-round:${requestId}`;
+  const blocks: MessageBlock[] = [
+    { kind: "text", text: clampBotMessage(text), recruitingRoundList: roundId ? { roundId } : {} },
+  ];
   // fosp 11-20 (1ae3a9c3): "再来5个" and a correction a minute later were two requests the same
-  // round answered, so the recruiter got the round twice, 11 s apart.
-  const recent = await deps.prisma.message
-    .findMany({
-      where: { threadId: root.returnThreadId, role: "bot" },
-      orderBy: { seq: "desc" },
-      take: 10,
-      select: { blocks: true },
-    })
-    .catch(() => []);
-  // fosp 11-21 (f2a69ebe): Kruit read the recorded round itself and listed its five people, and
-  // the round posted 90 s later read as the list sent twice. A message naming every person counts.
-  const names = [...posted.matchAll(/^\d+\.\s+\*\*\[?([^\]*\n]+)/gm)].map((match) =>
-    match[1]!.trim(),
-  );
-  const shownBefore = recent.some((message) => {
-    const texts = (Array.isArray(message.blocks) ? message.blocks : [])
-      .flatMap((block) => {
-        const { kind, text } = (block ?? {}) as { kind?: string; text?: unknown };
-        return kind === "text" && typeof text === "string" ? [text] : [];
-      })
-      .join("\n");
-    return texts === posted || (names.length > 0 && names.every((name) => texts.includes(name)));
-  });
-  if (shownBefore) return true;
+  // round answered, so the recruiter got the round twice, 11 s apart. A recorded round is posted
+  // once, whichever request it answers.
+  const clientNonce = `delegated-round:${roundId ? `round:${roundId}` : requestId}`;
   const shown = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
       const already = await tx.message.findUnique({
@@ -773,7 +753,7 @@ export async function showRoundWhereAskedNow(
     })
   )
     return;
-  await showRoundWhereAsked(deps, run, root, `round:${roundId}`, text);
+  await showRoundWhereAsked(deps, run, root, `round:${roundId}`, text, roundId);
 }
 
 /** The text of the round as posted where it was asked for. */
@@ -972,39 +952,11 @@ export async function returnDelegatedTeamOutcome(
   // fr 11-21 (41c12cca): the recruiter tapped an answer on the role's intake question there; that
   // ended the scan, so the round that followed never came back and Kruit said it wasn't recorded.
   // A tapped card answer is not the recruiter taking the conversation there.
-  const labels = new Set(
-    (
-      await deps.prisma.message
-        .findMany({
-          where: { threadId: run.threadId, role: "bot" },
-          orderBy: { seq: "desc" },
-          take: 20,
-          select: { blocks: true },
-        })
-        .catch(() => [])
-    ).flatMap((message) =>
-      (Array.isArray(message.blocks) ? message.blocks : []).flatMap((block) => {
-        const ask = (block ?? {}) as {
-          kind?: string;
-          answer?: unknown;
-          actions?: { id?: unknown; label?: unknown }[];
-        };
-        if (ask.kind !== "ask" || !Array.isArray(ask.actions)) return [];
-        return ask.actions.flatMap((action) =>
-          action.id === ask.answer && typeof action.label === "string" ? [action.label] : [],
-        );
-      }),
-    ),
-  );
-  const answersCard = (blocks: MessageBlock[]) => {
-    const words = blocks
-      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-      .join("\n")
-      .trim();
-    return words !== "" && labels.has(words);
-  };
+  const answersCard = (blocks: MessageBlock[]) =>
+    blocks.some((block) => block.kind === "text" && block.cardAnswer);
   let text = "";
   let round = "";
+  let roundId: string | undefined;
   let answeredThere = false;
   for (const message of later) {
     const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
@@ -1019,7 +971,11 @@ export async function returnDelegatedTeamOutcome(
       .join("\n")
       .trim();
     if (reply) text = reply;
-    if (ROUND_HEADING.test(reply)) round = reply;
+    const list = blocks.find((block) => block.kind === "text" && block.recruitingRoundList);
+    if (reply && list?.kind === "text") {
+      round = reply;
+      roundId = list.recruitingRoundList?.roundId;
+    }
   }
   // Staging 11-15: the recruiter answered the round in the role's chat, and nine minutes later
   // it came back here and was shown as the new search. A round is seen once, where it was.
@@ -1045,7 +1001,7 @@ export async function returnDelegatedTeamOutcome(
   // summarised it 5 s later, or relayed the team's closing line, so the recruiter read the round
   // twice. A round with nothing else to pass on is the whole answer: Kruit gets no turn for it.
   const roundShown =
-    Boolean(round) && (await showRoundWhereAsked(deps, run, root, delegated.id, round));
+    Boolean(round) && (await showRoundWhereAsked(deps, run, root, delegated.id, round, roundId));
   if (roundShown) text = "";
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)

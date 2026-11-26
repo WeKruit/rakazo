@@ -18,6 +18,7 @@ import {
   loadMcpCredentialRecord,
   McpConnector,
   NO_EMAIL_HISTORY_YET,
+  NoOutreachCampaignError,
   PATH_REFUSAL_NOTE,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
@@ -552,7 +553,7 @@ describe("local native Instantly thread history", () => {
     vi.spyOn(
       f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
       "instantlyCampaignScope",
-    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    ).mockRejectedValue(new NoOutreachCampaignError());
     const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     try {
       await f.connector.discoverTools(f.context as never);
@@ -577,7 +578,7 @@ describe("local native Instantly thread history", () => {
     vi.spyOn(
       f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
       "instantlyCampaignScope",
-    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    ).mockRejectedValue(new NoOutreachCampaignError());
     try {
       await f.connector.discoverTools(f.context as never);
       const result = await f.collect({}, { ...route, toolName: "list_emails" });
@@ -596,7 +597,7 @@ describe("local native Instantly thread history", () => {
     vi.spyOn(
       f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
       "instantlyCampaignScope",
-    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    ).mockRejectedValue(new NoOutreachCampaignError());
     try {
       await f.connector.discoverTools(f.context as never);
       const result = await f.collect(
@@ -5990,31 +5991,6 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(patches(f)).toEqual([]);
       });
 
-      it("refuses one email that greets several of its recipients at once", async () => {
-        const { f } = await roleWithSixteen();
-        const events = await f.run("ensure_role_campaign", {
-          steps: [{ subject: "A data role", body: "Hi Abe and P0,\n\nA role in Seattle." }],
-          recipients: ["abe@x.test", "p0@x.test"],
-        });
-        expect((events[0] as { message: string }).message).toMatch(
-          /greets Abe and P0 together\. Greet with \{\{firstName\}\}/,
-        );
-        expect(f.state.requests.filter((r) => r.method === "PATCH")).toEqual([]);
-      });
-
-      it("refuses one email that greets one of its recipients by name for all of them", async () => {
-        // Sim 11-14: "Hi Abe," was saved as both people's own email, so P0's card greeted Abe.
-        const { f } = await roleWithSixteen();
-        const events = await f.run("ensure_role_campaign", {
-          steps: [{ subject: "A data role", body: "Hi Abe,\n\nA role in Seattle." }],
-          recipients: ["abe@x.test", "p0@x.test"],
-        });
-        expect((events[0] as { message: string }).message).toMatch(
-          /greets one person by name\. Greet with \{\{firstName\}\}/,
-        );
-        expect(f.state.requests.filter((r) => r.method === "PATCH")).toEqual([]);
-      });
-
       it("keeps their own email when the role's email is saved again", async () => {
         const { f } = await roleWithSixteen();
         await saveForAbe(f);
@@ -6115,9 +6091,7 @@ describe("local native Instantly campaign and lead tools", () => {
           ((await f.run("ensure_role_campaign", args))[0] as { message: string }).message;
         expect(
           await message({ steps: [{ subject: "Hi", body: "Hi {{title}}" }], recipients: ["Abe"] }),
-        ).toMatch(
-          /fill-in-the-blank \(square brackets, or a \{\{\.\.\.\}\} other than \{\{firstName\}\}/,
-        );
+        ).toMatch(/a \{\{\.\.\.\}\} field other than \{\{firstName\}\}/);
         expect(
           await message({
             steps: [{ subject: "Hi", body: "Hi {{firstName}} {{lastName}}" }],

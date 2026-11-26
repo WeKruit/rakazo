@@ -458,7 +458,31 @@ export const JOURNEYS = [
       "When the first people show, tell Kruit which two or three are not a fit and why, in one short message.",
       "Check Kruit says plainly what it changed for the next people, without asking you to rate everyone.",
       "Ask for a few more people and check none of the rejected ones come back and the new ones follow your feedback.",
-      "Open the role's Results page and check the rejected people are marked and the new people show.",
+      "Yourself, without asking Kruit, open the role's Results page; type one rejected person's name in its search box and check that row's status says Passed (the first screen holds only the best matches, and people you turned down sort below them), then check the new people show.",
+    ],
+  },
+  {
+    name: "stressed-point-few-meet",
+    // Each play opens its own role, so one play's rejects and passes never seed the next.
+    leftover: /^测试固定 · 数据工程师 8 · \d{4,5}/,
+    mechanisms: ["reference", "long-task"],
+    paid: true,
+    title: "强调的要求很少人写明：全部给出来并分开说明，不扣人",
+    area: "search",
+    source:
+      "11-26 user: 「可以混入一些不完全合格的…列出来…他们可以自己做判断，而不是一直这样死死的卡住」; branch play s135: 19 fitting people found, 2 shown, the third 2.5 minutes later",
+    account: "batch",
+    chinese: true,
+    maxTurns: 6,
+    waitMs: 12 * 60_000,
+    persona: `${AGENCY_RECRUITER} You care most about one requirement and say so, but you would rather see every reasonable person, told apart by how well they meet it, than wait for perfect ones.`,
+    facts: (_recipients, tag) =>
+      `The role is named 「测试固定 · 数据工程师 8 · ${tag}」: Senior Data Engineer, Shanghai, hybrid 3 days in office, 5+ years building batch and streaming pipelines (Spark or Flink), data warehouse modelling, Mandarin and working English, base 500k–700k RMB. Do not approve any send. Keep any search small (10 people per round, 16 in all).`,
+    goals: [
+      "Give Kruit the role under that exact name with all its details in one message and ask it to find people.",
+      "When the first people show, say that the five years on batch and streaming pipelines matters most to you, and ask for 3 more people.",
+      "Check the 3 arrive together in one list, not some now and some later, and that the list tells apart people who meet everything from people whose profile leaves a point open, naming the point.",
+      "Check what Kruit says about each new person matches the line under that person in the list.",
     ],
   },
   {
@@ -704,7 +728,7 @@ export const JOURNEYS = [
       "The role: Senior Android Engineer, Shenzhen, 5+ years, Kotlin. The client is confidential: never give its name, and you do not have the salary yet.",
     goals: [
       "Ask for a first-outreach email template for the role.",
-      "Met only when the template names no client and no salary figure that you did not give, and has no bracketed fill-ins; asking you one question about them is fine.",
+      "Met only when the template names no client and no salary figure that you did not give, and has no bracketed fill-ins (the merge fields the sender fills per person, {{firstName}}, {{lastName}}, {{companyName}} and {{personalization}}, are fine; any other {{...}} is a fill-in); asking you one question about them is fine.",
       "Say the client stays confidential and the pay is 'competitive', and check the final template uses exactly that.",
     ],
   },

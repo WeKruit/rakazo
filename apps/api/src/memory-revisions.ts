@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import type { MemoryStore } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type { Actor, MemoryDocument } from "@rakazo/contracts";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 
@@ -90,14 +90,14 @@ export async function updateMemoryDocument(
       updatedAt: new Date().toISOString(),
     };
   } catch (error) {
-    if (!(error instanceof Error) || error.message !== MEMORY_REVISION_CONFLICT_ERROR) throw error;
+    if (!(error instanceof MemoryRevisionConflictError)) throw error;
     const current = await deps.prisma.memoryDocument.findFirst({
       where,
       select: { revision: true },
     });
     if (!current) throw new ORPCError("NOT_FOUND");
     throw new ORPCError("CONFLICT", {
-      message: MEMORY_REVISION_CONFLICT_ERROR,
+      message: error.message,
       data: { currentRevision: current.revision },
     });
   }

@@ -1,4 +1,3 @@
-import { validateToolArguments } from "@earendil-works/pi-ai";
 import type {
   AgentRunRequest,
   AgentRuntimeEvent,
@@ -7,7 +6,7 @@ import type {
   ConnectorEvent,
   ConnectorTool,
 } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MEMORY_REVISION_CONFLICT_ERROR, MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type * as CoreModule from "@rakazo/core";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { UNATTENDED_MEMORY_WRITE_REFUSAL } from "@rakazo/core";
@@ -17,12 +16,11 @@ import type { PauseRunForInput } from "@rakazo/db";
 import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
-import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
+import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import { changedPaths } from "./campaign-send-card.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
-import { parametersFor } from "./pi-runtime.js";
 import type * as RecruitingCandidatesToolModule from "./recruiting-candidates-tool.js";
 import type * as ScheduleToolsModule from "./schedule-tools.js";
 import { RoutineUpdateError } from "./schedule-tools.js";
@@ -32,7 +30,6 @@ vi.mock("./recruiting-candidates-tool.js", async (original) => ({
   ...(await original<typeof RecruitingCandidatesToolModule>()),
   executeRecruitingCandidatesTool: candidateReads,
 }));
-const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
 const replyProof = vi.hoisted(() => vi.fn());
 const crmApprovalProof = vi.hoisted(() => vi.fn());
 const nativeShortlist = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
@@ -77,8 +74,6 @@ vi.mock("@rakazo/core", async (importOriginal) => ({
 }));
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
-  prepareRecruitingApproval: recruitingApproval.prepare,
-  executeRecruitingApproval: recruitingApproval.execute,
   getRecruitingCrmTarget: recruitingCrm.read,
   prepareRecruitingCrmBinding: recruitingCrm.prepare,
   executeRecruitingCrmBinding: recruitingCrm.bind,
@@ -227,7 +222,7 @@ function fixture({
         request.expectedRevision !== undefined &&
         request.expectedRevision !== sharedMemoryState.revision
       ) {
-        throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
+        throw new MemoryRevisionConflictError();
       }
       sharedMemoryState.content = request.content;
       sharedMemoryState.revision = (sharedMemoryState.revision || 0) + 1;
@@ -324,6 +319,7 @@ function fixture({
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
       count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => []),
       updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(run, data);
         return { count: 1 };
@@ -1494,118 +1490,6 @@ describe("native Instantly activation card", () => {
     await f.run();
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
     expect(f.results[0]).toMatchObject({ error: expect.stringContaining("no recipients") });
-  });
-
-  it("refuses a send card whose email greets another person in the send", async () => {
-    // Sim 11-14: Ada's card showed the email written for Noah ("Hi Noah,").
-    const f = fixture({
-      name: "instantly__demo__activate_campaign",
-      route,
-      connectorResults: {
-        ...connectorResults,
-        native_instantly_list_leads: {
-          structuredContent: {
-            source: "local_native_instantly_rest",
-            result: {
-              items: [
-                { id: "l1", email: "ada@x.test", first_name: "Ada", last_name: "Lovelace" },
-                { id: "l2", email: "noah@x.test", first_name: "Noah", last_name: "Liu" },
-              ],
-            },
-          },
-        },
-      },
-      inputSchema,
-    });
-    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
-    await f.run();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.results[0]).toMatchObject({
-      error: expect.stringContaining("Noah Liu's email greets Ada"),
-    });
-  });
-
-  it("refuses a send card whose email greets two of its recipients at once", async () => {
-    // Sim 11-14: "Hi Noah and Ada," was queued as both people's own email.
-    const f = fixture({
-      name: "instantly__demo__activate_campaign",
-      route,
-      connectorResults: {
-        ...connectorResults,
-        native_instantly_get_campaign: {
-          structuredContent: {
-            ...connectorResults.native_instantly_get_campaign.structuredContent,
-            result: {
-              ...connectorResults.native_instantly_get_campaign.structuredContent.result,
-              sequences: [
-                {
-                  steps: [
-                    { variants: [{ subject: "Founding role", body: "<p>Hi Ada and Noah,</p>" }] },
-                  ],
-                },
-              ],
-            },
-          },
-        },
-        native_instantly_list_leads: {
-          structuredContent: {
-            source: "local_native_instantly_rest",
-            result: {
-              items: [
-                { id: "l1", email: "ada@x.test", first_name: "Ada", last_name: "Lovelace" },
-                { id: "l2", email: "noah@x.test", first_name: "Noah", last_name: "Liu" },
-              ],
-            },
-          },
-        },
-      },
-      inputSchema,
-    });
-    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
-    await f.run();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.results[0]).toMatchObject({
-      error: expect.stringContaining("Ada Lovelace's email greets Noah"),
-    });
-  });
-
-  it("refuses a send card whose email is signed with a recipient's name", async () => {
-    const f = fixture({
-      name: "instantly__demo__activate_campaign",
-      route,
-      connectorResults: {
-        ...connectorResults,
-        native_instantly_get_campaign: {
-          structuredContent: {
-            ...connectorResults.native_instantly_get_campaign.structuredContent,
-            result: {
-              ...connectorResults.native_instantly_get_campaign.structuredContent.result,
-              sequences: [
-                {
-                  steps: [
-                    {
-                      variants: [
-                        {
-                          subject: "Founding role",
-                          body: "<p>Hi Ada,</p><p>Best,</p><p>Ada Lovelace</p>",
-                        },
-                      ],
-                    },
-                  ],
-                },
-              ],
-            },
-          },
-        },
-      },
-      inputSchema,
-    });
-    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
-    await f.run();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.results[0]).toMatchObject({
-      error: expect.stringContaining('signed "Ada Lovelace", a recipient\'s name'),
-    });
   });
 
   it("refuses a send card that names no campaign outside a role", async () => {
@@ -3981,230 +3865,24 @@ describe("candidate-linked native reply", () => {
   });
 });
 
-describe("native recruiting package approval", () => {
-  const args = {
-    stage: "documents",
-    roleId: "role-example",
-    expectedRoleRevision: 2,
-    documents: {
-      jdText: { artifactId: "jd-text", sha256: "a".repeat(64) },
-      namedPdf: { artifactId: "jd-pdf", sha256: "b".repeat(64) },
-      anonymousPdf: null,
-      deck: null,
-    },
-  };
-  const file = {
-    kind: "file",
-    artifactId: "jd-pdf",
-    mimeType: "application/pdf",
-    name: "JD.pdf",
-    size: 128,
-  };
-  beforeEach(() => {
-    recruitingApproval.prepare
-      .mockReset()
-      .mockResolvedValue({ files: [file], roleTitle: "Verified role" });
-    recruitingApproval.execute.mockReset();
-    reviewMock.mockReset();
-  });
-  function approvalFixture() {
-    const f = fixture({
-      name: "recruiting_request_approval",
-      builtin: true,
-      artifacts: true,
-      autoReview: true,
-      rules: [
-        { effect: "always_allow", matchKind: "tool", matchValue: "recruiting_request_approval" },
-      ],
-    });
-    f.setCalls([{ args, executionId: "approval-1" }]);
-    return f;
-  }
-  it("never opens an approval card for role documents", async () => {
-    const f = approvalFixture();
-    await f.run();
-    expect((f.results.at(-1) as { error: string }).error).toContain(
-      "Role documents never use an approval card",
-    );
-    expect(f.effects).toHaveLength(0);
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(recruitingApproval.prepare).not.toHaveBeenCalled();
-    expect(recruitingApproval.execute).not.toHaveBeenCalled();
-  });
-  it("never opens an approval card for a calibration round", async () => {
-    const keys = Array.from({ length: 10 }, (_, index) => `linkedin:example-${index}`);
-    const profiles = keys.map((candidateKey, index) => ({
-      candidateKey,
-      linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-      evidenceUrl: `https://example.test/evidence/${index}`,
-      source: {
-        effectId: "raw-read",
-        rowIndex: index,
-        roleRevisionId: "role-revision",
-        providerTaskId: "provider-task",
-        artifactRef: { artifactId: "raw-artifact", sha256: "a".repeat(64) },
-      },
-    }));
-    const base = { stage: "calibration", roleId: "role-example", expectedRoleRevision: 2 };
-    for (const [round, request, expected] of [
-      [null, base, "Record the ten with recruiting_research calibration_round"],
-      [{ approvedAt: null, candidateKeys: keys }, base, "never use an approval card"],
-      [
-        { approvedAt: null, candidateKeys: keys },
-        { ...base, documentsApprovalEffectId: "g1", profiles, ruleChanges: [] },
-        "never use an approval card",
-      ],
-      [
-        { approvedAt: new Date("2026-10-25T00:00:00Z"), candidateKeys: keys },
-        base,
-        "already accepted the latest calibration round",
-      ],
-    ] as const) {
-      const f = approvalFixture();
-      Object.assign(f.prisma, {
-        recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
-      });
-      f.setCalls([{ args: request, executionId: `calibration-${expected}-${keys.length}` }]);
-      await f.run();
-      expect((f.results.at(-1) as { error: string }).error).toContain(expected);
-      expect(f.effects).toHaveLength(0);
-      expect(f.pauseRunForInput).not.toHaveBeenCalled();
-      expect(recruitingApproval.prepare).not.toHaveBeenCalled();
-    }
-  });
-  it("replays an exact stored assessment approval while refusing to create another legacy request", async () => {
-    const f = approvalFixture();
-    const request = {
-      stage: "calibration",
-      roleId: "role-example",
-      expectedRoleRevision: 2,
-      documentsApprovalEffectId: "g1",
-      ruleChanges: ["Original rule."],
-      profiles: Array.from({ length: 10 }, (_, index) => ({
-        candidateKey: `person-${index}`,
-        assessmentVersion: 1,
-        linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-        evidenceUrl: `https://example.test/evidence/${index}`,
-      })),
-    };
-    const historical = {
-      id: "old-g2",
-      spaceId: "space-1",
+describe("an approved card of the retired recruiting approval step", () => {
+  it("is closed on resume so the run carries on with its other tools", async () => {
+    const f = fixture({});
+    f.effects.push({
+      id: "old-approval",
       runId: "run-1",
       kind: "recruiting_request_approval",
       status: "approved",
-      idempotencyKey: approvalEffectKey("run-1", "recruiting_request_approval", request),
-      request,
-    };
-    f.effects.push(historical);
-    const result = { status: "approved", stage: "calibration", approvalEffectId: "old-g2" };
-    recruitingApproval.execute.mockImplementation(async () => {
-      Object.assign(f.effects[0]!, { status: "completed", result });
-      return result;
+      idempotencyKey: "old-approval-key",
+      request: { stage: "brief", roleId: "role-example", expectedRoleRevision: 2 },
     });
-    f.setCalls([{ args: { ...request, expectedRoleRevision: 99 }, executionId: "legacy-replay" }]);
+    f.setCalls([{ args: { id: "item-1" }, executionId: "call-1" }]);
     await f.run();
-    expect(recruitingApproval.execute).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ effectId: "old-g2", effectRequest: request }),
-      request,
-      expect.anything(),
-    );
-    expect(f.results.at(-1)).toEqual(result);
-    expect(f.effects).toHaveLength(1);
-    expect(recruitingApproval.prepare).not.toHaveBeenCalled();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    recruitingApproval.execute.mockClear();
-    f.setCalls([{ args: request, executionId: "legacy-new" }]);
-    await f.run();
-    expect(recruitingApproval.execute).not.toHaveBeenCalled();
-    expect(f.effects).toHaveLength(1);
-    expect(f.results.at(-1)).toHaveProperty("error");
-  });
-  it("admits only the authenticated original legacy request through Pi validation during replay", async () => {
-    const f = approvalFixture();
-    const request = {
-      stage: "calibration",
-      roleId: "role-example",
-      expectedRoleRevision: 2,
-      documentsApprovalEffectId: "g1",
-      ruleChanges: ["Original rule."],
-      profiles: Array.from({ length: 10 }, (_, index) => ({
-        candidateKey: `person-${index}`,
-        assessmentVersion: 1,
-        linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-        evidenceUrl: `https://example.test/evidence/${index}`,
-      })),
-    };
-    const historical = {
-      id: "old-g2",
-      spaceId: "space-1",
-      runId: "run-1",
-      kind: "recruiting_request_approval",
-      status: "approved",
-      idempotencyKey: approvalEffectKey("run-1", "recruiting_request_approval", request),
-      request,
-    };
-    f.effects.push(historical);
-    let schema: ReturnType<typeof parametersFor> | undefined;
-    let validationError: unknown;
-    recruitingApproval.execute.mockImplementation(async () => {
-      Object.assign(historical, { status: "completed" });
-      return { status: "approved" };
+    expect(f.effects[0]).toMatchObject({
+      status: "failed",
+      result: { error: "This approval step no longer exists.", dispatched: false },
     });
-    f.runtimeRun.mockImplementationOnce(async function* (runtimeRequest: AgentRunRequest) {
-      const tool = runtimeRequest.tools.find(
-        (entry) => entry.name === "recruiting_request_approval",
-      )!;
-      schema = parametersFor(tool);
-      try {
-        validateToolArguments(
-          { ...tool, parameters: schema },
-          { type: "toolCall", id: "old", name: tool.name, arguments: request },
-        );
-      } catch (error) {
-        validationError = error;
-        return;
-      }
-      await runtimeRequest.executeTool!(tool.name, request, "legacy-validated");
-      yield { type: "done" as const, text: "Done" };
-    });
-    await f.run({ allowFailure: true });
-    expect(validationError).toBeUndefined();
-    const ordinary = builtinAgentTools.find(
-      (entry) => entry.name === "recruiting_request_approval",
-    )!;
-    expect(() =>
-      validateToolArguments(
-        { ...ordinary, parameters: parametersFor(ordinary) },
-        { type: "toolCall", id: "fresh", name: ordinary.name, arguments: request },
-      ),
-    ).toThrow();
-    expect(recruitingApproval.execute).toHaveBeenCalledOnce();
-    const tool = {
-      name: "recruiting_request_approval",
-      description: "Review",
-      parameters: schema!,
-    };
-    for (const changed of [
-      { ...request, expectedRoleRevision: 3 },
-      { ...request, ruleChanges: ["Invented rule."] },
-      {
-        ...request,
-        profiles: request.profiles.map((profile) => ({ ...profile, assessmentVersion: 2 })),
-      },
-    ]) {
-      expect(() =>
-        validateToolArguments(tool, {
-          type: "toolCall",
-          id: "changed",
-          name: tool.name,
-          arguments: changed,
-        }),
-      ).toThrow();
-    }
-    expect(f.effects).toHaveLength(1);
+    expect(f.results).toEqual([{ item: "item-1" }]);
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
   });
 });

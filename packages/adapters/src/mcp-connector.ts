@@ -24,8 +24,6 @@ import {
   GMAIL_SEND_TOOLS,
   PLACEHOLDER_NOTE,
   recruitingBotKey,
-  signedAsTeam,
-  TEAM_SIGNATURE_NOTE,
   unfilledPlaceholder,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
@@ -82,7 +80,7 @@ import {
 } from "./lazy-tool-catalog.js";
 import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
-import { MCP_NOT_CONNECTED, type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
+import { McpNotConnectedError, type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { addressTypedInConversation } from "./named-address.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
@@ -273,17 +271,20 @@ export async function agentCrmScopedArgs(
   return next;
 }
 
+/** No campaign was named among several: the one refusal the agent can fix itself. */
+class CampaignChoiceError extends IsolationError {}
+
 export function scopedInstantlyCampaign(
   args: Record<string, unknown>,
   campaigns: readonly string[],
 ): string {
   const selected = args.campaign_id ?? (campaigns.length === 1 ? campaigns[0] : undefined);
   if (selected === undefined && campaigns.length > 1)
-    throw new IsolationError(
+    throw new CampaignChoiceError(
       `Select an exact campaign of the current recruiting role before reading its email: pass campaign_id, one of ${campaigns.join(", ")}`,
     );
   if (typeof selected !== "string" || !campaigns.includes(selected))
-    throw new IsolationError(
+    throw new CampaignChoiceError(
       "Select an exact campaign of the current recruiting role before reading its email",
     );
   return selected;
@@ -317,7 +318,11 @@ export function scopeRefusal(error: Error): string {
   return `${reason ? `${reason.replace(/[.\s]+$/, "")}. ` : ""}${PATH_REFUSAL_NOTE}`;
 }
 
-const NO_OUTREACH_CAMPAIGN_YET = "This account has no outreach campaign yet";
+export class NoOutreachCampaignError extends IsolationError {
+  constructor() {
+    super("This account has no outreach campaign yet");
+  }
+}
 export const NO_EMAIL_HISTORY_YET =
   "No emails yet: this account has not emailed anyone, so there is no history with this person. Treat it as a first email.";
 const nativeInstantlyReads = [
@@ -497,7 +502,6 @@ const GmailSendInput = z.strictObject({
     .min(1)
     .max(50_000)
     .describe("Plain-text body.")
-    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE)
     .refine((body) => !unfilledPlaceholder(body), PLACEHOLDER_NOTE),
   replyThreadId: z
     .string()
@@ -779,8 +783,7 @@ function peopleSearchRead(
     (tool === "web_search_exa" || tool === "web_search_advanced_exa")
   );
 }
-const isNeverSent = (error: unknown) =>
-  error instanceof Error && error.message === MCP_NOT_CONNECTED;
+const isNeverSent = (error: unknown) => error instanceof McpNotConnectedError;
 
 let warnedKeylessPeopleSearch = false;
 /**
@@ -1386,8 +1389,7 @@ export class McpConnector implements ConnectorProvider {
         // account with no campaign has sent nothing, so its mail list is an empty answer.
         if (
           call.route.toolName !== "list_emails" ||
-          !(error instanceof IsolationError) ||
-          error.message !== NO_OUTREACH_CAMPAIGN_YET
+          !(error instanceof NoOutreachCampaignError)
         )
           throw error;
         yield {
@@ -2250,7 +2252,7 @@ export class McpConnector implements ConnectorProvider {
       serverId,
       context.userId,
     );
-    if (!campaignIds.length) throw new IsolationError(NO_OUTREACH_CAMPAIGN_YET);
+    if (!campaignIds.length) throw new NoOutreachCampaignError();
     return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
   }
 
@@ -2466,8 +2468,7 @@ export class McpConnector implements ConnectorProvider {
         emailScope = await this.instantlyCampaignScope(context, credential.server.id);
       } catch (error) {
         // An account that has never sent has no mail to read; that is an answer, not a failure.
-        if (!(error instanceof IsolationError) || error.message !== NO_OUTREACH_CAMPAIGN_YET)
-          throw error;
+        if (!(error instanceof NoOutreachCampaignError)) throw error;
         yield {
           type: "result",
           data: {
@@ -2781,8 +2782,7 @@ export class McpConnector implements ConnectorProvider {
     } catch (error) {
       // Which campaign to name is the one fix the agent can make; "check the connection" is not
       // (gate 9e15e896, stop-after-approve: every mailbox and contact read failed this way).
-      if (!reason && error instanceof IsolationError && error.message.startsWith("Select an exact"))
-        reason = ` ${error.message}.`;
+      if (!reason && error instanceof CampaignChoiceError) reason = ` ${error.message}.`;
       yield {
         type: "error",
         message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}${rejectedCode ? ` (${rejectedCode})` : ""}.` : reason || " Check the current assigned connection and requested scope."}${hint}`,

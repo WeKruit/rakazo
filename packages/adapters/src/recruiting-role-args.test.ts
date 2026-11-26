@@ -1,4 +1,4 @@
-import { IsolationError, RecruitingIntentQuoteError } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
 import {
   normalizeRecruitingRoleArgs,
@@ -22,6 +22,17 @@ describe("normalizeRecruitingRoleArgs", () => {
     ).toEqual({
       operation: "read",
     });
+  });
+
+  // Branch play 11-26: a create written with the update's criteria shape, or without the empty
+  // lists, was refused and cost the role's first reply a second model step.
+  it("puts a create's lists into the create shape", () => {
+    expect(
+      normalizeRecruitingRoleArgs(
+        { operation: "create", title: "Data Engineer", criteria: { upsert: [], remove: [] } },
+        now,
+      ),
+    ).toMatchObject({ criteria: [], sourceRefs: [], preferences: [], definitionQuestions: [] });
   });
 
   it("fills a missing read time on references", () => {
@@ -162,7 +173,14 @@ describe("normalizeRecruitingRoleArgs", () => {
         { operation: "create", brief: { fields: [] } },
         now,
       ),
-    ).toEqual({ operation: "create", brief: { fields: [] } });
+    ).toEqual({
+      operation: "create",
+      brief: { fields: [] },
+      sourceRefs: [],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+    });
     const archive = { operation: "archive", roleId: "r1", expectedRevision: 2 };
     expect(normalizeRecruitingRoleArgs(archive, now)).toEqual(archive);
   });
@@ -282,17 +300,6 @@ describe("repairedRoleSave", () => {
       ...args,
       sourceRefs: [locator],
       criteria: [{ id: "c1", sourceRefs: [locator] }],
-    });
-  });
-
-  it("uses the recruiter's own words when the intent quote was mistyped", () => {
-    const repeat = repairedRoleSave(
-      { ...args, sourceRefs: [], criteria: [] },
-      new RecruitingIntentQuoteError("然后呢 继续找吗？"),
-    );
-    expect(repeat?.intent).toEqual({
-      basis: "direct",
-      quote: "然后呢 继续找吗？",
     });
   });
 

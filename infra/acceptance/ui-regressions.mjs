@@ -250,7 +250,8 @@ try {
       );
     const replies = await ask(
       kruit.id,
-      `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`,
+      // The pass counts LinkedIn links, so the request asks for them (as aftercard, #1801).
+      `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人和他们的 LinkedIn 链接。`,
       (items) => linked(items) >= 3,
     );
     // Kruit reads saved people itself; handing the read to the role team is slow and often silent.
@@ -300,7 +301,9 @@ try {
     const composer = page.locator('fieldset[aria-label="Message composer"] textarea').first();
     await composer.waitFor({ timeout: 20_000 });
     // The request goes in while the card answer's reply is still being written.
-    const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`;
+    // The pass counts LinkedIn links, so the request asks for them (gate 42cc9f8f: three saved
+    // people were listed with grades and no links, and the check failed a correct answer).
+    const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人和他们的 LinkedIn 链接。`;
     // The thread finishes painting first; a click on a card that is re-rendering is lost.
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(2_000);
@@ -530,15 +533,17 @@ try {
     if (!created) return failures.push("no new role chat appeared within 90 s");
     if (/^new role$/i.test(created.name.trim()))
       failures.push('the new role is still called "New role" after 90 s');
-    // Older untitled roles can still be listed, so look for this role's own title.
+    // Older untitled roles can still be listed, so look for this role's own name. Kruit names the
+    // role from the JD itself (gate 76f64c91 saved "仓库主管" for the pasted first line), so the
+    // sidebar is checked for the name the role was saved with, not the pasted line.
     const navigation = page.getByTestId("recruiting-navigation");
     const named = await navigation
-      .getByText(title)
+      .getByText(created.name.trim())
       .first()
       .waitFor({ timeout: 30_000 })
       .then(() => true)
       .catch(() => false);
-    if (!named) failures.push(`the sidebar does not show "${title}" within 30 s`);
+    if (!named) failures.push(`the sidebar does not show "${created.name.trim()}" within 30 s`);
     // The test role leaves the sidebar again.
     await rpc("threads/stop", { groupId: created.id, scope: "all" }).catch(() => {});
     await rpc("groups/archive", { groupId: created.id }).catch(() => {});

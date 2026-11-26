@@ -7,7 +7,6 @@ import {
   RecruitingCrmImportArgsSchema,
   RecruitingCrmTargetSchema,
   RecruitingPreferenceFeedbackSchema,
-  RetainedRecruitingApprovalRequestSchema,
 } from "@rakazo/contracts";
 import { formatCron, humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
@@ -26,12 +25,6 @@ type CrmApprovalOperation =
   | "crm_update_candidate_stage"
   | "crm_append_candidate_note";
 
-type RecruitingApprovalDisplay = {
-  roleTitle: string;
-  requirements?: string;
-  profiles?: { name: string; linkedinUrl: string; evidenceUrl: string }[];
-};
-
 export function buildApprovalAskBlock(
   effectId: string,
   toolName: string,
@@ -40,8 +33,9 @@ export function buildApprovalAskBlock(
   options?: {
     reviewReason?: string;
     oneTimeOnly?: boolean;
+    /** An email send: confirmed on its card each time. */
+    emailSend?: boolean;
     crmOperation?: CrmApprovalOperation;
-    recruiting?: RecruitingApprovalDisplay;
     crmImportTarget?: RecruitingCrmTarget;
     instantlyActivation?: InstantlyActivationDisplay;
     instantlyReply?: InstantlyReplyDisplay;
@@ -100,7 +94,6 @@ export function buildApprovalAskBlock(
     throw new Error("CRM import approval requires verified candidate facts and destination.");
   const crmOperation = options?.crmOperation;
   const oneTimeOnly = Boolean(crmTarget || crmImport || crmOperation || options?.oneTimeOnly);
-  const recruitingApproval = !crmOperation && toolName === "recruiting_request_approval";
   const parsedPreference = RecruitingPreferenceFeedbackSchema.safeParse(
     toolName === "recruiting_feedback"
       ? args
@@ -133,7 +126,6 @@ export function buildApprovalAskBlock(
             nativeMemory,
             crmOperation,
             considerationOperation,
-            options?.recruiting,
             options?.crmImportTarget,
           );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
@@ -168,11 +160,9 @@ export function buildApprovalAskBlock(
                             ? "Review CRM stage change"
                             : crmOperation === "crm_append_candidate_note"
                               ? "Review CRM note"
-                              : recruitingApproval
-                                ? summary
-                                : toolName === "create_space"
-                                  ? `${summary}?`
-                                  : `Review before ${summary}`,
+                              : toolName === "create_space"
+                                ? `${summary}?`
+                                : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -181,7 +171,6 @@ export function buildApprovalAskBlock(
       safeDetail &&
       !scheduleUpdate &&
       !considerationOperation &&
-      !recruitingApproval &&
       !preference &&
       !nativeMemory &&
       !oneTimeOnly
@@ -198,7 +187,7 @@ export function buildApprovalAskBlock(
           },
           { id: "deny", label: "Change the address", outcome: "cancelled" },
         ]
-      : options?.instantlyActivation || options?.instantlyReply
+      : options?.emailSend || options?.instantlyActivation || options?.instantlyReply
         ? [
             { id: "allow", label: "Confirm and send" },
             { id: "deny", label: "Cancel" },
@@ -208,24 +197,11 @@ export function buildApprovalAskBlock(
               { id: "allow", label: "Create space", outcome: "created" },
               { id: "deny", label: "Cancel", outcome: "cancelled" },
             ]
-          : recruitingApproval
-            ? [
-                {
-                  id: "allow",
-                  label:
-                    args.stage === "brief"
-                      ? "Looks good, start searching"
-                      : args.stage === "documents"
-                        ? "Approve documents"
-                        : "Approve calibration",
-                },
-                { id: "deny", label: args.stage === "brief" ? "Needs changes" : "Deny" },
-              ]
-            : [
-                { id: "allow", label: "Allow once" },
-                ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
-                { id: "deny", label: "Deny" },
-              ],
+          : [
+              { id: "allow", label: "Allow once" },
+              ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
+              { id: "deny", label: "Deny" },
+            ],
   };
 }
 
@@ -341,13 +317,6 @@ function describeApprovalAction(
   args: Record<string, unknown>,
   displayToolName: string,
 ): string {
-  if (toolName === "recruiting_request_approval") {
-    return args.stage === "brief"
-      ? "Role requirements"
-      : args.stage === "documents"
-        ? "Approve documents"
-        : "Approve calibration";
-  }
   if (toolName === "destination.write") {
     const collection = args.collection ? String(args.collection) : "records";
     const title = args.title ? ` "${String(args.title)}"` : "";
@@ -381,7 +350,6 @@ function formatApprovalDetail(
   nativeMemory = false,
   crmOperation?: CrmApprovalOperation,
   considerationOperation?: "hold" | "pass" | "resume",
-  recruiting?: RecruitingApprovalDisplay,
   crmImportTarget?: RecruitingCrmTarget,
 ): string | undefined {
   const booking = formatBooking(toolName, args) ?? formatBookingChange(toolName, args);
@@ -413,10 +381,7 @@ function formatApprovalDetail(
       "Save these supplied facts and add this person to the CRM role pool",
     ].join("\n");
   const lines: string[] = [];
-  if (
-    reviewReason?.trim() &&
-    !(toolName === "recruiting_request_approval" && args.stage === "brief")
-  ) {
+  if (reviewReason?.trim()) {
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
   }
   if (toolName === "schedule_update") {
@@ -483,52 +448,6 @@ function formatApprovalDetail(
         : `Content:\n${args.content}`,
     );
     return lines.join("\n\n");
-  }
-  if (toolName === "recruiting_request_approval") {
-    const request = RetainedRecruitingApprovalRequestSchema.parse(args);
-    if (recruiting) lines.push(`Role: ${recruiting.roleTitle}`);
-    if (request.stage !== "brief") lines.push(`Role version: ${request.expectedRoleRevision}`);
-    if (request.stage === "brief") {
-      if (!recruiting?.roleTitle.trim() || !recruiting.requirements?.trim())
-        throw new Error("Requirements confirmation requires verified role requirements.");
-      lines.push(recruiting.requirements);
-    } else if (request.stage === "documents") {
-      lines.push(
-        "Job description: attached",
-        "Named JD PDF: attached",
-        `Anonymous JD PDF: ${request.documents.anonymousPdf ? "attached" : "not provided"}`,
-        `Deck: ${request.documents.deck ? "attached" : "not provided"}`,
-      );
-    } else {
-      for (const [index, profile] of request.profiles.entries()) {
-        if ("source" in profile) {
-          const verified = recruiting?.profiles?.[index];
-          if (
-            !recruiting?.roleTitle.trim() ||
-            recruiting.profiles?.length !== request.profiles.length ||
-            !verified?.name.trim() ||
-            verified.linkedinUrl !== profile.linkedinUrl ||
-            verified.evidenceUrl !== profile.evidenceUrl
-          )
-            throw new Error("Calibration approval requires verified role and candidate evidence.");
-          lines.push(
-            `${index + 1}. ${verified.name}`,
-            verified.linkedinUrl,
-            `Evidence: ${verified.evidenceUrl}`,
-          );
-        } else
-          lines.push(
-            `${index + 1}. ${profile.linkedinUrl}`,
-            `Evidence: ${profile.evidenceUrl}`,
-            `Assessment version: ${profile.assessmentVersion}`,
-          );
-      }
-      lines.push(
-        request.ruleChanges.length ? "Rule changes:" : "Rule changes: none",
-        ...request.ruleChanges,
-      );
-    }
-    return lines.join("\n");
   }
   if (toolName === "create_space") {
     lines.push(

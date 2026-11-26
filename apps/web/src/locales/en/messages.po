@@ -841,14 +841,6 @@ msgstr "Bots with their own computer and browser"
 msgid "Bounced"
 msgstr "Bounced"
 
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Brief changed or could not be confirmed. Refresh and review it."
-msgstr "Brief changed or could not be confirmed. Refresh and review it."
-
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Brief confirmed"
-msgstr "Brief confirmed"
-
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Browse all candidates"
 msgstr "Browse all candidates"
@@ -1406,10 +1398,6 @@ msgstr "Confirm adding candidates to the campaign"
 #: src/components/AskCard.tsx
 msgid "Confirm and send"
 msgstr "Confirm and send"
-
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Confirm brief"
-msgstr "Confirm brief"
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
@@ -6003,10 +5991,6 @@ msgstr "Send to"
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Send totals are not available from these records."
 msgstr "Send totals are not available from these records."
-
-#: src/components/AskCard.tsx
-msgid "Send when I say send"
-msgstr "Send when I say send"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"

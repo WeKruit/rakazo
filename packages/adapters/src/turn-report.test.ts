@@ -1,15 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  lastOwnUpdate,
-  questionStatesWork,
-  quotesMessage,
-  REPORT_BEFORE_ASK,
-  readsOnly,
-  restatesUpdate,
-  TurnReportLedger,
-  turnReportText,
-  turnWork,
-} from "./turn-report.js";
+import { readsOnly, TurnReportLedger, turnReportText, turnWork } from "./turn-report.js";
 
 describe("turnWork", () => {
   it("counts searches, saves and business changes, never reads or failures", () => {
@@ -109,22 +99,6 @@ describe("TurnReportLedger", () => {
     expect(ledger.lastWork()).toBe("round");
   });
 
-  it("bounces one unreported question per attempt, never one that states the work", () => {
-    const ledger = new TurnReportLedger(true);
-    ledger.tool("1", "recruiting_crm_target", { operation: "update" });
-    expect(ledger.bounceAsk("The pool is now 139 people. Keep going?")).toBeUndefined();
-    expect(ledger.bounceAsk("What next?")).toBe(REPORT_BEFORE_ASK);
-    expect(ledger.bounceAsk("What next?")).toBeUndefined();
-  });
-
-  it("lets intake ask right after saving the role or the recruiter's answers", () => {
-    const ledger = new TurnReportLedger(true);
-    ledger.tool("1", "recruiting_role", { operation: "update" });
-    ledger.tool("2", "recruiting_feedback", { operation: "record" });
-    expect(ledger.bounceAsk("Which city?")).toBeUndefined();
-    expect(ledger.owed()).toEqual(["role", "feedback"]);
-  });
-
   it("owes nothing when disabled (routines, silent wakes)", () => {
     const ledger = new TurnReportLedger(false);
     ledger.tool("1", "recruiting_role", { operation: "update" });
@@ -175,125 +149,12 @@ describe("turnReportText", () => {
   });
 });
 
-it("questionStatesWork", () => {
-  expect(questionStatesWork("What next?")).toBe(false);
-  expect(questionStatesWork("Added 70 people. Keep going?")).toBe(true);
-});
-
 describe("readsOnly", () => {
   it("tells reads from work, so a read after a handoff leaves the request with the teammate", () => {
     expect(readsOnly("recruiting_candidates", { operation: "list" })).toBe(true);
     expect(readsOnly("recruiting_role", { operation: "update" })).toBe(false);
     expect(readsOnly("mcp__instantly__list_campaigns", {})).toBe(true);
     expect(readsOnly("mcp__instantly__activate_campaign", {})).toBe(false);
-  });
-});
-
-// Gate 19bf5552, progress-and-where: every answer ended with the same 「发来职位描述…」.
-// Sim cannot-do-that-honestly on 982a0ac9: Kruit said 「这里无法发送 LinkedIn InMail，也没有发送任何
-// 内容。」, then the writer's retried reply opened with the same line before its draft.
-describe("restatesUpdate", () => {
-  const update =
-    "The search has brought the role’s Results pool to 122 people, above your target of 100. I included San Francisco Bay Area profiles as a preferred search segment while keeping Atlanta onsite as the role’s primary location.";
-
-  it("drops a final reply that says the same thing again", () => {
-    expect(
-      restatesUpdate(
-        "The search now has **122 people** in Results, exceeding your target of 100. I included San Francisco Bay Area profiles as a preferred search segment and kept Atlanta onsite as the primary location.",
-        update,
-      ),
-    ).toBe(true);
-    // A first round finished in the background said it once before its final reply.
-    expect(
-      restatesUpdate(
-        "Recorded the first 10-person review set and saved the role brief, including **Chinese preferred; English assumed**. The candidates and their profile passages are shown above.",
-        "Recorded the first 10-person review set for the Atlanta on-site Warehouse Operations Manager role, with Chinese preferred and English assumed. The role brief is saved; the first review set includes the candidates and profile passages shown above.",
-      ),
-    ).toBe(true);
-    // The update already asked the question; the final reply asks it again.
-    expect(
-      restatesUpdate(
-        "Which candidates should I email, and what should the email be about?",
-        "I checked your active roles and existing outreach, and there are no candidates or prior emails available in this conversation to act on. Which candidates should I email, and what should the email be about?",
-      ),
-    ).toBe(true);
-  });
-
-  it("keeps a reply with new content or no update before it", () => {
-    expect(
-      restatesUpdate("Here is the draft email for Ada: Hi Ada, I saw your work at DHL.", update),
-    ).toBe(false);
-    expect(
-      restatesUpdate(
-        `${update} Here is the full list of all 122 people with their titles, locations, evidence and what is still unverified for each of them.`,
-        update,
-      ),
-    ).toBe(false);
-    expect(restatesUpdate("Found 122 people.", undefined)).toBe(false);
-  });
-
-  // send-at-night 11-14: each role report of the same timeout went out again in Chinese.
-  it("compares Chinese by its characters, not as one long word", () => {
-    const said =
-      "0232 岗位刚刚再次检查：邮件服务仍然连接超时，Noah Liu 和 Ada Chen 的首封邮件都没有保存，也没有生成发送确认卡，因此目前两人都还没有收到邮件。阻塞原因仍是邮件服务连接问题。";
-    expect(
-      restatesUpdate(
-        "0232 岗位检查时，邮件服务仍连接超时；Noah Liu 和 Ada Chen 的首封邮件都没有保存，也没有生成发送确认卡，两人都还没有收到邮件。仍被邮件服务连接问题卡住。",
-        said,
-      ),
-    ).toBe(true);
-    expect(restatesUpdate("Noah 的邮件已经发出，Ada 的明早 9 点发出。", said)).toBe(false);
-  });
-});
-
-describe("lastOwnUpdate", () => {
-  const text = (value: string) => [{ kind: "text", text: value }];
-  const relay = [{ kind: "bot_message_received", text: "report" }];
-  it("is this bot's newest reply when the recruiter has not written since", () => {
-    expect(
-      lastOwnUpdate(
-        [
-          { role: "user", botId: null, blocks: relay },
-          { role: "assistant", botId: "main", blocks: text("still timing out") },
-          { role: "user", botId: null, blocks: text("send it now") },
-        ],
-        "main",
-      ),
-    ).toBe("still timing out");
-    expect(
-      lastOwnUpdate(
-        [
-          { role: "user", botId: null, blocks: text("send it now") },
-          { role: "assistant", botId: "main", blocks: text("still timing out") },
-        ],
-        "main",
-      ),
-    ).toBeUndefined();
-    expect(
-      lastOwnUpdate([{ role: "assistant", botId: "other", blocks: text("x") }], "main"),
-    ).toBeUndefined();
-  });
-
-  it("counts the person's messages this turn answers, but not its own lines or a pushed-on nudge (staging 2026-11-21, aftercard)", () => {
-    // The same question asked again after a card: its answer matched the last one and was
-    // dropped, because the new question was this turn's own message and so was skipped.
-    const rows = [
-      { role: "assistant", botId: "main", runId: "run-2", blocks: text("我先查一下。") },
-      { role: "user", botId: null, runId: "run-2", blocks: text("列出 3 个候选人") },
-      { role: "assistant", botId: "main", runId: "run-1", blocks: text("Alex, Liang, Mia") },
-    ];
-    expect(lastOwnUpdate(rows, "main", "run-2")).toBeUndefined();
-    const nudged = [
-      {
-        role: "user",
-        botId: null,
-        runId: "run-2",
-        clientNonce: "autocontinue:run-1:decline",
-        blocks: text("retry"),
-      },
-      { role: "assistant", botId: "main", runId: "run-1", blocks: text("Alex, Liang, Mia") },
-    ];
-    expect(lastOwnUpdate(nudged, "main", "run-2")).toBe("Alex, Liang, Mia");
   });
 });
 
@@ -309,26 +170,5 @@ describe("TurnReportLedger.memorySaveFailed", () => {
     ledger.tool("c", "remember", {});
     ledger.settle("c", { ok: true });
     expect(ledger.memorySaveFailed()).toBe(false);
-  });
-});
-
-// Gate 95185659: after the teammate reported, the coordinator handed it the same recruiter
-// message again, and the second answer contradicted the first.
-describe("quotesMessage", () => {
-  it("finds the recruiter's words in a brief that quotes them", () => {
-    const message = "给 Wei Zhang 写封邮件，fintech 那个职位 wei.zhang.test@example.com";
-    expect(quotesMessage(`Goal: “${message}”。Where: this shared thread`, message)).toBe(true);
-    expect(
-      quotesMessage(
-        "Goal: 更新模板，用户补充“base改70-90万 另外加一条每周五remote”。",
-        "等等 base改70-90万 另外加一条每周五remote",
-      ),
-    ).toBe(true);
-  });
-  it("does not match a brief about something else, or a message too short to tell", () => {
-    expect(
-      quotesMessage("Goal: find contacts for the ten people above", "给 Wei Zhang 写封邮件"),
-    ).toBe(false);
-    expect(quotesMessage("Goal: 好的，继续", "好")).toBe(false);
   });
 });

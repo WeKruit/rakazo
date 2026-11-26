@@ -1,35 +1,21 @@
 import { disabledBuiltinToolSet } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
+import { SKILL_CATALOG_DESCRIPTION_MAX } from "./agent-skill.js";
 import {
   creditEstimateNote,
-  greetsByName,
   isChineseText,
   isEnglishText,
-  namesPeopleToEmail,
   RECRUITER_LANGUAGE,
-  RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
-  RECRUITING_PDF_RENDERING,
-  RECRUITING_ROUND_NEXT_STEP,
-  RECRUITING_SCALE_START,
-  RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   recruiterLanguage,
   recruiterLanguageText,
-  recruitingBriefConfirmedNextStep,
   replyLanguageNote,
   screenLanguage,
-  signedAsTeam,
   textLanguage,
   unfilledPlaceholder,
 } from "./recruiting-defaults.js";
-
-describe("calibration fast path", () => {
-  it("hands the new revision on with the confirmed brief", () => {
-    expect(recruitingBriefConfirmedNextStep(5)).toContain("expectedRoleRevision 5");
-  });
-});
 
 describe("maintained recruiting defaults", () => {
   // Same budget Workloop uses: a longer prompt dilutes every rule in it. Shorten before adding.
@@ -41,69 +27,19 @@ describe("maintained recruiting defaults", () => {
     expect(skill.body.length).toBeLessThanOrEqual(8_000);
   });
 
-  // Each shared rule has one source: the executor adds recruiter language to every recruiting
-  // run and the role context carries the calibration, scale and PDF rules.
-  it.each([
-    RECRUITER_LANGUAGE,
-    RECRUITING_CALIBRATION_QUICK_SEARCH,
-    RECRUITING_ROUND_NEXT_STEP,
-    RECRUITING_SCALE_START,
-    RECRUITING_PDF_RENDERING,
-  ])("keeps a shared rule out of bot instructions and skills (%#)", (rule) => {
-    for (const bot of RECRUITING_DEFAULT_BOTS) expect(bot.instructions).not.toContain(rule);
-    for (const skill of RECRUITING_DEFAULT_SKILLS) expect(skill.body).not.toContain(rule);
-  });
-
-  // Skills ship with the code, so accounts with customized bot text still get the template.
-  it("carries the search brief template in the sourcing skill", () => {
-    const sourcing = RECRUITING_DEFAULT_SKILLS.find(
-      (skill) => skill.name === "Recruitment sourcing continuation",
-    )!;
-    expect(sourcing.body).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
+  // The catalog cuts a longer description, and the model routes by it.
+  it.each(RECRUITING_DEFAULT_SKILLS)("$name description fits the skill catalog", (skill) => {
+    expect(skill.description.length).toBeLessThanOrEqual(SKILL_CATALOG_DESCRIPTION_MAX);
   });
 });
 
 describe("unfilledPlaceholder", () => {
-  it("finds a bracketed blank left in an email", () => {
-    expect(unfilledPlaceholder("Hi [Candidate Name],\n\nA role.")).toBe("[Candidate Name]");
-    expect(unfilledPlaceholder("<p>Best,</p><p>[Your name]</p>")).toBe("[Your name]");
-    expect(unfilledPlaceholder("您好 [候选人姓名]，")).toBe("[候选人姓名]");
+  it("finds a merge field the sending account does not fill", () => {
     expect(unfilledPlaceholder("Hi {{firstName}},\n\nA role.")).toBeUndefined();
     expect(unfilledPlaceholder("Hi {{ first_name }} at {{companyName}}.")).toBeUndefined();
     // A merge field nobody fills goes out as written, in any language.
     expect(unfilledPlaceholder("{{회사명}}에서 진행 중인 역할")).toBe("{{회사명}}");
     expect(unfilledPlaceholder("Join {{Company}} in Seoul.")).toBe("{{Company}}");
-    expect(unfilledPlaceholder("See [our site](https://example.com) for more.")).toBeUndefined();
-    expect(unfilledPlaceholder("Rated [1] of 5.")).toBeUndefined();
-  });
-});
-
-describe("greetsByName", () => {
-  it("flags a shared email written to one named person", () => {
-    // Staging 11-13: "Hi Noah," made Kruit split Noah and Ada into two campaigns, so the
-    // first card listed only Noah.
-    expect(greetsByName("Hi Noah, I'm reaching out about a role.\n\nBest,\nNoah Liu")).toBe(true);
-    expect(greetsByName("<p>Dear Ada:</p><p>Hello</p>")).toBe(true);
-    expect(greetsByName("Hi {{firstName}},\n\nA role in Seattle.")).toBe(false);
-    expect(greetsByName("Hi there,\n\nA role in Seattle.")).toBe(false);
-    expect(greetsByName("I'm reaching out about a role, Noah.")).toBe(false);
-  });
-});
-
-describe("signedAsTeam", () => {
-  it("refuses an email signed as Kruit", () => {
-    // Staging 11-13: a template written "from my voice" was signed "Kruit".
-    expect(signedAsTeam("Hi {{firstName}},\n\nA role.\n\nBest,\nKruit")).toBe(true);
-    expect(signedAsTeam("Hi {{firstName}},\n\nA role.\n\nBest,\nDavid Chen")).toBe(false);
-  });
-
-  it("finds an email signed by a team instead of a person", () => {
-    expect(signedAsTeam("Hi Noah,\n\nWould you be open to a chat?\n\nBest,\nRecruiting")).toBe(
-      true,
-    );
-    expect(signedAsTeam("Hi Noah,\n\nBest,\nThe Recruiting Team.")).toBe(true);
-    expect(signedAsTeam("Hi Noah,\n\nBest,\nJules Hou")).toBe(false);
-    expect(signedAsTeam("Hi Noah, are you open to recruiting work?")).toBe(false);
   });
 });
 
@@ -211,16 +147,6 @@ describe("creditEstimateNote", () => {
   });
 });
 
-describe("namesPeopleToEmail", () => {
-  it("is a send to named addresses, never a reply to someone's email (staging gate 60b7e937)", () => {
-    expect(namesPeopleToEmail(["Email alex@example.com about the data engineer role"])).toBe(true);
-    expect(
-      namesPeopleToEmail(["回复 noah@example.com 那封邮件（同一个线程），正文只写：Test note."]),
-    ).toBe(false);
-    expect(namesPeopleToEmail(["Reply to alex@example.com's email: thanks"])).toBe(false);
-  });
-});
-
 describe("recruiting tool list", () => {
   it("drops only real built-in tools and keeps every tool the playbook names", () => {
     expect(disabledBuiltinToolSet(RECRUITING_UNUSED_BUILTIN_TOOLS).size).toBe(
@@ -228,9 +154,6 @@ describe("recruiting tool list", () => {
     );
     const playbook = [
       RECRUITER_LANGUAGE,
-      RECRUITING_CALIBRATION_QUICK_SEARCH,
-      RECRUITING_SCALE_START,
-      RECRUITING_ROUND_NEXT_STEP,
       ...RECRUITING_DEFAULT_BOTS.map((bot) => bot.instructions),
       ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.body),
     ].join("\n");

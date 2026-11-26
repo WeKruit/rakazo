@@ -44,8 +44,11 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   // 16: a file card's source preview no longer names a local assessment (previews are added on
   // read, never stored).
   16: "cc984f209987fa0fd463736cc20ce7f0acbb57c842c17aacbaac987fc7b3d8b5",
-  // 17: optional openQuestions on a mail reply (the candidate's questions the recruiter never answered).
-  17: "52f3c932e4de5859cbb67a698075966b771b894f05e9dc9fff00fdbec1c053fa",
+  // 17: optional server-set facts on text blocks (a round list and its record, a card answer) and
+  // on ask blocks (answered by a message typed in the chat).
+  17: "8ad735f3f6ffe33efafa8105aacef93cbb5454fe0665ee9330fe2848507d24b8",
+  // 18: optional openQuestions on a mail reply (the candidate's questions the recruiter never answered).
+  18: "d5daefd350a8246a8171fef7019e2cf4b3aeab6107ce8458788bc980d01eea32",
 };
 
 const OLD_ROWS: unknown[] = [

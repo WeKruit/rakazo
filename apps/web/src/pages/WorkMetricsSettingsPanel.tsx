@@ -73,9 +73,8 @@ export function WorkMetricsSettingsPanel() {
       </p>
     );
 
-  const { completion, longTasks, experience, memory, collaboration, automation } = data;
+  const { completion, longTasks, experience, collaboration, automation } = data;
   const finished = completion.completed + completion.failed + completion.cancelled;
-  const corrected = memory.correctedAfterCompaction;
   return (
     <div data-testid="work-metrics-settings" className="space-y-7">
       <p className="text-xs text-muted-foreground">
@@ -152,15 +151,6 @@ export function WorkMetricsSettingsPanel() {
           [
             t`Unanswered messages`,
             `${count(experience.unansweredInputs)} / ${count(experience.inputs)}`,
-          ],
-        ]}
-      />
-      <Stats
-        label={t`Memory`}
-        rows={[
-          [
-            t`Corrected after compaction`,
-            `${percent(corrected.count, corrected.of)} (${count(corrected.count)} / ${count(corrected.of)})`,
           ],
         ]}
       />

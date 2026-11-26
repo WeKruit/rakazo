@@ -8,7 +8,7 @@ import {
   workActivityLabel,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
-import { BRIEF_CONFIRMATION_TEXT, recruitingHomeGroupId } from "@rakazo/db";
+import { recruitingHomeGroupId } from "@rakazo/db";
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import { openRecruitingRoles } from "./open-recruiting-roles.js";
 import type { RoleRecord } from "./role-records.js";
@@ -61,6 +61,7 @@ type StatePrisma = Pick<
   | "mcpServer"
   | "connection"
   | "recruitingCalibrationRound"
+  | "recruitingCandidateOccurrence"
 >;
 
 /**
@@ -249,8 +250,7 @@ function recruiterWords(rows: readonly RecruiterRow[]): string[] {
       const blocks = (row.blocks ?? []) as MessageBlock[];
       if (blocks.some((block) => block.kind === "bot_message_received")) return [];
       const text = blocks.flatMap((block) => (block.kind === "text" ? [block.text] : [])).join(" ");
-      // The brief confirmation is posted as the recruiter's, in English (fosp 11-23, d6c65687).
-      return text.trim() && !BRIEF_CONFIRMATION_TEXT.test(text.trim()) ? [text] : [];
+      return text.trim() ? [text] : [];
     });
   // The copy still speaks for the recruiter when it is all there is (staging 11-14: with it left
   // out, a new role's first question went out in English to a Chinese recruiter).
@@ -354,7 +354,14 @@ export async function loadWorkingState(
           where: { roleId: { in: teamRoleIds } },
           orderBy: [{ roleId: "asc" }, { round: "desc" }],
           distinct: ["roleId"],
-          select: { roleId: true, round: true, status: true, statusAt: true, approvedAt: true },
+          select: {
+            roleId: true,
+            round: true,
+            status: true,
+            statusAt: true,
+            approvedAt: true,
+            candidateKeys: true,
+          },
         })
         .catch(() => [])
     : Promise.resolve([]);
@@ -576,6 +583,28 @@ export async function loadWorkingState(
       : [];
     const botName = new Map(bots.map((bot) => [bot.id, bot.name]));
     const roundOf = new Map((await roundsRead).map((round) => [round.roleId, round]));
+    // Who the latest round showed, per role, from the round's own records: when the recruiter
+    // names people without naming the role, the role is on this card. Staging 11-26: Kruit read
+    // saved people seven times to find the role of three named people before its first line.
+    const shown = [...roundOf.values()].filter((round) => round.candidateKeys.length);
+    const shownRows = shown.length
+      ? await prisma.recruitingCandidateOccurrence
+          .findMany({
+            where: {
+              OR: shown.map((round) => ({
+                roleId: round.roleId,
+                candidateKey: { in: round.candidateKeys },
+              })),
+              name: { not: null },
+            },
+            distinct: ["roleId", "candidateKey"],
+            select: { roleId: true, name: true },
+          })
+          .catch(() => [])
+      : [];
+    const shownNames = new Map<string, string[]>();
+    for (const row of shownRows)
+      if (row.name) shownNames.set(row.roleId, [...(shownNames.get(row.roleId) ?? []), row.name]);
     // A large account (hundreds of roles, thousands of people) never fits a card: what is not
     // on it is read, never recalled from chat or made up.
     lines.push(
@@ -596,6 +625,8 @@ export async function loadWorkingState(
           .filter(Boolean)
           .join(" · ")}`,
       );
+      const people = roleId ? shownNames.get(roleId) : undefined;
+      if (people?.length) lines.push(`  People in its latest round: ${people.join(", ")}`);
       const messages = recent[index] ?? [];
       // A card the recruiter wrote past (newest first) is not what the team waits on: feedback-
       // round 11-16, an open next-step card read as "waiting on your choice" after their feedback.

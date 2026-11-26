@@ -1338,11 +1338,11 @@ describe("compactHistory", () => {
     expect(harness.prisma.thread.updateMany).not.toHaveBeenCalled();
   });
 
-  it("retries without persisting when the runtime reports a failure as text", async () => {
+  it("retries without persisting when the runtime reports a failed turn", async () => {
     const harness = compactionHarness({ deploymentModelKey: "openrouter-key" });
     harness.runtime.run.mockImplementation(async function* () {
-      yield { type: "text", text: "I hit a problem: model unavailable" };
-      yield { type: "done", text: "model unavailable" };
+      yield { type: "text", text: "Unknown model openrouter/none" };
+      yield { type: "done", failed: true };
     });
 
     await expect(compactHistory(harness.deps, "thread-1")).rejects.toThrow("summarizer failed");

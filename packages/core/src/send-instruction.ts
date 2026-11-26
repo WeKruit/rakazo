@@ -1,3 +1,11 @@
+/** Email send tools: each call shows its confirmation card. */
+export const EMAIL_SEND_TOOLS = new Set([
+  "reply_to_email",
+  "native_instantly_reply_to_email",
+  "GMAIL_SEND_EMAIL",
+  "GMAIL_REPLY_TO_THREAD",
+]);
+
 // The sending account is the recruiter's own connected mailbox, not a recipient.
 const SENDER_KEYS = new Set(["eaccount", "from", "from_email", "sender"]);
 

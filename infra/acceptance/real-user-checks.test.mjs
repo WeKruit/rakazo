@@ -605,13 +605,12 @@ test("a role chat's reply follows the recruiter's newest message in any chat", (
   assert(language(conversationChecks([jd, first], { recruiter: [jd] })));
 });
 
-test("a card answer or the brief confirmation does not set the recruiter's language", () => {
-  // 11-25 big-ask-split: a Chinese recruiter's role chat holds "Confirm recruiting brief …" and
-  // "allow", which the product posts or reads as theirs; its Chinese replies were flagged.
+test("a card answer does not set the recruiter's language", () => {
+  // 11-25 big-ask-split: a Chinese recruiter's role chat holds "allow", which the product reads
+  // as theirs; its Chinese replies were flagged.
   const at = (message, time) => ({ ...message, at: `2026-11-25T02:${time}Z` });
   const chat = [
     at(user("找60个 Senior Backend Engineer，Go或Java，人在新加坡"), "53:15"),
-    at(user("Confirm recruiting brief for Senior Backend Engineer — Singapore (requirements version 2)."), "54:33"),
     at(user("allow"), "55:07"),
     at(bot("已保存并检查到 57 名 Strong 或 Promising 候选人，尚差 3 名。"), "59:00"),
   ];

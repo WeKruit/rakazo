@@ -1285,10 +1285,6 @@ msgstr "Copy"
 msgid "Copy .env example"
 msgstr "Copy .env example"
 
-#: src/pages/WorkMetricsSettingsPanel.tsx
-msgid "Corrected after compaction"
-msgstr "Corrected after compaction"
-
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Cost"
 msgstr "Cost"
@@ -2806,7 +2802,6 @@ msgid "Meeting completed"
 msgstr "Meeting completed"
 
 #: src/pages/RecruitingPanel.tsx
-#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Memory"
 msgstr "Memory"
 

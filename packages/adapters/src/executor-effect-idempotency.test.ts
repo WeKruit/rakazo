@@ -8,6 +8,7 @@ import type {
   MemorySnapshot,
   SemanticMemoryProvider,
 } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type { MessageBlock, RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
 import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
@@ -27,7 +28,6 @@ import {
   Prisma,
   prepareNativeRecruitingCandidateDecision,
   RecruitingConflictError,
-  RecruitingIntentQuoteError,
   RecruitingSourceValidationError,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1907,27 +1907,6 @@ describe("recruiter-facing provider names", () => {
     );
   });
 
-  // Staging eval 11-11 (memory-after-role): Kruit sent its handoff brief to the recruiter.
-  it("keeps a handoff brief sent with message_user out of the chat", async () => {
-    const f = fixture("brief-message-user");
-    const botRow = await f.prisma.bot.findUniqueOrThrow();
-    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
-      ...botRow,
-      spawnKey: "recruiting:user-1:main",
-    } as typeof botRow);
-    f.runtimeRun.mockImplementation(async function* (request) {
-      const args = { message: "Goal: Continue intake.\nWhere: This role.\nDone when: ten shown." };
-      yield { type: "tool" as const, name: "message_user", args, executionId: "brief-call" };
-      f.results.push(await request.executeTool!("message_user", args, "brief-call"));
-      yield { type: "done" as const, text: "The role team has it." };
-    });
-
-    await f.run();
-
-    expect(JSON.stringify(f.published)).not.toContain("Continue intake");
-    expect(JSON.stringify(f.results)).toContain("Not shown: a handoff brief");
-  });
-
   // Staging eval 11-11 (cold-email-en): Kruit's report-back reply "NO_RESPONSE" was shown.
   it("keeps a recruiting agent's NO_RESPONSE reply out of the chat", async () => {
     const f = fixture("recruiting-no-response");
@@ -2584,7 +2563,7 @@ describe("mutating tool effect idempotency keys", () => {
 
 describe("native recruiting validation feedback", () => {
   it.each([
-    ["recruiting_role", "create", ["preferences", "intent"]],
+    ["recruiting_role", "create", ["intent"]],
     ["recruiting_research", "import_csv", ["expectedRoleRevision", "artifactId"]],
   ] as const)(
     "returns actionable schema fields for %s without dispatch",
@@ -2731,62 +2710,6 @@ describe("native recruiting role effect delivery", () => {
     expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
     expect(f.results).toEqual([delivered]);
     expect(f.effects.map((effect) => effect.status)).toEqual(["completed", "completed"]);
-  });
-
-  // 2026-10-27: "找 50 个" sent while the round's turn still ran; the brief update quoted the
-  // earlier answer and was refused. The update quotes the recruiter's latest message instead.
-  it("quotes the recruiter's latest message on a role update", async () => {
-    const f = fixture("role-update-latest");
-    vi.mocked(f.prisma.message.findFirst).mockResolvedValue({
-      blocks: [{ kind: "text", text: "这 10 个方向可以，找 50 个类似的人" }],
-    } as never);
-    vi.mocked(executeRecruitingRoleTool).mockRejectedValue(new IsolationError());
-    f.setCalls([
-      {
-        name: "recruiting_role",
-        args: {
-          operation: "update",
-          roleId: "role-1",
-          expectedRevision: 1,
-          intent: { basis: "direct", quote: "优先洛杉矶都会区" },
-        },
-        executionId: "update-latest",
-      },
-    ]);
-    await f.run();
-    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
-      intent: { basis: "direct", quote: "这 10 个方向可以，找 50 个类似的人" },
-    });
-  });
-
-  // 2026-10-28: feedback whose quote was not the recruiter's exact words was lost.
-  it("repeats a feedback save once with the words the quote check named", async () => {
-    const f = fixture("feedback-quote-repair");
-    vi.mocked(executeRecruitingFeedback)
-      .mockReset()
-      .mockRejectedValueOnce(new RecruitingIntentQuoteError("Greater Los Angeles first"))
-      .mockResolvedValue({ status: "rejected", reason: "noop" } as never);
-    f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: {
-          target: "role",
-          operation: "revise",
-          roleId: "role-1",
-          expectedRoleRevision: 1,
-          summary: "Prefer Los Angeles",
-          intent: { basis: "direct", quote: "prefer LA" },
-          sourceRefs: [],
-        },
-        executionId: "feedback-quote",
-      },
-    ]);
-    await f.run();
-    const calls = vi.mocked(executeRecruitingFeedback).mock.calls;
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.[2]).toMatchObject({
-      intent: { basis: "direct", quote: "Greater Los Angeles first" },
-    });
   });
 
   it.each(["quote", "scope"])(
@@ -3952,9 +3875,7 @@ describe("native recruiting feedback effect dispatch", () => {
       documents: [{ path: "MEMORY.md", content: "Earlier line", revision: 3 }],
     } as never);
     vi.mocked(executeRecruitingFeedback)
-      .mockRejectedValueOnce(
-        new Error("Memory changed since it was read. Read the latest version and save again."),
-      )
+      .mockRejectedValueOnce(new MemoryRevisionConflictError())
       .mockResolvedValueOnce({
         status: "saved",
         feedback,
@@ -5199,11 +5120,8 @@ describe("native recruiting turn delivery", () => {
   }
 
   it("never saves a role from a greeting in a role team with no role", async () => {
-    const f = await roleTeamFirstTurn("greeting-no-role", "你好，你能帮我做什么？");
+    await roleTeamFirstTurn("greeting-no-role", "你好，你能帮我做什么？");
     expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
-    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
-    expect(prompt).toContain("no role, no intake question and no people search");
-    expect(prompt).not.toContain("Do not create a role in this turn");
   });
 
   it("never shows a question card in a role team with no role", async () => {
@@ -5227,7 +5145,6 @@ describe("native recruiting turn delivery", () => {
       instead: expect.stringContaining("save it now with recruiting_role create"),
     });
     expect(JSON.stringify(bounced)).toContain("then ask this same question with ask_user");
-    expect(request.prompt).toContain("a request to find people for a named role counts");
   });
 
   // Staging eval 11-11 (mixed-language-ask): a second turn asked the same location question
@@ -5256,11 +5173,8 @@ describe("native recruiting turn delivery", () => {
   });
 
   it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {
-    const f = await roleTeamFirstTurn("short-request-role", "New grads from USC, CS");
+    await roleTeamFirstTurn("short-request-role", "New grads from USC, CS");
     expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
-    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
-      "Only when the recruiter's message describes a role they are hiring for",
-    );
   });
 
   // Gate 493e9f2e, change-mind-mid-run: the recruiter changed the ask after Main handed off; its
@@ -5602,7 +5516,6 @@ describe("native recruiting turn delivery", () => {
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
     expect(prompt).toContain("Overseas Sales Manager. Grow the US market.");
     expect(prompt).toContain("never read it again");
-    expect(prompt).not.toContain("read it and the intake skill");
     expect(vi.mocked(artifactReadFromTool)).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.anything(),

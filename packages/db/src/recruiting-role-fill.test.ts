@@ -85,6 +85,24 @@ describe("fillRecruitingRoleArgs", () => {
     ]);
   });
 
+  it("reads a mistyped file id as the one real file the save cites (staging 2026-11-26, jd-upload-pdf)", async () => {
+    const typo = {
+      ...jd,
+      id: "jd-2",
+      anchor: { kind: "artifact", artifact: { artifactId: "artifact-f1", sha256: hash } },
+    };
+    const filled = await fillRecruitingRoleArgs(prisma(), actor, context, {
+      operation: "create",
+      sourceRefs: [jd, typo],
+      criteria: [],
+    });
+    expect(
+      (filled.sourceRefs as { anchor: { artifact: { artifactId: string } } }[]).map(
+        (source) => source.anchor.artifact.artifactId,
+      ),
+    ).toEqual(["artifact-1", "artifact-1"]);
+  });
+
   it("acts on the conversation's role when the model mistypes its id", async () => {
     const args = { operation: "update", roleId: "d8399cf9-93e7-407f-b2a5-af4d7f4520da" };
     const filled = await fillRecruitingRoleArgs(

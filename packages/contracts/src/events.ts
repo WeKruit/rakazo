@@ -484,6 +484,8 @@ export const AskBlockSchema = z
     /** The options are checkboxes: the answer is every picked label plus any typed text. */
     multiple: z.boolean().optional(),
     answer: z.string().optional(),
+    /** The answer was typed in the chat while the card was open, not given on the card. */
+    answeredInChat: z.literal(true).optional(),
     requestedSchema: AskRequestedSchema.optional(),
     formResponse: AskFormResponseSchema.optional(),
     connection: AskConnectionSchema.optional(),
@@ -550,6 +552,10 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
     crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
     recruitingContext: RecruitingChatContextSchema.optional(),
+    /** Set by the server on a role team's round list; `roundId` once the round is recorded. */
+    recruitingRoundList: z.object({ roundId: z.string().optional() }).optional(),
+    /** Set by the server on the message it records an answer to a question card as (picked, typed on the card or spoken). */
+    cardAnswer: z.literal(true).optional(),
     /** The sender's interface language when they wrote this, such as "zh-CN" or "en". */
     uiLocale: UiLocaleTag.optional(),
   }),
@@ -935,7 +941,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 17;
+export const EVENT_FORMAT_VERSION = 18;
 
 export const ProductEventSchema = z
   .object({

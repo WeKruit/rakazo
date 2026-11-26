@@ -77,7 +77,7 @@ const revision = {
   roleId: role.id,
   revision: 1,
   sourceRefs: [],
-  brief: { fields: [], questions: [], rules: [], searchFilters: [], confirmation: null },
+  brief: { fields: [], questions: [], rules: [], searchFilters: [] },
   criteria: criteria.map(([id, priority, statement]) => ({
     id,
     priority,

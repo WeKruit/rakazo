@@ -3,26 +3,13 @@ import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { MailReplyErrorCode } from "@rakazo/contracts";
 import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
-import {
-  greetsByName,
-  INSTANTLY_MCP_ENDPOINT,
-  NAMED_GREETING_NOTE,
-  PLACEHOLDER_NOTE,
-  signedAsTeam,
-  TEAM_SIGNATURE_NOTE,
-  unfilledPlaceholder,
-} from "@rakazo/core";
+import { INSTANTLY_MCP_ENDPOINT, PLACEHOLDER_NOTE, unfilledPlaceholder } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
-import {
-  greetsSeveral,
-  OWN_EMAIL_STEP,
-  ownEmailSequences,
-  ownFirstEmails,
-} from "./campaign-own-emails.js";
+import { OWN_EMAIL_STEP, ownEmailSequences, ownFirstEmails } from "./campaign-own-emails.js";
 import { confirmedSends, sendingElsewhere } from "./campaign-send-record.js";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
@@ -36,6 +23,7 @@ import {
   EnsureSenderInput,
   ensureSendingIdentity,
   requireSendingMailboxReady,
+  SendingMailboxError,
   sendingMailboxState,
   sendingToday,
 } from "./instantly-senders.js";
@@ -65,7 +53,6 @@ const Step = z.strictObject({
     .min(1)
     .max(20_000)
     .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.')
-    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE)
     .refine((body) => !unfilledPlaceholder(body), PLACEHOLDER_NOTE),
   delay_days: z
     .number()
@@ -89,12 +76,6 @@ const CampaignSetup = {
 const CreateCampaignInput = z.strictObject({
   name: z.string().min(1).max(200),
   ...CampaignSetup,
-  // Everyone added to a new campaign gets its email, so a name written into the greeting is wrong
-  // for all but one of them (ensure_role_campaign's per-person email keeps its own schema).
-  steps: CampaignSetup.steps.refine(
-    (steps) => !steps?.some((step) => greetsByName(step.body)),
-    NAMED_GREETING_NOTE,
-  ),
 });
 const RoleDraftInput = CreateCampaignInput.extend({ role_id: z.string().min(1).max(100) });
 const CloneRoleDraftInput = z.strictObject({
@@ -781,6 +762,11 @@ export async function lastUsedMailbox(
 }
 
 const NO_MAILBOX = "No sending mailbox is set up for this account yet";
+class NoMailboxError extends Error {
+  constructor() {
+    super(`${NO_MAILBOX}; tell the recruiter instead of creating a campaign`);
+  }
+}
 /** Default sender: the last-used mailbox if still connected, else the first connected one. */
 async function defaultMailbox(
   prisma: PrismaClient,
@@ -796,7 +782,7 @@ async function defaultMailbox(
     .filter((email): email is string => typeof email === "string");
   const last = await lastUsedMailbox(prisma, context.spaceId, serverId, context.userId);
   const picked = emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
-  if (!picked) throw new Error(`${NO_MAILBOX}; tell the recruiter instead of creating a campaign`);
+  if (!picked) throw new NoMailboxError();
   return picked;
 }
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -1739,13 +1725,7 @@ export async function requireReplySendingMailboxReady(
       return await requireSendingMailboxReady(prisma, rest, context, email);
     } catch (error) {
       throw new MailReplySendingError(
-        error instanceof IsolationError
-          ? "sender_unavailable"
-          : error instanceof Error && error.message.includes("display name changed")
-            ? "sender_changed"
-            : error instanceof Error && error.message.includes("not active yet")
-              ? "sender_not_ready"
-              : "sender_unavailable",
+        error instanceof SendingMailboxError ? error.code : "sender_unavailable",
       );
     }
   }
@@ -1997,8 +1977,7 @@ async function ensureRoleCampaign(
       (stale ? existing!.binding.eaccount : await defaultMailbox(prisma, rest, context, serverId));
   } catch (error) {
     // Saving the role's email needs no mailbox: it waits on the role until a campaign exists.
-    if (!input.steps || !(error instanceof Error) || !error.message.startsWith(NO_MAILBOX))
-      throw error;
+    if (!input.steps || !(error instanceof NoMailboxError)) throw error;
     return saveRoleEmail(prisma, context, emailKey, role, serverId, input.steps);
   }
   const steps = input.steps ?? (await savedRoleEmail(prisma, context, emailKey));
@@ -2262,18 +2241,6 @@ async function saveOwnEmail(
   if (unnamed.length)
     throw new Error(
       `No ${missingFields(own, unnamed[0]!).join(" or ")} is known for ${label(unnamed)}; pass each of them as "Full Name <email>" with the name the recruiter gave, or write their email out in full without it, then save again.`,
-    );
-  const together = greetsSeveral(
-    own.body,
-    chosen.map((person) => text(person.first_name)),
-  );
-  if (together)
-    throw new Error(
-      `Each of these people gets this email alone, but it greets ${together} together. Greet with {{firstName}}, which is filled in for each person, then save again.`,
-    );
-  if (chosen.length > 1 && greetsByName(own.body))
-    throw new Error(
-      `Each of ${who} gets this email alone, but it greets one person by name. Greet with {{firstName}}, which is filled in for each person, or save each person's own email with recipients set to that person alone, then save again.`,
     );
   if (binding.created !== true)
     throw new Error(askAbout(who, "this role's campaign was set up outside this product"));
@@ -3841,7 +3808,7 @@ export async function runInstantlyWrite(
       const ensure = () => ensureRoleCampaign(prisma, rest, context, serverId, input);
       return oneAtATime(prisma, lock, ensure).catch(async (error: unknown) => {
         // No mailbox yet: the role's saved email is still there to show.
-        if (!(error instanceof Error) || !error.message.startsWith(NO_MAILBOX)) throw error;
+        if (!(error instanceof NoMailboxError)) throw error;
         const roleId = input.role_id ?? (await activeRoleId(prisma, context));
         const steps =
           roleId &&

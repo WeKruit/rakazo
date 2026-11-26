@@ -46,16 +46,10 @@ export interface TextJudge {
   ): Promise<Map<string, CriterionVerdict> | undefined>;
 }
 
-/**
- * A requirement to look for in a profile, or (avoid) a reason the recruiter turned people down,
- * which fails a person whose profile shows the same problem.
- */
+/** A requirement to look for in a profile, in the words it was saved in. */
 export type CriterionQuestion = {
   id: string;
   statement: string;
-  avoid?: boolean;
-  /** How to read the profile for this requirement, given after the question. */
-  rule?: string;
   /** The requirement states a place: the answer says where the person is relative to it. */
   place?: boolean;
 };
@@ -212,15 +206,11 @@ export function typeSafeJudge(
           body: JSON.stringify({
             model: "jev-latest",
             state,
-            questions: Object.fromEntries(
-              requirements.map((requirement, index) => [
-                `q${index}`,
-                requirement.avoid
-                  ? {
-                      type: "noul",
-                      instructions: `The recruiter turned other people down for this reason: "${requirement.statement}". Does this person's profile show the same problem? Answer no when the profile does not show it.`,
-                    }
-                  : requirement.place
+            questions: {
+              ...Object.fromEntries(
+                requirements.map((requirement, index) => [
+                  `q${index}`,
+                  requirement.place
                     ? {
                         type: "choice",
                         instructions: `Where is this person now, relative to the place this requirement states: "${requirement.statement}"? Judge the current location first; a past job or school in that place matters only when the person is now somewhere else.`,
@@ -228,11 +218,12 @@ export function typeSafeJudge(
                       }
                     : {
                         type: "choice",
-                        instructions: `Does this person's profile show: ${requirement.statement}?${requirement.rule ? ` ${requirement.rule}` : ""}`,
+                        instructions: `Does this person's profile show: ${requirement.statement}?`,
                         criteria: CRITERION_CHOICES,
                       },
-              ]),
-            ),
+                ]),
+              ),
+            },
           }),
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
@@ -244,24 +235,12 @@ export function typeSafeJudge(
               choice?: unknown;
               confidence?: unknown;
               probabilities?: { opposite?: unknown };
-              noul?: unknown;
             }
           >;
         };
         const verdicts = new Map<string, CriterionVerdict>();
         for (const [index, requirement] of requirements.entries()) {
           const answer = body.answers?.[`q${index}`];
-          if (requirement.avoid) {
-            // The same problem shown is the requirement not met.
-            const same = answer?.noul;
-            if (typeof same === "number")
-              verdicts.set(requirement.id, {
-                level: same >= 0.5 ? "opposite" : "strong",
-                confidence: Math.max(same, 1 - same),
-                against: same,
-              });
-            continue;
-          }
           if (requirement.place) {
             const tag = answer?.choice as PlaceTag | undefined;
             if (!tag || !(tag in PLACE_TAGS) || typeof answer?.confidence !== "number") continue;

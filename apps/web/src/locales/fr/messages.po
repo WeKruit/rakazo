@@ -841,14 +841,6 @@ msgstr ""
 msgid "Bounced"
 msgstr ""
 
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Brief changed or could not be confirmed. Refresh and review it."
-msgstr ""
-
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Brief confirmed"
-msgstr ""
-
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Browse all candidates"
 msgstr ""
@@ -1405,10 +1397,6 @@ msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Confirm and send"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Confirm brief"
 msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
@@ -5999,10 +5987,6 @@ msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Send totals are not available from these records."
-msgstr ""
-
-#: src/components/AskCard.tsx
-msgid "Send when I say send"
 msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx

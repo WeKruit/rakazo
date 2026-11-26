@@ -1,5 +1,4 @@
 import type { PrismaClient } from "@rakazo/db";
-import { chatReplyToAsk } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   GLOBAL_HANDOFF_ROLE_WORK,
@@ -545,27 +544,6 @@ describe("group handoff report back", () => {
     expect(deps.jobs.enqueue).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["没有发出去的原因是什么？", false],
-    ["Find ten more people like these.", true],
-  ])("after an answered %s, wakes the sender: %s", async (question, wakes) => {
-    // Staging 11-13: the teammate answered the recruiter's question, then the sender restated it
-    // and handed it back, so one question got three answers.
-    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
-      { blocks: [{ kind: "text", text: "已排队 3 人，周五 9:00 发出。" }] },
-    ]);
-    tx.message.findFirst.mockImplementation((async (query?: {
-      where?: { role?: string; blocks?: unknown };
-    }) =>
-      query?.where?.blocks
-        ? null
-        : query?.where?.role === "user"
-          ? { blocks: [{ kind: "text", text: question }] }
-          : { blocks: [asked] }) as never);
-    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
-    expect(runCreate.mock.calls.length > 0).toBe(wakes);
-  });
-
   it("leaves the next step to the recruiter while a card waits on them", async () => {
     // Staging 11-13: the teammate asked to connect Gmail, and the sender re-handed the send four
     // times, each answer repeating "connect Gmail first".
@@ -653,14 +631,14 @@ describe("group handoff report back", () => {
   });
 
   it.each([
-    ["typed in the chat", chatReplyToAsk("我们外联用哪些发件邮箱？"), true, false],
-    ["picked on the card", "Selected choice choice-1: 不要求", false, false],
+    ["typed in the chat", true, true, false],
+    ["picked on the card", false, false, false],
     // Staging 11-10: the sender already acted on the typed answer, then a report back told it to
     // act on it again, and it restated the recruiter's feedback a second time.
-    ["typed in the chat and already replied to", chatReplyToAsk("仅本轮不合适"), false, true],
+    ["typed in the chat and already replied to", true, false, true],
   ])(
     "reminds the sender of a question closed by a message %s",
-    async (_, answer, reminds, replied) => {
+    async (_, typed, reminds, replied) => {
       const question = "语言要求按哪种处理？";
       const reply = "我们外联用哪些发件邮箱？";
       const { deps, messageCreate, tx } = harness([asked]);
@@ -673,14 +651,18 @@ describe("group handoff report back", () => {
               ? { id: "reply-1" }
               : null
             : {
-                runId: "run-a",
                 seq: 5,
-                blocks: [{ kind: "ask", text: question, status: "answered", answer: reply }],
+                blocks: [
+                  {
+                    kind: "ask",
+                    text: question,
+                    status: "answered",
+                    answer: reply,
+                    ...(typed ? { answeredInChat: true } : {}),
+                  },
+                ],
               }
           : { blocks: [asked] }) as never);
-      tx.run.findFirst.mockImplementation((async () => ({
-        task: { prompt: `新岗位\n\n${question}\nAnswer: ${answer}` },
-      })) as never);
       await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
       const text = (
         messageCreate.mock.calls[0] as unknown as [{ data: { blocks: [{ text: string }] } }]

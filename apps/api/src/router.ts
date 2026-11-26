@@ -12,6 +12,7 @@ import type {
   UsageOperationKind,
 } from "@rakazo/adapter-kit";
 import {
+  ByteLimitError,
   computerControlExpireJobKey,
   discoveryWarmJob,
   messagingDeliverJob,
@@ -149,6 +150,7 @@ import {
   validateModelAuthAvailability,
   validateStoredModelAuth,
   verifyMcpInstall,
+  WorkspacePathError,
 } from "@rakazo/adapters";
 import type { CrmMembershipReads, CrmRoleListReads } from "@rakazo/adapters/recruiting-reads";
 import type { Auth, FirstPartySessionConfig, OidcConfig } from "@rakazo/auth";
@@ -355,7 +357,6 @@ import {
   approveRecruitingCalibrationRound,
   archiveRecruitingRole,
   bindRecruitingRole,
-  confirmRecruitingBrief,
   createRecruitingCandidateNote,
   createRecruitingReminder,
   createRecruitingRole,
@@ -3909,7 +3910,7 @@ export function createRouter(deps: RouterDeps) {
               maxBytes: MAX_COMPUTER_TEXT_FILE_BYTES,
             });
           } catch (error) {
-            if (error instanceof Error && error.message.startsWith("agent home file exceeds ")) {
+            if (error instanceof ByteLimitError) {
               throw new ORPCError("BAD_REQUEST", { message: "file is too large to preview" });
             }
             throw error;
@@ -3939,7 +3940,7 @@ export function createRouter(deps: RouterDeps) {
             { maxBytes: ATTACHMENT_MAX_BYTES },
           )
           .catch((error: unknown) => {
-            if (error instanceof Error && /exceeds|too large/i.test(error.message)) {
+            if (error instanceof ByteLimitError) {
               throw new ORPCError("BAD_REQUEST", { message: "File is too large to download." });
             }
             throw error;
@@ -3968,7 +3969,7 @@ export function createRouter(deps: RouterDeps) {
         try {
           storedPath = resolveBotUploadPath(parseComputerMode(computer.scope), bot.id, input.path);
         } catch (error) {
-          if (error instanceof Error && /escapes/i.test(error.message)) {
+          if (error instanceof WorkspacePathError) {
             throw new ORPCError("BAD_REQUEST", { message: error.message });
           }
           throw error;
@@ -4459,14 +4460,6 @@ export function createRouter(deps: RouterDeps) {
       ),
       editCriteria: authed.recruiting.editCriteria.handler(async ({ context, input }) => {
         const saved = await editRecruitingCriteria(deps.prisma, context.actor, input, {
-          artifacts: deps.artifacts,
-          context: connectionContext(context.actor, randomUUID()),
-        });
-        await notifyRecruitingChange(deps, context.actor, input.threadId);
-        return saved;
-      }),
-      confirmBrief: authed.recruiting.confirmBrief.handler(async ({ context, input }) => {
-        const saved = await confirmRecruitingBrief(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
           context: connectionContext(context.actor, randomUUID()),
         });

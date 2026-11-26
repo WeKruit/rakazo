@@ -1,12 +1,5 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
-import {
-  RECRUITING_CALIBRATION_QUICK_SEARCH,
-  RECRUITING_MISSED_REQUIREMENT,
-  RECRUITING_PDF_RENDERING,
-  RECRUITING_ROUND_NEXT_STEP,
-  RECRUITING_SCALE_START,
-} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +9,6 @@ import {
   RECRUITING_PRESENTATION_INSTRUCTION,
 } from "./recruiting-context.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
-import type * as UnrecordedVerdicts from "./unrecorded-verdicts.js";
 
 const db = vi.hoisted(() => ({
   workspace: vi.fn(),
@@ -26,11 +18,10 @@ const db = vi.hoisted(() => ({
   feedback: vi.fn(),
   quality: vi.fn(),
   patterns: vi.fn(),
-  unsaved: vi.fn(),
 }));
-vi.mock("./unrecorded-verdicts.js", async (original) => ({
+vi.mock("./recruiting-round-check.js", async (original) => ({
   ...(await original<object>()),
-  namedWithoutVerdict: db.unsaved,
+  requestCounts: async () => ({ counted: 0, turnedDown: 0, fitNotShownYet: 0, notGradedYet: 0 }),
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
@@ -135,7 +126,6 @@ describe("recruiting run context", () => {
     db.crmSource.mockReset().mockResolvedValue(null);
     db.feedback.mockResolvedValue({ feedback: [], nextCursor: null });
     db.quality.mockResolvedValue({ rounds: [], goodExample: 0, notFit: 0 });
-    db.unsaved.mockResolvedValue(undefined);
     db.patterns.mockResolvedValue({ role: [], allRoles: [] });
   });
 
@@ -293,15 +283,6 @@ describe("recruiting run context", () => {
         ],
         rules: [],
         questions: [],
-        confirmation:
-          salary === "ready"
-            ? {
-                revision: 1,
-                userId: run.userId,
-                messageId: "confirmed",
-                confirmedAt: "2026-10-20T00:00:00.000Z",
-              }
-            : null,
       };
       const current = { ...workspace, revision: { ...workspace.revision, brief } };
       const savedBefore = JSON.stringify(current);
@@ -378,63 +359,6 @@ describe("recruiting run context", () => {
       "round 1: 2 good examples, 6 not a fit of 10 shown; round 2: 1 good examples, 5 not a fit of 10 shown; all people on this role: 3 good examples, 11 not a fit.",
     );
     expect(loaded!.text).toContain("tell the recruiter in one line what you changed");
-  });
-
-  it("tells the agent whom the recruiter named since the round with nothing saved (branch b0ceaea0)", async () => {
-    // Three people were turned down in the main chat; the role team never saved it, so Results
-    // marked them only after the recruiter complained.
-    const { deps } = fixture();
-    db.unsaved.mockResolvedValueOnce({ round: 1, names: ["Ann Example", "王测试"] });
-    const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
-      reason: "turn",
-    });
-    expect(loaded!.text).toContain(
-      "Since round 1 was shown the recruiter wrote about Ann Example, 王测试 from it",
-    );
-    const { namedWithoutVerdict, namesPerson } = await vi.importActual<typeof UnrecordedVerdicts>(
-      "./unrecorded-verdicts.js",
-    );
-    expect(namesPerson("Victor Doe 是架构师，Tom G. 是转行的", "Victor Middle Doe")).toBe(true);
-    expect(namesPerson("王测试最近经历停在2021，不要", "王测试")).toBe(true);
-    expect(namesPerson("Kai Sample 不要", "Kai (Nick) Sample")).toBe(true);
-    expect(namesPerson("Mark is fine", "Ma Test")).toBe(false);
-    const prisma = {
-      recruitingCalibrationRound: {
-        findFirst: vi.fn(async () => ({
-          round: 1,
-          candidateKeys: ["a", "b", "c"],
-          createdAt: new Date("2026-11-20T13:25:42Z"),
-        })),
-      },
-      message: {
-        findMany: vi.fn(async () => [
-          {
-            blocks: [
-              {
-                kind: "bot_message_received",
-                text: 'The recruiter wrote, word for word:\n"Ann Lee 才3年经验，Bo Chen 不要"\n\nKruit\'s note, only on who:\nCy Wu is fine',
-              },
-            ],
-          },
-        ]),
-      },
-      recruitingCandidateOccurrence: {
-        findMany: vi.fn(async () => [
-          { candidateKey: "a", name: "Ann Lee" },
-          { candidateKey: "b", name: "Bo Chen" },
-          { candidateKey: "c", name: "Cy Wu" },
-        ]),
-      },
-      recruitingCandidate: { findMany: vi.fn(async () => [{ candidateKey: "b" }]) },
-      $queryRaw: vi.fn(async () => []),
-    };
-    // Bo Chen already has a pass; Cy Wu is named only in Kruit's note, never by the recruiter.
-    await expect(
-      namedWithoutVerdict(prisma as never, { spaceId: "space", userId: "owner" } as never, {
-        roleId: "role",
-        threadId: "thread",
-      }),
-    ).resolves.toEqual({ round: 1, names: ["Ann Lee"] });
   });
 
   it("tells the agent what the praised and turned-down people share, on this role and across roles", async () => {
@@ -558,7 +482,7 @@ describe("recruiting run context", () => {
   );
 
   it.each(["instructions", "tool_result", "steering"] as const)(
-    "distinguishes authorized exploration and continuation from formal calibration gates in %s context",
+    "carries the role as data in %s context",
     async (placement) => {
       const { deps } = fixture();
       const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
@@ -566,15 +490,7 @@ describe("recruiting run context", () => {
         placement,
       });
       const text = loaded!.manifest.roleText;
-      for (const rule of [
-        RECRUITING_CALIBRATION_QUICK_SEARCH,
-        RECRUITING_ROUND_NEXT_STEP,
-        RECRUITING_SCALE_START,
-        RECRUITING_PDF_RENDERING,
-        // A missed requirement is redone at every stage, not only right after the first ten.
-        RECRUITING_MISSED_REQUIREMENT,
-      ])
-        expect(text).toContain(rule);
+      expect(text).toContain("<recruiting_role>");
       expect(loaded!.text).toContain(text);
       expect(loaded!.manifest.placement).toBe(placement);
       expect(loaded!.workspace).toBe(workspace);
@@ -617,12 +533,6 @@ describe("recruiting run context", () => {
         },
       ],
       questions: [],
-      confirmation: {
-        revision: 1,
-        userId: "owner",
-        messageId: "confirmation",
-        confirmedAt: "2026-10-16T00:00:00Z",
-      },
     };
     const current = {
       ...workspace,
@@ -645,7 +555,6 @@ describe("recruiting run context", () => {
         brief: {
           ...brief,
           searchFilters: [],
-          confirmation: { ...brief.confirmation, revision: 2 },
         },
       },
     };

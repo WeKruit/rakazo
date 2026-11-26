@@ -20,7 +20,6 @@ import {
   IsolationError,
   listRecruitingCandidates,
   listRunToolResults,
-  RecruitingIntentQuoteError,
   RecruitingSourceValidationError,
   recruitingCsvImportReceipt,
   recruitingPeopleSearchReceipt,
@@ -191,6 +190,14 @@ export function normalizeRecruitingRoleArgs(
         upsert: repairCriteria(visited.criteria.upsert),
       },
     };
+  // A create takes plain lists: criteria written in the update's shape become the list, and a
+  // list left out is empty.
+  if (visited.operation === "create") {
+    if (object(visited.criteria) && Array.isArray(visited.criteria.upsert))
+      visited = { ...visited, criteria: visited.criteria.upsert };
+    for (const key of ["sourceRefs", "criteria", "preferences", "definitionQuestions"])
+      if (visited[key] === undefined) visited = { ...visited, [key]: [] };
+  }
   // An update's criteria hold only upsert/remove; other keys written there belong to the call.
   if (visited.operation === "update" && object(visited.criteria)) {
     const { upsert, remove, ...stray } = visited.criteria;
@@ -218,7 +225,6 @@ export function normalizeRecruitingRoleArgs(
     if (!Object.hasOwn(result, key)) result[key] = brief[key];
     delete brief[key];
   }
-  delete brief.confirmation;
   return { ...result, brief };
 }
 
@@ -1073,8 +1079,8 @@ export async function resolveRecruitingContactAcrossRoles(
 
 /**
  * The arguments for the server's one repeat of a refused role save: every citation becomes a plain
- * locator (no quote to match), and a mistyped intent quote becomes the recruiter's own words. The
- * repeat passes the same ownership checks; undefined when it would change nothing.
+ * locator (no quote to match). The repeat passes the same ownership checks; undefined when it
+ * would change nothing.
  */
 export function repairedRoleSave(
   args: Record<string, unknown>,
@@ -1102,16 +1108,6 @@ export function repairedRoleSave(
   };
   const { intent, ...rest } = args;
   const repaired = strip(rest) as Record<string, unknown>;
-  const quote = error instanceof RecruitingIntentQuoteError ? error.quote : undefined;
-  const intentRecord =
-    intent && typeof intent === "object" ? (intent as Record<string, unknown>) : {};
-  if (quote && quote !== intentRecord.quote) changed = true;
   if (!changed) return undefined;
-  return {
-    ...repaired,
-    ...(intent === undefined && !quote
-      ? {}
-      : { intent: { ...intentRecord, ...(quote ? { quote } : {}) } }),
-  };
+  return { ...repaired, ...(intent === undefined ? {} : { intent }) };
 }
-

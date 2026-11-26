@@ -16,6 +16,7 @@ import {
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
+  RECRUITING_RETIRED_SKILL_NAMES,
   recruitingBotKey,
 } from "@rakazo/core";
 import type { Bot, BotMcpServer, CapabilityInstall, McpServer, PrismaClient } from "./client.js";
@@ -132,6 +133,8 @@ const catalogDigest = (firstPartyMcpUrl?: string) =>
     recruitingServices(firstPartyMcpUrl),
     RECRUITING_DISABLED_BUILTIN_TOOLS,
     [MEMORY_TIDY_ROUTINE_NAME, memoryTidyRoutinePrompt(true), memoryTidyRoutinePrompt(false)],
+    RECRUITING_DEFAULT_SKILLS,
+    RECRUITING_RETIRED_SKILL_NAMES,
   ]);
 export function recruitingPresetId(actor: Pick<Actor, "spaceId" | "userId">): string {
   return `recruiting-defaults-${digest([actor.spaceId, actor.userId])}`;
@@ -322,7 +325,11 @@ const LEGACY_PRESET_VERSION = "legacy";
 const TURN_IN_FLIGHT_STATUSES = ["queued", "leased", "running"] as const;
 const LEGACY_BOT_FIELDS = ["title", "description", "instructions"] as const;
 const legacyDigest = (firstPartyMcpUrl?: string) =>
-  digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS]);
+  digest([
+    catalogDigest(firstPartyMcpUrl),
+    RECRUITING_DEFAULT_SKILLS,
+    RECRUITING_RETIRED_SKILL_NAMES,
+  ]);
 
 /**
  * Adopt a crew set up before the managed preset (bots named after the default roles, recorded
@@ -396,11 +403,7 @@ async function adoptLegacyCrew(
     if (changed.count !== 1)
       throw new IsolationError("A recruiting assistant changed during the upgrade");
   }
-  // User copies of the built-in recruiting skills would shadow the maintained ones.
-  const names = RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name);
-  await tx.agentSkill.deleteMany({
-    where: { ...scope, source: "user", name: { in: names, mode: "insensitive" } },
-  });
+  await deleteRecruitingSkillCopies(tx, actor);
   const priorRoutines = prior?.routines;
   const routines = validRoutines(priorRoutines) && priorRoutines ? { ...priorRoutines } : {};
   await ensureMemoryTidyRoutines(
@@ -431,6 +434,25 @@ async function recruitingComputerKind(
     : sandboxKind;
 }
 
+/**
+ * User copies of the built-in recruiting skills would shadow the maintained ones, and copies of
+ * retired ones would stay in the catalog beside the skills that replaced them.
+ */
+async function deleteRecruitingSkillCopies(tx: Prisma.TransactionClient, actor: Actor) {
+  const names = [
+    ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name),
+    ...RECRUITING_RETIRED_SKILL_NAMES,
+  ];
+  await tx.agentSkill.deleteMany({
+    where: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      source: "user",
+      name: { in: names, mode: "insensitive" },
+    },
+  });
+}
+
 async function upgradeInTransaction(
   tx: Prisma.TransactionClient,
   actor: Actor,
@@ -447,6 +469,7 @@ async function upgradeInTransaction(
   const baseline = readPreset(installed.config);
   if (baseline.groupId !== recruitingHomeGroupId(actor))
     throw new IsolationError("Recruiting defaults belong to another workspace");
+  await deleteRecruitingSkillCopies(tx, actor);
   // A service the product no longer ships leaves the baseline with it.
   const shipped = new Set(recruitingServices(options.firstPartyMcpUrl).map((item) => item.slug));
   for (const slug of Object.keys(baseline.services))

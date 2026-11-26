@@ -31,6 +31,7 @@ const messageHash = (message: Message) =>
     .digest("hex");
 interface OriginalMetadata {
   rakazoNavigation?: boolean;
+  rakazoSummary?: boolean;
   rakazoHistory?: boolean;
   rakazoMessageId?: string;
   rakazoCreatedAt?: string;
@@ -377,12 +378,7 @@ export function createRuntimeContextPolicy(
       const summaries = ctx.messages.filter(
         (message) =>
           (message as Message & OriginalMetadata).rakazoNavigation ||
-          ((message as Message & OriginalMetadata).rakazoHistory &&
-            !(message as Message & OriginalMetadata).rakazoMessageId &&
-            (text(message).startsWith("Rakazo-owned compacted context through message sequence ") ||
-              text(message).startsWith(
-                "Memory recalled from earlier conversations that fell outside the visible history.",
-              ))),
+          (message as Message & OriginalMetadata).rakazoSummary,
       );
       for (const summary of summaries) {
         const required = protectedMessageIndexes.map((index) => messages[index]!);
