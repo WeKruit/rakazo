@@ -528,6 +528,14 @@ test("a send card's recipients are its To list, never the sending mailbox or the
     ),
     ["ethan@test.example"],
   );
+  // A calendar invitation goes to every guest on its Guests line.
+  assert.deepEqual(
+    recipientsOf(
+      "Confirm interview booking",
+      "Guests: Ethan Park <ethan@test.example>, priya@test.example\nWhen: Tue, Dec 1, 2026",
+    ),
+    ["ethan@test.example", "priya@test.example"],
+  );
 });
 
 test("cardAnswer sends a button id, a filled form, or the typed text", () => {

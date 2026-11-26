@@ -27,6 +27,24 @@ export function withOpenQuestions(schema: Record<string, unknown>): Record<strin
   };
 }
 
+/**
+ * The schema an approved reply is checked against when it is sent: its stored arguments no longer
+ * carry the list (takeOpenQuestions split it off before the card), so it is not required there.
+ */
+export function withoutOpenQuestions(schema: Record<string, unknown>): Record<string, unknown> {
+  const { [OPEN_QUESTIONS]: _listed, ...properties } = (schema.properties ?? {}) as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...schema,
+    ...(schema.properties ? { properties } : {}),
+    ...(Array.isArray(schema.required)
+      ? { required: (schema.required as string[]).filter((name) => name !== OPEN_QUESTIONS) }
+      : {}),
+  };
+}
+
 /** Splits the list off a reply's arguments, so the mail service never sees it. */
 export function takeOpenQuestions(args: Record<string, unknown>): {
   args: Record<string, unknown>;

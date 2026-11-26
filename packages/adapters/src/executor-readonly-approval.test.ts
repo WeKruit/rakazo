@@ -22,6 +22,7 @@ import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 import type * as RecruitingCandidatesToolModule from "./recruiting-candidates-tool.js";
+import { withOpenQuestions } from "./reply-open-questions.js";
 import type * as ScheduleToolsModule from "./schedule-tools.js";
 import { RoutineUpdateError } from "./schedule-tools.js";
 
@@ -2100,7 +2101,8 @@ describe.each([false, true])("a reply to a candidate (catalog: %s)", (catalog) =
         resourceRevision: 1,
         toolName: "reply_to_email",
       },
-      inputSchema: { type: "object" },
+      // The schema the connector lists for a reply: the open questions are required.
+      inputSchema: withOpenQuestions({ type: "object" }),
     });
 
   it("shows the questions the recruiter never answered on its card, and still drafts it", async () => {

@@ -4,7 +4,8 @@ import type {
   StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
 import { auth, Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { McpOAuthBroker } from "./mcp-oauth.js";
 import { ThirdPartyConnectorEmulator } from "./third-party-connector-emulator.js";
 
 const ENDPOINT = new URL("https://calendarmcp.googleapis.com/mcp/v1");
@@ -140,6 +141,68 @@ describe("GoogleCalendarEmulator", () => {
     await call("delete_event", { eventId: event.id });
     expect(await call("list_events", {})).toMatchObject({ events: [] });
     expect(thirdParties.googleCalendar.events()).toMatchObject([{ status: "cancelled" }]);
+  });
+
+  it("signs in through the product's own OAuth broker and the backend's connector network", async () => {
+    const thirdParties = new ThirdPartyConnectorEmulator();
+    const server = { id: "server-1", endpoint: ENDPOINT.href, revision: 1, secretId: null };
+    const stored: string[] = [];
+    const tx = {
+      $executeRaw: vi.fn(async () => 1),
+      $queryRaw: vi.fn(async () => []),
+      mcpServer: { findFirst: vi.fn(async () => server), update: vi.fn(async () => ({})) },
+      secret: {
+        findFirst: vi.fn(async () => undefined),
+        create: vi.fn(async () => ({})),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      mcpServer: { findFirst: vi.fn(async () => server), update: vi.fn(async () => ({})) },
+      secret: {
+        findFirst: vi.fn(async () => undefined),
+        create: vi.fn(async () => ({})),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+      },
+      mcpOAuthSession: {
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => ({})),
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+      },
+      deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "owner" })) },
+    };
+    const secrets = {
+      load: () => "{}",
+      put: async (plaintext: string) => {
+        stored.push(plaintext);
+        return { id: `secret-${stored.length}`, ciphertext: "encrypted" };
+      },
+    };
+    const broker = new McpOAuthBroker(prisma as never, secrets as never, {
+      fetch: thirdParties.fetch,
+      resolveHostname: thirdParties.resolveHostname,
+    });
+    const started = await broker.begin({
+      serverId: "server-1",
+      spaceId: "space",
+      userId: "user",
+      redirectUri: REDIRECT,
+    });
+    expect(started.status).toBe("authorization_required");
+    if (started.status !== "authorization_required") return;
+    const back = new URL(thirdParties.googleCalendar.consent(started.authorizationUrl));
+    expect(back.searchParams.get("state")).toBe(started.sessionId);
+    await broker.complete({
+      sessionId: started.sessionId,
+      code: back.searchParams.get("code")!,
+      state: started.sessionId,
+      spaceId: "space",
+      userId: "user",
+    });
+    expect(JSON.parse(stored.at(-1)!)).toMatchObject({
+      oauth: { tokens: { access_token: expect.any(String) } },
+    });
   });
 
   it("gives each sign-in its own calendar", async () => {

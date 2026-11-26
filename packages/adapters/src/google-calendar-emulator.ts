@@ -278,9 +278,7 @@ export class GoogleCalendarEmulator {
   }
 
   private token(raw: RequestInit["body"] | null | undefined): Response {
-    const form = new URLSearchParams(
-      raw instanceof URLSearchParams ? raw.toString() : typeof raw === "string" ? raw : "",
-    );
+    const form = new URLSearchParams(bodyText(raw));
     let calendar: Calendar | undefined;
     if (form.get("grant_type") === "authorization_code") {
       const code = this.codes.get(form.get("code") ?? "");
@@ -573,10 +571,17 @@ function wall(at: number, zone: string) {
   };
 }
 
+/** The backend's pinned fetch hands bodies over as bytes; the SDK's own fetch as strings or forms. */
+function bodyText(body: RequestInit["body"] | null | undefined): string {
+  if (typeof body === "string" || body instanceof URLSearchParams) return body.toString();
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body))
+    return new TextDecoder().decode(body);
+  return "";
+}
+
 function readJson(body: RequestInit["body"] | null | undefined): Row {
-  if (typeof body === "string") return JSON.parse(body) as Row;
-  if (body instanceof Uint8Array) return JSON.parse(new TextDecoder().decode(body)) as Row;
-  return {};
+  const text = bodyText(body);
+  return text ? (JSON.parse(text) as Row) : {};
 }
 
 function rpc(id: unknown, result: unknown): Response {
