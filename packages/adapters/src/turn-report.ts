@@ -199,24 +199,12 @@ const WORK_DONE_ZH: Record<TurnWork, string> = {
 };
 
 /** The short report the server posts when the model ended without one, in the recruiter's language. */
-export function turnReportText(
-  work: readonly TurnWork[],
-  savedPeople?: number,
-  chinese = false,
-): string {
+export function turnReportText(work: readonly TurnWork[], chinese = false): string {
   // "A change in a connected app" says nothing beside work that names itself.
   const named = [...new Set(work)];
   const items = named.length > 1 ? named.filter((item) => item !== "connected") : named;
-  const counted =
-    savedPeople && work.some((item) => item === "people_search" || item === "people_saved");
-  if (chinese)
-    return `已完成：${items.map((item) => WORK_DONE_ZH[item]).join("、")}。${
-      counted ? `这个岗位现在存了 ${savedPeople} 人。` : ""
-    }`;
-  const saved = counted
-    ? ` ${savedPeople} ${savedPeople === 1 ? "person is" : "people are"} saved for this role.`
-    : "";
-  return `Done: ${items.map((item) => WORK_DONE[item]).join(", ")}.${saved}`;
+  if (chinese) return `已完成：${items.map((item) => WORK_DONE_ZH[item]).join("、")}。`;
+  return `Done: ${items.map((item) => WORK_DONE[item]).join(", ")}.`;
 }
 
 /** A question that also states something ("The pool is now 139. Keep going?") reports it. */

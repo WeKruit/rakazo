@@ -262,7 +262,6 @@ export async function requestCounts(prisma: PrismaClient, roleId: string) {
     countRecruitingRoleGrades(prisma, roleId),
   ]);
   return {
-    peopleInResults,
     fitShown: grades.fitShown,
     fitNotShownYet: grades.fit - grades.fitShown,
     notGradedYet: peopleInResults - grades.checked,

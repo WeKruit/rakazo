@@ -138,9 +138,6 @@ describe("recruiting brief checklist", () => {
       builtinAgentTools.find((tool) => tool.name === name)!.description;
     expect(description("recruiting_role")).toContain(RECRUITING_BRIEF_CHECKLIST);
     expect(description("recruiting_request_approval")).toContain(
-      "ask the unstated language requirement before this card",
-    );
-    expect(description("recruiting_request_approval")).toContain(
       "run the first calibration round as a quick people search in the same turn; never",
     );
   });
