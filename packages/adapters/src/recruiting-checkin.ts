@@ -1,5 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AdapterContext, ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
+import type {
+  AdapterContext,
+  ArtifactStore,
+  ConnectorProvider,
+  JobPublisher,
+} from "@rakazo/adapter-kit";
 import { recruitingCheckinStartJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { Actor, RunTrigger } from "@rakazo/contracts";
 import { automaticReplyVerdict, recruitingBotKey } from "@rakazo/core";
@@ -198,6 +203,7 @@ async function mailboxRepliesSince(
     prisma: PrismaClient;
     jobs: JobPublisher;
     connector: Pick<ConnectorProvider, "execute">;
+    artifacts?: ArtifactStore;
   },
   actor: Actor,
   target: RecruitingThreadTarget,
@@ -212,7 +218,13 @@ async function mailboxRepliesSince(
     undefined,
     undefined,
     { limit: 50 },
-    { connectors: deps.connector, jobs: deps.jobs, signal, reauthorize: async () => target },
+    {
+      connectors: deps.connector,
+      jobs: deps.jobs,
+      artifacts: deps.artifacts,
+      signal,
+      reauthorize: async () => target,
+    },
   );
   if (read.status === "failed") throw new Error("mailbox read failed");
   return {
@@ -344,6 +356,8 @@ export async function startRecruitingCheckin(
     prisma: PrismaClient;
     jobs: JobPublisher;
     connector?: Pick<ConnectorProvider, "execute">;
+    /** Keeps a reply's attachments as saved files the Inbox opens. */
+    artifacts?: ArtifactStore;
   },
   payload: { threadId: string },
   now = Date.now(),
@@ -440,7 +454,12 @@ export async function startRecruitingCheckin(
             since,
           )
         : await mailboxRepliesSince(
-            { prisma: deps.prisma, jobs: deps.jobs, connector: deps.connector },
+            {
+              prisma: deps.prisma,
+              jobs: deps.jobs,
+              connector: deps.connector,
+              artifacts: deps.artifacts,
+            },
             actor,
             thread.groupId
               ? {

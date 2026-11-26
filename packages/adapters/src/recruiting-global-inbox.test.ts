@@ -68,6 +68,7 @@ const deps = () => ({
   } as never,
   connectors: { execute: vi.fn() } as never,
   jobs: { enqueue: vi.fn() } as never,
+  artifacts: { put: vi.fn() } as never,
 });
 beforeEach(() => {
   vi.clearAllMocks();
@@ -103,7 +104,8 @@ it("resolves the exact owned stored message and current role before its targeted
     undefined,
     undefined,
     { message: email },
-    expect.objectContaining({ jobs: expect.anything() }),
+    // The account Inbox keeps a reply's attachments (a résumé) as the role's Inbox does.
+    expect.objectContaining({ jobs: expect.anything(), artifacts: expect.anything() }),
   );
   expect(result.items[0]!.email.body).toBe("The actual complete body");
 });
@@ -160,7 +162,7 @@ it("reads the newest mail of a sending role behind the list, at most once in two
     undefined,
     undefined,
     { limit: 50 },
-    expect.objectContaining({ connectors: expect.anything() }),
+    expect.objectContaining({ connectors: expect.anything(), artifacts: expect.anything() }),
   );
   await getGlobalRecruitingInbox(deps(), { ...actor, userId: "sender" }, { limit: 20 });
   await new Promise((resolve) => setTimeout(resolve, 20));

@@ -615,6 +615,7 @@ export async function createApp(
     messaging,
     cloudAgent,
     connector: stack.connector,
+    artifacts,
     shutdownSignal: shutdown.signal,
   });
   if (inMemoryJobs) {
