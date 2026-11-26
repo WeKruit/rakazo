@@ -472,7 +472,7 @@ async function replyAfter(journey, rpc, since, quick = false) {
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone), but make each message mean what your goal means: if a stranger could read it as a different question, reword it. Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
 {"action": "say" | "answer_card" | "approve_send" | "deny_send" | "wait" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button, except on a reply draft, where a text is your edited reply as it should go out (the whole email); for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "people": <how many new people this message asks Kruit to find or show now: "find 10" is 10, "swap these two" is 2, a first search with no number is 10, a later "more like these" with no number is 3; 0 when it asks for none>, "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
-Use "wait" only when a goal tells you to wait or step away: you write nothing and come back when Kruit writes to you, or after a few minutes. Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
+Use "wait" only when a goal tells you to wait or step away, and only as often as it says: you write nothing and come back when Kruit writes to you, or after a few minutes. Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
 // With --ui the recruiter works in the browser and can also open pages and press buttons.
 const UI_RULES = `${SIMULATOR_RULES}
 You are using the product in a browser and see the page described under "Your screen". Two more actions:
@@ -607,7 +607,7 @@ async function candidatesAnswer(journey, tag, label) {
     const address = candidate.address.toLowerCase();
     const thread = mail.filter((email) => String(email.lead).toLowerCase() === address);
     const last = thread.at(-1);
-    if (!last || last.ue_type !== 1) continue;
+    if (last?.ue_type !== 1) continue;
     const text = thread
       .map(
         (email) =>
@@ -715,6 +715,7 @@ async function play(journey, label, owner, mailbox, out) {
     : null;
   if (ui) await ui.openChat(kruit.id);
   const turns = [];
+  let waited = 0;
   const chatNamed = async (name) =>
     (await groupsOf(rpc)).find((group) => group.name === name) ?? kruit;
   try {
@@ -779,7 +780,9 @@ async function play(journey, label, owner, mailbox, out) {
         waitForKruit = false;
         log(`${label}: recruiter steps away`);
         turn.candidateMail = journey.candidates ? await candidatesAnswer(journey, tag, label) : [];
-        const until = Date.now() + 8 * 60_000;
+        // One real step away per play; a repeated wait is only a short pause, never 8 more minutes.
+        const minutes = waited++ ? 1 : 8;
+        const until = Date.now() + minutes * 60_000;
         while (Date.now() < until && !(await newestBotMessageAfter(rpc, at)))
           await changeOrTimeout(rpc, 30_000);
         const wrote = await newestBotMessageAfter(rpc, at);
@@ -787,7 +790,7 @@ async function play(journey, label, owner, mailbox, out) {
           ? Math.round((Date.parse(wrote.createdAt) - at) / 1000)
           : undefined;
         log(
-          `${label}:   Kruit ${wrote ? `wrote first after ${turn.firstReplySeconds} s` : "said nothing in 8 minutes"}`,
+          `${label}:   Kruit ${wrote ? `wrote first after ${turn.firstReplySeconds} s` : `said nothing in ${minutes} minutes`}`,
         );
       } else if (move.action === "say") {
         const chat = await chatNamed(move.chat);
