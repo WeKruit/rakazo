@@ -3823,6 +3823,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let unchangedVisualStreak: UnchangedVisualStreak = { count: 0 };
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
+        // Set once this run shows an approval card; a second card in the same step waits for it.
+        let approvalCardShown = false;
         let handedOff = false;
         let handedOffAt: Date | undefined;
         // Gate b2005684, one-off-email: the coordinator saved the address after handing the send on,
@@ -7871,6 +7873,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 };
               approvalBlock.approvalEvidenceHash = calendarApprovalHash;
             }
+            // Two confirmations asked in one step (a reply card and a calendar card, called
+            // together): the run shows the first card and waits; the second shows none, records
+            // nothing and is not run, so the same call made after the answer shows its own card.
+            if (approvalCardShown) {
+              await deps.prisma.externalEffect.deleteMany({
+                where: { id: applied!.effect.id, runId, status: "intended" },
+              });
+              return {
+                error:
+                  "Not run yet: another card from this same step is already waiting for the recruiter, and only one card is shown at a time. Call this again after they answer that card; do not describe it as done or failed.",
+                dispatched: false,
+              };
+            }
+            approvalCardShown = true;
             const paused = await pauseRunForInput({
               spaceId: run.spaceId,
               threadId: run.threadId,

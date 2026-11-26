@@ -248,6 +248,13 @@ function fixture({
     createdAt: new Date(),
   };
   const externalEffect = {
+    deleteMany: vi.fn(async ({ where }: { where: { id: string; status: string } }) => {
+      const index = effects.findIndex(
+        (effect) => effect.id === where.id && effect.status === where.status,
+      );
+      if (index >= 0) effects.splice(index, 1);
+      return { count: index >= 0 ? 1 : 0 };
+    }),
     findFirst: vi.fn(
       async ({ where }: { where: { id?: string; status?: string; kind?: unknown } }) =>
         effects.find(
@@ -2135,6 +2142,32 @@ describe.each([false, true])("a reply to a candidate (catalog: %s)", (catalog) =
     await f.run();
     expect(f.execute).toHaveBeenCalledOnce();
     expect(f.execute.mock.calls[0]?.[0].args).toEqual(replyArgs);
+  });
+
+  it("shows one card at a time when a step asks for two confirmations together", async () => {
+    // Play fix-all/play-2: a reply and a calendar invite in one step; the second failed with
+    // "Could not pause this run for approval" and was lost.
+    const f = replyFixture();
+    const call = (body: string) => {
+      const args = { ...replyArgs, body_text: body, open_questions: [] };
+      return catalog ? { id: catalogEntries([f.providerTools[0]!])[0]?.id, arguments: args } : args;
+    };
+    f.runtimeRun.mockImplementationOnce(async function* (request: AgentRunRequest) {
+      const tool = catalog ? catalogExecuteToolName("mcp") : "renamed_reply";
+      f.results.push(
+        ...(await Promise.all([
+          request.executeTool!(tool, call("First draft."), "first"),
+          request.executeTool!(tool, call("Second draft."), "second"),
+        ])),
+      );
+      if (!f.results.some((result) => isApprovalPausedResult(result)))
+        yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.results.filter((result) => isApprovalPausedResult(result))).toHaveLength(1);
+    expect(JSON.stringify(f.results)).toContain("Not run yet");
+    expect(f.effects).toHaveLength(1);
   });
 });
 
