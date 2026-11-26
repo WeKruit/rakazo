@@ -191,6 +191,14 @@ export function normalizeRecruitingRoleArgs(
         upsert: repairCriteria(visited.criteria.upsert),
       },
     };
+  // A create takes plain lists: criteria written in the update's shape become the list, and a
+  // list left out is empty.
+  if (visited.operation === "create") {
+    if (object(visited.criteria) && Array.isArray(visited.criteria.upsert))
+      visited = { ...visited, criteria: visited.criteria.upsert };
+    for (const key of ["sourceRefs", "criteria", "preferences", "definitionQuestions"])
+      if (visited[key] === undefined) visited = { ...visited, [key]: [] };
+  }
   // An update's criteria hold only upsert/remove; other keys written there belong to the call.
   if (visited.operation === "update" && object(visited.criteria)) {
     const { upsert, remove, ...stray } = visited.criteria;
