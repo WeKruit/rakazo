@@ -532,15 +532,17 @@ try {
     if (!created) return failures.push("no new role chat appeared within 90 s");
     if (/^new role$/i.test(created.name.trim()))
       failures.push('the new role is still called "New role" after 90 s');
-    // Older untitled roles can still be listed, so look for this role's own title.
+    // Older untitled roles can still be listed, so look for this role's own name. Kruit names the
+    // role from the JD itself (gate 76f64c91 saved "仓库主管" for the pasted first line), so the
+    // sidebar is checked for the name the role was saved with, not the pasted line.
     const navigation = page.getByTestId("recruiting-navigation");
     const named = await navigation
-      .getByText(title)
+      .getByText(created.name.trim())
       .first()
       .waitFor({ timeout: 30_000 })
       .then(() => true)
       .catch(() => false);
-    if (!named) failures.push(`the sidebar does not show "${title}" within 30 s`);
+    if (!named) failures.push(`the sidebar does not show "${created.name.trim()}" within 30 s`);
     // The test role leaves the sidebar again.
     await rpc("threads/stop", { groupId: created.id, scope: "all" }).catch(() => {});
     await rpc("groups/archive", { groupId: created.id }).catch(() => {});
