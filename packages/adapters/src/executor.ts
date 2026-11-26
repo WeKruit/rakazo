@@ -3652,8 +3652,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A card denied in an earlier run of this thread since the recruiter's previous message:
         // their message now is their first word since, and its follow-up run would not know the
         // card was cancelled (deny plays 11-21: "标题不对" renamed the role). Both reads below are
-        // independent, so they share one round trip.
-        const [continuationEffects, [, previousHuman]] = await Promise.all([
+        // independent, so they share one round trip. The thread's other runs are read beside them:
+        // filtered through the run relation, the denied read scanned effects across accounts and
+        // took up to 10 s before a reply (gate 11-26); by run id it is an index lookup.
+        const [continuationEffects, [, previousHuman], threadRuns] = await Promise.all([
           deps.prisma.externalEffect.findMany({
             where: { runId, status: { in: ["approved", "denied"] } },
             orderBy: APPROVED_EFFECT_REPLAY_ORDER,
@@ -3671,6 +3673,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             orderBy: { createdAt: "desc" },
             take: 2,
             select: { createdAt: true },
+          }),
+          deps.prisma.run.findMany({
+            where: { threadId: thread.id, id: { not: runId } },
+            select: { id: true },
           }),
         ]);
         const retiredApprovals = continuationEffects.filter(
@@ -3691,8 +3697,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const deniedSinceLastWord = await deps.prisma.externalEffect.findMany({
           where: {
             status: "denied",
-            runId: { not: runId },
-            run: { threadId: thread.id },
+            runId: { in: threadRuns.map((other) => other.id) },
             updatedAt: {
               gt: deniedCardsSince(
                 previousHuman?.createdAt,
