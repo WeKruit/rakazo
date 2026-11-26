@@ -402,7 +402,7 @@ export const JOURNEYS = [
     maxTurns: 12,
     persona: `${AGENCY_RECRUITER} You emailed two candidates for a client role and now you want to handle their answers through Kruit, from first email to a booked call.`,
     facts: (recipients, tag) =>
-      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. The client's hiring manager is Priya, free for a 30-minute call Tuesday to Thursday 1–5 pm Central.\nTwo candidates you found yourself:\n${twoInboxes(
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. The client's hiring manager is Priya, free for a 30-minute call Tuesday to Thursday 1–5 pm Central. You also know, but do not volunteer until Kruit asks you: the client pays up to $10k relocation, and it cannot sponsor or transfer visas.\nTwo candidates you found yourself:\n${twoInboxes(
         recipients,
         tag,
       )
@@ -417,7 +417,7 @@ export const JOURNEYS = [
           name: "Ethan Park",
           address: ethan,
           persona:
-            "Ethan Park, a senior data engineer in Seattle with 8 years of Spark and Kafka, open to a move if the pay is right. You want to know the base pay and how many office days, and you can talk Tuesday or Wednesday 2–4 pm Central. Once a time is proposed that fits, you accept it; if the recruiter only asks generally, you give your times.",
+            "Ethan Park, a senior data engineer in Portland with 8 years of Spark and Kafka, on an H-1B visa, open to a move if the pay is right. In your first answer you ask the base pay, whether they help with relocation to Seattle, and whether they can transfer your H-1B. You can talk Tuesday or Wednesday 2–4 pm Central. If an answer dodges one of your questions, ask it again. Once a time is proposed that fits, you accept it.",
         },
         {
           name: "Ada Lin",
@@ -431,7 +431,7 @@ export const JOURNEYS = [
       "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both.",
       "When the send confirmation card appears, check it names both candidates and the email, and approve it.",
       "A little later, ask whether anyone replied and what they said, unless Kruit already told you. Met only when Kruit's account of each reply matches what the candidate actually wrote.",
-      "Ask Kruit to answer Ethan's questions from what you told it and offer him a call; check the reply card names Ethan and says what you want before approving.",
+      "Ask Kruit to answer Ethan's questions and offer him a call. Met only when the reply Kruit writes states only facts you gave it (never invents relocation or visa terms), asks you about what you did not tell it before replying, and the reply card names Ethan in his own email thread; approve it then.",
       "Tell Kruit Ada must not be emailed again. Met only when Kruit says truthfully what it did and no later email goes to her.",
       "Once Ethan has answered with a time, ask Kruit to book the 30-minute call with Priya and send Ethan the invitation; approve a card that names Ethan, the time and the content. If no calendar is connected, met when Kruit says so plainly, shows how to connect, and keeps the booking for afterwards.",
     ],
