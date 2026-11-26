@@ -7900,6 +7900,8 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
+              // The search's own sentence on why it returned the person.
+              reason: saved.why_recommended ?? null,
               // Where the person is relative to the place the recruiter asked for.
               ...(typeof saved.location_tag === "string" ? { locationTag: saved.location_tag } : {}),
               ...gradeShown(captured.rows[row.rowIndex]!, graded.has(row.candidateKey)),
@@ -8778,8 +8780,7 @@ export function candidateIndexQuery(
     ) match ON true
     LEFT JOIN LATERAL (
       -- A person's grade is the newest saved tier, whoever gave it: the search grades the people
-      -- it returns, so a tier needs no separate grading page to count (same rule as
-      -- countRecruitingRoleGrades, which the agent's "N fit" comes from).
+      -- it returns, so a tier needs no separate grading page to count.
       SELECT o."pageId", page."roleRevisionId", CASE
         WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
           THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade,
@@ -11890,25 +11891,13 @@ async function candidateByOtherKeyShape(
   return near.length === 1 ? (near[0] ?? null) : null;
 }
 
-/**
- * A role's people by their newest saved grade. A request for N people counts one thing: people
- * graded Strong or Promising whom a round has shown the recruiter (`fitShown`). Staging 42e30040:
- * with only the fit people in Results counted, Kruit said "reached 60" with 20 shown, then gave
- * 60, 61 and 63 as the count in turn.
- */
-export async function countRecruitingRoleGrades(
+/** The role's people whose newest grade from the search is Strong or Promising. */
+export async function listRecruitingFitCandidateKeys(
   prisma: Pick<PrismaClient, "$queryRaw">,
   roleId: string,
-): Promise<{ fit: number; fitShown: number; checked: number }> {
-  const [row] = await prisma.$queryRaw<{ fit: number; fitShown: number; checked: number }[]>(
-    Prisma.sql`
-    SELECT (count(*) FILTER (WHERE g.grade IN ('Strong', 'Promising')))::int AS fit,
-      (count(*) FILTER (WHERE g.grade IN ('Strong', 'Promising') AND EXISTS (
-        SELECT 1 FROM "recruiting_calibration_rounds" r
-        WHERE r."roleId" = ${roleId} AND r."status" = 'shown'
-          AND g."candidateKey" = ANY(r."candidateKeys"))))::int AS "fitShown",
-      count(*)::int AS checked
-    FROM (
+): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ candidateKey: string }[]>(Prisma.sql`
+    SELECT g."candidateKey" FROM (
       SELECT DISTINCT ON (o."candidateKey") o."candidateKey", CASE
         WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
           THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade
@@ -11917,9 +11906,8 @@ export async function countRecruitingRoleGrades(
       WHERE o."roleId" = ${roleId} AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'
       ORDER BY o."candidateKey", p."observedAt" DESC, p."effectId" DESC
     ) g
-    WHERE g.grade IS NOT NULL`,
-  );
-  return row ?? { fit: 0, fitShown: 0, checked: 0 };
+    WHERE g.grade IN ('Strong', 'Promising')`);
+  return rows.map((row) => row.candidateKey);
 }
 
 export async function listRecruitingCandidateSources(

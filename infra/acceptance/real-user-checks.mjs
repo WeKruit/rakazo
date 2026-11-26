@@ -1,3 +1,4 @@
+import { profilesIn } from "./request-completion.mjs";
 import { SUPPLIER, TOOL_NAME } from "./ui-regressions-checks.mjs";
 
 // Checks for what a real recruiter sees, taken from conversations that went wrong. Each check
@@ -39,7 +40,7 @@ const SENDER =
 // The brief one agent writes for another, shown to the recruiter as if it were a reply.
 export const AGENT_BRIEF = /^\s*(?:\*\*)?(?:Goal|Deliverable|Done when|Context)(?:\*\*)?\s*:/m;
 // The header of a round of people the search returns.
-export const ROUND = /people this round|本轮|这一轮/i;
+export const ROUND = /(?:people|person) this round|本轮|这一轮/i;
 // A fill-in left in an email or template ("Hi [Candidate Name],"). A merge field such as
 // {{firstName}} is filled per person by the sender and is fine.
 export const PLACEHOLDER =
@@ -120,6 +121,53 @@ export const questionsIn = (text) =>
     .map((part) => part.trim())
     .filter((part) => part.length >= 4 && /[?？]$/.test(part));
 
+const ROUND_SIZE = /^(?:(\d+) (?:people|person) this round:|本轮 (\d+) 人：)/m;
+const SHOWN_SO_FAR =
+  /累计展示 (\d+) 人(?:，你淘汰了 (\d+) 人，计入 (\d+) 人)?|(\d+) shown so far(?:, (\d+) turned down by you, (\d+) counted)?/;
+const OWN_COUNT = /(?:计入|计数为?)\s*\**\s*(\d+)|(\d+)\**\s*counted/;
+
+/**
+ * The number Kruit says is the number of people on screen (the recruiter's rule, 11-26): a round's
+ * heading equals the people listed under it, and the running count is never below the people this
+ * chat has listed (it said "20 shown" under rounds that listed 21 to 30).
+ */
+export function countChecks(messages) {
+  const failures = [];
+  const listed = new Set();
+  let latest;
+  for (const message of messages) {
+    if (message.role === "user") continue;
+    const text = message.text ?? "";
+    const round = ROUND_SIZE.exec(text);
+    if (round) {
+      const said = Number(round[1] ?? round[2]);
+      const rows = text.match(/^\d+\. /gm)?.length ?? 0;
+      // A list in the agent's own prose has no numbered rows to count.
+      if (rows && said !== rows) failures.push(`count: round says ${said} people and lists ${rows}`);
+      for (const profile of profilesIn(text)) listed.add(profile);
+    }
+    const total = SHOWN_SO_FAR.exec(text);
+    if (!total) {
+      // A count in Kruit's own words is the one its newest list gave ("计入 8 人" came a few
+      // seconds after the list that said 10, from a note it kept).
+      const own = OWN_COUNT.exec(text);
+      const said = own && Number(own[1] ?? own[2]);
+      if (own && latest !== undefined && said !== latest)
+        failures.push(`count: says ${said} counted, its newest list said ${latest}`);
+      continue;
+    }
+    const [shown, turnedDown, counted] = (total[1] ? total.slice(1, 4) : total.slice(4, 7)).map(
+      (value) => (value === undefined ? undefined : Number(value)),
+    );
+    if (shown < listed.size)
+      failures.push(`count: says ${shown} shown, this chat has listed ${listed.size}`);
+    latest = counted ?? shown;
+    if (counted !== undefined && counted !== shown - turnedDown)
+      failures.push(`count: ${shown} shown less ${turnedDown} turned down is not ${counted}`);
+  }
+  return failures;
+}
+
 /** Every check that applies to any conversation. */
 // What the recruiter reads in a bot message. A connect card's title is app chrome the web
 // translates ("连接 Gmail"); its stored text is the English fallback, so the agent's reason counts.
@@ -157,6 +205,7 @@ export function conversationChecks(messages, { recruiter } = {}) {
     .filter((message) => message.role === "user")
     .flatMap((message) => message.text.match(EMAIL) ?? [])
     .map((address) => address.toLowerCase());
+  failures.push(...countChecks(messages));
   const said = [];
   for (const [index, message] of messages.entries()) {
     if (message.role === "user") continue;

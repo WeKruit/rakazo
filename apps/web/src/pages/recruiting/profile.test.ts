@@ -30,6 +30,17 @@ describe("requirementRows", () => {
     ]);
   });
 
+  it("names each line of the requirement check by the requirement it states", () => {
+    const { rows } = requirementRows(
+      "Met - Location: Shanghai (there now)\nPartial - 5+ years of backend work\nUnknown - Speaks Mandarin",
+    );
+    expect(rows.map((row) => [row.label, row.criterionId, row.status, row.text])).toEqual([
+      ["Location: Shanghai (there now)", undefined, "match", ""],
+      ["5+ years of backend work", undefined, "partial", ""],
+      ["Speaks Mandarin", undefined, "unknown", ""],
+    ]);
+  });
+
   it("reads Chinese status words", () => {
     const { rows } = requirementRows("R1：符合 - 斯坦福博士；R2：缺口 - 没有仿真经验");
     expect(rows.map((row) => row.status)).toEqual(["match", "gap"]);
