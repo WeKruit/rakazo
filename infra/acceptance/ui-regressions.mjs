@@ -250,7 +250,8 @@ try {
       );
     const replies = await ask(
       kruit.id,
-      `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`,
+      // The pass counts LinkedIn links, so the request asks for them (as aftercard, #1801).
+      `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人和他们的 LinkedIn 链接。`,
       (items) => linked(items) >= 3,
     );
     // Kruit reads saved people itself; handing the read to the role team is slow and often silent.
