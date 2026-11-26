@@ -49,7 +49,7 @@ export const RecruitingArtifactRefSchema = z
   .readonly();
 export type RecruitingArtifactRef = z.infer<typeof RecruitingArtifactRefSchema>;
 
-/** ACLs and the authenticity of the locator/quote are checked by the reading handler. */
+/** ACLs, the file fingerprint and the read receipt are checked on save; the quote is not matched to text. */
 export const RecruitingSourceRefSchema = z
   .strictObject({
     id: RecruitingId.describe(
@@ -537,7 +537,7 @@ export const RecruitingAssessmentSourceRefSchema = RecruitingSourceRefSchema.unw
       if (source.quote === undefined || source.selection === undefined) {
         ctx.addIssue({
           code: "custom",
-          message: "Read assessment evidence requires an exact quote and selection",
+          message: "Read assessment evidence requires a quote and selection",
         });
       } else if (
         (source.anchor.kind === "message") !==

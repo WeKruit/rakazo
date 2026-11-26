@@ -20,7 +20,6 @@ import {
   IsolationError,
   listRecruitingCandidates,
   listRunToolResults,
-  RecruitingSourceValidationError,
   recruitingCsvImportReceipt,
   recruitingPeopleSearchReceipt,
   saveRecruitingCandidateCsvImport,
@@ -1079,7 +1078,7 @@ export async function resolveRecruitingContactAcrossRoles(
 
 /**
  * The arguments for the server's one repeat of a refused role save: every citation becomes a plain
- * locator (no quote to match). The repeat passes the same ownership checks; undefined when it
+ * locator (no quote, so no read receipt is asked of it). The repeat passes the same ownership checks; undefined when it
  * would change nothing.
  */
 export function repairedRoleSave(
@@ -1089,7 +1088,6 @@ export function repairedRoleSave(
   if (args.operation === "read" || !(error instanceof Error)) return undefined;
   if (
     !(error instanceof IsolationError) &&
-    !(error instanceof RecruitingSourceValidationError) &&
     error.name !== "RecruitingPlaybookValidationError" &&
     error.name !== "ZodError"
   )

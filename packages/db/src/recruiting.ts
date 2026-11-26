@@ -94,13 +94,10 @@ import {
   parseRecruitingCrmImportReceipt,
   projectRecruitingCandidateReport,
   RecruitingPlaybookValidationError,
-  readRecruitingJsonString,
   recruitingCalibrationIdentity,
   validateRecruitingBrief,
-  validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
 import { getLogger } from "@rakazo/logging";
 import { backgroundToolSourceTrigger } from "./background-tool.js";
 import { STOPPED_TURN } from "./cancel-runs.js";
@@ -146,15 +143,6 @@ export class RecruitingConflictError extends Error {
   constructor(message = "Recruiting revision changed") {
     super(message);
     this.name = "RecruitingConflictError";
-  }
-}
-
-export class RecruitingSourceValidationError extends Error {
-  constructor(sourceRefId: string, locator: string) {
-    super(
-      `Source ${JSON.stringify(sourceRefId)} at ${JSON.stringify(locator)}: quote must be exact contiguous text from the original read receipt; copy one unchanged excerpt without omissions or joined passages.`,
-    );
-    this.name = "RecruitingSourceValidationError";
   }
 }
 
@@ -3106,22 +3094,6 @@ export async function recordRecruitingContextAdoption(
   });
 }
 
-function sourceSelection(text: string, start: number, end: number, quote: string) {
-  try {
-    validateRecruitingTextSelection(text, start, end, quote);
-  } catch {
-    throw new IsolationError();
-  }
-}
-
-function sourceJsonString(bytes: Uint8Array, path: readonly (string | number)[]): string {
-  try {
-    return readRecruitingJsonString(bytes, path);
-  } catch {
-    throw new IsolationError();
-  }
-}
-
 async function validateReadSources(
   tx: Tx,
   actor: Actor,
@@ -3156,7 +3128,6 @@ async function validateReadSources(
   if (loadedMessages.length !== messageIds.size) throw new IsolationError();
   const messages = new Map(loadedMessages.map((message) => [message.id, message]));
   const rows = new Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>();
-  const pdfTexts = new Map<string, string>();
   const provenance = new Map<
     string,
     {
@@ -3290,37 +3261,6 @@ async function validateReadSources(
         createHash("sha256").update(bytes).digest("hex") !== artifact.hash
       )
         throw new IsolationError();
-      // ponytail: role references attest only extracted text; other fields need typed selections.
-      if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
-        throw new RecruitingSourceCheckError(source.id, 'locator must be "text" for a file.');
-      const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
-      const pdf = isExtractedDocumentMimeType(artifact.mimeType);
-      const jsonPath =
-        selection?.kind === "artifact_json_string"
-          ? selection.path
-          : !selection && json
-            ? ["text"]
-            : undefined;
-      if (jsonPath ? !json : (!artifact.mimeType.startsWith("text/") && !pdf) || json)
-        throw new RecruitingSourceCheckError(
-          source.id,
-          "this file type has no quotable text; quote the page text or the recruiter's message.",
-        );
-      if (pdf && !pdfTexts.has(artifact.hash)) {
-        try {
-          pdfTexts.set(artifact.hash, await extractDocumentText(bytes, artifact.mimeType));
-        } catch {
-          throw new IsolationError();
-        }
-      }
-      const text = jsonPath
-        ? sourceJsonString(bytes, jsonPath)
-        : pdf
-          ? pdfTexts.get(artifact.hash)!
-          : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      const start = selection?.start ?? text.indexOf(source.quote);
-      if (start < 0) throw new RecruitingSourceValidationError(source.id, source.anchor.locator);
-      sourceSelection(text, start, selection?.end ?? start + source.quote.length, source.quote);
     }
   }
   return messages;

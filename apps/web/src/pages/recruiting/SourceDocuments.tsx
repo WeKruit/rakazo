@@ -109,9 +109,12 @@ export function ArtifactReference({
               ? readRecruitingJsonString(bytes, path)
               : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
             const start = selection?.start ?? text.indexOf(source.quote);
-            const end = selection?.end ?? start + source.quote.length;
-            validateRecruitingTextSelection(text, start, end, source.quote);
-            excerpt = { kind: "text", text, start, end };
+            if (!selection && start < 0) excerpt = { kind: "text", text, start: 0, end: 0 };
+            else {
+              const end = selection?.end ?? start + source.quote.length;
+              validateRecruitingTextSelection(text, start, end, source.quote);
+              excerpt = { kind: "text", text, start, end };
+            }
           } catch {
             unavailable = true;
           }

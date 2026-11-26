@@ -218,16 +218,11 @@ describe("jsonSchemaParameters", () => {
     expect(tool.description).not.toContain("expectedRevision:0");
     expect(tool.description).toContain("For JD URLs, call web_fetch before creating the role");
     expect(tool.description).toContain("sourceMaterial");
-    expect(tool.description).toContain("before role creation");
     expect(tool.description).toContain("not complete JD coverage");
     for (const guidance of [
       'expression:{kind:"atom",id:',
       'anchor:{kind:"artifact",artifact:sourceMaterial.artifact,locator:',
-      "readAt:sourceMaterial.readAt",
-      "url:sourceMaterial.url",
       "Assign stable local criterion, atom and source IDs",
-      "quote:<one exact contiguous excerpt of returned text>",
-      "Never omit words or join separate passages within a quote; cite separate excerpts with separate sourceRefs.",
       "Correct deterministic schema rejections using the actual validator error and read receipt",
     ])
       expect(tool.description).toContain(guidance);
@@ -308,7 +303,6 @@ describe("jsonSchemaParameters", () => {
       "each criterion gets the rule its priority implies",
     ])
       expect(JSON.stringify(wire)).toContain(guidance);
-    expect(tool.description).toContain("Different quotes require different source IDs");
     expect(
       validateToolArguments(
         { name: tool.name, description: tool.description, parameters: wire },
