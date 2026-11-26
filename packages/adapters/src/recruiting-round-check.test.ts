@@ -9,15 +9,8 @@ import {
 } from "./recruiting-round-check.js";
 
 describe("roundCriteria", () => {
-  // The role's requirements are read as saved: the recruiter's and the job post's own fields and
-  // the hard criteria, nothing reworded, joined or added by code.
-  const field = (key: string, value: string, message: string, origin = "user_instruction") => ({
-    key,
-    value,
-    origin,
-    state: "known",
-    sourceRefIds: [`human-message:${message}`],
-  });
+  // The role's requirements are its hard criteria as saved: nothing reworded, joined or added by
+  // code, and a brief field never adds a second copy.
   const prisma = {
     recruitingRole: {
       findUnique: async () => ({
@@ -27,38 +20,27 @@ describe("roundCriteria", () => {
               id: "titles",
               priority: "hard",
               expression: { kind: "atom", statement: "data engineer titles only" },
-              sourceRefs: [{ id: "x", anchor: { kind: "message", messageId: "m-after" } }],
             },
-            // Also saved as a field: judged once.
             {
               id: "place",
               priority: "hard",
               expression: { kind: "atom", statement: "Seattle metro, hybrid" },
             },
+            {
+              id: "nice",
+              priority: "preferred",
+              expression: { kind: "atom", statement: "Kafka" },
+            },
           ],
-          brief: {
-            fields: [
-              field("production technologies", "Spark and Kafka in production", "m-jd"),
-              field("location", "Seattle metro, hybrid", "m-after"),
-              field("language", "none", "m-jd", "inferred"),
-              field("Should I cap experience at 10 years?", "Target 6–10 years", "m-jd"),
-            ],
-          },
         },
       }),
     },
   } as unknown as PrismaClient;
 
-  it("returns each requirement in the words saved, with the brief field's key apart", async () => {
+  it("returns each hard criterion in the words saved", async () => {
     expect(await roundCriteria(prisma, { roleId: "r" })).toEqual([
-      {
-        id: "brief:production technologies",
-        statement: "Spark and Kafka in production",
-        field: "production technologies",
-      },
-      { id: "brief:location", statement: "Seattle metro, hybrid", field: "location" },
-      { id: "brief:Should I cap experience at 10 years?", statement: "Target 6–10 years" },
       { id: "titles", statement: "data engineer titles only" },
+      { id: "place", statement: "Seattle metro, hybrid" },
     ]);
   });
 });

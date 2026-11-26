@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { JudgeSettings, typeSafeJudge } from "./judge.js";
-import { criteriaAssessment, personRequirements } from "./recruiting-criteria-check.js";
+import { criteriaAssessment } from "./recruiting-criteria-check.js";
 
 const answer = (body: unknown, status = 200) =>
   vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -197,22 +197,6 @@ describe("JudgeSettings", () => {
       apiKey: "good",
       languageUrl: "https://check.example/",
     });
-  });
-
-  it("shows a brief field's requirement without the field's key, and keeps a label a criterion states", async () => {
-    const requirements = await personRequirements({ yes: async () => undefined }, [
-      {
-        id: "brief:experience",
-        statement: "5+ years of batch and streaming pipelines",
-        field: "experience",
-      },
-      { id: "hard-1", statement: "Languages: Mandarin" },
-    ]);
-    expect(requirements.map(({ shown }) => shown)).toEqual([
-      "5+ years of batch and streaming pipelines",
-      "Languages: Mandarin",
-    ]);
-    expect(requirements[0]!.statement).toContain("experience:");
   });
 
   it("writes the verdicts as the assessment lines Results reads", () => {

@@ -8,11 +8,11 @@ import {
 
 /**
  * What the recruiter asked for on a role, as the agent saved it: the role's requirement memory.
- * Each brief field the recruiter or their job post stated and each hard criterion, in the words
- * saved, never reshaped here. `field` is the brief field's own key: context for a judge, not
- * the recruiter's words.
+ * The role's hard criteria, in the words saved, never reshaped here. They are the one place a
+ * requirement on the person is saved (staging 11-26: the same requirement saved as a criterion
+ * and as a brief field was judged twice, "9 requirements" for a role that stated five).
  */
-export type RoundCriterion = { id: string; statement: string; field?: string };
+export type RoundCriterion = { id: string; statement: string };
 
 function statementOf(expression: RecruitingCriterionExpression): string {
   if (expression.kind === "atom") return expression.statement;
@@ -20,44 +20,18 @@ function statementOf(expression: RecruitingCriterionExpression): string {
   return expression.items.map(statementOf).join(expression.kind === "all" ? " and " : " or ");
 }
 
-type BriefField = { key?: unknown; value?: unknown; state?: unknown; origin?: unknown };
-
 export async function roundCriteria(
   prisma: Pick<PrismaClient, "recruitingRole">,
   input: { roleId: string },
 ): Promise<RoundCriterion[]> {
   const role = await prisma.recruitingRole.findUnique({
     where: { id: input.roleId },
-    select: { currentRevision: { select: { criteria: true, brief: true } } },
+    select: { currentRevision: { select: { criteria: true } } },
   });
-  const fields = (role?.currentRevision.brief as { fields?: unknown } | null)?.fields;
   const criteria = role?.currentRevision.criteria;
-  const all: RoundCriterion[] = [
-    ...(Array.isArray(fields) ? (fields as BriefField[]) : []).flatMap((field) =>
-      typeof field?.key === "string" &&
-      typeof field.value === "string" &&
-      field.state === "known" &&
-      (field.origin === "user_instruction" || field.origin === "jd")
-        ? [
-            {
-              id: `brief:${field.key}`,
-              statement: field.value,
-              // A field saved from an intake question keeps the question as its key.
-              ...(field.key.trim().endsWith("?") ? {} : { field: field.key }),
-            },
-          ]
-        : [],
-    ),
-    ...(Array.isArray(criteria) ? (criteria as unknown as RecruitingCriterion[]) : [])
-      .filter((criterion) => criterion?.priority === "hard" && criterion.expression)
-      .map((criterion) => ({ id: criterion.id, statement: statementOf(criterion.expression) })),
-  ];
-  // A requirement saved in both places is judged once (staging 11-26: "数仓建模、数仓建模").
-  const seen = new Set<string>();
-  return all.filter((criterion) => {
-    const same = criterion.statement.trim().toLowerCase();
-    return !seen.has(same) && Boolean(seen.add(same));
-  });
+  return (Array.isArray(criteria) ? (criteria as unknown as RecruitingCriterion[]) : [])
+    .filter((criterion) => criterion?.priority === "hard" && criterion.expression)
+    .map((criterion) => ({ id: criterion.id, statement: statementOf(criterion.expression) }));
 }
 
 /** What a recorded round's read says about repeats: the round record refuses anyone already seen. */
