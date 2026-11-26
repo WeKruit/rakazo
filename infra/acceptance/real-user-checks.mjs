@@ -374,7 +374,10 @@ export function requirementSaved(roleText, pattern) {
  */
 export function recipientsOf(title, detail) {
   const lines = detail.split("\n");
-  const start = lines.findIndex((line) => /^(?:To|收件人)(?:\s*\(\d+\+?\))?\s*[:：]/i.test(line));
+  // A calendar invitation names its guests, or the ones a change adds, on one line.
+  const start = lines.findIndex((line) =>
+    /^(?:To|收件人|Guests|Adding)(?:\s*\(\d+\+?\))?\s*[:：]/i.test(line),
+  );
   let found = [];
   if (start >= 0) {
     // A reply card names its one recipient on the To line itself.
