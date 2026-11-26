@@ -642,6 +642,7 @@ import type { RoundVerdict } from "./recruiting-round-check.js";
 import { checkPeopleCriteria } from "./recruiting-criteria-check.js";
 import {
   checkRound,
+  onlyPeopleWhoCount,
   requestCounts,
   roundCriteria,
   withoutShownBefore,
@@ -5667,6 +5668,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ]),
               ),
             };
+          let roundLeftOut = 0;
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -5691,7 +5693,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return {
                 error: `Not recorded: all ${fresh.shownBefore} were already shown to the recruiter in an earlier round, so nothing was listed again. Record only people no round has shown, or say that nobody new fits yet.`,
               };
-            args = { ...args, candidateKeys: fresh.keys };
+            // A round lists only people who count, so the list and the number told are the same.
+            const counted = await onlyPeopleWhoCount(
+              deps.prisma,
+              thread.activeRecruitingRoleId,
+              fresh.keys,
+            );
+            if (!counted.keys.length)
+              return {
+                error: `Not recorded: none of these ${fresh.keys.length} has a Strong or Promising grade from the search yet, and a round lists only people who count toward the request. People from a quick search get their grade from the grading run of the First ten rule; record the round once it is back.`,
+              };
+            roundLeftOut = counted.leftOut;
+            args = { ...args, candidateKeys: counted.keys };
           }
           // One round check for everything the recruiter asked for (brief, criteria and the reasons
           // they turned people down): the agent's verdict on each decides who is in.
@@ -10096,6 +10109,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ...round,
                       ...(typeof recorded?.roleId === "string"
                         ? await requestCounts(deps.prisma, recorded.roleId).catch(() => ({}))
+                        : {}),
+                      ...(roundLeftOut
+                        ? {
+                            notListed: `${roundLeftOut} of the people you gave have no Strong or Promising grade, so they are not in this round's list and were not shown.`,
+                          }
                         : {}),
                       // Gate 9d632819: the turn began on an English JD, the recruiter went on in
                       // Chinese in the main chat, and the card after the round was English.

@@ -1,6 +1,6 @@
 import type { RecruitingCriterion, RecruitingCriterionExpression } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { countRecruitingRoleGrades } from "@rakazo/db";
+import { countRecruitingRoleGrades, listRecruitingFitCandidateKeys } from "@rakazo/db";
 import { handedInRecruiterWords } from "./global-role-writes.js";
 
 /**
@@ -249,6 +249,22 @@ export async function withoutShownBefore(
   const shown = new Set(earlier.flatMap((round) => round.candidateKeys));
   const fresh = [...new Set(keys)].filter((key) => !shown.has(key));
   return { keys: fresh, shownBefore: keys.length - fresh.length };
+}
+
+/**
+ * A round lists only people who count toward the request: those the search graded Strong or
+ * Promising. What the recruiter reads in a list and the number they are told are then the same
+ * people (staging 11-26: "20 shown" beside rounds listing 21 to 30, the extra ones shown before
+ * any grade or graded lower).
+ */
+export async function onlyPeopleWhoCount(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  roleId: string,
+  keys: readonly string[],
+): Promise<{ keys: string[]; leftOut: number }> {
+  const fit = new Set(await listRecruitingFitCandidateKeys(prisma, roleId));
+  const counted = keys.filter((key) => fit.has(key));
+  return { keys: counted, leftOut: keys.length - counted.length };
 }
 
 /**
