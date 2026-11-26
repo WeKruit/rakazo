@@ -9078,18 +9078,21 @@ export function candidateIndexQuery(
       ) m
     ) match ON true
     LEFT JOIN LATERAL (
-      SELECT o."pageId", gp."roleRevisionId", CASE
+      -- A person's grade is the newest saved tier, whoever gave it: the search grades the people
+      -- it returns, so a tier needs no separate grading page to count (same rule as
+      -- countRecruitingRoleGrades, which the agent's "N fit" comes from).
+      SELECT o."pageId", page."roleRevisionId", CASE
         WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
           THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade,
         CASE WHEN reviewer_score.value IS NOT NULL
           THEN round(LEAST(100, GREATEST(0, reviewer_score.value))) END AS score
       FROM "recruiting_candidate_occurrences" o
-      JOIN grade_pages gp ON gp."effectId" = o."pageId"
       JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
       CROSS JOIN LATERAL (SELECT COALESCE(
         ${scoreCellPart(Prisma.sql`o."matchFields"`, "fraction")},
         ${scoreCellPart(Prisma.sql`o."matchFields"`, "plain")}) AS value) reviewer_score
       WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+        AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'
       ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC LIMIT 1
     ) reviewer ON true
     LEFT JOIN LATERAL (
