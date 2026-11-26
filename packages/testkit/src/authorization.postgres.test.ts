@@ -165,8 +165,6 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["recruiting/bindRole", { threadId: "missing-thread", roleId: "missing-role" }],
       ["recruiting/getWorkspace", { threadId: "missing-thread" }],
       ["recruiting/reviseRole", { ...roleDefinition, roleId: "missing-role", expectedRevision: 1 }],
-      ["recruiting/listAssessments", { roleId: "missing-role" }],
-      ["recruiting/getAssessment", { roleId: "missing-role", candidateKey: "missing-candidate" }],
       ["recruiting/listResearch", { roleId: "missing-role" }],
       ["routines/list", { botId: "missing-bot" }],
       ["routines/create", routineInput("missing-bot")],

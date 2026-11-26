@@ -4,10 +4,7 @@ import type { AdapterContext, ArtifactStore, ConnectorCall } from "@rakazo/adapt
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { readInstantlyEmail } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
-import {
-  RecruitingAssessmentSnapshotSchema,
-  RecruitingCrmCandidatesReadSchema,
-} from "@rakazo/contracts";
+import { RecruitingCrmCandidatesReadSchema } from "@rakazo/contracts";
 import { catalogApprovalRequest } from "@rakazo/core";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type * as DbExports from "@rakazo/db";
@@ -45,9 +42,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     readRecruitingNativeCorrespondence: vi.fn(async () => null),
     readRecruitingImportedCorrespondence: vi.fn(async () => null),
     reviseRecruitingRole: vi.fn(),
-    listRecruitingAssessments: vi.fn(),
     listRecruitingFeedback: vi.fn(),
-    getRecruitingAssessment: vi.fn(),
     listRecruitingResearch: vi.fn(),
     listRecruitingCandidates: vi.fn(),
     listRecruitingCandidateSources: vi.fn(),
@@ -3606,45 +3601,6 @@ describe("readable recruiting sources", () => {
       where: { id: "material", spaceId: actor.spaceId, userId: actor.userId },
     });
   });
-  it("loads the exact stored assessment selection, not a caller-controlled JSON path", async () => {
-    const f = fixture();
-    const start = text.indexOf(quote);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-      assessment: {
-        version: 2,
-        sourceRefs: [
-          {
-            ...source,
-            kind: "original_material",
-            selection: {
-              kind: "artifact_json_string",
-              path: ["nested", "evidence"],
-              start,
-              end: start + quote.length,
-            },
-          },
-        ],
-      },
-    } as never);
-    const input = {
-      kind: "assessment" as const,
-      roleId: "role",
-      candidateKey: "candidate",
-      version: 2,
-      sourceRefId: "source",
-    };
-    expect(await api.readRecruitingSource(f.deps, actor, input)).toEqual({
-      kind: "text",
-      text,
-      start,
-      end: start + quote.length,
-    });
-    expect(db.getRecruitingAssessment).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
-      roleId: "role",
-      candidateKey: "candidate",
-      version: 2,
-    });
-  });
   it("rejects missing, conflicting, unread or revised stored references before reading bytes", async () => {
     const f = fixture();
     for (const revision of [
@@ -3728,36 +3684,16 @@ describe("readable recruiting sources", () => {
     const pdf = Buffer.from("%PDF-1.7\nsynthetic original bytes");
     beforeEach(() => vi.mocked(extractPdfText).mockReset().mockResolvedValue(text));
 
-    it("reads a saved role quote and assessment UTF-16 selection from the same extracted text", async () => {
+    it("reads a saved role quote from the extracted text", async () => {
       const f = fixture(pdf, "application/pdf");
       const start = text.indexOf(quote);
       const expected = { kind: "text", text, start, end: start + quote.length };
       expect(await api.readRecruitingSource(f.deps, actor, roleInput)).toEqual(expected);
-      vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-        assessment: {
-          version: 2,
-          sourceRefs: [
-            {
-              ...f.source,
-              selection: { kind: "artifact_text", start, end: start + quote.length },
-            },
-          ],
-        },
-      } as never);
-      expect(
-        await api.readRecruitingSource(f.deps, actor, {
-          kind: "assessment",
-          roleId: "role",
-          candidateKey: "candidate",
-          version: 2,
-          sourceRefId: "source",
-        }),
-      ).toEqual(expected);
-      expect(extractPdfText).toHaveBeenCalledTimes(2);
+      expect(extractPdfText).toHaveBeenCalledOnce();
       expect(extractPdfText).toHaveBeenLastCalledWith(pdf);
     });
 
-    it.each(["foreign", "hash", "bytes", "json-selection", "message-selection"])(
+    it.each(["foreign", "hash", "bytes"])(
       "rejects %s before invoking the PDF processor",
       async (boundary) => {
         const f = fixture(pdf, "application/pdf");
@@ -3767,12 +3703,6 @@ describe("readable recruiting sources", () => {
           ...f.source,
           ...(boundary === "hash"
             ? { anchor: { ...f.source.anchor, artifact: { artifactId: "material", sha256: hash } } }
-            : {}),
-          ...(boundary === "json-selection"
-            ? { selection: { kind: "artifact_json_string", path: ["text"], start: 0, end: 1 } }
-            : {}),
-          ...(boundary === "message-selection"
-            ? { selection: { kind: "message_text", blockIndex: 0, start: 0, end: 1 } }
             : {}),
         };
         vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
@@ -3787,11 +3717,10 @@ describe("readable recruiting sources", () => {
       },
     );
 
-    it.each(["quote", "offset", "processor"])(
+    it.each(["quote", "processor"])(
       "fails closed on a PDF %s error without returning raw bytes or processor details",
       async (boundary) => {
         const f = fixture(pdf, "application/pdf");
-        const start = text.indexOf(quote);
         vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
           revision: {
             id: "revision",
@@ -3799,11 +3728,6 @@ describe("readable recruiting sources", () => {
               {
                 ...f.source,
                 quote: boundary === "quote" ? "Invented evidence" : quote,
-                selection: {
-                  kind: "artifact_text",
-                  start: boundary === "offset" ? start + 1 : start,
-                  end: start + quote.length,
-                },
               },
             ],
             criteria: [],
@@ -3828,8 +3752,6 @@ describe("authenticated recruiting API", () => {
       [db.bindRecruitingRole, api.bindRecruitingRole],
       [db.getRecruitingWorkspace, api.getRecruitingWorkspace],
       [db.reviseRecruitingRole, api.reviseRecruitingRole],
-      [db.listRecruitingAssessments, api.listRecruitingAssessments],
-      [db.getRecruitingAssessment, api.getRecruitingAssessment],
       [db.listRecruitingResearch, api.listRecruitingResearch],
       [db.listRecruitingCandidates, api.listRecruitingCandidates],
       [db.setRecruitingCandidateShortlist, api.setRecruitingCandidateShortlist],
@@ -3958,12 +3880,6 @@ describe("native recruiting RPC", () => {
       threadId: "thread",
       roleId: null,
     });
-    vi.mocked(db.listRecruitingAssessments).mockResolvedValueOnce([]);
-    expect(await client.recruiting.listAssessments({ roleId: "role" })).toEqual([]);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValueOnce(null);
-    expect(
-      await client.recruiting.getAssessment({ roleId: "role", candidateKey: "row" }),
-    ).toBeNull();
     const candidatePage = {
       sortAvailability: { rank: false, tier: false, score: false },
       roleId: "role",
@@ -3976,8 +3892,6 @@ describe("native recruiting RPC", () => {
         sourceRows: 15,
         candidates: 10,
         identifiedCandidates: 6,
-        unassessed: 10,
-        assessed: 0,
         shortlisted: 0,
       },
     };
@@ -4091,77 +4005,6 @@ describe("native recruiting RPC", () => {
         signal: expect.any(AbortSignal),
       }),
     });
-  });
-  it("returns the original assessment revision and authorized message targets through both RPC reads", async () => {
-    const source = {
-      id: "source",
-      kind: "original_material" as const,
-      anchor: { kind: "message" as const, messageId: "message", locator: "text:0" },
-      readState: "unread" as const,
-      readAt: null,
-    };
-    const snapshot: DbExports.RecruitingAssessmentSnapshot = {
-      assessment: {
-        roleId: "role",
-        roleRevisionId: "original-revision",
-        candidateKey: "row",
-        version: 1,
-        basedOnVersion: null,
-        createdByRunId: "run",
-        createdAt: "2026-10-16T00:00:00.000Z",
-        facts: [],
-        questions: [],
-        sourceRefs: [source],
-        judgments: { atoms: [], employment: [], criteria: [], hardGate: "unknown" },
-      },
-      roleRevision: {
-        id: "original-revision",
-        roleId: "role",
-        revision: 1,
-        sourceRefs: [source],
-        criteria: [],
-        preferences: [],
-        definitionQuestions: [],
-        createdAt: "2026-10-16T00:00:00.000Z",
-      },
-      isCurrent: false,
-      sourceMessageTargets: [
-        { messageId: "message", threadId: "source-thread", target: { groupId: "source-group" } },
-      ],
-    };
-    const client = createRouterClient(createRouter({ prisma } as RouterDeps), {
-      context: { actor },
-    });
-    vi.mocked(db.listRecruitingAssessments).mockResolvedValueOnce([snapshot]);
-    expect(await client.recruiting.listAssessments({ roleId: "role" })).toEqual([snapshot]);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValueOnce(snapshot);
-    expect(
-      await client.recruiting.getAssessment({ roleId: "role", candidateKey: "row", version: 1 }),
-    ).toEqual(snapshot);
-    expect(
-      RecruitingAssessmentSnapshotSchema.safeParse({
-        ...snapshot,
-        roleRevision: { ...snapshot.roleRevision, id: "current-revision" },
-      }).success,
-    ).toBe(false);
-    expect(
-      RecruitingAssessmentSnapshotSchema.safeParse({
-        ...snapshot,
-        sourceMessageTargets: [
-          {
-            messageId: "message",
-            threadId: "source-thread",
-            target: { botId: "bot", groupId: "group" },
-          },
-        ],
-      }).success,
-    ).toBe(false);
-    vi.mocked(db.getRecruitingAssessment).mockRejectedValueOnce(
-      new IsolationError("Private source-thread and message target"),
-    );
-    await expect(
-      client.recruiting.getAssessment({ roleId: "role", candidateKey: "row" }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
   });
   it("rejects unauthenticated reads and model-supplied identity before storage", async () => {
     const authenticated = createRouterClient(createRouter({ prisma } as RouterDeps), {
@@ -4489,7 +4332,6 @@ describe("retained candidate report API", () => {
           firstDiscoveredAt: null,
           lastDiscoveredAt: null,
           crm: null,
-          latestAssessment: null,
           ...(latestSource ? { latestSource } : {}),
         }),
       );
@@ -4505,8 +4347,6 @@ describe("retained candidate report API", () => {
           sourceRows: 2,
           candidates: 3,
           identifiedCandidates: 0,
-          unassessed: 3,
-          assessed: 0,
           shortlisted: 0,
         },
       });
@@ -4725,227 +4565,6 @@ describe("retained candidate report API", () => {
     else expect((await result).items).toEqual([f.occurrence]);
     if (["foreign-actor", "missing-occurrence"].includes(boundary))
       expect(f.get).not.toHaveBeenCalled();
-  });
-  it("accepts an exact 550-character incomplete array prefix confined to its saved person", async () => {
-    const f = fixture(false, (snapshot) => {
-      const canonical = structuredClone(rows);
-      Object.assign(canonical[0]!, {
-        infra_evidence: { value: "Supplied project implementation evidence. ".repeat(30) },
-      });
-      snapshot.providerResult.structuredContent.rows = canonical;
-      snapshot.providerResult.content[0].text = JSON.stringify(
-        canonical.map((row) =>
-          Object.fromEntries(
-            Object.entries(row)
-              .filter(([key]) => !key.startsWith("_"))
-              .map(([key, cell]) => [
-                key,
-                typeof cell === "object" && cell !== null && "value" in cell ? cell.value : cell,
-              ]),
-          ),
-        ),
-      );
-    });
-    const quote = f.snapshot.providerResult.content[0]!.text.slice(0, 550);
-    expect(() => JSON.parse(quote)).toThrow();
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-      assessment: {
-        version: 2,
-        sourceRefs: [
-          {
-            id: "source",
-            kind: "provider_report",
-            anchor: {
-              kind: "artifact",
-              artifact: f.occurrence.artifactRef,
-              locator: "providerResult",
-            },
-            readState: "read",
-            readAt: "2026-10-17T00:00:00.000Z",
-            quote,
-            selection: {
-              kind: "artifact_json_string",
-              path: ["providerResult", "content", 0, "text"],
-              start: 0,
-              end: 550,
-            },
-          },
-        ],
-      },
-    } as never);
-    const result = await api.readRecruitingSource(f.deps, actor, {
-      kind: "assessment",
-      ...input,
-      version: 2,
-      sourceRefId: "source",
-    });
-    expect(result).toMatchObject({
-      kind: "report",
-      report: {
-        fields: expect.arrayContaining([
-          expect.objectContaining({ label: "Name", value: "Selected Person" }),
-          expect.objectContaining({
-            label: "Infra evidence",
-            value: "Supplied project implementation evidence. ".repeat(30),
-          }),
-        ]),
-      },
-    });
-    expect(JSON.stringify(result)).not.toMatch(/Neighbor|private-|shard_id|providerResult/);
-  });
-  it.each([
-    "prefix",
-    "pretty-prefix",
-    "neighbor",
-    "cross-row",
-    "values",
-    "sparse-same-title",
-    "missing-gap",
-    "order",
-    "duplicate",
-    "request",
-    "typed-cell",
-  ])("binds the exact assessment selection to its own row at the %s boundary", async (boundary) => {
-    const flatRows = rows.map((row) =>
-      Object.fromEntries(
-        Object.entries(row)
-          .filter(([key]) => !key.startsWith("_") && key !== "shard_id")
-          .map(([key, cell]) => [
-            key,
-            typeof cell === "object" && cell !== null && "value" in cell ? cell.value : cell,
-          ]),
-      ),
-    );
-    if (boundary === "values") flatRows[0]!.name = "Changed person";
-    if (boundary === "sparse-same-title") flatRows[0] = { current_title: "Engineer" };
-    if (boundary === "missing-gap") delete flatRows[0]!.concerns;
-    if (boundary === "order") flatRows.reverse();
-    const f = fixture(false, (snapshot) => {
-      if (boundary === "sparse-same-title") {
-        snapshot.providerResult.structuredContent.rows = structuredClone(rows);
-        snapshot.providerResult.structuredContent.rows[0].current_title = { value: "Engineer" };
-      }
-      snapshot.providerResult.content[0].text = JSON.stringify(
-        flatRows,
-        null,
-        boundary === "pretty-prefix" ? 2 : undefined,
-      );
-    });
-    const text = f.snapshot.providerResult.content[0]!.text;
-    let path: (string | number)[] = ["providerResult", "content", 0, "text"];
-    let start = 0;
-    let end = text.indexOf('"tier"') + 6;
-    if (boundary === "neighbor") {
-      start = text.indexOf("Neighbor Person");
-      end = start + "Neighbor Person".length;
-    }
-    if (boundary === "cross-row") end = text.indexOf("Neighbor Person") + "Neighbor Person".length;
-    if (boundary === "request") {
-      path = ["request", 2, "args", "task_id"];
-      start = 0;
-      end = "provider-task".length;
-    }
-    if (boundary === "typed-cell") {
-      path = ["providerResult", "structuredContent", "rows", 0, "name", "value"];
-      start = 0;
-      end = "Selected Person".length;
-    }
-    const quote =
-      boundary === "request"
-        ? "provider-task"
-        : boundary === "typed-cell"
-          ? "Selected Person"
-          : text.slice(start, end);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-      assessment: {
-        version: 2,
-        sourceRefs: [
-          {
-            id: "source",
-            kind: "provider_report",
-            anchor: {
-              kind: "artifact",
-              artifact: f.occurrence.artifactRef,
-              locator: "providerResult",
-            },
-            readState: "read",
-            readAt: "2026-10-17T00:00:00.000Z",
-            quote,
-            selection: { kind: "artifact_json_string", path, start, end },
-          },
-        ],
-      },
-    } as never);
-    if (boundary === "duplicate") f.page.items.push({ ...f.occurrence });
-    const result = api.readRecruitingSource(f.deps, actor, {
-      kind: "assessment",
-      ...input,
-      version: 2,
-      sourceRefId: "source",
-    });
-    if (["prefix", "pretty-prefix", "typed-cell"].includes(boundary)) {
-      expect(await result).toMatchObject({
-        kind: "report",
-        report: { sourceUrls: ["https://example.test/selected"] },
-      });
-      expect(f.get).toHaveBeenCalledOnce();
-    } else
-      await expect(result).rejects.toMatchObject({
-        code: "NOT_FOUND",
-        message: "Resource not found",
-      });
-  });
-  it("returns the exact person's report after validating an assessment's original quote and scoped saved occurrence", async () => {
-    const f = fixture();
-    const text = f.snapshot.providerResult.content[0]!.text;
-    const quote = "Selected Person";
-    const start = text.indexOf(quote);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-      assessment: {
-        version: 2,
-        sourceRefs: [
-          {
-            id: "source",
-            kind: "provider_report",
-            anchor: {
-              kind: "artifact",
-              artifact: f.occurrence.artifactRef,
-              locator: "providerResult",
-            },
-            readState: "read",
-            readAt: "2026-10-17T00:00:00.000Z",
-            quote,
-            selection: {
-              kind: "artifact_json_string",
-              path: ["providerResult", "content", 0, "text"],
-              start,
-              end: start + quote.length,
-            },
-          },
-        ],
-      },
-    } as never);
-    const result = await api.readRecruitingSource(f.deps, actor, {
-      kind: "assessment",
-      ...input,
-      version: 2,
-      sourceRefId: "source",
-    });
-    expect(result).toMatchObject({
-      kind: "report",
-      report: { sourceUrls: ["https://example.test/selected"] },
-    });
-    expect(JSON.stringify(result)).not.toMatch(/Neighbor|private-|task_id|rows|providerResult/);
-    expect(f.get).toHaveBeenCalledOnce();
-    f.page.items = [];
-    await expect(
-      api.readRecruitingSource(f.deps, actor, {
-        kind: "assessment",
-        ...input,
-        version: 2,
-        sourceRefId: "source",
-      }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -7563,7 +7182,6 @@ describe("role candidates (search results + CRM merged list)", () => {
       discoveryCount: 1,
       firstDiscoveredAt: null,
       lastDiscoveredAt: null,
-      latestAssessment: null,
       ...extra,
     }) as unknown as db.RecruitingCandidate;
   const contact = (n: number, fields: Record<string, unknown>) => ({
@@ -7612,8 +7230,6 @@ describe("role candidates (search results + CRM merged list)", () => {
           sourceRows: sourced.length,
           candidates: sourced.length,
           identifiedCandidates: sourced.length,
-          unassessed: sourced.length,
-          assessed: 0,
           shortlisted: sourced.filter((row) => row.shortlisted).length,
         },
         crmTarget: crm === "unbound" ? null : crmTarget,

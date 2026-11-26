@@ -7,7 +7,6 @@ export const RECORD_TOOLS: ReadonlySet<string> = new Set([
   "recruiting_role",
   "recruiting_candidates",
   "recruiting_shortlist",
-  "recruiting_assess",
   "recruiting_feedback",
   "recruiting_notes",
   "recruiting_reminders",

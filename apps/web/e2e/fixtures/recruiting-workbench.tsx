@@ -89,42 +89,6 @@ const revision = {
   definitionQuestions: [],
   createdAt: checkedAt,
 };
-const verdicts = ["met", "unmet", "unknown"] as const;
-const judgment = (verdict: (typeof verdicts)[number]) => ({
-  verdict,
-  factIds: [],
-  evidence: [],
-  missing: [],
-});
-const assessments = people.slice(0, 4).map((person, i) => ({
-  assessment: {
-    roleId: role.id,
-    roleRevisionId: revision.id,
-    candidateKey: `fixture-${i}`,
-    version: 1,
-    basedOnVersion: null,
-    createdByRunId: "run-demo",
-    createdAt: checkedAt,
-    facts: [],
-    sourceRefs: [],
-    questions: [],
-    judgments: {
-      atoms: criteria.map(([id], c) => ({
-        atomId: `${id}-atom`,
-        ...judgment(verdicts[(i + c) % 3]!),
-      })),
-      criteria: criteria.map(([id], c) => ({
-        criterionId: id,
-        ...judgment(verdicts[(i + c) % 3]!),
-      })),
-      employment: [],
-      hardGate: verdicts[i % 3],
-    },
-  },
-  isCurrent: true,
-  roleRevision: revision,
-  sourceMessageTargets: [],
-}));
 const candidates: RecruitingCandidate[] = people.map((person, i) => ({
   roleId: role.id,
   candidateKey: `fixture-${i}`,
@@ -182,16 +146,6 @@ const candidates: RecruitingCandidate[] = people.map((person, i) => ({
   discoveryCount: 1,
   firstDiscoveredAt: checkedAt,
   lastDiscoveredAt: checkedAt,
-  latestAssessment:
-    i < 4
-      ? {
-          version: 1,
-          roleRevisionId: revision.id,
-          createdAt: checkedAt,
-          isCurrent: true,
-          hardGate: verdicts[i % 3]!,
-        }
-      : null,
   crm: null,
 }));
 const mail = people.slice(0, 4).map((person, i) => ({
@@ -352,18 +306,11 @@ const rpc: Record<string, (input: Record<string, unknown>) => unknown> = {
         sourceRows: items.length,
         candidates: items.length,
         identifiedCandidates: items.length,
-        unassessed: items.filter((candidate) => !candidate.latestAssessment).length,
-        assessed: items.filter((candidate) => candidate.latestAssessment).length,
         shortlisted: items.filter((candidate) => candidate.shortlisted).length,
       },
     };
   },
-  "recruiting/listAssessments": () => page(assessments),
-  "recruiting/getAssessment": (input) =>
-    assessments.find((item) => item.assessment.candidateKey === input.candidateKey) ??
-    assessments[0],
   "recruiting/listResearch": () => ({ observations: [], tasks: [], actions: [] }),
-  "recruiting/listQuestions": () => ({ questions: [] }),
   "recruiting/listFeedback": () => [],
   "recruiting/listCandidateSources": (input) => ({
     roleId: role.id,

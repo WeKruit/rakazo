@@ -107,7 +107,6 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   recruiting_role: "role",
   recruiting_candidates: "candidates",
   recruiting_shortlist: "candidates",
-  recruiting_assess: "candidates",
   recruiting_research: "research",
   recruiting_feedback: "feedback",
   recruiting_profiles: "candidates",
@@ -150,7 +149,6 @@ const OPERATION_ACTIVITIES: Record<string, Record<string, WorkActivity>> = {
     replies: "replies",
     resolve: "candidate_lookup",
   },
-  recruiting_assess: { ask: "question" },
   recruiting_profiles: { save: "profiles_save", save_many: "profiles_save" },
 };
 

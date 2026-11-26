@@ -163,7 +163,6 @@ import {
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
-  RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
   RUN_EGRESS_RATE_LIMITED,
@@ -598,13 +597,12 @@ import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js
 import { oneLineNote } from "./reply-line.js";
 import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
-import type { RecruiterListItem } from "./recruiting-assessment.js";
+import type { RecruiterListItem } from "./recruiting-candidates-tool.js";
 import {
-  executeRecruitingAssessmentTool,
   executeRecruitingCandidatesTool,
   peopleToShow,
   retainRecruitingWebMaterial,
-} from "./recruiting-assessment.js";
+} from "./recruiting-candidates-tool.js";
 import { checkinToolRefusal, checkinTools } from "./recruiting-checkin.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
@@ -757,7 +755,7 @@ import {
 import { createToolFixMemory, withKnownFix } from "./tool-fixes.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
-import { answerSearchFilters, intakeAnswers, recruitingRoundListText } from "./turn-end-guard.js";
+import { recruitingRoundListText } from "./turn-end-guard.js";
 import {
   newRoleNote,
   otherRoleNote,
@@ -4337,16 +4335,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           !linkRole &&
           !attachedJob &&
           !roleCreatedInTurn;
-        // After the ten are shown the server saves the recruiter's intake answers as the brief, so
-        // the role always has one; the model's own brief save then replaces it. The next-step card
-        // waits for that save, so the pause never cuts it off.
-        let briefSaving: Promise<unknown> | undefined;
         // Role saves run in the background, so later calls may name a revision this run moved past.
         const roleRevisions = ownRoleRevisions();
         const roleSavesInFlight = new Set<Promise<unknown>>();
-        // That save moves the role on a revision the model has not seen; its own brief save, which
-        // replaces the answers-only brief, still names the revision it recorded the round on.
-        let briefBump: { from: number; to: number } | undefined;
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
         // The role's total after each people search this run, so a scale-out cannot hand off while
@@ -4612,94 +4603,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           questionStream = { callId: call.id, text, at: Date.now(), posting };
           // Text written after a bounced question replaces it instead of appending to it.
           hasStreamedText = false;
-        };
-        // The recruiter's answers to the intake cards, saved into the brief as they come: each
-        // answer is in the role at once, in the background, never waiting on the first ten.
-        const saveBriefFromAnswers = async (roleId: string) => {
-          const quote = currentTurnMessage?.blocks.flatMap((block) =>
-            block.kind === "text" && block.text.trim() ? [block.text] : [],
-          )[0];
-          const role = await deps.prisma.recruitingRole.findFirst({
-            where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
-            select: {
-              revision: true,
-              currentRevision: { select: { brief: true } },
-              revisions: {
-                where: { revision: 1 },
-                select: { createdAt: true },
-              },
-            },
-          });
-          type BriefItem = Record<string, unknown> & {
-            key?: unknown;
-            value?: unknown;
-            id?: unknown;
-          };
-          const existing = (role?.currentRevision?.brief ?? null) as
-            | (Record<string, unknown> & {
-                fields?: BriefItem[];
-                searchFilters?: BriefItem[];
-                confirmation?: unknown;
-              })
-            | null;
-          // A confirmed brief changes only through the agent's own save.
-          if (!quote || !role || existing?.confirmation) return;
-          const messages = await deps.prisma.message.findMany({
-            where: {
-              threadId: thread.id,
-              steeringMessages: { none: { originTrigger: "follow_up" } },
-              ...(role.revisions[0] ? { createdAt: { gte: role.revisions[0].createdAt } } : {}),
-            },
-            orderBy: { seq: "asc" },
-            select: { role: true, blocks: true },
-          });
-          const answers = intakeAnswers(messages);
-          const savedFields = existing?.fields ?? [];
-          const fresh = answers.filter(
-            ({ key, value }) =>
-              !savedFields.some((field) => field.key === key && field.value === value),
-          );
-          if (!fresh.length) return;
-          const answerFields = fresh.map(({ key, value }) => ({
-            key,
-            value,
-            origin: "user_instruction",
-            state: "known",
-            consequential: true,
-          }));
-          const { confirmation: _confirmation, ...kept } = existing ?? {};
-          const saved = (await applyTool(
-            "recruiting_role",
-            {
-              operation: "update",
-              roleId,
-              expectedRevision: role.revision,
-              intent: { basis: "direct", quote },
-              brief: {
-                ...kept,
-                fields: [
-                  ...savedFields.filter((field) => !fresh.some(({ key }) => key === field.key)),
-                  ...answerFields,
-                ],
-                searchFilters: [
-                  ...(existing?.searchFilters ?? []).filter(
-                    (filter) => !String(filter.id ?? "").startsWith("recruiter-answer-"),
-                  ),
-                  ...answerSearchFilters(answers),
-                ],
-              },
-            },
-            `${runId}:brief-after-round`,
-          )) as {
-            error?: unknown;
-            workspace?: { role?: { revision?: unknown } } | null;
-          } | null;
-          if (saved?.error)
-            getLogger().warn("brief not saved from answers", {
-              error: saved.error,
-            });
-          const to = saved?.workspace?.role?.revision;
-          if (typeof to === "number" && to > role.revision) briefBump = { from: role.revision, to };
         };
         /** The newest round this run recorded; a refused attempt (its result is an error) is none. */
         const roundRecordedThisRun = async () => {
@@ -5238,20 +5141,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               remaining_after: batch.remaining,
             };
           }
-          if (
-            name === "recruiting_role" &&
-            args.operation === "update" &&
-            // Its own repaired repeat (":brief-after-round:repaired") must not wait on itself.
-            !executionId.startsWith(`${runId}:brief-after-round`)
-          )
-            await briefSaving;
-          if (
-            name === "recruiting_role" &&
-            args.operation === "update" &&
-            briefBump &&
-            args.expectedRevision === briefBump.from
-          )
-            args = { ...args, expectedRevision: briefBump.to };
           // A call naming a role revision waits briefly for this run's own role saves still
           // running, then acts on the newest revision this run saved.
           const revisionKey =
@@ -5469,28 +5358,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const filled = await filledRecruitingFeedbackArgs(deps.prisma, feedbackRoleId, args);
             args = filled.args;
             feedbackArgsError = filled.error;
-          }
-          if (name === "recruiting_assess" && args.operation === "ask") {
-            // Clarifying questions come before the search: once this turn shows the ten, it
-            // ends on the next-step card instead of another question.
-            const rounds = await deps.prisma.externalEffect.findMany({
-              where: {
-                runId,
-                spaceId: run.spaceId,
-                kind: "recruiting_research",
-                status: "completed",
-                request: { path: ["operation"], equals: "calibration_round" },
-              },
-              select: { id: true },
-              take: 1,
-            });
-            if (rounds.length)
-              return {
-                error:
-                  "Clarifying questions come before the search, and the ten are already shown. Do not ask it: end the turn with the next-step card (ask_user).",
-              };
-            if (typeof args.question === "string")
-              args = { ...args, question: shortQuestion(args.question) };
           }
           if (disabledBuiltinTools.has(name)) {
             return { error: disabledToolError(name) };
@@ -7583,63 +7450,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           };
 
-          const executeAssessment = async () => {
-            const result = redactConnectorPayload(
-              await executeRecruitingAssessmentTool(
-                {
-                  prisma: deps.prisma,
-                  artifacts: deps.artifacts,
-                  events: deps.events,
-                },
-                {
-                  actor: researchActor.actor,
-                  runId,
-                  threadId: thread.id,
-                  botId: bot.id,
-                  attemptId: attempt.id,
-                  redactText: (text) => redactSecrets(text, runSecrets),
-                  save:
-                    args.operation !== "read" && applied
-                      ? {
-                          leaseOwner: workerId,
-                          leaseFence: fence,
-                          contextArtifact: currentRecruitingContext?.contextArtifact,
-                          effectId: applied.effect.id,
-                          effectRequest: applied.effect.request,
-                        }
-                      : undefined,
-                },
-                args,
-                context,
-              ),
-              runSecrets,
-            );
-            if (isToolPauseResult(result)) approvalPausePending = true;
-            return result;
-          };
-          const assessmentError = (error: unknown) => {
-            if (error instanceof RecruitingSourceCheckError) return { error: error.message };
-            if (error instanceof IsolationError)
-              return {
-                error: "Recruiting assessment or source is unavailable",
-              };
-            if (error instanceof RecruitingConflictError)
-              return { error: error.message, code: "CONFLICT" };
-            if (
-              error instanceof RecruitingAssessmentValidationError ||
-              error instanceof RecruitingSourceValidationError ||
-              (error instanceof Error && error.name === "ZodError")
-            )
-              return { error: sanitizeConnectorError(error, runSecrets) };
-            throw error;
-          };
-          const replayAssessment = async () => {
-            try {
-              return await executeAssessment();
-            } catch (error) {
-              return assessmentError(error);
-            }
-          };
           const claimOrReturn = async (
             from: "approved" | "intended",
           ): Promise<unknown | undefined> => {
@@ -7911,16 +7721,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (retryGate.action === "return") {
                 if (current.status === "completed")
                   deferRecruitingInboxReceipt(deps.jobs, connectorCall.route, current.id);
-                if (
-                  name === "recruiting_assess" &&
-                  current.status === "completed" &&
-                  (args.operation === "read" ||
-                    (args.operation !== "read" &&
-                      retryGate.result &&
-                      typeof retryGate.result === "object" &&
-                      (args.operation === "ask" ? "messageId" : "assessment") in retryGate.result))
-                )
-                  return replayAssessment();
                 if (
                   name === "recruiting_role" &&
                   retryGate.result &&
@@ -8541,16 +8341,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (gate.action === "return") {
               if (applied.effect.status === "completed")
                 deferRecruitingInboxReceipt(deps.jobs, connectorCall.route, applied.effect.id);
-              if (
-                name === "recruiting_assess" &&
-                applied.effect.status === "completed" &&
-                (args.operation === "read" ||
-                  (args.operation !== "read" &&
-                    gate.result &&
-                    typeof gate.result === "object" &&
-                    (args.operation === "ask" ? "messageId" : "assessment") in gate.result))
-              )
-                return replayAssessment();
               if (name === "request_secret") {
                 const replacementSecret = await deps.prisma.secret.findFirst({
                   where: {
@@ -9563,17 +9353,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   round?: unknown;
                 } | null;
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
-                  // A stuck save never holds the turn: the model's own brief save and the
-                  // next-step card wait for this one.
-                  briefSaving ??= withinDeadline(
-                    saveBriefFromAnswers(recorded.roleId).catch((error) =>
-                      getLogger().warn("brief not saved after the round", {
-                        error: String(error),
-                      }),
-                    ),
-                    SAVE_WAIT_MS,
-                    () => getLogger().warn("brief save after the round still running", { runId }),
-                  );
                   if (hideVendors)
                     turnLanguage = await recruiterLanguageNow(
                       deps.prisma,
@@ -9880,19 +9659,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
             } catch (error) {
               return finish(roleError(error));
-            }
-          }
-          if (name === "recruiting_assess") {
-            if (args.operation !== "read" && applied && !claimedEffect) {
-              const early = await claimOrReturn("intended");
-              if (early !== undefined) return early;
-            }
-            try {
-              const result = await executeAssessment();
-              // Mutations and their native receipts commit together; do not overwrite a question binding or assessment.
-              return args.operation !== "read" ? result : finish(result);
-            } catch (error) {
-              return finish(assessmentError(error));
             }
           }
           if (name === "recruiting_request_approval") {
@@ -13687,7 +13453,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       movedElsewhere = true;
                       return { instead: askAfterNewerMessage(moved) };
                     }
-                    await briefSaving;
                     await turnReport.caughtUpToAsk();
                     return undefined;
                   },
@@ -15307,7 +15072,6 @@ export function selectBuiltinToolsForRun(options: {
           "remember",
           "recruiting_role",
           "recruiting_request_approval",
-          "recruiting_assess",
           "recruiting_candidates",
           "recruiting_shortlist",
           "recruiting_feedback",

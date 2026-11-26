@@ -1,54 +1,7 @@
-import type { MessageBlock } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
 
-/** The recruiter's answers to the bot's question cards, keyed by question; a later answer wins. */
-export function intakeAnswers(messages: readonly { role: string; blocks: unknown }[]) {
-  const answers = new Map<string, string>();
-  let question: string | undefined;
-  for (const message of messages) {
-    const blocks = message.blocks as MessageBlock[];
-    if (message.role !== "user") {
-      const ask = blocks.find((block) => block.kind === "ask");
-      question = ask?.kind === "ask" ? ask.text.trim().slice(0, 200) : undefined;
-      continue;
-    }
-    const answer = blocks
-      .flatMap((block) => (block.kind === "text" ? [block.text.trim()] : []))
-      .filter(Boolean)
-      .join("\n");
-    if (question && answer) {
-      answers.delete(question);
-      answers.set(question, answer);
-    }
-    question = undefined;
-  }
-  return [...answers].map(([key, value]) => ({ key, value }));
-}
-/** An intake answer that only states a preference or lifts a limit, which narrows no search. */
-const PREFERENCE_ANSWER =
-  /^(prefer|preferred|nice to have|optional|either|any\b|no\b|not required|open to|偏好|优先|最好|可选|不限|都可以|无所谓|不需要)/i;
-
-/**
- * The recruiter's answers that set a requirement, as search filters every search must apply: a
- * stated must-have such as a language narrows who is searched for instead of staying a note. An
- * answer worded as a preference or as lifting a limit stays in the brief only.
- */
-export function answerSearchFilters(answers: readonly { key: string; value: string }[]) {
-  return answers.flatMap(({ value }, index) =>
-    value && !PREFERENCE_ANSWER.test(value.trim())
-      ? [
-          {
-            id: `recruiter-answer-${index + 1}`,
-            mode: "include" as const,
-            origin: "user_instruction" as const,
-            statement: value,
-          },
-        ]
-      : [],
-  );
-}
 type RoundPrisma = Pick<PrismaClient, "externalEffect"> & {
   recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
 };

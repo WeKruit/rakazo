@@ -20,7 +20,6 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   executeRecruitingRoleMutation: vi.fn(),
   getRecruitingWorkspace: vi.fn(),
   recruitingResearchSnapshot: vi.fn(),
-  saveRecruitingAssessment: vi.fn(),
   saveRecruitingCandidateCsvImport: vi.fn(),
 }));
 

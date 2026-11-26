@@ -508,19 +508,6 @@ export function SourcingCandidateCard({
   );
 }
 
-export function CandidateAssessment({ candidate }: { candidate: RecruitingCandidate }) {
-  const assessment = candidate.latestAssessment;
-  return assessment ? (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="text-muted-foreground">
-        <Trans>Internal assessment</Trans> · <Trans>Version {assessment.version}</Trans> ·{" "}
-        {assessment.isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
-      </span>
-      <VerdictLabel verdict={assessment.hardGate} />
-    </div>
-  ) : null;
-}
-
 export function ResearchActionStatus({ action }: { action: RecruitingResearchAction }) {
   return (
     <>

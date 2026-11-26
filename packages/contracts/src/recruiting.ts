@@ -34,13 +34,6 @@ export const ReadRecruitingSourceInput = z.discriminatedUnion("kind", [
     roleRevisionId: RecruitingId,
     sourceRefId: RecruitingId,
   }),
-  z.strictObject({
-    kind: z.literal("assessment"),
-    roleId: RecruitingId,
-    candidateKey: RecruitingId,
-    version: z.number().int().positive(),
-    sourceRefId: RecruitingId,
-  }),
 ]);
 export type ReadRecruitingSourceInput = z.infer<typeof ReadRecruitingSourceInput>;
 
@@ -1186,51 +1179,6 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
 ]);
 export type RecruitingResearchToolInput = z.infer<typeof RecruitingResearchToolInputSchema>;
 
-export const SaveRecruitingAssessmentInput = z
-  .strictObject({
-    ...AssessmentContent,
-    atomJudgments: z.array(RecruitingAtomJudgmentSchema).readonly(),
-    employmentEvaluations: z.array(RecruitingEmploymentEvaluationSchema).readonly(),
-    /** Expected candidate assessment version; zero creates its first snapshot. */
-    expectedRevision: z.number().int().nonnegative(),
-  })
-  .superRefine((assessment, ctx) => {
-    assessmentDependencies(
-      assessment,
-      [
-        ...assessment.atomJudgments,
-        ...assessment.employmentEvaluations.map((evaluation) => ({
-          factIds: [
-            ...evaluation.intervals.map((interval) => interval.factId),
-            ...(evaluation.historyCompletenessFactId === null
-              ? []
-              : [evaluation.historyCompletenessFactId]),
-          ],
-          evidence: evaluation.evidence,
-        })),
-        ...assessment.employmentEvaluations.flatMap((evaluation) =>
-          evaluation.intervals.map((interval) => ({
-            factIds: [interval.factId],
-            evidence: interval.evidence,
-          })),
-        ),
-      ],
-      ctx,
-    );
-    const ids = [...assessment.atomJudgments, ...assessment.employmentEvaluations].map(
-      (judgment) => judgment.atomId,
-    );
-    if (new Set(ids).size !== ids.length)
-      ctx.addIssue({ code: "custom", message: "An atom must have exactly one judgment input" });
-  });
-export type SaveRecruitingAssessmentInput = z.infer<typeof SaveRecruitingAssessmentInput>;
-
-/** Full next facts and sources, with only affected semantic inputs supplied again. */
-export const ReassessRecruitingAssessmentInput = SaveRecruitingAssessmentInput.safeExtend({
-  expectedRevision: Revision,
-});
-export type ReassessRecruitingAssessmentInput = z.infer<typeof ReassessRecruitingAssessmentInput>;
-
 export const RecruitingAssessmentAskTargetSchema = z.discriminatedUnion("kind", [
   z
     .strictObject({ kind: z.literal("role"), criterionIds: z.array(RecruitingId).readonly() })
@@ -1245,37 +1193,6 @@ export const RecruitingAssessmentAskTargetSchema = z.discriminatedUnion("kind", 
     .readonly(),
 ]);
 export type RecruitingAssessmentAskTarget = z.infer<typeof RecruitingAssessmentAskTargetSchema>;
-
-export const RecruitingAssessmentAskInputSchema = z.strictObject({
-  operation: z.literal("ask"),
-  roleId: RecruitingId,
-  roleRevisionId: RecruitingId,
-  target: RecruitingAssessmentAskTargetSchema,
-  question: z.string().min(1).max(240).regex(/\S/, "Question must not be blank"),
-  options: z
-    .array(z.string().min(1).max(80).regex(/\S/, "Option must not be blank"))
-    .min(2)
-    .max(4)
-    .refine((options) => new Set(options).size === options.length, {
-      message: "Ask options must be unique",
-    })
-    .readonly(),
-  multiple: z
-    .boolean()
-    .optional()
-    .describe(
-      "true when the recruiter may pick more than one option; leave out for a single choice.",
-    ),
-});
-export type RecruitingAssessmentAskInput = z.infer<typeof RecruitingAssessmentAskInputSchema>;
-
-export const RecruitingAssessmentToolInputSchema = z.discriminatedUnion("operation", [
-  z.strictObject({ operation: z.literal("read"), candidateKey: RecruitingId }),
-  SaveRecruitingAssessmentInput.safeExtend({ operation: z.literal("save") }),
-  ReassessRecruitingAssessmentInput.safeExtend({ operation: z.literal("reassess") }),
-  RecruitingAssessmentAskInputSchema,
-]);
-export type RecruitingAssessmentToolInput = z.infer<typeof RecruitingAssessmentToolInputSchema>;
 
 /** One display read followed by a fresh thread binding check; not a serializable DB snapshot. */
 export const ReadRecruitingViewInput = z.discriminatedUnion("kind", [
@@ -1438,15 +1355,6 @@ export const RecruitingCandidateSchema = z.strictObject({
   discoveryCount: z.number().int().nonnegative(),
   firstDiscoveredAt: IsoDate.nullable(),
   lastDiscoveredAt: IsoDate.nullable(),
-  latestAssessment: z
-    .strictObject({
-      version: Revision,
-      roleRevisionId: RecruitingId,
-      createdAt: IsoDate,
-      isCurrent: z.boolean(),
-      hardGate: VerdictSchema,
-    })
-    .nullable(),
 });
 export type RecruitingCandidate = z.infer<typeof RecruitingCandidateSchema>;
 export const ListRecruitingCandidatesOutput = z.strictObject({
@@ -1463,8 +1371,6 @@ export const ListRecruitingCandidatesOutput = z.strictObject({
     sourceRows: z.number().int().nonnegative(),
     candidates: z.number().int().nonnegative(),
     identifiedCandidates: z.number().int().nonnegative(),
-    unassessed: z.number().int().nonnegative(),
-    assessed: z.number().int().nonnegative(),
     shortlisted: z.number().int().nonnegative(),
   }),
 });

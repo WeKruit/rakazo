@@ -292,7 +292,6 @@ describe("lingui catalogs", () => {
     );
     expect(entries.length).toBeGreaterThan(30);
     for (const message of [
-      "Open original question",
       "Cards",
       "Table",
       "Candidate",

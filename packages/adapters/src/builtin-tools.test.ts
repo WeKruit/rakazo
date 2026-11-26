@@ -75,12 +75,6 @@ describe("native recruiting approval tool", () => {
     expect(role?.description).not.toContain("in the Role panel");
   });
 
-  it("reuses indexed native row identities when assessing research results", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess");
-    expect(tool?.description).toContain("reuse the exact candidateKey");
-    expect(tool?.description).toContain("candidateRows entry for that rowIndex");
-  });
-
   it("guides reusable preferences through one exact edit without confusing it with a full document", () => {
     const feedback = builtinAgentTools.find((tool) => tool.name === "recruiting_feedback");
     expect(feedback?.description).toContain(

@@ -109,13 +109,12 @@ import {
 } from "./domain.js";
 import {
   AskAnswerSchema,
-  AskBlockSchema,
   CanvasJsonSchema,
   ComputerCommandSchema,
   ProductEventSchema,
   UiLocaleTag,
 } from "./events.js";
-import { Id, IsoDate, RunStatus } from "./ids.js";
+import { Id, IsoDate } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
@@ -144,8 +143,6 @@ import {
   ReadRecruitingSourceInput,
   ReadRecruitingViewInput,
   RecordRecruitingProfileViewInput,
-  RecruitingAssessmentAskTargetSchema,
-  RecruitingAssessmentSchema,
   RecruitingCalibrationRoundOutput,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateNoteSchema,
@@ -244,49 +241,6 @@ const CompanySiteAnswer = z.object({
   icon: z.string().optional(),
   retry: z.boolean().optional(),
 });
-
-export const RecruitingAssessmentSnapshotSchema = z
-  .strictObject({
-    assessment: RecruitingAssessmentSchema,
-    roleRevision: RecruitingRoleRevisionSchema,
-    isCurrent: z.boolean(),
-    sourceMessageTargets: z.array(
-      z.strictObject({
-        messageId: Id,
-        threadId: Id,
-        target: z.union([z.strictObject({ botId: Id }), z.strictObject({ groupId: Id })]),
-      }),
-    ),
-  })
-  .refine(
-    (snapshot) =>
-      snapshot.roleRevision.id === snapshot.assessment.roleRevisionId &&
-      snapshot.roleRevision.roleId === snapshot.assessment.roleId,
-    {
-      message: "Assessment role revision must match its saved snapshot",
-      path: ["roleRevision"],
-    },
-  );
-export type RecruitingAssessmentSnapshot = z.infer<typeof RecruitingAssessmentSnapshotSchema>;
-
-export const RecruitingQuestionSchema = z.strictObject({
-  effectId: RecruitingId,
-  roleId: RecruitingId,
-  roleRevisionId: RecruitingId,
-  target: RecruitingAssessmentAskTargetSchema,
-  threadId: Id,
-  botId: Id,
-  groupId: Id.nullable(),
-  runId: Id,
-  messageId: Id,
-  askIndex: z.number().int().nonnegative(),
-  block: AskBlockSchema,
-  expiresAt: z.string().nullable(),
-  runStatus: RunStatus,
-  isCurrent: z.boolean(),
-  canAnswer: z.boolean(),
-});
-export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
 
 export const MailReplyMessageFilterSchema = z
   .strictObject({
@@ -1011,9 +965,6 @@ export const appContract = {
     setCandidateShortlist: oc
       .input(SetRecruitingCandidateShortlistInput)
       .output(SetRecruitingCandidateShortlistOutput),
-    listQuestions: oc
-      .input(z.strictObject({ threadId: Id, roleId: RecruitingId }).safeExtend(listPageFields))
-      .output(z.strictObject({ questions: z.array(RecruitingQuestionSchema) })),
     createRole: oc.input(CreateRecruitingRoleInput).output(recruitingWorkspace),
     bindRole: oc
       .input(z.strictObject({ threadId: RecruitingId, roleId: RecruitingId.nullable() }))
@@ -1054,18 +1005,6 @@ export const appContract = {
     },
     confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
     editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),
-    listAssessments: oc
-      .input(z.strictObject({ roleId: RecruitingId }).safeExtend(listPageFields))
-      .output(z.array(RecruitingAssessmentSnapshotSchema)),
-    getAssessment: oc
-      .input(
-        z.strictObject({
-          roleId: RecruitingId,
-          candidateKey: RecruitingId,
-          version: z.number().int().positive().optional(),
-        }),
-      )
-      .output(RecruitingAssessmentSnapshotSchema.nullable()),
     listResearch: oc
       .input(z.strictObject({ roleId: RecruitingId }).safeExtend(listPageFields))
       .output(

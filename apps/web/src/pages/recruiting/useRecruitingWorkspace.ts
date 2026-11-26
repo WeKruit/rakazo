@@ -40,7 +40,6 @@ export function useRecruitingWorkspace({
   refreshSignal,
   onClose,
   onBrowseCandidates,
-  onRevealMessage,
   onDiscussCandidate,
   onAskChat,
   onImportFile,
@@ -138,11 +137,6 @@ export function useRecruitingWorkspace({
   const [shortlistPending, setShortlistPending] = useState<string | null>(null);
   const [shortlistFailed, setShortlistFailed] = useState<string | null>(null);
   const shortlistMutation = useRef<object | null>(null);
-  const [selectedEvidence, setSelectedEvidence] = useState<{
-    key: string;
-    value: Awaited<ReturnType<typeof rpc.recruiting.getAssessment>>;
-  } | null>(null);
-  const [evidenceFailed, setEvidenceFailed] = useState(false);
   const candidateGeneration = useRef(0);
   const candidateReadAbort = useRef<AbortController | null>(null);
   const previousCandidateSearch = useRef<{ scope: string; query?: string } | undefined>(undefined);
@@ -181,7 +175,6 @@ export function useRecruitingWorkspace({
         detailOpen: false,
       }));
       candidateHandoff.current = null;
-      setSelectedEvidence(null);
       setCriteriaEdit(null);
       shortlistMutation.current = null;
       setShortlistPending(null);
@@ -252,7 +245,6 @@ export function useRecruitingWorkspace({
       setCandidatePage(null);
       setSelection(null);
       candidateHandoff.current = null;
-      setSelectedEvidence(null);
       shortlistMutation.current = null;
       setShortlistPending(null);
       setShortlistFailed(null);
@@ -288,10 +280,7 @@ export function useRecruitingWorkspace({
           if (summary) return;
           const roleId = workspace?.role.id;
           let verifiedResearch: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> | undefined;
-          const [assessments, research, questions, documents] = await Promise.all([
-            roleId && !candidateWorkspace
-              ? read(() => rpc.recruiting.listAssessments({ roleId }))
-              : Promise.resolve([]),
+          const [research, documents] = await Promise.all([
             roleId
               ? candidateWorkspace
                 ? read(async () => {
@@ -322,9 +311,6 @@ export function useRecruitingWorkspace({
                   })
                 : read(() => rpc.recruiting.listResearch({ roleId }))
               : Promise.resolve({ tasks: [], actions: [], observations: [] }),
-            roleId && !candidateWorkspace
-              ? read(() => rpc.recruiting.listQuestions({ threadId, roleId }))
-              : Promise.resolve({ questions: [] }),
             candidateWorkspace
               ? Promise.resolve([])
               : Promise.all([
@@ -350,9 +336,7 @@ export function useRecruitingWorkspace({
           }
           setSnapshot({
             workspace,
-            assessments,
             research,
-            questions: questions.questions,
             documents,
           });
           return;
@@ -424,35 +408,6 @@ export function useRecruitingWorkspace({
       ].map((source) => [source.id, source]),
     ).values(),
   ];
-  const assessments = snapshot?.assessments ?? [];
-  const showInternalAssessments =
-    showDiagnostics ||
-    assessments.length > 0 ||
-    (candidateWorkspace &&
-      ((candidatePage?.counts.assessed ?? 0) > 0 ||
-        candidateFilters.assessmentState !== undefined ||
-        candidateFilters.verdict !== undefined));
-  const retainInternalAssessmentFilters =
-    candidateWorkspace || showInternalAssessments || !snapshot;
-  const candidateRequestFilters = useMemo(() => {
-    if (
-      retainInternalAssessmentFilters ||
-      (candidateFilters.assessmentState === undefined && candidateFilters.verdict === undefined)
-    )
-      return candidateFilters;
-    const { assessmentState: _, verdict: __, ...filters } = candidateFilters;
-    return filters;
-  }, [candidateFilters, retainInternalAssessmentFilters]);
-  const selectedKey =
-    selection && selection.roleId === workspace?.role.id
-      ? JSON.stringify([
-          selection.roleId,
-          selection.candidateKey,
-          selection.latestAssessment?.version,
-        ])
-      : null;
-  const selected = selectedEvidence?.key === selectedKey ? selectedEvidence.value : null;
-  const assessment = selected?.assessment;
   const roleId = workspace?.role.id;
   const roleRevisionId = workspace?.revision.id;
   // Contacts merges search results with CRM rows and still appends; the other lists are numbered.
@@ -464,7 +419,7 @@ export function useRecruitingWorkspace({
     threadId,
     roleId,
     roleRevisionId,
-    candidateRequestFilters,
+    candidateFilters,
   ]);
   const candidateQueryKey = `${candidateListKey}:${candidateOffset}`;
   const candidateFresh =
@@ -483,7 +438,7 @@ export function useRecruitingWorkspace({
   });
   const candidatesCacheKey =
     readCacheScope && roleId && roleRevisionId
-      ? `${readCacheScope}:candidates:${JSON.stringify([roleId, roleRevisionId, candidateRequestFilters, candidateOffset])}`
+      ? `${readCacheScope}:candidates:${JSON.stringify([roleId, roleRevisionId, candidateFilters, candidateOffset])}`
       : undefined;
   useEffect(() => {
     const list = tabsList.current;
@@ -513,7 +468,7 @@ export function useRecruitingWorkspace({
   const candidateQuery = useRef({ ...candidateList, roleRevisionId, selection });
   candidateQuery.current = {
     ...candidateList,
-    filters: candidateRequestFilters,
+    filters: candidateFilters,
     roleRevisionId,
     selection,
   };
@@ -582,8 +537,8 @@ export function useRecruitingWorkspace({
     const scope = JSON.stringify([userId, threadId, roleId, roleRevisionId]);
     const queryChanged =
       previousCandidateSearch.current?.scope === scope &&
-      previousCandidateSearch.current.query !== candidateRequestFilters.query;
-    previousCandidateSearch.current = { scope, query: candidateRequestFilters.query };
+      previousCandidateSearch.current.query !== candidateFilters.query;
+    previousCandidateSearch.current = { scope, query: candidateFilters.query };
     const load = async () => {
       const result = await rpc.recruiting.readView(
         {
@@ -593,7 +548,7 @@ export function useRecruitingWorkspace({
           roleRevisionId: roleRevisionId!,
           query: {
             limit: CANDIDATE_PAGE,
-            ...candidateRequestFilters,
+            ...candidateFilters,
             ...(candidateOffset ? { offset: candidateOffset } : {}),
           },
         },
@@ -613,7 +568,7 @@ export function useRecruitingWorkspace({
         return;
       }
       const page = result.data;
-      if (resetUnavailableCandidateSort(page, candidateRequestFilters)) return;
+      if (resetUnavailableCandidateSort(page, candidateFilters)) return;
       if (candidateOffset && !page.items.length) {
         // The list shrank or the filters changed under a saved page: open its last page.
         const last = Math.max(0, Math.ceil(page.total / CANDIDATE_PAGE) - 1);
@@ -631,7 +586,7 @@ export function useRecruitingWorkspace({
         cacheEpoch,
       );
       const selectedCandidateKey = candidateQuery.current.selectedCandidateKey;
-      const { sourceEffectId, actionId } = candidateRequestFilters;
+      const { sourceEffectId, actionId } = candidateFilters;
       const explicitSource = sourceEffectId !== undefined || actionId !== undefined;
       let restored = page.items.find((item) => item.candidateKey === selectedCandidateKey);
       if (
@@ -701,7 +656,7 @@ export function useRecruitingWorkspace({
   }, [
     roleId,
     roleRevisionId,
-    candidateRequestFilters,
+    candidateFilters,
     candidateOffset,
     feedbackRefresh,
     workspaceSnapshot,
@@ -716,32 +671,6 @@ export function useRecruitingWorkspace({
     validatedWorkspaceRead,
     candidateReread,
   ]);
-  useEffect(() => {
-    let cancelled = false;
-    const epoch = readEpoch.current;
-    setSelectedEvidence(null);
-    setEvidenceFailed(false);
-    if (!selection || !selectedKey || !selection.latestAssessment) return;
-    void rpc.recruiting
-      .getAssessment({
-        roleId: selection.roleId,
-        candidateKey: selection.candidateKey,
-        version: selection.latestAssessment.version,
-      })
-      .then((value) => {
-        if (!cancelled && epoch === readEpoch.current)
-          setSelectedEvidence({ key: selectedKey, value });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled && epoch === readEpoch.current) {
-          denyAccess(error);
-          setEvidenceFailed(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedKey, snapshot, denyAccess]);
   function selectCandidate(candidate: RecruitingCandidate, trigger: HTMLButtonElement) {
     candidateHandoff.current = null;
     candidateTrigger.current = trigger;
@@ -778,12 +707,6 @@ export function useRecruitingWorkspace({
       intent,
     });
   }
-  const revealCandidateMessage: Props["onRevealMessage"] = onRevealMessage
-    ? (target) => {
-        candidateHandoff.current = () => onRevealMessage(target);
-        setCandidateDetailOpen(false);
-      }
-    : undefined;
   function goToCandidatePage(index: number) {
     setCandidateList((current) => ({ ...current, page: index + 1 }));
   }
@@ -800,7 +723,7 @@ export function useRecruitingWorkspace({
         {
           roleId,
           limit: CANDIDATE_PAGE,
-          ...candidateRequestFilters,
+          ...candidateFilters,
           cursor: candidatePage.nextCursor,
         },
         { signal },
@@ -820,7 +743,7 @@ export function useRecruitingWorkspace({
         setRefresh((value) => value + 1);
         return;
       }
-      if (resetUnavailableCandidateSort(page, candidateRequestFilters)) return;
+      if (resetUnavailableCandidateSort(page, candidateFilters)) return;
       setCandidatePage((current) =>
         current ? { ...page, items: current.items.concat(page.items) } : page,
       );
@@ -1016,7 +939,6 @@ export function useRecruitingWorkspace({
     refreshSignal,
     onClose,
     onBrowseCandidates,
-    onRevealMessage,
     onDiscussCandidate,
     onAskChat,
     onImportFile,
@@ -1064,8 +986,6 @@ export function useRecruitingWorkspace({
     candidateFailed,
     shortlistPending,
     shortlistFailed,
-    selectedEvidence,
-    evidenceFailed,
     candidateValidation,
     denyAccess,
     criteriaEdit,
@@ -1081,11 +1001,6 @@ export function useRecruitingWorkspace({
     unphrasedBriefFields,
     roleQuestions,
     roleSources,
-    assessments,
-    showInternalAssessments,
-    selectedKey,
-    selected,
-    assessment,
     roleId,
     roleRevisionId,
     candidateFresh,
@@ -1094,7 +1009,6 @@ export function useRecruitingWorkspace({
     selectedCrmTarget,
     selectCandidate,
     discussCandidate,
-    revealCandidateMessage,
     loadMoreCandidates,
     goToCandidatePage,
     candidatePageIndex,
