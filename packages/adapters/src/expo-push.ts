@@ -4,6 +4,7 @@ import type {
   NotificationMessage,
   NotificationProvider,
 } from "@rakazo/adapter-kit";
+import { ResponseTooLargeError } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { claimConversationNotification, releaseConversationNotification } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -274,7 +275,7 @@ async function readExpoPushBody(response: Response, signal: AbortSignal): Promis
     if (bytes.byteLength === 0) return undefined;
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch (error) {
-    if (error instanceof Error && error.message === "Response is too large") {
+    if (error instanceof ResponseTooLargeError) {
       throw new Error("Expo push response is too large.");
     }
     if (error instanceof SyntaxError) return undefined;

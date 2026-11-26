@@ -9,6 +9,7 @@ import type {
 } from "@rakazo/adapter-kit";
 import { JSDOM } from "jsdom";
 import { clampMaxChars, clampMaxResults } from "./web-limits.js";
+import { HttpStatusError } from "./undici-fetch.js";
 import { fetchSafeWebText, type ResolveHostname } from "./web-ssrf.js";
 
 export {
@@ -49,7 +50,7 @@ export type PageReader = (
 ) => Promise<{ url: string; title: string; text: string }>;
 
 /** Statuses a site answers a plain request with when it wants a signed-in browser. */
-const REFUSED = /^Request failed: HTTP (401|403|429|451|999)$/;
+const REFUSED = new Set([401, 403, 429, 451, 999]);
 
 /** HTML search backend using DuckDuckGo’s public HTML form. One keyless option, not the interface. */
 export const duckDuckGoHtmlSearchBackend: KeylessHtmlSearchBackend = {
@@ -132,7 +133,7 @@ export class KeylessHttpWebProvider implements WebProvider {
       });
     } catch (error) {
       // Only a page the site refused goes to the reader; a private or invalid URL never does.
-      if (!this.pageReader || !REFUSED.test(error instanceof Error ? error.message : ""))
+      if (!this.pageReader || !(error instanceof HttpStatusError) || !REFUSED.has(error.status))
         throw error;
       const read = await this.pageReader(request.url, maxChars, signal);
       const truncated = read.text.length >= maxChars;

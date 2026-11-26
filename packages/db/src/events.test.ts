@@ -954,7 +954,7 @@ describe("ordinary native Ask answer provenance", () => {
     const answer = "  Paris\nwith the local team  ";
     await expect(answerRunInput(f.prisma, { ...f.input, answer })).resolves.toBe(true);
     expect(f.rows.find((row) => row.id === "created-human")?.blocks).toEqual([
-      { kind: "text", text: answer },
+      { kind: "text", text: answer, cardAnswer: true },
     ]);
     expect(f.rows[0]?.blocks).toEqual([
       { kind: "ask", text: "Which city?", status: "answered", answer },
@@ -2774,7 +2774,7 @@ describe("answerRunInput", () => {
         botId: undefined,
         runId: "run-1",
         clientNonce: "call:call-1:answer-1",
-        blocks: [{ kind: "text", text: "Toronto" }],
+        blocks: [{ kind: "text", text: "Toronto", cardAnswer: true }],
       }),
     });
     expect(tx.event.create).toHaveBeenCalledWith(
@@ -2883,7 +2883,7 @@ describe("answerRunInput", () => {
           botId: undefined,
           runId: "run-1",
           clientNonce,
-          blocks: [{ kind: "text", text: "use [redacted]" }],
+          blocks: [{ kind: "text", text: "use [redacted]", cardAnswer: true }],
         }),
       });
       expect(tx.message.update).toHaveBeenCalledWith({

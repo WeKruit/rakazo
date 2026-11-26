@@ -159,8 +159,8 @@ export function roundCountLine(
     : `${shown} shown so far.`;
 }
 
-/** A role team's round list starts with this heading, in either language. */
-export const ROUND_HEADING = /^(?:\d+ (?:people|person) this round:|本轮 \d+ 人：)/;
+type StoredBlock = { kind?: unknown; text?: unknown; recruitingRoundList?: { roundId?: unknown } };
+const storedBlocks = (blocks: unknown) => (Array.isArray(blocks) ? (blocks as StoredBlock[]) : []);
 
 /**
  * A round list the role's chat posted after the latest recorded round: the next round is shown
@@ -169,33 +169,23 @@ export const ROUND_HEADING = /^(?:\d+ (?:people|person) this round:|本轮 \d+ �
 export async function roundListedNotRecorded(
   prisma: PrismaClient,
   input: { roleId: string; after: string },
-): Promise<{ people: number } | null> {
+): Promise<boolean> {
   const role = await prisma.recruitingRole.findFirst({
     where: { id: input.roleId },
     select: { sourceThreadId: true },
   });
-  if (!role?.sourceThreadId) return null;
+  if (!role?.sourceThreadId) return false;
   const messages = await prisma.message.findMany({
     where: { threadId: role.sourceThreadId, role: "bot", createdAt: { gt: new Date(input.after) } },
     orderBy: { seq: "desc" },
     take: 20,
     select: { blocks: true },
   });
-  for (const message of messages) {
-    const blocks = Array.isArray(message.blocks)
-      ? (message.blocks as Array<{ kind?: unknown; text?: unknown }>)
-      : [];
-    const list = blocks.find(
-      (block) =>
-        block.kind === "text" && typeof block.text === "string" && ROUND_HEADING.test(block.text),
-    );
-    const count =
-      typeof list?.text === "string"
-        ? /^(?:(\d+) (?:people|person)|本轮 (\d+) 人)/.exec(list.text)
-        : null;
-    if (count) return { people: Number(count[1] ?? count[2]) };
-  }
-  return null;
+  return messages.some((message) =>
+    storedBlocks(message.blocks).some(
+      (block) => block.recruitingRoundList && block.recruitingRoundList.roundId === undefined,
+    ),
+  );
 }
 
 /**
@@ -238,13 +228,12 @@ export async function listedBeforeRound(
     // A reply still being written when the round was recorded may be listing that very round.
     .filter((message) => message.updatedAt.getTime() < recorded)
     .flatMap((message) =>
-      Array.isArray(message.blocks)
-        ? (message.blocks as Array<{ kind?: unknown; text?: unknown }>).flatMap((block) =>
-            block.kind === "text" && typeof block.text === "string" ? [block.text] : [],
-          )
-        : [],
+      storedBlocks(message.blocks).flatMap((block) =>
+        block.kind === "text" && typeof block.text === "string" && !block.recruitingRoundList
+          ? [block.text]
+          : [],
+      ),
     )
-    .filter((text) => !ROUND_HEADING.test(text))
     .join("\n");
   return slugs
     .filter(({ slug }) =>

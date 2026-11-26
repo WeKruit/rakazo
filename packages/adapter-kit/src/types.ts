@@ -329,6 +329,15 @@ export interface MemorySearchResult {
 export const MEMORY_REVISION_CONFLICT_ERROR =
   "Memory changed since it was read. Read the latest version and save again.";
 
+export class MemoryRevisionConflictError extends Error {
+  constructor() {
+    super(MEMORY_REVISION_CONFLICT_ERROR);
+  }
+}
+
+/** A file or response larger than the byte limit the caller set. */
+export class ByteLimitError extends Error {}
+
 export interface MemoryCommitRequest {
   scope: MemoryDocumentScope;
   botId?: string;
@@ -517,6 +526,8 @@ export interface AgentRunRequest {
     content: string;
     /** Proven current-task context must survive history windows and context selection. */
     requiredForRun?: true;
+    /** Stands in for older messages (a compaction summary or recalled memory). */
+    summary?: true;
     /** Images attached to this message, hydrated only for recent user turns. */
     images?: AgentInputImage[];
     /** The model's own reasoning behind this reply; replayed only to the same model. */
@@ -697,7 +708,7 @@ export type AgentRuntimeEvent =
       progress?: string;
       result?: string;
     }
-  | { type: "done"; text?: string };
+  | { type: "done"; text?: string; failed?: true };
 
 export interface AgentRuntimeCapabilities {
   streaming: boolean;

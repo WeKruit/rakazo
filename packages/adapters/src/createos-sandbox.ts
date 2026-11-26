@@ -15,7 +15,8 @@ import type {
   ScreenRequest,
   ScreenSession,
 } from "@rakazo/adapter-kit";
-import { boundedSandboxCommandTimeoutMs } from "@rakazo/core";
+import { ByteLimitError } from "@rakazo/adapter-kit";
+import { boundedSandboxCommandTimeoutMs, ResponseTooLargeError } from "@rakazo/core";
 import {
   browserProfilePathForScreen,
   DEFAULT_DESKTOP_ENV,
@@ -646,7 +647,7 @@ print(json.dumps(out))
       );
       const size = Number((stat.result?.stdout ?? "").trim());
       if (Number.isFinite(size) && size > options.maxBytes) {
-        throw new Error(`computer file exceeds ${options.maxBytes} bytes`);
+        throw new ByteLimitError(`computer file exceeds ${options.maxBytes} bytes`);
       }
     }
     return this.getBytes(
@@ -1606,7 +1607,7 @@ async function readCreateOSBody(
   const declared = Number(response.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > maxBytes) {
     cancelCreateOSResponseBody(response);
-    throw new Error(`CreateOS response exceeds ${maxBytes} bytes`);
+    throw new ByteLimitError(`CreateOS response exceeds ${maxBytes} bytes`);
   }
   const readSignal = AbortSignal.any([
     signal,
@@ -1615,8 +1616,8 @@ async function readCreateOSBody(
   try {
     return await readBodyCapped(response, maxBytes, readSignal);
   } catch (error) {
-    if (error instanceof Error && error.message === "Response is too large") {
-      throw new Error(`CreateOS response exceeds ${maxBytes} bytes`, { cause: error });
+    if (error instanceof ResponseTooLargeError) {
+      throw new ByteLimitError(`CreateOS response exceeds ${maxBytes} bytes`, { cause: error });
     }
     throw error;
   }

@@ -354,7 +354,7 @@ export class PiAgentRuntime implements AgentRuntime {
             type: "text",
             text: `Unknown model ${selectedModel.provider}/${selectedModel.modelId}`,
           });
-          queue.push({ type: "done" });
+          queue.push({ type: "done", failed: true });
           return;
         }
         const { models, model, apiKey } = selectedModel;
@@ -1609,6 +1609,7 @@ function toHistory(
         rakazoHistory: true,
         rakazoMessageId: m.id,
         rakazoCreatedAt: m.createdAt,
+        ...(m.summary ? { rakazoSummary: true } : {}),
       };
       if (m.role === "assistant")
         return {

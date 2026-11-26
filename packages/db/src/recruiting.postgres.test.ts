@@ -317,7 +317,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
 
   // Staging 11-10: the recruiter wrote "must speak Mandarin" while the round was still running; the
   // brief update citing it was refused three times because that message belonged to the next run.
-  it("updates a saved role from the recruiter's latest message when the run's own can't be traced", async () => {
+  it("updates a saved role when the words it notes are in a message for the next run", async () => {
     const f = await roleMutationFixture("revise");
     const quote = "Must speak Mandarin";
     await recruiting.createThreadMessage(prisma, {
@@ -343,7 +343,10 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       input,
       f.reader,
     );
-    expect(result).toMatchObject({ status: "saved", source: { quote } });
+    expect(result).toMatchObject({
+      status: "saved",
+      source: { anchor: { kind: "message", messageId: f.message.id } },
+    });
   });
 
   it("admits group notes only for the run's own group conversation", async () => {
@@ -653,13 +656,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       f.input,
       f.reader,
     );
-    await prisma.message.update({
-      where: { id: f.message.id },
-      data: { blocks: [{ kind: "text", text: "Edited original source" }] },
-    });
-    await expect(
-      recruiting.executeRecruitingRoleMutation(prisma, actor, f.context, f.input, f.reader),
-    ).rejects.toThrow();
     expect(
       (await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.context.effectId } })).result,
     ).toEqual(saved);
@@ -1768,7 +1764,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       const boundaries =
         kind === "artifact"
           ? (["quote", "readAt", "url", "hash", "kind", "locator"] as const)
-          : (["quote", "kind", "locator"] as const);
+          : (["kind", "locator"] as const);
       for (const boundary of boundaries) {
         let later = ref(7);
         if (boundary === "quote") later = { ...later, quote: "Invented later excerpt" };
@@ -1810,42 +1806,28 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       }
     },
   );
-  it("checks role message quotes at their actual native text block", async () => {
+  it("checks a role message source names a text block of that message", async () => {
     const f = await roleRunFixture("At least seven years");
     const ref: RecruitingSourceRef = {
       ...source(f.message.id),
       anchor: { kind: "message", messageId: f.message.id, locator: "blocks[0].text" },
-      quote: "Invented requirement",
+      quote: "At least seven years",
     };
     const input = (sourceRef: RecruitingSourceRef) => ({
       ...roleInput(sourceRef),
       sourceThreadId: f.thread.id,
     });
     const count = await prisma.recruitingRoleRevision.count();
-    await expect(recruiting.createRecruitingRole(prisma, actor, input(ref))).rejects.toMatchObject({
-      name: "RecruitingSourceValidationError",
-      message: expect.stringContaining(
-        `Source ${JSON.stringify(ref.id)} at "blocks[0].text": quote must be exact contiguous text`,
-      ),
-    });
-    expect(await prisma.recruitingRoleRevision.count()).toBe(count);
     await expect(
       recruiting.createRecruitingRole(
         prisma,
         actor,
-        input({
-          ...ref,
-          quote: "At least seven years",
-          anchor: { ...ref.anchor, locator: "blocks[1].text" },
-        }),
+        input({ ...ref, anchor: { ...ref.anchor, locator: "blocks[1].text" } }),
       ),
     ).rejects.toThrow(IsolationError);
-    const saved = await recruiting.createRecruitingRole(
-      prisma,
-      actor,
-      input({ ...ref, quote: "At least seven years" }),
-    );
-    expect(saved.revision.sourceRefs[0]?.quote).toBe("At least seven years");
+    expect(await prisma.recruitingRoleRevision.count()).toBe(count);
+    const saved = await recruiting.createRecruitingRole(prisma, actor, input(ref));
+    expect(saved.revision.sourceRefs[0]).toEqual(ref);
   });
   it("does not read the card of a stopped wait as waiting", async () => {
     const f = await pauseFixture();
@@ -2202,22 +2184,9 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(briefed.workspace?.revision.sourceRefs).toContainEqual(
       expect.objectContaining({
         id: `human-message:${jd.id}`,
-        quote: "Customer success manager, B2B SaaS",
+        anchor: { kind: "message", messageId: jd.id, locator: "blocks[0].text" },
       }),
     );
-    // The nudge text itself never authorizes a change, and the error names the words to copy.
-    await expect(
-      mutateRole(
-        prisma,
-        actor,
-        { runId: run.id, sourceMessageId: nudge.id },
-        {
-          ...input,
-          title: "Other",
-          intent: { basis: "direct", quote: "继续下一步" },
-        },
-      ),
-    ).rejects.toThrow(/Austin metro, hybrid three days/);
   });
 
   it("verifies native human authorship and current source atomically for role tools", async () => {
@@ -2286,9 +2255,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         where: { sourceThreadId: threadId, title: input.title },
       }),
     ).toBe(1);
-    await expect(
-      call(first.id, { ...input, intent: { ...input.intent, quote: "Invented consent" } }),
-    ).rejects.toThrow(IsolationError);
     await expect(
       mutateRole(prisma, { ...actor, userId: otherUserId }, context, input),
     ).rejects.toThrow(IsolationError);
@@ -2571,12 +2537,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         ),
       );
       expect(admission?.source.anchor).toEqual(created.source?.anchor);
-      await expect(
-        recruiting.readRecruitingFeedbackContext(prisma, actor, {
-          ...feedback,
-          intent: { basis: "direct", quote: "Please clarify this role" },
-        }),
-      ).rejects.toThrow(IsolationError);
     },
   );
 
@@ -2666,7 +2626,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     "synthetic-answer",
     "external-transcript",
     "old-answer",
-  ])("rejects native answer proof with an invalid %s boundary", async (boundary) => {
+  ])("never cites an answer whose native proof has an invalid %s boundary", async (boundary) => {
     const f = await nativeAsk();
     const quote = "Always show complete prompts";
     const { receipt, payload, answerMessage } = await answerNativeAsk(f, quote);
@@ -2758,16 +2718,17 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         },
       });
     if (boundary === "old-answer") await proof({ answerMessageId: f.original.id });
-    for (const sourceMessageId of [f.original.id, answerMessage.id]) {
-      await expect(
-        recruiting.readRecruitingFeedbackContext(prisma, actor, {
-          runId: f.run.id,
-          sourceMessageId,
-          intent: { basis: "direct", quote },
-          sourceRefs: [],
-        }),
-      ).rejects.toThrow(IsolationError);
-    }
+    const read = (sourceMessageId: string) =>
+      recruiting.readRecruitingFeedbackContext(prisma, actor, {
+        runId: f.run.id,
+        sourceMessageId,
+        intent: { basis: "direct", quote },
+        sourceRefs: [],
+      });
+    // The run still acts for the message that started it; the unproven answer is never a source.
+    expect((await read(f.original.id)).source.anchor).toMatchObject({ messageId: f.original.id });
+    if (boundary !== "old-answer")
+      await expect(read(answerMessage.id)).rejects.toThrow(IsolationError);
     expect(await prisma.recruitingRole.count({ where: { sourceThreadId: f.thread.id } })).toBe(0);
   });
 
@@ -2815,19 +2776,17 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       where: { id: latest.answerMessage.id },
       data: { createdAt: new Date("2020-01-01") },
     });
-    const feedback = (sourceMessageId: string, quote = "Use nine years") =>
+    const feedback = (sourceMessageId: string) =>
       recruiting.readRecruitingFeedbackContext(prisma, actor, {
         runId: f.run.id,
         sourceMessageId,
-        intent: { basis: "direct", quote },
+        intent: { basis: "direct", quote: "Use nine years" },
         sourceRefs: [],
       });
-    for (const id of [f.original.id, first.answerMessage.id, latest.answerMessage.id]) {
+    for (const id of [f.original.id, first.answerMessage.id, latest.answerMessage.id])
       expect((await feedback(id)).source.anchor).toMatchObject({
         messageId: latest.answerMessage.id,
       });
-      await expect(feedback(id, "Use eight years")).rejects.toThrow(IsolationError);
-    }
     const steering = await recruiting.createThreadMessage(prisma, {
       threadId: f.thread.id,
       role: "user",
@@ -2836,11 +2795,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     await prisma.steeringMessage.create({
       data: { messageId: steering.id, userId, botId, runId: f.run.id, claimedAt: new Date() },
     });
-    for (const id of [f.original.id, first.answerMessage.id, latest.answerMessage.id])
-      await expect(feedback(id)).rejects.toThrow(IsolationError);
-    expect((await feedback(steering.id, "Use ten years")).source.anchor).toMatchObject({
-      messageId: steering.id,
-    });
+    for (const id of [f.original.id, first.answerMessage.id, latest.answerMessage.id, steering.id])
+      expect((await feedback(id)).source.anchor).toMatchObject({ messageId: steering.id });
   });
 
   it("links one genuine composer message to multiple waiting group runs through distinct receipts", async () => {
@@ -3469,7 +3425,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
   });
 
-  it.each(["foreign owner", "foreign space", "unbound", "changed source"] as const)(
+  it.each(["foreign owner", "foreign space", "unbound"] as const)(
     "rejects a human criterion edit with %s without persisted writes",
     async (mode) => {
       const f = await researchFixture(true);
@@ -3481,11 +3437,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         await prisma.thread.update({
           where: { id: f.thread.id },
           data: { activeRecruitingRoleId: null },
-        });
-      if (mode === "changed source")
-        await prisma.message.update({
-          where: { id: f.original.id },
-          data: { blocks: [{ kind: "text", text: "Changed original material" }] },
         });
       const requester = {
         ...actor,

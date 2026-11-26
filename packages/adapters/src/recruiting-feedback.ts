@@ -1,5 +1,5 @@
 import type { AdapterContext, MemoryStore } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type {
   Actor,
   RecruitingCandidateFeedbackSelection,
@@ -219,9 +219,6 @@ async function recordRecruitingFeedback(
       ? {}
       : { roleId: feedback.roleId, expectedRoleRevision: feedback.expectedRoleRevision }),
     ...(feedback.target === "candidate" ? { candidateKeys: feedback.candidateKeys } : {}),
-    ...(feedback.target === "round" && feedback.operation === "approve"
-      ? { acceptEarlierQuote: true }
-      : {}),
     ...((feedback.target === "round" && feedback.operation === "scope") ||
     (feedback.target === "candidate" && feedback.operation === "review")
       ? { recordKeeping: true }
@@ -284,7 +281,7 @@ async function recordRecruitingFeedback(
   const snapshot = await deps.memory.read(target, context);
   const document = snapshot.documents[0];
   if ((document?.revision ?? 0) !== feedback.expectedRevision)
-    throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
+    throw new MemoryRevisionConflictError();
   let edited: ReturnType<typeof applyRecruitingPreferenceEdit>;
   try {
     edited = applyRecruitingPreferenceEdit(document?.content ?? "", feedback);

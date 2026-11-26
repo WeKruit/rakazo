@@ -65,6 +65,7 @@ describe("listedBeforeRound", () => {
           {
             kind: "text",
             text: "10 people this round:\n1. **[Bo](https://www.linkedin.com/in/bo)**",
+            recruitingRoundList: { roundId: "effect-round-1" },
           },
         ],
       },
@@ -128,10 +129,10 @@ describe("listedBeforeRound", () => {
 describe("roundListedNotRecorded", () => {
   // Staging 11-15: the role's chat showed the new ten at 04:51:03 but the round was recorded at
   // 04:51:26; in between Kruit read round 1, reposted it and said the new round was not ready.
-  it("counts the people of a round list the role's chat posted after the latest recorded round", async () => {
+  it("sees a round list the role's chat posted that is not recorded yet", async () => {
     const findMany = vi.fn(async () => [
       { blocks: [{ kind: "text", text: "Here's what changed." }] },
-      { blocks: [{ kind: "text", text: "10 people this round:\n\n1. **[A](x)**\n2. **[B](y)**" }] },
+      { blocks: [{ kind: "text", text: "10 people this round:\n\n1. **[A](x)**", recruitingRoundList: {} }] },
     ]);
     const prisma = {
       recruitingRole: { findFirst: vi.fn(async () => ({ sourceThreadId: "thread-role" })) },
@@ -139,7 +140,7 @@ describe("roundListedNotRecorded", () => {
     } as unknown as PrismaClient;
     await expect(
       roundListedNotRecorded(prisma, { roleId: "role-1", after: "2026-11-15T04:48:02Z" }),
-    ).resolves.toEqual({ people: 10 });
+    ).resolves.toBe(true);
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -149,10 +150,17 @@ describe("roundListedNotRecorded", () => {
         }),
       }),
     );
-    findMany.mockResolvedValueOnce([]);
+    // The list of a round that is recorded is not a next round still being written.
+    findMany.mockResolvedValueOnce([
+      {
+        blocks: [
+          { kind: "text", text: "…", recruitingRoundList: { roundId: "effect-round-2" } },
+        ],
+      },
+    ]);
     await expect(
       roundListedNotRecorded(prisma, { roleId: "role-1", after: "2026-11-15T04:48:02Z" }),
-    ).resolves.toBeNull();
+    ).resolves.toBe(false);
   });
 });
 

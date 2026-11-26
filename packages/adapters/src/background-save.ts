@@ -13,8 +13,8 @@ export const FEEDBACK_SAVING = {
 /** How long the agent waits for a quick save before carrying on. */
 export const FEEDBACK_SAVE_WAIT_MS = 1_500;
 /**
- * How long the agent waits for a preference's first attempt. A refusal (the exact quote, a role
- * requirement) must reach the agent so it can fix and resend; only retries run in the background.
+ * How long the agent waits for a preference's first attempt. A refusal (a role requirement)
+ * must reach the agent so it can fix and resend; only retries run in the background.
  */
 export const PREFERENCE_SAVE_WAIT_MS = 15_000;
 /** How long a call naming a role revision waits for this run's own role saves still running. */

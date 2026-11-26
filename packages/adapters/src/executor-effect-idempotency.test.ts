@@ -8,6 +8,7 @@ import type {
   MemorySnapshot,
   SemanticMemoryProvider,
 } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type { MessageBlock, RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
 import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
@@ -27,7 +28,6 @@ import {
   Prisma,
   prepareNativeRecruitingCandidateDecision,
   RecruitingConflictError,
-  RecruitingIntentQuoteError,
   RecruitingSourceValidationError,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -2712,62 +2712,6 @@ describe("native recruiting role effect delivery", () => {
     expect(f.effects.map((effect) => effect.status)).toEqual(["completed", "completed"]);
   });
 
-  // 2026-10-27: "找 50 个" sent while the round's turn still ran; the brief update quoted the
-  // earlier answer and was refused. The update quotes the recruiter's latest message instead.
-  it("quotes the recruiter's latest message on a role update", async () => {
-    const f = fixture("role-update-latest");
-    vi.mocked(f.prisma.message.findFirst).mockResolvedValue({
-      blocks: [{ kind: "text", text: "这 10 个方向可以，找 50 个类似的人" }],
-    } as never);
-    vi.mocked(executeRecruitingRoleTool).mockRejectedValue(new IsolationError());
-    f.setCalls([
-      {
-        name: "recruiting_role",
-        args: {
-          operation: "update",
-          roleId: "role-1",
-          expectedRevision: 1,
-          intent: { basis: "direct", quote: "优先洛杉矶都会区" },
-        },
-        executionId: "update-latest",
-      },
-    ]);
-    await f.run();
-    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
-      intent: { basis: "direct", quote: "这 10 个方向可以，找 50 个类似的人" },
-    });
-  });
-
-  // 2026-10-28: feedback whose quote was not the recruiter's exact words was lost.
-  it("repeats a feedback save once with the words the quote check named", async () => {
-    const f = fixture("feedback-quote-repair");
-    vi.mocked(executeRecruitingFeedback)
-      .mockReset()
-      .mockRejectedValueOnce(new RecruitingIntentQuoteError("Greater Los Angeles first"))
-      .mockResolvedValue({ status: "rejected", reason: "noop" } as never);
-    f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: {
-          target: "role",
-          operation: "revise",
-          roleId: "role-1",
-          expectedRoleRevision: 1,
-          summary: "Prefer Los Angeles",
-          intent: { basis: "direct", quote: "prefer LA" },
-          sourceRefs: [],
-        },
-        executionId: "feedback-quote",
-      },
-    ]);
-    await f.run();
-    const calls = vi.mocked(executeRecruitingFeedback).mock.calls;
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.[2]).toMatchObject({
-      intent: { basis: "direct", quote: "Greater Los Angeles first" },
-    });
-  });
-
   it.each(["quote", "scope"])(
     "settles native role source %s errors without repeating the mutation",
     async (kind) => {
@@ -3931,9 +3875,7 @@ describe("native recruiting feedback effect dispatch", () => {
       documents: [{ path: "MEMORY.md", content: "Earlier line", revision: 3 }],
     } as never);
     vi.mocked(executeRecruitingFeedback)
-      .mockRejectedValueOnce(
-        new Error("Memory changed since it was read. Read the latest version and save again."),
-      )
+      .mockRejectedValueOnce(new MemoryRevisionConflictError())
       .mockResolvedValueOnce({
         status: "saved",
         feedback,

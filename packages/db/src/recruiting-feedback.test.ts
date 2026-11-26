@@ -115,7 +115,9 @@ function fixture() {
     },
     event: { findMany: vi.fn(async () => []) },
     // The runs that saved the document's revisions; a preference's receipt is one of their events.
-    memoryRevision: { findMany: vi.fn(async (_query: unknown) => [{ sourceRunId: "earlier-run" }]) },
+    memoryRevision: {
+      findMany: vi.fn(async (_query: unknown) => [{ sourceRunId: "earlier-run" }]),
+    },
     steeringMessage: { findMany: vi.fn(async (_query: unknown) => [] as unknown[]) },
     recruitingCandidate: {
       findMany: vi.fn(
@@ -393,7 +395,7 @@ describe("native recruiting memory admission", () => {
       operation: "revoke",
       previousAnchor: { start, end: start + 3, quote: "old" },
       anchor: null,
-      source: { anchor: { messageId: f.source.id }, quote: "Remove only old." },
+      source: { anchor: { messageId: f.source.id } },
     });
     await expect(
       authorizeRecruitingMemoryCommit(f.tx as never, edit, context, { ...existing, revision: 3 }),
@@ -544,7 +546,6 @@ describe("native recruiting feedback records", () => {
     });
     expect(result.source).toMatchObject({
       id: "human-message:human",
-      quote,
       anchor: { messageId: f.source.id },
     });
     expect(result.source.id).not.toContain("handoff");
@@ -559,7 +560,7 @@ describe("native recruiting feedback records", () => {
       IsolationError,
     );
   });
-  it.each(["event", "cancelled", "membership", "order", "bot-quote"] as const)(
+  it.each(["event", "cancelled", "membership", "order"] as const)(
     "rejects invalid native feedback handoff %s",
     async (boundary) => {
       const f = handoffFixture();
@@ -567,15 +568,9 @@ describe("native recruiting feedback records", () => {
       if (boundary === "cancelled") f.sender.status = "cancelled";
       if (boundary === "membership") f.membershipCount.mockResolvedValueOnce(1);
       if (boundary === "order") f.source.seq = f.handoff.seq + 1;
-      await expect(
-        readRecruitingFeedbackContext(
-          f.prisma,
-          actor,
-          boundary === "bot-quote"
-            ? { ...f.input, intent: { basis: "direct", quote: f.handoff.blocks[0]!.text } }
-            : f.input,
-        ),
-      ).rejects.toThrow(IsolationError);
+      await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
+        IsolationError,
+      );
     },
   );
   it("rejects newer claimed human input after a native handoff", async () => {
@@ -595,7 +590,7 @@ describe("native recruiting feedback records", () => {
       IsolationError,
     );
   });
-  it("uses the sender's latest claimed human input before handoff without reviving an earlier quote", async () => {
+  it("uses the sender's latest claimed human input before handoff", async () => {
     const f = handoffFixture();
     f.handoff.seq = 3;
     const newer = {
@@ -617,12 +612,8 @@ describe("native recruiting feedback records", () => {
     const result = await readRecruitingFeedbackContext(f.prisma, actor, {
       ...f.input,
       candidateKeys: undefined,
-      intent: { basis: "direct", quote: newer.blocks[0]!.text },
     });
     expect(result.source.anchor).toMatchObject({ messageId: newer.id });
-    await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
-      IsolationError,
-    );
   });
   it("rejects a cyclic native handoff chain", async () => {
     const f = handoffFixture();
@@ -1251,7 +1242,7 @@ describe("native recruiting feedback records", () => {
     f.source.blocks = [{ kind: "text", text: intent.quote }];
     const result = await readRecruitingFeedbackContext(f.prisma, actor, { ...f.input, intent });
     expect(result).toMatchObject({
-      source: { quote: intent.quote, anchor: { kind: "message", messageId: "human" } },
+      source: { anchor: { kind: "message", messageId: "human" } },
       workspace: { role: { id: "role" } },
     });
     expect(f.tx.recruitingCandidate.findMany).toHaveBeenCalledWith({
@@ -1374,11 +1365,6 @@ describe("native recruiting feedback records", () => {
     expect(serialized).toContain('"equals":"recorded"');
     expect(f.tx.message.findMany).toHaveBeenCalledTimes(2);
     expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(1);
-    f.source.blocks = [{ kind: "text", text: "Changed text" }];
-    await expect(listRecruitingFeedback(f.prisma, actor, { roleId: "role" })).resolves.toEqual({
-      feedback: [],
-      nextCursor: null,
-    });
   });
 
   // Staging 11-10: one record that cited the recruiter's latest message (its quote is their words,
@@ -1615,7 +1601,6 @@ describe("record keeping is never refused over which recruiter message it cites"
     expect(result.source).toMatchObject({
       id: "human-message:human",
       anchor: { messageId: f.source.id },
-      quote,
     });
   });
 

@@ -6,7 +6,7 @@ import type {
   ConnectorEvent,
   ConnectorTool,
 } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MEMORY_REVISION_CONFLICT_ERROR, MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type * as CoreModule from "@rakazo/core";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { UNATTENDED_MEMORY_WRITE_REFUSAL } from "@rakazo/core";
@@ -222,7 +222,7 @@ function fixture({
         request.expectedRevision !== undefined &&
         request.expectedRevision !== sharedMemoryState.revision
       ) {
-        throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
+        throw new MemoryRevisionConflictError();
       }
       sharedMemoryState.content = request.content;
       sharedMemoryState.revision = (sharedMemoryState.revision || 0) + 1;
@@ -308,6 +308,7 @@ function fixture({
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
       count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => []),
       updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(run, data);
         return { count: 1 };

@@ -565,16 +565,9 @@ export async function compactHistory(
           estimateCatalogTokenCostUsd,
         );
       }
-      if (
-        event.type === "text" &&
-        /^(?:I hit a problem:|Unknown model )/i.test(event.text.trim())
-      ) {
-        runtimeReportedFailure = true;
-      }
-      if (event.type === "done" && event.text) {
-        const done = event.text.trim();
-        if (/^(?:I hit a problem:|Unknown model )/i.test(done)) runtimeReportedFailure = true;
-        else text = done;
+      if (event.type === "done") {
+        if (event.failed) runtimeReportedFailure = true;
+        else if (event.text) text = event.text.trim();
       }
     }
     if (runtimeReportedFailure) {
