@@ -755,13 +755,17 @@ describe("local native Instantly thread history", () => {
                 {
                   campaignId: anchor.campaign_id,
                   stopOnReply: false,
-                  warning: expect.stringMatching(/stop_on_reply is off/),
+                  warning: expect.stringContaining(
+                    `call pause_campaign with their email and campaign_id ${anchor.campaign_id}`,
+                  ),
                 },
               ],
             },
           },
         },
       ]);
+      // Audit 11-26: the advice named the mail service and asked for a change nobody could make.
+      expect(JSON.stringify(events)).not.toMatch(/in Instantly|stop_on_reply is off/);
       const campaignCalls = f.rest.mock.calls.filter((call) =>
         new URL(logicalHref(...call)).pathname.startsWith("/api/v2/campaigns/"),
       );
@@ -5353,6 +5357,46 @@ describe("local native Instantly campaign and lead tools", () => {
         sentFrom: { "abe@x.test": "Senior Data Engineer Seattle" },
         next: expect.stringContaining("unsent draft, not the send"),
       });
+    });
+
+    it("stops one person for good without sending anything, and refuses a later send to them", async () => {
+      // Audit 11-26: "don't contact Ada again" could only pause the whole campaign, and nothing
+      // kept a later send from reaching her.
+      const { f, binding } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      f.state.existingLeads = [{ id: ABE.id, email: ABE.email }];
+      const out = f.result(
+        await f.run("pause_campaign", { email: "Abe@x.test", campaign_id: CAMPAIGN }),
+      );
+      expect(out).toMatchObject({ stopped: true, stoppedInCampaigns: [CAMPAIGN] });
+      expect(
+        f.state.requests
+          .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+          .map((r) => `${r.method} ${r.path}`),
+      ).toEqual([`DELETE /api/v2/leads/${ABE.id}`]);
+      expect(Object.keys((binding.result as { leads: object }).leads)).not.toContain(
+        "key-abe@x.test",
+      );
+      expect(f.state.effects.get("outreach-contact-stop:w1:abe@x.test")).toMatchObject({
+        kind: "outreach_contact_stop",
+        status: "completed",
+      });
+      // A later send naming them is refused before anything is added or started.
+      f.state.campaign.status = 0;
+      f.state.campaignLeads.push({ ...ABE });
+      f.state.requests.length = 0;
+      const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
+      expect((events[0] as { message: string }).message).toMatch(
+        /abe@x\.test \(the recruiter asked that they never be contacted again\)/,
+      );
+      expect(sends(f)).toEqual([]);
+      // Taken back only when the recruiter says so.
+      expect(
+        f.result(await f.run("pause_campaign", { email: "abe@x.test", allow_again: true })),
+      ).toMatchObject({ allowedAgain: true });
+      expect(
+        f.result(await f.run("activate_campaign", { recipients: ["abe@x.test"] })),
+      ).toMatchObject({ activated: true });
     });
 
     it("takes the unnamed never-sent people out of a draft before activating it", async () => {

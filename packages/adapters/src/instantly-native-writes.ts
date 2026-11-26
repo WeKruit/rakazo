@@ -31,6 +31,7 @@ import {
 import { htmlToPlainText } from "./keyless-http-web.js";
 import { recipientParts, untypedAddressRefusal } from "./named-address.js";
 import { oneAtATime } from "./one-at-a-time.js";
+import { outreachStopRefusal, outreachStops, stopContact } from "./outreach-stops.js";
 import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
@@ -123,6 +124,22 @@ const UpdateLeadInterestInput = z.strictObject({
     ),
 });
 const CampaignIdInput = z.strictObject({ campaign_id: Uuid });
+const PauseCampaignInput = z
+  .strictObject({
+    campaign_id: Uuid.optional().describe(
+      "The campaign to pause; with email, the campaign that emailed that person, when known.",
+    ),
+    email: Email.optional().describe(
+      "Stop only this person, in every campaign of this account that holds them.",
+    ),
+    allow_again: z
+      .boolean()
+      .optional()
+      .describe("With email: only when the recruiter says this person may be contacted again."),
+  })
+  .refine((input) => input.email || (input.campaign_id && !input.allow_again), {
+    message: "Pass campaign_id to pause a campaign, or email to stop one person.",
+  });
 const RoleId = z
   .string()
   .min(1)
@@ -306,9 +323,9 @@ export const nativeInstantlyWrites = [
   ),
   tool(
     "pause_campaign",
-    CampaignIdInput,
+    PauseCampaignInput,
     false,
-    "Pauses a campaign; stops further sends. Only when the recruiter asks to stop or hold sending: a send they confirmed is their decision, so never pause it on your own, for example to change when it goes out; tell them when it goes out instead and offer send_now.",
+    "Pauses a campaign; stops further sends. Only when the recruiter asks to stop or hold sending: a send they confirmed is their decision, so never pause it on your own, for example to change when it goes out; tell them when it goes out instead and offer send_now. With email instead, stops only that person: no follow-up or later email from this account reaches them, everyone else keeps going. Use it when the recruiter says not to contact someone again, or when a person who replied would otherwise keep getting follow-ups; it records that they are not contacted again, so later sends to them are refused, sends nothing and needs no confirmation. allow_again lifts that stop only when the recruiter says to contact them again.",
   ),
   tool(
     "get_email",
@@ -332,7 +349,7 @@ export const nativeInstantlyWrites = [
     "add_shortlist_leads",
     AddShortlistLeadsInput,
     false,
-    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence); a person passed without an email gets the one an earlier contact lookup saved. Skips people with no email, on hold or passed for the role, or already in the campaign; records candidate_key -> lead id. When the campaign is already sending, the people are kept ready instead and are emailed only through activate_campaign with them as recipients.",
+    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence); a person passed without an email gets the one an earlier contact lookup saved. Skips people with no email, on hold or passed for the role, stopped for good (pause_campaign with their email), or already in the campaign; records candidate_key -> lead id. When the campaign is already sending, the people are kept ready instead and are emailed only through activate_campaign with them as recipients.",
   ),
 ];
 const TOOL_NAMES = new Set(nativeInstantlyWrites.map((entry) => entry.toolName));
@@ -2251,7 +2268,7 @@ async function addSavedRecipients(
   const stopped = candidates.filter((c) => out.onHoldOrPassed.includes(c.candidate_key));
   if (stopped.length)
     throw new Error(
-      `Nothing was saved: ${stopped.map((c) => [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email).join(", ")} is on hold or passed for this role. Ask the recruiter one question: take them off hold and email them, or leave them out?`,
+      `Nothing was saved: ${stopped.map((c) => [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email).join(", ")} is on hold or passed for this role, or the recruiter asked that they not be contacted again. Ask the recruiter one question: contact them again and email them, or leave them out?`,
     );
   return candidates.map((c) => c.email!);
 }
@@ -2520,6 +2537,15 @@ async function addShortlistLeads(
       })
       .map((candidate) => candidate.candidateKey),
   );
+  // People the recruiter asked never to contact again are not added either.
+  const doNotContact = await outreachStops(
+    prisma,
+    context,
+    null,
+    candidates.flatMap((c) => (c.email ? [c.email] : [])),
+  );
+  for (const c of candidates)
+    if (c.email && doNotContact.has(c.email.toLowerCase())) stopped.add(c.candidate_key);
   const named = candidates.filter(isNamedEmail);
   if (named.length) {
     const known = [
@@ -2778,6 +2804,14 @@ async function sendCampaign(
     input.send_now === true,
   );
   if ("refusal" in plan) throw new Error(plan.refusal);
+  // Nobody stopped, on hold or passed is emailed, whatever the card said when it was shown.
+  const stops = await outreachStops(
+    prisma,
+    context,
+    await activeRoleId(prisma, context),
+    plan.recipients.map((person) => person.email),
+  );
+  if (stops.size) throw new Error(outreachStopRefusal(stops));
   if (input.resend !== true) {
     const elsewhere = await sendingElsewhere(prisma, (id) => rest("GET", `/campaigns/${id}`), {
       spaceId: context.spaceId,
@@ -3804,11 +3838,15 @@ export async function runInstantlyWrite(
         activateCampaign(prisma, rest, context, serverId, input, Boolean(owned)),
       );
     }
-    case "native_instantly_pause_campaign":
+    case "native_instantly_pause_campaign": {
+      const input = PauseCampaignInput.parse(args);
+      if (input.email)
+        return stopContact(prisma, rest, context, serverId, { ...input, email: input.email });
       return {
-        ...(await rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`)),
+        ...(await rest("POST", `/campaigns/${input.campaign_id}/pause`)),
         next: PAUSED_NEXT,
       };
+    }
     case "native_instantly_get_email": {
       const input = EmailIdInput.parse(args);
       const original = await readEmail(rest, input.id);
