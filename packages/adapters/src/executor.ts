@@ -4988,19 +4988,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
         };
         /** The server's short report of work the model left unreported. */
-        const turnReportFor = async (work: readonly TurnWork[]) => {
-          const roleId = (
-            await deps.prisma.thread.findUnique({
-              where: { id: thread.id },
-              select: { activeRecruitingRoleId: true },
-            })
-          )?.activeRecruitingRoleId;
-          const saved = roleId
-            ? (await readRecruitingPlaybookStep(deps.prisma, roleId).catch(() => null))
-                ?.savedCandidates
-            : undefined;
-          return turnReportText(work, saved, turnLanguage === "zh");
-        };
+        const turnReportFor = (work: readonly TurnWork[]) =>
+          turnReportText(work, turnLanguage === "zh");
         /** Text of the last message this run already put in the conversation. */
         const lastRunMessageText = async () => {
           try {

@@ -146,18 +146,18 @@ describe("TurnReportLedger", () => {
 });
 
 describe("turnReportText", () => {
-  it("names the work and the saved count", () => {
-    expect(turnReportText(["people_search", "people_search", "people_saved"], 139)).toBe(
-      "Done: searched for people, saved people to the role. 139 people are saved for this role.",
+  it("names the work and no head count", () => {
+    expect(turnReportText(["people_search", "people_search", "people_saved"])).toBe(
+      "Done: searched for people, saved people to the role.",
     );
     expect(turnReportText(["draft"])).toBe("Done: saved the email draft.");
   });
 
   it("reports in Chinese to a recruiter writing Chinese", () => {
-    expect(turnReportText(["feedback", "people_search"], 12, true)).toBe(
-      "已完成：记下了你的反馈、搜索了候选人。这个岗位现在存了 12 人。",
+    expect(turnReportText(["feedback", "people_search"], true)).toBe(
+      "已完成：记下了你的反馈、搜索了候选人。",
     );
-    expect(turnReportText(["feedback"], 12, true)).not.toMatch(/[A-Za-z]/);
+    expect(turnReportText(["feedback"], true)).not.toMatch(/[A-Za-z]/);
   });
 
   // 11-12: "查了联系方式、在已连接的应用里做了修改" told the recruiter nothing.
@@ -173,9 +173,7 @@ describe("turnReportText", () => {
         },
       ),
     ).toBe("sender");
-    expect(turnReportText(["contacts", "connected"], undefined, true)).toBe(
-      "已完成：查了联系方式。",
-    );
+    expect(turnReportText(["contacts", "connected"], true)).toBe("已完成：查了联系方式。");
     expect(turnReportText(["connected"])).toBe("Done: made changes in a connected app.");
   });
 });
