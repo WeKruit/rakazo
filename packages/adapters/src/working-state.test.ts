@@ -1,5 +1,6 @@
 import { recruitingHomeGroupId } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
+import { requirementsText } from "./role-records.js";
 import { isRolelessHomeTeam, loadWorkingState } from "./working-state.js";
 
 const now = Date.parse("2026-11-01T04:00:00Z");
@@ -824,5 +825,17 @@ describe("loadWorkingState", () => {
       now,
     );
     expect(archived.text).toContain("Role teams: none active; 2 archived");
+  });
+});
+
+describe("requirementsText", () => {
+  it("keeps every saved requirement, however long the list is", () => {
+    const criteria = Array.from({ length: 30 }, (_, i) => ({
+      priority: "hard",
+      expression: { kind: "atom", statement: `requirement number ${i} stated by the recruiter` },
+    }));
+    const text = requirementsText(criteria, []) ?? "";
+    expect(text).toContain("requirement number 29 stated by the recruiter");
+    expect(text).not.toContain("…");
   });
 });
