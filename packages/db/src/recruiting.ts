@@ -6090,6 +6090,11 @@ export async function saveRecruitingCandidatePeopleSearch(
               ...(typeof saved.location_tag === "string"
                 ? { locationTag: saved.location_tag }
                 : {}),
+              // The full profile judged on each saved requirement: what the agent weighs when it
+              // picks and groups a round.
+              ...(typeof saved.requirements_assessment === "string"
+                ? { requirements_assessment: saved.requirements_assessment }
+                : {}),
               ...gradeShown(captured.rows[row.rowIndex]!, graded.has(row.candidateKey)),
               email: (saved._profile as { email?: string | null } | undefined)?.email ?? null,
               _profile: saved._profile,

@@ -609,11 +609,8 @@ import {
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
-import type { RoundVerdict } from "./recruiting-round-check.js";
 import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import {
-  checkRound,
-  withoutGradedBelowFit,
   requestCounts,
   roundCountLine,
   roundCriteria,
@@ -5021,24 +5018,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args = { ...args, expectedRoleRevision: typed };
             else if (role) args = { ...args, expectedRoleRevision: role.revision };
           }
-          // An unverified note written as a list is one note, so the round records on the first call.
-          if (
-            name === "recruiting_research" &&
-            args.operation === "calibration_round" &&
-            args.unverified &&
-            typeof args.unverified === "object" &&
-            !Array.isArray(args.unverified)
-          )
-            args = {
-              ...args,
-              unverified: Object.fromEntries(
-                Object.entries(args.unverified as Record<string, unknown>).map(([key, value]) => [
-                  key,
-                  Array.isArray(value) ? value.map(String).join("; ") : value,
-                ]),
-              ),
-            };
-          let roundLeftOut = 0;
           // The list as the recruiter reads it, returned with the round: the agent's closing words
           // rest on it. Without it, people listed as "not stated: 5 years" were called a clear match.
           let roundShown: string | undefined;
@@ -5066,48 +5045,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return {
                 error: `Not recorded: all ${fresh.shownBefore} were already shown to the recruiter in an earlier round, so nothing was listed again. Record only people no round has shown, or say that nobody new fits yet.`,
               };
-            // Everyone a round lists counts toward the request, so nobody graded lower is listed.
-            const counted = await withoutGradedBelowFit(
-              deps.prisma,
-              thread.activeRecruitingRoleId,
-              fresh.keys,
-            );
-            if (!counted.keys.length)
-              return {
-                error: `Not recorded: all ${fresh.keys.length} were graded below Promising by the search, and a round lists only people who count toward the request. Record people graded Strong or Promising, or say that nobody new fits yet.`,
-              };
-            roundLeftOut = counted.leftOut;
-            args = { ...args, candidateKeys: counted.keys };
-          }
-          // One round check for everything the recruiter asked for (brief, criteria and the reasons
-          // they turned people down): the agent's verdict on each decides who is in.
-          if (
-            name === "recruiting_research" &&
-            args.operation === "calibration_round" &&
-            Array.isArray(args.candidateKeys) &&
-            thread.activeRecruitingRoleId
-          ) {
-            const roleId = thread.activeRecruitingRoleId;
-            const keys = args.candidateKeys.map(String);
-            const given =
-              args.checks && typeof args.checks === "object" && !Array.isArray(args.checks)
-                ? (args.checks as Record<string, Record<string, RoundVerdict>>)
-                : undefined;
-            const checkKeys = given
-              ? await savedRoleCandidateKeys(deps.prisma, roleId, Object.keys(given))
-              : [];
-            const checks = given
-              ? Object.fromEntries(
-                  Object.values(given).map((verdicts, index) => [checkKeys[index], verdicts]),
-                )
-              : undefined;
-            const checked = checkRound({
-              keys,
-              checks,
-              criteria: await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId }),
-            });
-            if (Object.keys(checked.unverified).length || checks)
-              args = { ...args, unverified: checked.unverified };
+            args = { ...args, candidateKeys: fresh.keys };
           }
           // The server fills what it knows about the thread's role and names a person the recruiter
           // mentioned by their saved key, so feedback saves on the first call.
@@ -9065,8 +9003,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     spaceId: run.spaceId,
                     roleId: recorded.roleId,
                     candidateKeys: recorded.candidateKeys as string[],
-                    unverified: Object.fromEntries(
-                      Object.entries(researchInput.data.unverified ?? {}).map(([key, value]) => [
+                    groupOf: Object.fromEntries(
+                      Object.entries(researchInput.data.groupOf ?? {}).map(([key, value]) => [
                         savedCandidateKeyForm(key),
                         value,
                       ]),
@@ -9128,11 +9066,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           }).catch(() => ({}))
                         : {}),
                       ...(roundShown ? { shownToRecruiter: roundShown } : {}),
-                      ...(roundLeftOut
-                        ? {
-                            notListed: `${roundLeftOut} of the people you gave were graded below Promising, so they are not in this round's list and were not shown.`,
-                          }
-                        : {}),
                       // Gate 9d632819: the turn began on an English JD, the recruiter went on in
                       // Chinese in the main chat, and the card after the round was English.
                       next: hideVendors
