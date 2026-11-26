@@ -104,6 +104,20 @@ async function personRequirements(
   ];
 }
 
+/**
+ * Before the role has saved requirements, each person is judged on what the recruiter wrote: the
+ * judge reads those words beside the profile and answers one question per kind of requirement. A
+ * kind the recruiter did not state comes back silent, which excludes nobody.
+ */
+const ASKED_FOR: readonly CriterionQuestion[] = [
+  ["place", "the place (city or country) the recruiter_request states, if it states one"],
+  ["years", "the years of experience the recruiter_request states, if it states any"],
+  ["title", "the job title and level the recruiter_request states"],
+  ["skills", "the skills and technologies the recruiter_request requires"],
+  ["work", "the kind of work or industry experience the recruiter_request requires"],
+].map(([id, statement]) => ({ id: `asked:${id}`, statement: statement! }));
+const REQUEST_CHARS = 2_000;
+
 function profileState(row: Record<string, unknown>): Record<string, unknown> {
   const { _profile, profile_image_url, email, match_score, match_tier, ...shown } = row;
   const text = JSON.stringify(shown);
@@ -117,7 +131,13 @@ function profileState(row: Record<string, unknown>): Record<string, unknown> {
 export async function checkPeopleCriteria(
   judgeSettings: { resolve(): Promise<TextJudge | undefined> } | undefined,
   prisma: PrismaClient,
-  role: { roleId: string; spaceId: string; revision: number; request?: string },
+  role: {
+    roleId: string;
+    spaceId: string;
+    revision: number;
+    /** What the recruiter wrote, or failing that what the search asked for. */
+    request?: string;
+  },
   entries: Array<{ row: Record<string, unknown>; check?: CriteriaCheck }>,
 ): Promise<void> {
   try {
@@ -130,12 +150,8 @@ export async function checkPeopleCriteria(
       return;
     }
     const stated = await personRequirements(judge, await roundCriteria(prisma, role));
-    // A role with nothing saved yet is judged on what the search itself asked for.
-    const requirements = stated.length
-      ? stated
-      : role.request?.trim()
-        ? [{ id: "search-request", statement: role.request.trim().slice(0, 1_000) }]
-        : [];
+    const asked = stated.length ? "" : (role.request?.trim().slice(0, REQUEST_CHARS) ?? "");
+    const requirements = stated.length ? stated : asked ? ASKED_FOR : [];
     if (!requirements.length) {
       getLogger().info("recruiting.criteria.check skipped", { requirements: 0 });
       return;
@@ -152,7 +168,13 @@ export async function checkPeopleCriteria(
     for (let at = 0; at < fresh.length && !deadline.aborted; at += TOGETHER)
       await Promise.all(
         fresh.slice(at, at + TOGETHER).map(async (entry) => {
-          const verdicts = await judge.criteria?.(profileState(entry.row), requirements, deadline);
+          const verdicts = await judge.criteria?.(
+            asked
+              ? { recruiter_request: asked, profile: profileState(entry.row) }
+              : profileState(entry.row),
+            requirements,
+            deadline,
+          );
           if (!verdicts) return;
           const answered = requirements.filter((requirement) => verdicts.has(requirement.id));
           const { match_tier: tier, match_score: score } = entry.row;

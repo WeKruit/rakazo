@@ -9315,7 +9315,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     request,
                     context,
                     applied.effect.id,
-                    (found) =>
+                    async (found) =>
                       checkPeopleCriteria(
                         deps.judge,
                         deps.prisma,
@@ -9324,9 +9324,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           spaceId: run.spaceId,
                           revision: role.revision,
                           request:
-                            typeof connectorCall.args?.query === "string"
+                            (await recruiterWords(deps.prisma, thread.id)).reverse().join("\n") ||
+                            (typeof connectorCall.args?.query === "string"
                               ? connectorCall.args.query
-                              : undefined,
+                              : undefined),
                         },
                         found,
                       ),
