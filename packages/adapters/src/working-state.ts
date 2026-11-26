@@ -61,6 +61,7 @@ type StatePrisma = Pick<
   | "mcpServer"
   | "connection"
   | "recruitingCalibrationRound"
+  | "recruitingCandidateOccurrence"
 >;
 
 /**
@@ -353,7 +354,14 @@ export async function loadWorkingState(
           where: { roleId: { in: teamRoleIds } },
           orderBy: [{ roleId: "asc" }, { round: "desc" }],
           distinct: ["roleId"],
-          select: { roleId: true, round: true, status: true, statusAt: true, approvedAt: true },
+          select: {
+            roleId: true,
+            round: true,
+            status: true,
+            statusAt: true,
+            approvedAt: true,
+            candidateKeys: true,
+          },
         })
         .catch(() => [])
     : Promise.resolve([]);
@@ -575,6 +583,28 @@ export async function loadWorkingState(
       : [];
     const botName = new Map(bots.map((bot) => [bot.id, bot.name]));
     const roundOf = new Map((await roundsRead).map((round) => [round.roleId, round]));
+    // Who the latest round showed, per role, from the round's own records: when the recruiter
+    // names people without naming the role, the role is on this card. Staging 11-26: Kruit read
+    // saved people seven times to find the role of three named people before its first line.
+    const shown = [...roundOf.values()].filter((round) => round.candidateKeys.length);
+    const shownRows = shown.length
+      ? await prisma.recruitingCandidateOccurrence
+          .findMany({
+            where: {
+              OR: shown.map((round) => ({
+                roleId: round.roleId,
+                candidateKey: { in: round.candidateKeys },
+              })),
+              name: { not: null },
+            },
+            distinct: ["roleId", "candidateKey"],
+            select: { roleId: true, name: true },
+          })
+          .catch(() => [])
+      : [];
+    const shownNames = new Map<string, string[]>();
+    for (const row of shownRows)
+      if (row.name) shownNames.set(row.roleId, [...(shownNames.get(row.roleId) ?? []), row.name]);
     // A large account (hundreds of roles, thousands of people) never fits a card: what is not
     // on it is read, never recalled from chat or made up.
     lines.push(
@@ -595,6 +625,8 @@ export async function loadWorkingState(
           .filter(Boolean)
           .join(" · ")}`,
       );
+      const people = roleId ? shownNames.get(roleId) : undefined;
+      if (people?.length) lines.push(`  People in its latest round: ${people.join(", ")}`);
       const messages = recent[index] ?? [];
       // A card the recruiter wrote past (newest first) is not what the team waits on: feedback-
       // round 11-16, an open next-step card read as "waiting on your choice" after their feedback.
