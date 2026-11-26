@@ -86,7 +86,7 @@ describe("recruitingRoundListText", () => {
       roleId: "role-1",
       candidateKeys: ["linkedin:/in/zy"],
     });
-    expect(text).toContain("> Meets 2 of 3 requirements; not stated: Mandarin");
+    expect(text).toContain("> Meets 1 of 3 requirements; partly: Spark or Flink; not stated: Mandarin");
     expect(text).not.toContain("4 years and 11 months");
   });
 
