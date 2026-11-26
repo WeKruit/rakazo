@@ -14,7 +14,6 @@ import type {
   Actor,
   ListRecruitingCandidatesOutput,
   ReadRecruitingSourceInput,
-  RecruitingAssessmentSourceRef,
   RecruitingCandidateRanking,
   RecruitingCandidateSource,
   RecruitingCorrespondence,
@@ -26,7 +25,6 @@ import type {
   RecruitingRoleCandidate,
   RecruitingRoleCandidatesOutput,
   RecruitingSourceRef,
-  RecruitingSourceSelection,
 } from "@rakazo/contracts";
 import {
   inboxMessageKey,
@@ -75,8 +73,6 @@ import {
   rememberRecruitingSequenceObservation,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import type { ParseError } from "jsonc-parser";
-import { findNodeAtLocation, parseTree } from "jsonc-parser";
 import { readActorArtifact } from "./artifact-read.js";
 import { sentCount } from "./campaign-send-record.js";
 import { classifyInstantlyReplyReceipt, readInstantlyEmail } from "./instantly-reply.js";
@@ -85,10 +81,7 @@ import { hasPlatformMcpCredential } from "./mcp-connector.js";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
 import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { refreshRecruitingCorrespondence } from "./recruiting-live-correspondence.js";
-import {
-  createRecruitingCandidateReportReader,
-  isRecruitingCandidateReportField,
-} from "./recruiting-research.js";
+import { createRecruitingCandidateReportReader } from "./recruiting-research.js";
 
 /**
  * Some imported CRM sources carry a mail workspace id in their company field. It names no
@@ -2708,106 +2701,20 @@ export async function getRecruitingCorrespondence(
   });
 }
 
-/** Bind exact UTF-16 quotes in MCP array text to one canonical saved person. */
-function selectedProviderRow(
-  bytes: Uint8Array,
-  text: string,
-  selection: RecruitingSourceSelection | undefined,
-) {
-  if (selection?.kind !== "artifact_json_string") throw new IsolationError();
-  const { path, start, end } = selection;
-  const rowPaths = [
-    ["providerResult", "structuredContent", "rows"],
-    ["observation", "rows"],
-  ];
-  const rowPath = rowPaths.find((prefix) => prefix.every((key, index) => path[index] === key));
-  if (rowPath) {
-    const rowIndex = path[rowPath.length];
-    if (typeof rowIndex !== "number" || !Number.isSafeInteger(rowIndex) || rowIndex < 0)
-      throw new IsolationError();
-    const original = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    JSON.parse(original);
-    const node = findNodeAtLocation(parseTree(original)!, [...rowPath, rowIndex]);
-    if (node?.type !== "object") throw new IsolationError();
-    return {
-      rowIndex,
-      row: JSON.parse(original.slice(node.offset, node.offset + node.length)) as Record<
-        string,
-        unknown
-      >,
-    };
-  }
-  if (
-    path.length !== 4 ||
-    path[0] !== "providerResult" ||
-    path[1] !== "content" ||
-    typeof path[2] !== "number" ||
-    path[3] !== "text"
-  )
-    throw new IsolationError();
-  JSON.parse(text);
-  const errors: ParseError[] = [];
-  const root = parseTree(text, errors, { disallowComments: true, allowTrailingComma: false });
-  const rows = root?.type === "array" ? root : root && findNodeAtLocation(root, ["rows"]);
-  if (errors.length || rows?.type !== "array" || !rows.children) throw new IsolationError();
-  const overlapping = rows.children.filter(
-    (node) => start < node.offset + node.length && end > node.offset,
-  );
-  const node = overlapping[0];
-  if (overlapping.length !== 1 || !node || node.type !== "object") throw new IsolationError();
-  const surrounding =
-    text.slice(start, Math.min(end, node.offset)) +
-    text.slice(Math.max(start, node.offset + node.length), end);
-  if (!/^[\s[\],]*$/.test(surrounding)) throw new IsolationError();
-  return {
-    rowIndex: rows.children.indexOf(node),
-    row: JSON.parse(text.slice(node.offset, node.offset + node.length)) as Record<string, unknown>,
-  };
-}
-
-function sameReportedRow(selected: Record<string, unknown>, canonical: unknown) {
-  if (!canonical || typeof canonical !== "object" || Array.isArray(canonical)) return false;
-  const value = (cell: unknown) =>
-    cell && typeof cell === "object" && !Array.isArray(cell) && Object.hasOwn(cell, "value")
-      ? (cell as { value: unknown }).value
-      : cell;
-  const keys = Object.keys(selected).filter(isRecruitingCandidateReportField);
-  return (
-    keys.length > 0 &&
-    keys.length === Object.keys(canonical).filter(isRecruitingCandidateReportField).length &&
-    keys.every(
-      (key) =>
-        Object.hasOwn(canonical, key) &&
-        isDeepStrictEqual(value(selected[key]), value((canonical as Record<string, unknown>)[key])),
-    )
-  );
-}
-
 export const readRecruitingSource = (
   deps: { prisma: PrismaClient; artifacts: ArtifactStore },
   actor: Actor,
   input: ReadRecruitingSourceInput,
 ) =>
   authenticated(async () => {
-    let sources: readonly (RecruitingSourceRef | RecruitingAssessmentSourceRef)[];
-    if (input.kind === "role") {
-      const workspace = await recruiting.getRecruitingWorkspace(deps.prisma, actor, {
-        threadId: input.threadId,
-      });
-      if (!workspace || workspace.revision.id !== input.roleRevisionId) throw new IsolationError();
-      sources = [
-        ...workspace.revision.sourceRefs,
-        ...workspace.revision.criteria.flatMap((criterion) => criterion.sourceRefs),
-      ];
-    } else {
-      const snapshot = await recruiting.getRecruitingAssessment(deps.prisma, actor, {
-        roleId: input.roleId,
-        candidateKey: input.candidateKey,
-        version: input.version,
-      });
-      if (!snapshot || snapshot.assessment.version !== input.version) throw new IsolationError();
-      sources = snapshot.assessment.sourceRefs;
-    }
+    const workspace = await recruiting.getRecruitingWorkspace(deps.prisma, actor, {
+      threadId: input.threadId,
+    });
+    if (!workspace || workspace.revision.id !== input.roleRevisionId) throw new IsolationError();
+    const sources: readonly RecruitingSourceRef[] = [
+      ...workspace.revision.sourceRefs,
+      ...workspace.revision.criteria.flatMap((criterion) => criterion.sourceRefs),
+    ];
     const matches = sources.filter((source) => source.id === input.sourceRefId);
     const source = matches[0];
     if (
@@ -2823,57 +2730,19 @@ export const readRecruitingSource = (
         artifactId: source.anchor.artifact.artifactId,
       });
       if (row.hash !== source.anchor.artifact.sha256) throw new IsolationError();
-      const selection = "selection" in source ? source.selection : undefined;
-      // ponytail: role sources attest only extracted text; other strings require the stored typed path.
-      if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
-        throw new IsolationError();
+      // Role sources attest only extracted text.
+      if (source.anchor.locator !== "text") throw new IsolationError();
       const json = row.mimeType === "application/json" || row.mimeType.endsWith("+json");
       const pdf = isExtractedDocumentMimeType(row.mimeType);
-      const path =
-        selection?.kind === "artifact_json_string"
-          ? selection.path
-          : !selection && json
-            ? ["text"]
-            : undefined;
-      if (path ? !json : (!row.mimeType.startsWith("text/") && !pdf) || json)
-        throw new IsolationError();
-      const text = path
-        ? readRecruitingJsonString(bytes, path)
+      if (!json && !row.mimeType.startsWith("text/") && !pdf) throw new IsolationError();
+      const text = json
+        ? readRecruitingJsonString(bytes, ["text"])
         : pdf
           ? await extractDocumentText(bytes, row.mimeType)
           : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      const start = selection?.start ?? text.indexOf(source.quote);
-      const end = selection?.end ?? start + source.quote.length;
+      const start = text.indexOf(source.quote);
+      const end = start + source.quote.length;
       validateRecruitingTextSelection(text, start, end, source.quote);
-      if (input.kind === "assessment" && source.kind === "provider_report" && json) {
-        const selected = selectedProviderRow(bytes, text, selection);
-        const readReport = createRecruitingCandidateReportReader(deps, actor, input.roleId, {
-          artifacts: new Map([[row.id, { row, bytes }]]),
-        });
-        // ponytail: use existing occurrence pagination; add an artifact selector only if histories grow large.
-        const matches: RecruitingCandidateSource[] = [];
-        let cursor: string | undefined;
-        do {
-          const page = await recruiting.listRecruitingCandidateSources(deps.prisma, actor, {
-            roleId: input.roleId,
-            candidateKey: input.candidateKey,
-            ...(cursor ? { cursor } : {}),
-          });
-          matches.push(
-            ...page.items.filter(
-              (item) =>
-                item.artifactRef.artifactId === row.id &&
-                item.artifactRef.sha256 === row.hash &&
-                item.rowIndex === selected.rowIndex,
-            ),
-          );
-          cursor = page.nextCursor ?? undefined;
-        } while (cursor);
-        if (matches.length !== 1) throw new IsolationError();
-        const retained = await readReport(matches[0]!);
-        if (!sameReportedRow(selected.row, retained.row)) throw new IsolationError();
-        return { kind: "report" as const, report: retained.report };
-      }
       return { kind: "text" as const, text, start, end };
     } catch {
       throw new IsolationError();
@@ -2907,35 +2776,16 @@ export const archiveRecruitingRole = (
   actor: Actor,
   input: Parameters<typeof recruiting.setRecruitingRoleArchived>[2],
 ) => authenticated(() => recruiting.setRecruitingRoleArchived(prisma, actor, input));
-export const listRecruitingAssessments = (
-  prisma: PrismaClient,
-  actor: Actor,
-  input: Parameters<typeof recruiting.listRecruitingAssessments>[2],
-) => authenticated(() => recruiting.listRecruitingAssessments(prisma, actor, input));
 export const listRecruitingFeedback = (
   prisma: PrismaClient,
   actor: Actor,
   input: Parameters<typeof recruiting.listRecruitingFeedback>[2],
 ) => authenticated(() => recruiting.listRecruitingFeedback(prisma, actor, input));
-export const getRecruitingAssessment = (
-  prisma: PrismaClient,
-  actor: Actor,
-  input: Parameters<typeof recruiting.getRecruitingAssessment>[2],
-) => authenticated(() => recruiting.getRecruitingAssessment(prisma, actor, input));
 export const listRecruitingResearch = (
   prisma: PrismaClient,
   actor: Actor,
   input: Parameters<typeof recruiting.listRecruitingResearch>[2],
 ) => authenticated(() => recruiting.listRecruitingResearch(prisma, actor, input));
-
-export const listRecruitingQuestions = (
-  prisma: PrismaClient,
-  actor: Actor,
-  input: Parameters<typeof recruiting.listRecruitingQuestions>[2],
-) =>
-  authenticated(async () => ({
-    questions: await recruiting.listRecruitingQuestions(prisma, actor, input),
-  }));
 
 export const confirmRecruitingBrief = (
   prisma: PrismaClient,

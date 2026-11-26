@@ -662,10 +662,6 @@ msgstr "评估候选人"
 msgid "Assessment"
 msgstr "评估"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Assessment unavailable"
-msgstr "暂无评估"
-
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Associated roles"
 msgstr "关联岗位"
@@ -957,10 +953,6 @@ msgstr "已取消"
 msgid "Candidate"
 msgstr "候选人"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Candidate assessment"
-msgstr "候选人评估"
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Candidate conversations"
 msgstr "候选人沟通"
@@ -972,10 +964,6 @@ msgstr "候选人详情"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Candidate details unavailable"
 msgstr "候选人详情不可用"
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Candidate facts"
-msgstr "候选人信息"
 
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Candidate interview status"
@@ -992,10 +980,6 @@ msgstr "候选人消息"
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 msgid "Candidate pipeline"
 msgstr "候选人进展"
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Candidate question"
-msgstr "候选人问题"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Candidate record"
@@ -1834,10 +1818,6 @@ msgstr "无法加载审批规则"
 msgid "Could not load artifacts."
 msgstr "无法加载文件。"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Could not load assessment"
-msgstr "无法加载评估"
-
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Could not load backup models"
 msgstr "无法加载备用模型。"
@@ -2232,10 +2212,6 @@ msgstr "额度"
 
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Criteria"
-msgstr "标准"
-
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Criterion"
 msgstr "标准"
 
 #. placeholder {0}: index + 1
@@ -3298,12 +3274,6 @@ msgstr "意向"
 msgid "Interested"
 msgstr "感兴趣"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-#: src/pages/recruiting/CandidatePresentation.tsx
-#: src/pages/recruiting/RecruitingLegacyResults.tsx
-msgid "Internal assessment"
-msgstr "内部评估"
-
 #: src/pages/SettingsOverlay.tsx
 msgid "Internal Costs"
 msgstr ""
@@ -4230,10 +4200,6 @@ msgstr "没有符合筛选的运行记录。"
 msgid "No runs yet"
 msgstr "还没有运行记录"
 
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "No saved assessments"
-msgstr "暂无已保存的评估"
-
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No saved calendar records matched this candidate."
 msgstr "没有匹配此候选人的已保存日历记录。"
@@ -4550,10 +4516,6 @@ msgstr "打开导航"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open original email"
 msgstr "打开原邮件"
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Open original question"
-msgstr "打开原问题"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open the conversation to review its history, or ask WeKruit to prepare drafts from saved candidate evidence."
@@ -5718,10 +5680,6 @@ msgstr "已保存的邮件"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"
 msgstr "已保存的邮件"
-
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Saved facts"
-msgstr "已保存的信息"
 
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Saved feedback for this role"

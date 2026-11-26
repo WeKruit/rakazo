@@ -1,8 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
-  answerSearchFilters,
-  intakeAnswers,
   recruitingRoundListText,
   roundPassage,
 } from "./turn-end-guard.js";
@@ -268,30 +266,6 @@ describe("recruitingRoundListText", () => {
   ];
 });
 
-describe("intakeAnswers", () => {
-  const ask = (text: string) => ({ role: "bot", blocks: [{ kind: "ask", text }] });
-  const say = (role: string, text: string) => ({ role, blocks: [{ kind: "text", text }] });
-
-  it("pairs each question card with the recruiter's answer and skips the JD itself", () => {
-    expect(
-      intakeAnswers([
-        say("user", "Research Scientist, Simulation — full JD"),
-        ask("语言要求？"),
-        say("user", "英语必需"),
-        say("bot", "本轮 10 位人选"),
-        say("user", "找 100 个"),
-        ask("地点？"),
-        say("user", "Redwood City 现场"),
-        ask("语言要求？"),
-        say("user", " 英语必需，中文不要求 "),
-      ]),
-    ).toEqual([
-      { key: "地点？", value: "Redwood City 现场" },
-      { key: "语言要求？", value: "英语必需，中文不要求" },
-    ]);
-  });
-});
-
 describe("roundPassage", () => {
   it("drops search scaffolding and cuts at a word", () => {
     expect(
@@ -311,36 +285,3 @@ describe("roundPassage", () => {
   });
 });
 
-describe("answerSearchFilters", () => {
-  it("turns a stated must-have into a filter every search applies", () => {
-    expect(
-      answerSearchFilters([
-        {
-          key: "Should Mandarin and English both be required?",
-          value: "Require Mandarin and English",
-        },
-        { key: "Where?", value: "On-site within 30 miles of 07036" },
-      ]),
-    ).toEqual([
-      {
-        id: "recruiter-answer-1",
-        mode: "include",
-        origin: "user_instruction",
-        statement: "Require Mandarin and English",
-      },
-      {
-        id: "recruiter-answer-2",
-        mode: "include",
-        origin: "user_instruction",
-        statement: "On-site within 30 miles of 07036",
-      },
-    ]);
-  });
-
-  it.each(["Prefer bilingual; consider either-language candidates", "不限地点", "No requirement"])(
-    "leaves a preference or a lifted limit out (%s)",
-    (value) => {
-      expect(answerSearchFilters([{ key: "q", value }])).toEqual([]);
-    },
-  );
-});

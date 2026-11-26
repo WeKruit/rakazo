@@ -5,7 +5,6 @@ export const ARRAY_LIST_RPC_PATHS = [
   "models/backups",
   "botSections/list",
   "computer/updates",
-  "recruiting/listAssessments",
   "memory/list",
   "memory/history",
   "routines/list",
@@ -35,7 +34,6 @@ export const ARRAY_LIST_RPC_PATHS = [
 
 export const STRUCTURED_LIST_RPC_FIELDS: Readonly<Record<string, readonly string[]>> = {
   "recruiting/schedulingPlans": ["plans", "slots"],
-  "recruiting/listQuestions": ["questions"],
   "recruiting/listResearch": ["tasks", "actions", "observations"],
   "runs/list": ["runs"],
   "tickets/list": ["tickets"],
@@ -43,8 +41,6 @@ export const STRUCTURED_LIST_RPC_FIELDS: Readonly<Record<string, readonly string
 
 /** These reads paginate in the database; the boundary must not slice their page again. */
 export const DATABASE_PAGED_LIST_RPC_PATHS = [
-  "recruiting/listQuestions",
-  "recruiting/listAssessments",
   "recruiting/listResearch",
   "computer/updates",
   "memory/history",

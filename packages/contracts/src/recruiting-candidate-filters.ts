@@ -1,6 +1,6 @@
 import * as z from "zod";
 import { RecruitingCandidateRankingGroupSchema } from "./recruiting-candidate-ranking.js";
-import { RecruitingId, VerdictSchema } from "./recruiting-identifiers.js";
+import { RecruitingId } from "./recruiting-identifiers.js";
 
 const Text = z.string().trim().min(1);
 
@@ -11,8 +11,6 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   /** Rows to skip for a numbered page; a cursor takes precedence. */
   offset: z.number().int().min(0).max(6000).optional(),
   query: z.string().max(240).optional(),
-  assessmentState: z.enum(["unassessed", "current", "outdated"]).optional(),
-  verdict: VerdictSchema.optional(),
   shortlisted: z.boolean().optional(),
   shortlistedSince: z.iso.datetime().optional(),
   actionId: RecruitingId.optional(),

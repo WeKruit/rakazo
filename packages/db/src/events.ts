@@ -48,13 +48,9 @@ import {
   RunHistoryWriteError,
 } from "./messages.js";
 import { syncMirroredAsksInTransaction } from "./mirrored-asks.js";
-import type { RecruitingQuestionPauseContext } from "./recruiting.js";
 import {
   authorizeRecruitingApprovalAnswerInTransaction,
   authorizeRecruitingFeedbackMessage,
-  authorizeRecruitingQuestionAnswerInTransaction,
-  commitRecruitingQuestionInTransaction,
-  prepareRecruitingQuestionInTransaction,
 } from "./recruiting.js";
 import { retriedReplyInTransaction } from "./retried-reply.js";
 import { IsolationError } from "./scope.js";
@@ -230,8 +226,6 @@ export interface PauseRunForInput {
    * (not in message blocks) so clients still see redacted labels.
    */
   offeredActions?: Array<{ id: string; label: string }>;
-  /** Server-owned native question binding; model tool arguments never supply this context. */
-  recruitingQuestion?: RecruitingQuestionPauseContext;
   /** Model calls this attempt retried after a stalled stream, kept on run.waiting_input. */
   modelRetries?: number;
 }
@@ -1255,16 +1249,6 @@ async function commitAnswerRunInput(
       return null;
   }
 
-  if (
-    !(await authorizeRecruitingQuestionAnswerInTransaction(
-      tx,
-      input,
-      message,
-      parsed.data.indexOf(pendingAsk),
-    ))
-  )
-    return null;
-
   const queued = await tx.run.updateMany({
     where: {
       id: input.runId,
@@ -1658,10 +1642,7 @@ export async function pauseRunForInput(
   MessageBlockSchema.array().parse(input.blocks);
   if (
     input.existingApprovalEffectId !== undefined &&
-    (!input.existingApprovalEffectId.trim() ||
-      input.blocks.length ||
-      input.offeredActions?.length ||
-      input.recruitingQuestion)
+    (!input.existingApprovalEffectId.trim() || input.blocks.length || input.offeredActions?.length)
   )
     return false;
   const committed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -1732,10 +1713,6 @@ export async function pauseRunForInput(
       });
       if (answered) return null;
     }
-    const question = input.recruitingQuestion
-      ? await prepareRecruitingQuestionInTransaction(tx, input)
-      : undefined;
-    if (question?.kind === "completed") return { threadId: input.threadId, seq: question.eventSeq };
     const waitAt = new Date();
     const paused = await tx.run.updateMany({
       where: {
@@ -1746,9 +1723,7 @@ export async function pauseRunForInput(
         status: "running",
         leaseOwner: input.leaseOwner,
         leaseFence: input.leaseFence,
-        ...(input.recruitingQuestion || input.existingApprovalEffectId
-          ? { leaseExpiresAt: { gt: new Date() } }
-          : {}),
+        ...(input.existingApprovalEffectId ? { leaseExpiresAt: { gt: new Date() } } : {}),
       },
       data: {
         status: "waiting_input",
@@ -1781,9 +1756,6 @@ export async function pauseRunForInput(
           blocks: input.blocks,
           botId: input.botId,
           runId: input.runId,
-          ...(question?.kind === "new"
-            ? { clientNonce: `recruiting-question:${question.effectId}` }
-            : {}),
         });
     if (message)
       await appendEventInTransaction(tx, {
@@ -1794,7 +1766,7 @@ export async function pauseRunForInput(
         runId: input.runId,
         payload: { messageId: message.id, role: "bot", blocks: input.blocks },
       });
-    let waitingEvent = await appendEventInTransaction(tx, {
+    const waitingEvent = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,
       botId: input.botId,
@@ -1805,8 +1777,6 @@ export async function pauseRunForInput(
         ...(input.modelRetries ? { modelRetries: input.modelRetries } : {}),
       },
     });
-    if (question?.kind === "new" && message)
-      waitingEvent = await commitRecruitingQuestionInTransaction(tx, input, question, message);
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
     return { threadId: waitingEvent.threadId, seq: waitingEvent.seq };
   });

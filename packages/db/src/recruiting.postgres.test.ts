@@ -7,11 +7,8 @@ import type {
   MessageBlock,
   NativeAskAnswerPayload,
   RecruitingApprovalToolInput,
-  RecruitingAssessmentAskInput,
-  RecruitingAssessmentSourceRef,
   RecruitingRoleToolInput,
   RecruitingSourceRef,
-  SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
 import { RECRUITING_CANDIDATE_OUTPUT_SCHEMA } from "@rakazo/contracts";
 import {
@@ -25,7 +22,7 @@ import { projectRecruitingCandidateProfiles } from "../../adapters/src/recruitin
 import { saveRecruitingPeopleSearch } from "../../adapters/src/recruiting-tools.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { createDb, Prisma as PrismaSql } from "./client.js";
-import { appendEventInTransaction, chatReplyToAsk } from "./events.js";
+import { appendEventInTransaction } from "./events.js";
 import * as recruiting from "./index.js";
 import { IsolationError } from "./scope.js";
 
@@ -84,46 +81,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       },
     ],
   });
-  const assessmentSource = (
-    id = messageId,
-    quote = "At least seven years",
-  ): RecruitingAssessmentSourceRef => ({
-    ...source(id),
-    quote,
-    selection: { kind: "message_text", blockIndex: 0, start: 0, end: quote.length },
-  });
-  const assessmentInput = (
-    roleId: string,
-    roleRevisionId: string,
-    candidateKey: string,
-  ): SaveRecruitingAssessmentInput => ({
-    roleId,
-    roleRevisionId,
-    candidateKey,
-    expectedRevision: 0,
-    facts: [],
-    sourceRefs: [assessmentSource()],
-    questions: ["Employment history"],
-    atomJudgments: [
-      {
-        atomId: "years",
-        verdict: "unknown",
-        factIds: [],
-        evidence: [],
-        missing: ["Employment history"],
-      },
-    ],
-    employmentEvaluations: [],
-  });
-  async function assessmentAdmission(
-    input: SaveRecruitingAssessmentInput,
-    scope = { runId, threadId },
-  ) {
+  async function runAdmission(input: { roleId: string }, scope = { runId, threadId }) {
     const run = await prisma.run.update({
       where: { id: scope.runId },
       data: {
         status: "running",
-        leaseOwner: "assessment-worker",
+        leaseOwner: "role-worker",
         leaseFence: 1,
         leaseExpiresAt: new Date(Date.now() + 60_000),
       },
@@ -149,12 +112,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       roleId: role.id,
       roleRevisionId: role.currentRevisionId,
       artifact: {
-        name: "assessment-context.json",
+        name: "role-context.json",
         mimeType: "application/json",
         size: bytes.length,
         hash,
         storageKey: `test-context-${run.id}-${hash}`,
-        clientNonce: `assessment-context:${run.id}:${hash}`,
+        clientNonce: `role-context:${run.id}:${hash}`,
       },
     });
     const effectRequest = { operation: "save", ...input };
@@ -162,8 +125,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       data: {
         spaceId,
         runId: run.id,
-        kind: "recruiting_assess",
-        idempotencyKey: `assessment:${suffix}:${crypto.randomUUID()}`,
+        kind: "recruiting_role",
+        idempotencyKey: `role:${suffix}:${crypto.randomUUID()}`,
         status: "executing",
         request: effectRequest as Prisma.InputJsonValue,
       },
@@ -173,7 +136,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         runId: run.id,
         threadId: scope.threadId,
         botId: run.botId,
-        leaseOwner: "assessment-worker",
+        leaseOwner: "role-worker",
         leaseFence: 1,
         contextArtifact: { artifactId: adopted.artifact.id, sha256: hash },
         effectId: effect.id,
@@ -182,9 +145,9 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       artifacts: [{ artifactId: adopted.artifact.id, bytes }],
     };
   }
-  async function assessmentFixture(text = "Candidate personally implemented geometry transforms") {
+  async function roleRunFixture(text = "Candidate personally implemented geometry transforms") {
     const group = await prisma.chatGroup.create({
-      data: { spaceId, userId, name: "Assessment fixture", members: { create: { botId } } },
+      data: { spaceId, userId, name: "Role run fixture", members: { create: { botId } } },
     });
     const thread = await prisma.thread.create({ data: { spaceId, userId, groupId: group.id } });
     const message = await recruiting.createThreadMessage(prisma, {
@@ -202,7 +165,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         userId,
         botId,
         threadId: thread.id,
-        prompt: "Assess supplied material",
+        prompt: "Read supplied material",
         status: "running",
       },
     });
@@ -218,30 +181,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         sourceMessageId: message.id,
       },
     });
-    const src = assessmentSource(message.id, text);
-    const input: SaveRecruitingAssessmentInput = {
-      ...assessmentInput(role.role.id, role.revision.id, "candidate"),
-      sourceRefs: [src],
-      questions: [],
-      facts: [{ kind: "statement", id: "personal-work", statement: text, sourceRefIds: [src.id] }],
-      atomJudgments: [
-        {
-          atomId: "years",
-          verdict: "met",
-          factIds: ["personal-work"],
-          evidence: [src.id],
-          missing: [],
-        },
-      ],
-    };
     return {
       group,
       thread,
       message,
       role,
       run,
-      input,
-      ...(await assessmentAdmission(input, { runId: run.id, threadId: thread.id })),
+      ...(await runAdmission({ roleId: role.role.id }, { runId: run.id, threadId: thread.id })),
     };
   }
   async function mutateRole(
@@ -287,7 +233,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   }
 
   async function roleMutationFixture(operation: "create" | "revise" = "create") {
-    const f = await assessmentFixture("Create and revise this supplied role");
+    const f = await roleRunFixture("Create and revise this supplied role");
     const bytes = Buffer.from(
       JSON.stringify({ text: "At least seven years of software experience" }),
     );
@@ -402,7 +348,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   });
 
   it("admits group notes only for the run's own group conversation", async () => {
-    const f = await assessmentFixture("Group notes fixture");
+    const f = await roleRunFixture("Group notes fixture");
     await prisma.thread.update({
       where: { id: f.thread.id },
       data: { activeRecruitingRoleId: f.role.role.id },
@@ -720,39 +666,15 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toEqual(saved);
   });
 
-  async function questionFixture(candidate = false) {
-    const f = await assessmentFixture();
-    if (candidate)
-      await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
-    const request: RecruitingAssessmentAskInput = {
-      operation: "ask",
-      roleId: f.role.role.id,
-      roleRevisionId: f.role.revision.id,
-      target: candidate
-        ? {
-            kind: "candidate",
-            candidateKey: f.input.candidateKey,
-            assessmentVersion: 1,
-            criterionIds: ["experience"],
-          }
-        : { kind: "role", criterionIds: ["experience"] },
-      question: "  Which evidence should be verified?  ",
-      options: ["Employment history", "Personal code"],
-    };
-    const effect = await prisma.externalEffect.create({
-      data: {
-        spaceId,
-        runId: f.run.id,
-        kind: "recruiting_assess",
-        status: "executing",
-        idempotencyKey: `question:${f.run.id}`,
-        request: request as Prisma.InputJsonValue,
-      },
-    });
+  async function pauseFixture() {
+    const f = await roleRunFixture();
     const attempt = await prisma.attempt.create({
       data: { runId: f.run.id, fence: 1, status: "running" },
     });
-    const actions = request.options.map((label, index) => ({ id: `choice-${index + 1}`, label }));
+    const actions = ["Employment history", "Personal code"].map((label, index) => ({
+      id: `choice-${index + 1}`,
+      label,
+    }));
     const pause: recruiting.PauseRunForInput = {
       spaceId,
       threadId: f.thread.id,
@@ -761,18 +683,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       attemptId: attempt.id,
       leaseOwner: f.context.leaseOwner,
       leaseFence: 1,
-      blocks: [{ kind: "ask", text: request.question, actions, status: "pending" }],
+      blocks: [
+        { kind: "ask", text: "Which evidence should be verified?", actions, status: "pending" },
+      ],
       offeredActions: actions,
-      recruitingQuestion: {
-        actor,
-        effectId: effect.id,
-        effectRequest: request,
-        contextArtifact: f.context.contextArtifact,
-        artifacts: f.artifacts,
-      },
     };
-    const lookup = { threadId: f.thread.id, roleId: f.role.role.id, effectId: effect.id };
-    return { ...f, request, effect, attempt, pause, lookup };
+    return { ...f, attempt, pause };
   }
   it("returns new-role supplied facts before background photo work and eventually projects Contacts", async () => {
     await prisma.member.create({
@@ -1346,9 +1262,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       { ...actor, spaceId: otherSpaceId },
     ]) {
       await expect(
-        recruiting.listRecruitingAssessments(prisma, foreignActor, { roleId: firstRoleId }),
-      ).rejects.toThrow(IsolationError);
-      await expect(
         recruiting.reviseRecruitingRole(prisma, foreignActor, {
           ...revision,
           roleId: firstRoleId,
@@ -1532,7 +1445,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     await recruiting.bindRecruitingRole(prisma, actor, { threadId, roleId: firstRoleId });
   });
   it("authenticates role quotes against native web material on both create and revise", async () => {
-    const f = await assessmentFixture();
+    const f = await roleRunFixture();
     const text =
       "Build geometry systems 👩🏽‍💻. Keep existing sensor tooling. Require seven years of experience.";
     const bytes = Buffer.from(
@@ -1723,7 +1636,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   it.each(["artifact", "message"])(
     "reads one native %s once for distinct source excerpts in a mutation",
     async (kind) => {
-      const f = await assessmentFixture();
+      const f = await roleRunFixture();
       const excerpts = Array.from(
         { length: 8 },
         (_, index) =>
@@ -1899,7 +1812,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     },
   );
   it("checks role message quotes at their actual native text block", async () => {
-    const f = await assessmentFixture("At least seven years");
+    const f = await roleRunFixture("At least seven years");
     const ref: RecruitingSourceRef = {
       ...source(f.message.id),
       anchor: { kind: "message", messageId: f.message.id, locator: "blocks[0].text" },
@@ -1935,727 +1848,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
     expect(saved.revision.sourceRefs[0]?.quote).toBe("At least seven years");
   });
-  it("assessment CAS retains full snapshots and computes staleness from the actual role pointer", async () => {
-    const role = (await recruiting.getRecruitingWorkspace(prisma, actor, { threadId }))!;
-    const input = assessmentInput(firstRoleId, role.revision.id, "source-row-1");
-    const admission = await assessmentAdmission(input);
-    const first = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admission.context,
-      input,
-      admission.artifacts,
-    );
-    expect(first.isCurrent).toBe(true);
-    expect(first.assessment.judgments).toMatchObject({
-      hardGate: "unknown",
-      criteria: [{ criterionId: "experience", verdict: "unknown" }],
-    });
-    const next = { ...input, expectedRevision: 1 };
-    const a = await assessmentAdmission(next);
-    const b = await assessmentAdmission(next);
-    const secondPool = createDb(databaseUrl!);
-    const settled = await Promise.allSettled([
-      recruiting.saveRecruitingAssessment(prisma, actor, a.context, next, a.artifacts),
-      recruiting.saveRecruitingAssessment(secondPool.prisma, actor, b.context, next, b.artifacts),
-    ]);
-    await secondPool.prisma.$disconnect();
-    await secondPool.pool.end();
-    expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(
-      (
-        await recruiting.getRecruitingAssessment(prisma, actor, {
-          roleId: firstRoleId,
-          candidateKey: "source-row-1",
-        })
-      )?.assessment.version,
-    ).toBe(2);
-    const { sourceThreadId: _, ...definition } = roleInput();
-    await recruiting.reviseRecruitingRole(prisma, actor, {
-      ...definition,
-      roleId: firstRoleId,
-      expectedRevision: 2,
-    });
-    expect(
-      (await recruiting.listRecruitingAssessments(prisma, actor, { roleId: firstRoleId }))[0]
-        ?.isCurrent,
-    ).toBe(false);
-    expect(
-      (
-        await recruiting.getRecruitingAssessment(prisma, actor, {
-          roleId: firstRoleId,
-          candidateKey: "source-row-1",
-          version: 1,
-        })
-      )?.assessment,
-    ).toEqual(first.assessment);
-    await expect(
-      prisma.recruitingAssessment.update({
-        where: {
-          roleId_candidateKey_version: {
-            roleId: firstRoleId,
-            candidateKey: "source-row-1",
-            version: 1,
-          },
-        },
-        data: { questions: ["Modified"] },
-      }),
-    ).rejects.toThrow();
-    await expect(
-      recruiting.saveRecruitingAssessment(
-        prisma,
-        actor,
-        { ...admission.context, runId: wrongRunId },
-        { ...input, expectedRevision: 2 },
-        admission.artifacts,
-      ),
-    ).rejects.toThrow("Resource not found");
-    const otherRole = await recruiting.createRecruitingRole(prisma, actor, roleInput());
-    await recruiting.bindRecruitingRole(prisma, actor, { threadId, roleId: firstRoleId });
-    await expect(
-      recruiting.saveRecruitingAssessment(
-        prisma,
-        actor,
-        admission.context,
-        {
-          ...input,
-          roleRevisionId: otherRole.revision.id,
-          expectedRevision: 2,
-        },
-        admission.artifacts,
-      ),
-    ).rejects.toThrow();
-  });
-  it("returns the assessment's original role revision after the current role changes", async () => {
-    const f = await assessmentFixture();
-    await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
-    const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
-    await recruiting.reviseRecruitingRole(prisma, actor, {
-      ...definition,
-      roleId: f.role.role.id,
-      expectedRevision: 1,
-      criteria: [{ ...definition.criteria[0]!, id: "changed-criterion", priority: "preferred" }],
-    });
-    const input = { roleId: f.role.role.id, candidateKey: f.input.candidateKey };
-    const restored = (await recruiting.getRecruitingAssessment(prisma, actor, input))!;
-    expect(restored.isCurrent).toBe(false);
-    expect(restored).toMatchObject({ roleRevision: f.role.revision });
-    expect(
-      (await recruiting.listRecruitingAssessments(prisma, actor, { roleId: f.role.role.id }))[0],
-    ).toEqual(restored);
-  });
-  it("returns deduplicated real message targets from assessment and original role sources across threads", async () => {
-    const a = await assessmentFixture();
-    const b = await assessmentFixture();
-    const { sourceThreadId: _, ...definition } = roleInput(source(b.message.id));
-    const role = await recruiting.reviseRecruitingRole(prisma, actor, {
-      ...definition,
-      roleId: a.role.role.id,
-      expectedRevision: 1,
-    });
-    const input = {
-      ...a.input,
-      roleRevisionId: role.revision.id,
-      sourceRefs: [...a.input.sourceRefs, assessmentSource()],
-    };
-    const admission = await assessmentAdmission(input, { runId: a.run.id, threadId: a.thread.id });
-    await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admission.context,
-      input,
-      admission.artifacts,
-    );
-    const restored = (await recruiting.getRecruitingAssessment(prisma, actor, {
-      roleId: a.role.role.id,
-      candidateKey: input.candidateKey,
-    }))!;
-    expect(restored).toMatchObject({
-      roleRevision: role.revision,
-      sourceMessageTargets: expect.arrayContaining([
-        { messageId: a.message.id, threadId: a.thread.id, target: { groupId: a.group.id } },
-        { messageId: b.message.id, threadId: b.thread.id, target: { groupId: b.group.id } },
-        { messageId, threadId, target: { botId } },
-      ]),
-    });
-    expect(restored.sourceMessageTargets).toHaveLength(3);
-  });
-  it("retains an external conversation source without inventing a native message target", async () => {
-    const f = await assessmentFixture();
-    const conversation = await prisma.externalConversation.create({
-      data: {
-        spaceId,
-        userId,
-        botId,
-        provider: "synthetic",
-        workspaceId: "synthetic",
-        externalKey: `snapshot-${f.run.id}`,
-        conversationId: `snapshot-${f.run.id}`,
-      },
-    });
-    const externalThread = await prisma.thread.create({
-      data: { spaceId, userId, externalConversationId: conversation.id },
-    });
-    const externalMessage = await prisma.message.create({
-      data: {
-        threadId: externalThread.id,
-        seq: 1,
-        role: "user",
-        blocks: [{ kind: "text", text: "Supplied role material" }],
-      },
-    });
-    const externalSource = source(externalMessage.id);
-    const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
-    const role = await recruiting.reviseRecruitingRole(prisma, actor, {
-      ...definition,
-      sourceRefs: [...definition.sourceRefs, externalSource],
-      roleId: f.role.role.id,
-      expectedRevision: 1,
-    });
-    const input = { ...f.input, roleRevisionId: role.revision.id };
-    const admission = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admission.context,
-      input,
-      admission.artifacts,
-    );
-    const restored = (await recruiting.getRecruitingAssessment(prisma, actor, {
-      roleId: f.role.role.id,
-      candidateKey: input.candidateKey,
-    }))!;
-    expect(restored.roleRevision.sourceRefs).toContainEqual(externalSource);
-    expect(restored.sourceMessageTargets).toEqual([
-      { messageId: f.message.id, threadId: f.thread.id, target: { groupId: f.group.id } },
-    ]);
-  });
-  it("rejects snapshot reads without exposing original role source targets after access is revoked", async () => {
-    const a = await assessmentFixture();
-    const b = await assessmentFixture();
-    const { sourceThreadId: _, ...definition } = roleInput(source(b.message.id));
-    const role = await recruiting.reviseRecruitingRole(prisma, actor, {
-      ...definition,
-      roleId: a.role.role.id,
-      expectedRevision: 1,
-    });
-    const input = { ...a.input, roleRevisionId: role.revision.id };
-    const admission = await assessmentAdmission(input, { runId: a.run.id, threadId: a.thread.id });
-    await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admission.context,
-      input,
-      admission.artifacts,
-    );
-    await prisma.thread.update({ where: { id: b.thread.id }, data: { userId: otherUserId } });
-    await expect(
-      recruiting.getRecruitingAssessment(prisma, actor, {
-        roleId: a.role.role.id,
-        candidateKey: input.candidateKey,
-      }),
-    ).rejects.toThrow(IsolationError);
-    await expect(
-      recruiting.listRecruitingAssessments(prisma, actor, { roleId: a.role.role.id }),
-    ).rejects.toThrow(IsolationError);
-  });
-  it("reassesses only explicit changes and commits one immutable version per native effect", async () => {
-    const f = await assessmentFixture();
-    const first = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      f.context,
-      f.input,
-      f.artifacts,
-    );
-    const input = { ...f.input, expectedRevision: 1, atomJudgments: [], employmentEvaluations: [] };
-    const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    const request = { operation: "reassess", ...input };
-    await prisma.externalEffect.update({
-      where: { id: admitted.context.effectId },
-      data: { request: request as Prisma.InputJsonValue },
-    });
-    const context = { ...admitted.context, effectRequest: request };
-    const second = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      context,
-      input,
-      admitted.artifacts,
-    );
-    expect(second.assessment.version).toBe(2);
-    expect(second.assessment.judgments).toEqual(first.assessment.judgments);
-    await prisma.run.update({
-      where: { id: f.run.id },
-      data: { status: "completed", leaseOwner: null, leaseExpiresAt: null },
-    });
-    expect(
-      await recruiting.saveRecruitingAssessment(
-        prisma,
-        actor,
-        { ...context, contextArtifact: undefined },
-        input,
-        [],
-      ),
-    ).toEqual(second);
-    expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(2);
-    const stale = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    await prisma.externalEffect.update({
-      where: { id: stale.context.effectId },
-      data: { request: request as Prisma.InputJsonValue },
-    });
-    await expect(
-      recruiting.saveRecruitingAssessment(
-        prisma,
-        actor,
-        { ...stale.context, effectRequest: request },
-        input,
-        stale.artifacts,
-      ),
-    ).rejects.toThrow(recruiting.RecruitingConflictError);
-    const changed = {
-      ...input,
-      expectedRevision: 2,
-      facts: [{ ...input.facts[0]!, statement: "Changed material interpretation" }],
-    };
-    const rejected = await assessmentAdmission(changed, { runId: f.run.id, threadId: f.thread.id });
-    const changedRequest = { operation: "reassess", ...changed };
-    await prisma.externalEffect.update({
-      where: { id: rejected.context.effectId },
-      data: { request: changedRequest as Prisma.InputJsonValue },
-    });
-    await expect(
-      recruiting.saveRecruitingAssessment(
-        prisma,
-        actor,
-        { ...rejected.context, effectRequest: changedRequest },
-        changed,
-        rejected.artifacts,
-      ),
-    ).rejects.toThrow("explicit atom update");
-    expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(2);
-    const current = await recruiting.getRecruitingAssessment(prisma, actor, {
-      roleId: f.role.role.id,
-      candidateKey: input.candidateKey,
-    });
-    expect(current?.assessment.version).toBe(2);
-  });
-  it("pauses with the original native recruiting card, effect and asked event in one transaction", async () => {
-    const f = await questionFixture();
-    expect(await recruiting.pauseRunForInput(prisma, f.pause)).toBe(true);
-    const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
-    expect(question).toMatchObject({
-      effectId: f.effect.id,
-      messageId: expect.any(String),
-      askIndex: 0,
-      isCurrent: true,
-      canAnswer: true,
-      runStatus: "waiting_input",
-      groupId: f.group.id,
-      block: { kind: "ask", text: f.request.question, status: "pending" },
-    });
-    expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toMatchObject({
-      leaseOwner: null,
-      leaseExpiresAt: null,
-    });
-    expect((await prisma.attempt.findUniqueOrThrow({ where: { id: f.attempt.id } })).status).toBe(
-      "waiting_input",
-    );
-    expect(
-      (await prisma.message.findUniqueOrThrow({ where: { id: question.messageId } })).clientNonce,
-    ).toBe(`recruiting-question:${f.effect.id}`);
-    const effect = await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.effect.id } });
-    const event = await prisma.event.findFirstOrThrow({
-      where: { runId: f.run.id, type: "recruiting.question.asked" },
-    });
-    expect(effect.status).toBe("completed");
-    expect(effect.result).toEqual(event.payload);
-    expect(
-      await recruiting.listRecruitingQuestions(prisma, actor, {
-        threadId: f.thread.id,
-        roleId: f.role.role.id,
-      }),
-    ).toEqual([question]);
-    await expect(
-      recruiting.getRecruitingQuestion(prisma, { ...actor, userId: otherUserId }, f.lookup),
-    ).rejects.toThrow(IsolationError);
-  });
-  it("keeps a removed group bot's original question readable and disables its answer", async () => {
-    const f = await questionFixture();
-    await recruiting.pauseRunForInput(prisma, f.pause);
-    const original = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
-    await prisma.chatGroupMember.deleteMany({ where: { groupId: f.group.id, botId } });
-    const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
-    expect(question).toMatchObject({
-      messageId: original.messageId,
-      block: original.block,
-      isCurrent: true,
-      canAnswer: false,
-      runStatus: "waiting_input",
-    });
-    expect(
-      await recruiting.listRecruitingQuestions(prisma, actor, {
-        threadId: f.thread.id,
-        roleId: f.role.role.id,
-      }),
-    ).toEqual([question]);
-    expect(
-      await recruiting.answerRunInput(prisma, {
-        spaceId,
-        threadId: f.thread.id,
-        runId: f.run.id,
-        messageId: original.messageId,
-        answeredByUserId: userId,
-        answer: "Personal code",
-      }),
-    ).toBe(false);
-    expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
-      "waiting_input",
-    );
-    expect(await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } })).toBe(0);
-  });
-  it("retains raw offered options on the native checkpoint while storing only the redacted card", async () => {
-    const f = await questionFixture();
-    const secret = "synthetic-secret-token";
-    const request = {
-      ...f.request,
-      question: `Use ${secret}?`,
-      options: [`Use ${secret}`, "Other material"],
-    };
-    await prisma.externalEffect.update({
-      where: { id: f.effect.id },
-      data: { request: request as Prisma.InputJsonValue },
-    });
-    const actions = request.options.map((label, index) => ({ id: `choice-${index + 1}`, label }));
-    const pause = {
-      ...f.pause,
-      blocks: [
-        {
-          kind: "ask" as const,
-          text: "Use [redacted]?",
-          actions: [{ id: "choice-1", label: "Use [redacted]" }, actions[1]!],
-          status: "pending" as const,
-        },
-      ],
-      offeredActions: actions,
-      recruitingQuestion: { ...f.pause.recruitingQuestion!, effectRequest: request },
-    };
-    expect(await recruiting.pauseRunForInput(prisma, pause)).toBe(true);
-    const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
-    expect(question.block.text).toBe("Use [redacted]?");
-    const events = await prisma.event.findMany({ where: { runId: f.run.id } });
-    expect(JSON.stringify(events.map((event) => event.payload))).not.toContain(secret);
-    expect(
-      await recruiting.answerRunInput(prisma, {
-        spaceId,
-        threadId: f.thread.id,
-        runId: f.run.id,
-        messageId: question.messageId,
-        answeredByUserId: userId,
-        answer: "choice-1",
-      }),
-    ).toBe(true);
-    expect(await recruiting.getRecruitingQuestion(prisma, actor, f.lookup)).toMatchObject({
-      canAnswer: false,
-      block: { answer: "choice-1", status: "answered" },
-    });
-    expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toContain(
-      secret,
-    );
-  });
-  it.each(["role", "candidate"])(
-    "rejects stale %s recruiting cards through both answer paths",
-    async (target) => {
-      const f = await questionFixture(target === "candidate");
-      await recruiting.pauseRunForInput(prisma, f.pause);
-      const original = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
-      if (target === "role") {
-        const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
-        await recruiting.reviseRecruitingRole(prisma, actor, {
-          ...definition,
-          roleId: f.role.role.id,
-          expectedRevision: 1,
-        });
-      } else {
-        const run = await prisma.run.create({
-          data: {
-            spaceId,
-            userId,
-            botId,
-            threadId: f.thread.id,
-            taskId: f.run.taskId,
-            status: "running",
-            trigger: "user",
-          },
-        });
-        const input = { ...f.input, expectedRevision: 1 };
-        const admission = await assessmentAdmission(input, {
-          runId: run.id,
-          threadId: f.thread.id,
-        });
-        await recruiting.saveRecruitingAssessment(
-          prisma,
-          actor,
-          admission.context,
-          input,
-          admission.artifacts,
-        );
-      }
-      expect(await recruiting.getRecruitingQuestion(prisma, actor, f.lookup)).toMatchObject({
-        isCurrent: false,
-        canAnswer: false,
-      });
-      expect(
-        await recruiting.answerRunInput(prisma, {
-          spaceId,
-          threadId: f.thread.id,
-          runId: f.run.id,
-          messageId: original.messageId,
-          answeredByUserId: userId,
-          answer: "New answer",
-        }),
-      ).toBe(false);
-      expect(
-        await prisma.$transaction((tx) =>
-          recruiting.answerWaitingRunWithTextInTransaction(tx, {
-            spaceId,
-            threadId: f.thread.id,
-            runId: f.run.id,
-            answeredByUserId: userId,
-            answer: "New answer",
-          }),
-        ),
-      ).toBeNull();
-      expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
-        "waiting_input",
-      );
-      expect(await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } })).toBe(
-        0,
-      );
-      expect(
-        (await prisma.message.findUniqueOrThrow({ where: { id: original.messageId } })).blocks,
-      ).toEqual([original.block]);
-    },
-  );
-  it.each(["custom", "choice", "composer"])(
-    "records one native author proof for a recruiting %s answer",
-    async (kind) => {
-      const f = await questionFixture();
-      const originalRun = await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } });
-      const originalTask = await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } });
-      await recruiting.pauseRunForInput(prisma, f.pause);
-      const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
-      const rawAnswer = " \n  Custom material 😀\n  ";
-      const answer = kind === "choice" ? "choice-2" : rawAnswer;
-      if (kind === "composer") {
-        const result = await prisma.$transaction(async (tx) => {
-          const message = await recruiting.createThreadMessageInTransaction(tx, {
-            threadId: f.thread.id,
-            role: "user",
-            blocks: [{ kind: "text", text: rawAnswer }],
-          });
-          return recruiting.answerWaitingRunWithTextInTransaction(tx, {
-            spaceId,
-            threadId: f.thread.id,
-            runId: f.run.id,
-            answeredByUserId: userId,
-            answer,
-            answerMessageId: message.id,
-          });
-        });
-        expect(result).not.toBeNull();
-      } else
-        expect(
-          await recruiting.answerRunInput(prisma, {
-            spaceId,
-            threadId: f.thread.id,
-            runId: f.run.id,
-            messageId: question.messageId,
-            answeredByUserId: userId,
-            answer,
-          }),
-        ).toBe(true);
-      await prisma.run.update({ where: { id: f.run.id }, data: { status: "completed" } });
-      expect(await recruiting.getRecruitingQuestion(prisma, actor, f.lookup)).toMatchObject({
-        runStatus: "completed",
-        canAnswer: false,
-        block: { status: "answered", answer },
-      });
-      const receipt = await prisma.event.findFirstOrThrow({
-        where: { runId: f.run.id, type: "thread.choice" },
-      });
-      const proof = receipt.payload as NativeAskAnswerPayload;
-      expect(proof).toMatchObject({
-        messageId: question.messageId,
-        askIndex: 0,
-        answeredByUserId: userId,
-      });
-      const human = await prisma.message.findUniqueOrThrow({
-        where: { id: proof.answerMessageId },
-      });
-      expect(human.botId).toBeNull();
-      expect(human.role).toBe("user");
-      expect(human.blocks).toEqual([
-        { kind: "text", text: kind === "choice" ? "Personal code" : rawAnswer },
-      ]);
-      const resumedPrompt = `${originalTask.prompt}\n\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : kind === "composer" ? chatReplyToAsk(rawAnswer) : rawAnswer}`;
-      expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toBe(
-        resumedPrompt,
-      );
-      expect(resumedPrompt.split(originalTask.prompt)).toHaveLength(2);
-      expect(await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } })).toBe(
-        1,
-      );
-      const restored = createDb(databaseUrl!);
-      try {
-        expect(
-          await recruiting.getRecruitingQuestion(restored.prisma, actor, f.lookup),
-        ).toMatchObject({
-          messageId: question.messageId,
-          runId: f.run.id,
-          canAnswer: false,
-          block: { status: "answered", answer },
-        });
-        expect(
-          (await restored.prisma.message.findUniqueOrThrow({ where: { id: human.id } })).blocks,
-        ).toEqual(human.blocks);
-        expect(
-          await restored.prisma.run.findUniqueOrThrow({ where: { id: f.run.id } }),
-        ).toMatchObject({
-          taskId: originalRun.taskId,
-          sourceMessageId: originalRun.sourceMessageId,
-        });
-        expect(
-          (await restored.prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt,
-        ).toBe(resumedPrompt);
-        const canonical = await recruiting.loadRunHumanSources(
-          restored.prisma,
-          actor,
-          await restored.prisma.run.findUniqueOrThrow({ where: { id: f.run.id } }),
-          { continuationOnly: true },
-        );
-        expect(canonical.currentAnswer?.id).toBe(human.id);
-        expect(canonical.currentAnswer?.blocks).toEqual(human.blocks);
-        expect(canonical.answeredAsks.map((turn) => [turn.card.id, turn.answer.id])).toEqual([
-          [question.messageId, human.id],
-        ]);
-        expect(canonical.originalSource?.id).toBe(originalRun.sourceMessageId);
-      } finally {
-        await restored.prisma.$disconnect();
-        await restored.pool.end();
-      }
-    },
-  );
-  it("replays a committed question without a lease or another card/pause", async () => {
-    const f = await questionFixture();
-    const lostAck = {
-      $transaction: async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
-        await prisma.$transaction(callback);
-        throw new Error("lost question acknowledgement");
-      },
-    } as unknown as PrismaClient;
-    await expect(recruiting.pauseRunForInput(lostAck, f.pause)).rejects.toThrow(
-      "lost question acknowledgement",
-    );
-    const original = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
-    expect(
-      await recruiting.pauseRunForInput(prisma, {
-        ...f.pause,
-        recruitingQuestion: {
-          ...f.pause.recruitingQuestion!,
-          contextArtifact: undefined,
-          artifacts: [],
-        },
-      }),
-    ).toBe(true);
-    expect(
-      await recruiting.answerRunInput(prisma, {
-        spaceId,
-        threadId: f.thread.id,
-        runId: f.run.id,
-        messageId: original.messageId,
-        answeredByUserId: userId,
-        answer: "Personal code",
-      }),
-    ).toBe(true);
-    await prisma.run.update({
-      where: { id: f.run.id },
-      data: { status: "running", leaseOwner: "new-worker", leaseFence: 2 },
-    });
-    expect(await recruiting.pauseRunForInput(prisma, f.pause)).toBe(true);
-    expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toMatchObject({
-      status: "running",
-      leaseOwner: "new-worker",
-      leaseFence: 2,
-    });
-    expect(
-      await prisma.message.count({
-        where: { threadId: f.thread.id, clientNonce: `recruiting-question:${f.effect.id}` },
-      }),
-    ).toBe(1);
-    expect(
-      await prisma.event.count({ where: { runId: f.run.id, type: "recruiting.question.asked" } }),
-    ).toBe(1);
-  });
-  it.each(["cancelled", "foreign", "deleted", "event", "card", "proof"])(
-    "refuses a recruiting answer after %s changes",
-    async (boundary) => {
-      const f = await questionFixture();
-      await recruiting.pauseRunForInput(prisma, f.pause);
-      const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
-      if (boundary === "cancelled")
-        await prisma.$transaction((tx) =>
-          recruiting.cancelRunsInTransaction(
-            tx,
-            [{ id: f.run.id, taskId: f.run.taskId }],
-            new Date(),
-          ),
-        );
-      if (boundary === "deleted")
-        await prisma.message.delete({ where: { id: question.messageId } });
-      if (boundary === "event")
-        await prisma.event.deleteMany({
-          where: { runId: f.run.id, type: "recruiting.question.asked" },
-        });
-      if (boundary === "card")
-        await prisma.message.update({
-          where: { id: question.messageId },
-          data: { blocks: [{ ...question.block, text: "Changed question" }] },
-        });
-      if (boundary === "proof")
-        await prisma.event.create({
-          data: {
-            spaceId,
-            threadId: f.thread.id,
-            botId,
-            runId: f.run.id,
-            seq: 100,
-            type: "thread.choice",
-            payload: {
-              messageId: question.messageId,
-              askIndex: 0,
-              answerMessageId: f.message.id,
-              answeredByUserId: userId,
-            },
-          },
-        });
-      expect(
-        await recruiting.answerRunInput(prisma, {
-          spaceId,
-          threadId: f.thread.id,
-          runId: f.run.id,
-          messageId: question.messageId,
-          answeredByUserId: boundary === "foreign" ? otherUserId : userId,
-          answer: "Answer",
-        }),
-      ).toBe(false);
-      expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
-        boundary === "cancelled" ? "cancelled" : "waiting_input",
-      );
-    },
-  );
   it("does not read the card of a stopped wait as waiting", async () => {
-    const f = await questionFixture();
+    const f = await pauseFixture();
     await recruiting.pauseRunForInput(prisma, f.pause);
     expect(await recruiting.waitingCardBlocks(prisma, f.thread.id)).toHaveLength(1);
     await prisma.$transaction((tx) =>
@@ -2663,44 +1857,9 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
     expect(await recruiting.waitingCardBlocks(prisma, f.thread.id)).toEqual([]);
   });
-  it.each(["lease", "role", "attempt"])(
-    "rolls back a question pause invalidated by %s before clearing the lease",
-    async (boundary) => {
-      const f = await questionFixture();
-      if (boundary === "lease")
-        await prisma.run.update({ where: { id: f.run.id }, data: { leaseExpiresAt: new Date(0) } });
-      if (boundary === "role") {
-        const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
-        await recruiting.reviseRecruitingRole(prisma, actor, {
-          ...definition,
-          roleId: f.role.role.id,
-          expectedRevision: 1,
-        });
-      }
-      if (boundary === "attempt")
-        await prisma.attempt.update({ where: { id: f.attempt.id }, data: { status: "failed" } });
-      await expect(recruiting.pauseRunForInput(prisma, f.pause)).rejects.toThrow();
-      expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toMatchObject({
-        status: "running",
-        leaseOwner: f.context.leaseOwner,
-      });
-      expect(
-        await prisma.message.count({
-          where: { clientNonce: `recruiting-question:${f.effect.id}` },
-        }),
-      ).toBe(0);
-      expect(
-        (await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.effect.id } })).status,
-      ).toBe("executing");
-    },
-  );
-  it.each(["pause", "answer"])(
-    "linearizes native recruiting %s against cancellation",
-    async (stage) => {
-      const f = await questionFixture();
-      if (stage === "answer") await recruiting.pauseRunForInput(prisma, f.pause);
-      const question =
-        stage === "answer" ? await recruiting.getRecruitingQuestion(prisma, actor, f.lookup) : null;
+  it("linearizes a question pause against cancellation", async () => {
+    {
+      const f = await pauseFixture();
       let release!: () => void;
       let locked!: () => void;
       const gate = new Promise<void>((resolve) => {
@@ -2724,17 +1883,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       await lock;
       const second = createDb(databaseUrl!);
       try {
-        const pending =
-          stage === "pause"
-            ? recruiting.pauseRunForInput(second.prisma, f.pause)
-            : recruiting.answerRunInput(second.prisma, {
-                spaceId,
-                threadId: f.thread.id,
-                runId: f.run.id,
-                messageId: question!.messageId,
-                answeredByUserId: userId,
-                answer: "Answer",
-              });
+        const pending = recruiting.pauseRunForInput(second.prisma, f.pause);
         const observed = pending.then(
           (result) => result,
           () => false,
@@ -2754,821 +1903,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         expect(
           await prisma.event.count({ where: { runId: f.run.id, type: "thread.choice" } }),
         ).toBe(0);
-        expect(
-          await prisma.event.count({
-            where: { runId: f.run.id, type: "recruiting.question.asked" },
-          }),
-        ).toBe(stage === "answer" ? 1 : 0);
       } finally {
         release();
         await cancel;
         await second.prisma.$disconnect();
         await second.pool.end();
       }
-    },
-  );
-  it("persists the server-computed composite gate and non-overlapping employment calculation", async () => {
-    const text =
-      "I personally implemented 3D coordinate transforms. I was a full-time software engineer from 2018-01-01 to 2026-01-01; this is my complete history through 2026-01-01.";
-    const f = await assessmentFixture(text);
-    const day = (year: number) => ({ precision: "day" as const, year, month: 1, day: 1 });
-    const definition = roleInput(source(f.message.id));
-    const { sourceThreadId: _sourceThreadId, ...revision } = definition;
-    const role = await recruiting.reviseRecruitingRole(prisma, actor, {
-      ...revision,
-      roleId: f.role.role.id,
-      expectedRevision: 1,
-      criteria: [
-        {
-          ...definition.criteria[0]!,
-          expression: {
-            kind: "all",
-            items: [
-              {
-                kind: "atom",
-                id: "personal-geometry",
-                statement: "Personally implemented 3D coordinate transforms",
-              },
-              {
-                kind: "atom",
-                id: "years",
-                statement: "At least seven years of qualifying full-time engineering",
-                employmentRule: {
-                  minimumMonths: 84,
-                  countingRule: "complete_calendar_months",
-                  qualificationDefinition: "Full-time software engineering",
-                  cutoff: { kind: "fixed", date: day(2026) },
-                },
-              },
-            ],
-          },
-        },
-      ],
-    });
-    const ref = f.input.sourceRefs[0]!;
-    const input: SaveRecruitingAssessmentInput = {
-      ...f.input,
-      roleRevisionId: role.revision.id,
-      facts: [
-        {
-          kind: "statement",
-          id: "geometry",
-          statement: "Personally implemented coordinate transforms",
-          sourceRefIds: [ref.id],
-        },
-        {
-          kind: "employment",
-          id: "employment",
-          statement: "Qualifying full-time engineering",
-          sourceRefIds: [ref.id],
-          start: day(2018),
-          end: day(2026),
-          employmentType: "full-time",
-        },
-        {
-          kind: "history_completeness",
-          id: "complete",
-          statement: "Complete employment history",
-          sourceRefIds: [ref.id],
-          complete: true,
-          asOf: day(2026),
-        },
-      ],
-      atomJudgments: [
-        {
-          atomId: "personal-geometry",
-          verdict: "met",
-          factIds: ["geometry"],
-          evidence: [ref.id],
-          missing: [],
-        },
-      ],
-      employmentEvaluations: [
-        {
-          atomId: "years",
-          intervals: [
-            { factId: "employment", qualifyingFullTime: "met", evidence: [ref.id], missing: [] },
-          ],
-          historyCompletenessFactId: "complete",
-          evidence: [ref.id],
-          missing: [],
-        },
-      ],
-    };
-    const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    const saved = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admitted.context,
-      input,
-      admitted.artifacts,
-    );
-    expect(saved.assessment.judgments).toMatchObject({
-      hardGate: "met",
-      criteria: [{ criterionId: "experience", verdict: "met" }],
-      employment: [
-        {
-          atomId: "years",
-          lowerMonths: 96,
-          upperMonths: 96,
-          verdict: "met",
-          minimumMonths: 84,
-          cutoff: day(2026),
-        },
-      ],
-    });
-    expect(saved.assessment.facts).toEqual(input.facts);
-  });
-  it("authenticates exact human text selections and preserves whitespace and emoji", async () => {
-    const text = "prefix 👩🏽‍💻 exact text  ";
-    const f = await assessmentFixture(text);
-    const quote = "👩🏽‍💻 exact text  ";
-    const src: RecruitingAssessmentSourceRef = {
-      ...f.input.sourceRefs[0]!,
-      kind: "candidate_statement",
-      quote,
-      selection: { kind: "message_text", blockIndex: 0, start: 7, end: text.length },
-    };
-    const input = { ...f.input, sourceRefs: [src] };
-    const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    const saved = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admitted.context,
-      input,
-      admitted.artifacts,
-    );
-    expect(saved.assessment.sourceRefs[0]).toEqual(src);
-    expect(saved.assessment.judgments.hardGate).toBe("met");
-    expect(
-      await prisma.event.count({ where: { runId: f.run.id, type: "recruiting.assessment.saved" } }),
-    ).toBe(1);
-  });
-  it.each(["quote", "block", "surrogate", "foreign", "deleted", "assistant", "transcript"])(
-    "rejects unauthenticated message evidence: %s",
-    async (boundary) => {
-      const f = await assessmentFixture("A😀B");
-      let src = f.input.sourceRefs[0]!;
-      if (boundary === "quote") src = { ...src, quote: "Invented candidate work" };
-      if (boundary === "block")
-        src = { ...src, selection: { kind: "message_text", blockIndex: 1, start: 0, end: 4 } };
-      if (boundary === "surrogate")
-        src = {
-          ...src,
-          quote: "😀",
-          selection: { kind: "message_text", blockIndex: 0, start: 1, end: 2 },
-        };
-      if (boundary === "foreign")
-        src = { ...src, anchor: { kind: "message", messageId: otherMessageId, locator: "text:0" } };
-      if (boundary === "assistant")
-        await prisma.message.update({
-          where: { id: f.message.id },
-          data: { role: "bot", botId, runId: f.run.id },
-        });
-      if (boundary === "transcript") {
-        const conversation = await prisma.externalConversation.create({
-          data: {
-            spaceId,
-            userId,
-            botId,
-            provider: "synthetic",
-            workspaceId: "test",
-            externalKey: `assessment-${f.run.id}`,
-            conversationId: `assessment-${f.run.id}`,
-          },
-        });
-        await prisma.externalMessage.create({
-          data: {
-            externalConversationId: conversation.id,
-            providerEventId: "source",
-            threadMessageId: f.message.id,
-            content: "A😀B",
-            senderId: "synthetic",
-            senderName: "Synthetic",
-          },
-        });
-      }
-      const input = { ...f.input, sourceRefs: [src] };
-      const admission = await assessmentAdmission(input, {
-        runId: f.run.id,
-        threadId: f.thread.id,
-      });
-      if (boundary === "deleted") await prisma.message.delete({ where: { id: f.message.id } });
-      await expect(
-        recruiting.saveRecruitingAssessment(
-          prisma,
-          actor,
-          admission.context,
-          input,
-          admission.artifacts,
-        ),
-      ).rejects.toThrow();
-      expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(
-        0,
-      );
-      expect(
-        (
-          await prisma.externalEffect.findUniqueOrThrow({
-            where: { id: admission.context.effectId },
-          })
-        ).status,
-      ).toBe("executing");
-    },
-  );
-  it.each([
-    "owner",
-    "fence",
-    "expired",
-    "cancelled",
-    "adoption",
-    "revision",
-    "active-role",
-    "effect-request",
-    "effect-run",
-  ])("fences a live assessment against %s changes", async (boundary) => {
-    const f = await assessmentFixture();
-    if (boundary === "owner") f.context.leaseOwner = "old-worker";
-    if (boundary === "fence") f.context.leaseFence = 0;
-    if (boundary === "expired")
-      await prisma.run.update({ where: { id: f.run.id }, data: { leaseExpiresAt: new Date(0) } });
-    if (boundary === "cancelled")
-      await prisma.run.update({
-        where: { id: f.run.id },
-        data: { status: "cancelled", leaseOwner: null },
-      });
-    if (boundary === "adoption") {
-      await prisma.event.create({
-        data: {
-          spaceId,
-          threadId: f.thread.id,
-          botId,
-          runId: f.run.id,
-          seq: 2,
-          type: "recruiting.context.adopted",
-          payload: {
-            roleId: f.role.role.id,
-            roleRevisionId: f.role.revision.id,
-            contextArtifact: { artifactId, sha256: hash },
-          },
-        },
-      });
-    }
-    if (boundary === "revision") {
-      const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
-      await recruiting.reviseRecruitingRole(prisma, actor, {
-        ...definition,
-        roleId: f.role.role.id,
-        expectedRevision: 1,
-      });
-    }
-    if (boundary === "active-role")
-      await recruiting.bindRecruitingRole(prisma, actor, { threadId: f.thread.id, roleId: null });
-    if (boundary === "effect-request")
-      await prisma.externalEffect.update({
-        where: { id: f.context.effectId },
-        data: { request: { operation: "read" } },
-      });
-    if (boundary === "effect-run")
-      await prisma.externalEffect.update({ where: { id: f.context.effectId }, data: { runId } });
-    await expect(
-      recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts),
-    ).rejects.toThrow();
-    expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(0);
-  });
-  it.each(["text", "json"])("selects exact native %s Artifact content", async (format) => {
-    const f = await assessmentFixture();
-    const quote = "Candidate 😀 implemented transforms";
-    const bytes = Buffer.from(
-      format === "json"
-        ? JSON.stringify({
-            rows: [{ detail: quote }, { detail: "Another actual field" }],
-            decoy: "Other",
-          })
-        : `prefix ${quote}`,
-    );
-    const materialHash = createHash("sha256").update(bytes).digest("hex");
-    const material = await prisma.artifact.create({
-      data: {
-        spaceId,
-        userId,
-        botId,
-        groupId: f.group.id,
-        name: `material.${format}`,
-        mimeType: format === "json" ? "application/json" : "text/plain",
-        hash: materialHash,
-        size: bytes.length,
-        storageKey: `material-${f.run.id}`,
-      },
-    });
-    const src: RecruitingAssessmentSourceRef = {
-      ...f.input.sourceRefs[0]!,
-      anchor: {
-        kind: "artifact",
-        artifact: { artifactId: material.id, sha256: materialHash },
-        locator: "exact field",
-      },
-      quote,
-      selection:
-        format === "json"
-          ? {
-              kind: "artifact_json_string",
-              path: ["rows", 0, "detail"],
-              start: 0,
-              end: quote.length,
-            }
-          : { kind: "artifact_text", start: 7, end: 7 + quote.length },
-    };
-    const other: RecruitingAssessmentSourceRef = {
-      ...src,
-      id: "other-field",
-      quote: "Another actual field",
-      selection: { kind: "artifact_json_string", path: ["rows", 1, "detail"], start: 0, end: 20 },
-    };
-    const input = { ...f.input, sourceRefs: format === "json" ? [src, other] : [src] };
-    const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    const artifacts = [...admitted.artifacts, { artifactId: material.id, bytes }];
-    const saved = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admitted.context,
-      input,
-      artifacts,
-    );
-    expect(saved.assessment.sourceRefs).toEqual(input.sourceRefs);
-    await expect(
-      recruiting.saveRecruitingAssessment(
-        prisma,
-        actor,
-        { ...admitted.context, contextArtifact: undefined },
-        input,
-        [{ artifactId: material.id, bytes: Buffer.from("changed") }],
-      ),
-    ).rejects.toThrow();
-    expect(
-      (
-        await recruiting.saveRecruitingAssessment(
-          prisma,
-          actor,
-          { ...admitted.context, contextArtifact: undefined },
-          input,
-          [{ artifactId: material.id, bytes }],
-        )
-      ).assessment,
-    ).toEqual(saved.assessment);
-  });
-  it.each([
-    "hash",
-    "bytes",
-    "quote",
-    "json-path",
-    "prototype",
-    "array-key",
-    "raw-json",
-    "foreign",
-    "deleted",
-    "assistant",
-    "provider-label",
-  ])("rejects unverified Artifact evidence: %s", async (boundary) => {
-    const f = await assessmentFixture();
-    const quote = "Actual primary text";
-    const bytes = Buffer.from(JSON.stringify({ rows: [{ detail: quote }], decoy: "Invented" }));
-    const materialHash = createHash("sha256").update(bytes).digest("hex");
-    const material = await prisma.artifact.create({
-      data: {
-        spaceId,
-        userId,
-        botId,
-        groupId: f.group.id,
-        name: "material.json",
-        mimeType: "application/json",
-        hash: materialHash,
-        size: bytes.length,
-        storageKey: `bad-material-${f.run.id}`,
-        ...(boundary === "assistant" ? { runId: f.run.id } : {}),
-      },
-    });
-    let src: RecruitingAssessmentSourceRef = {
-      ...f.input.sourceRefs[0]!,
-      anchor: {
-        kind: "artifact",
-        artifact: { artifactId: material.id, sha256: materialHash },
-        locator: "rows[0].detail",
-      },
-      quote,
-      selection: {
-        kind: "artifact_json_string",
-        path: ["rows", 0, "detail"],
-        start: 0,
-        end: quote.length,
-      },
-    };
-    if (boundary === "hash")
-      src = {
-        ...src,
-        anchor: {
-          kind: "artifact",
-          artifact: { artifactId: material.id, sha256: hash },
-          locator: "field",
-        },
-      };
-    if (boundary === "quote") src = { ...src, quote: "Invented" };
-    if (boundary === "json-path")
-      src = {
-        ...src,
-        selection: { kind: "artifact_json_string", path: ["decoy"], start: 0, end: quote.length },
-      };
-    if (boundary === "prototype")
-      src = {
-        ...src,
-        selection: {
-          kind: "artifact_json_string",
-          path: ["__proto__", "detail"],
-          start: 0,
-          end: quote.length,
-        },
-      };
-    if (boundary === "array-key")
-      src = {
-        ...src,
-        selection: {
-          kind: "artifact_json_string",
-          path: ["rows", "0", "detail"],
-          start: 0,
-          end: quote.length,
-        },
-      };
-    if (boundary === "raw-json")
-      src = {
-        ...src,
-        selection: {
-          kind: "artifact_text",
-          start: bytes.toString().indexOf(quote),
-          end: bytes.toString().indexOf(quote) + quote.length,
-        },
-      };
-    if (boundary === "foreign")
-      src = {
-        ...src,
-        anchor: {
-          kind: "artifact",
-          artifact: { artifactId: otherArtifactId, sha256: hash },
-          locator: "text",
-        },
-      };
-    if (boundary === "provider-label") src = { ...src, kind: "provider_report" };
-    const input = { ...f.input, sourceRefs: [src] };
-    const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    if (boundary === "deleted") await prisma.artifact.delete({ where: { id: material.id } });
-    await expect(
-      recruiting.saveRecruitingAssessment(prisma, actor, admitted.context, input, [
-        ...admitted.artifacts,
-        { artifactId: material.id, bytes: boundary === "bytes" ? Buffer.from("corrupt") : bytes },
-      ]),
-    ).rejects.toThrow();
-    expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(0);
-  });
-  it("retains unread gaps but refuses to use them for a nonunknown atom", async () => {
-    const f = await assessmentFixture();
-    const { quote: _quote, selection: _selection, ...ref } = f.input.sourceRefs[0]!;
-    const unread = { ...ref, readState: "unread" as const, readAt: null };
-    const invalid = { ...f.input, sourceRefs: [unread], candidateKey: "unread-primary" };
-    const rejected = await assessmentAdmission(invalid, { runId: f.run.id, threadId: f.thread.id });
-    await expect(
-      recruiting.saveRecruitingAssessment(
-        prisma,
-        actor,
-        rejected.context,
-        invalid,
-        rejected.artifacts,
-      ),
-    ).rejects.toThrow();
-    const input = {
-      ...invalid,
-      candidateKey: "unread-gap",
-      atomJudgments: [
-        {
-          ...invalid.atomJudgments[0]!,
-          verdict: "unknown" as const,
-          evidence: [],
-          missing: ["Read the supplied material"],
-        },
-      ],
-    };
-    const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    const saved = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admitted.context,
-      input,
-      admitted.artifacts,
-    );
-    expect(saved.assessment.sourceRefs).toEqual([unread]);
-    expect(saved.assessment.judgments.hardGate).toBe("unknown");
-  });
-  it("keeps provider snapshots as reports even when their label is spoofed", async () => {
-    const f = await assessmentFixture();
-    const text = "Provider claims sufficient experience";
-    const bytes = Buffer.from(JSON.stringify({ text }));
-    const hash = createHash("sha256").update(bytes).digest("hex");
-    const material = await prisma.artifact.create({
-      data: {
-        spaceId,
-        userId,
-        botId,
-        groupId: f.group.id,
-        runId: f.run.id,
-        name: "provider.json",
-        mimeType: "application/json",
-        size: bytes.length,
-        hash,
-        storageKey: `provider-${f.run.id}`,
-      },
-    });
-    const server = await prisma.mcpServer.create({
-      data: {
-        spaceId,
-        userId,
-        name: "Synthetic research",
-        slug: `provider-${f.run.id}`,
-        transport: "http",
-        endpoint: "https://example.test/mcp",
-      },
-    });
-    const task = await prisma.recruitingResearchTask.create({
-      data: {
-        roleId: f.role.role.id,
-        mcpServerId: server.id,
-        serverRevision: 1,
-        createdByRunId: f.run.id,
-      },
-    });
-    await prisma.recruitingResearchAction.create({
-      data: {
-        taskId: task.id,
-        roleRevisionId: f.role.revision.id,
-        runId: f.run.id,
-        sourceMessageId: f.message.id,
-        clientNonce: `provider-${f.run.id}`,
-        kind: "create",
-        requestArtifactId: material.id,
-        requestArtifactHash: hash,
-        contextArtifactId: f.context.contextArtifact!.artifactId,
-        contextArtifactHash: f.context.contextArtifact!.sha256,
-        outputArtifacts: [{ artifactId: material.id, sha256: hash }],
-      },
-    });
-    const src: RecruitingAssessmentSourceRef = {
-      ...f.input.sourceRefs[0]!,
-      quote: text,
-      anchor: {
-        kind: "artifact",
-        artifact: { artifactId: material.id, sha256: hash },
-        locator: "text",
-      },
-      selection: { kind: "artifact_json_string", path: ["text"], start: 0, end: text.length },
-    };
-    for (const kind of ["original_material", "provider_report"] as const) {
-      const input = { ...f.input, candidateKey: kind, sourceRefs: [{ ...src, kind }] };
-      const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-      await expect(
-        recruiting.saveRecruitingAssessment(prisma, actor, admitted.context, input, [
-          ...admitted.artifacts,
-          { artifactId: material.id, bytes },
-        ]),
-      ).rejects.toThrow();
-    }
-    const input = {
-      ...f.input,
-      candidateKey: "provider-gap",
-      sourceRefs: [{ ...src, kind: "provider_report" as const }],
-      atomJudgments: [
-        {
-          ...f.input.atomJudgments[0]!,
-          verdict: "unknown" as const,
-          missing: ["Original evidence"],
-        },
-      ],
-    };
-    const admitted = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    const saved = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admitted.context,
-      input,
-      [...admitted.artifacts, { artifactId: material.id, bytes }],
-    );
-    expect(saved.assessment.facts).toEqual(f.input.facts);
-    expect(saved.assessment.sourceRefs[0]?.kind).toBe("provider_report");
-    expect(saved.assessment.judgments.hardGate).toBe("unknown");
-  });
-  it("uses a native web reader receipt as primary material and preserves its first read time", async () => {
-    const f = await assessmentFixture();
-    const text = "Candidate personally implemented coordinate transforms 😀";
-    const url = "https://example.test/profile";
-    const readAt = "2026-10-16T00:00:00.000Z";
-    const bytes = Buffer.from(JSON.stringify({ text, title: "Profile", url, truncated: false }));
-    const hash = createHash("sha256").update(bytes).digest("hex");
-    const metadata = {
-      name: "web-material.json",
-      mimeType: "application/json",
-      size: bytes.length,
-      hash,
-      storageKey: `web-${f.run.id}`,
-      clientNonce: `native-web:${f.run.id}:${hash}`,
-    };
-    const input = { artifact: metadata, reader: "web_fetch" as const, url, readAt };
-    const retained = await recruiting.recordRecruitingWebMaterial(prisma, actor, f.context, input);
-    const repeated = await recruiting.recordRecruitingWebMaterial(prisma, actor, f.context, {
-      ...input,
-      readAt: "2026-10-16T01:00:00.000Z",
-      artifact: { ...metadata, storageKey: "second-blob" },
-    });
-    expect(repeated.created).toBe(false);
-    expect(repeated.event).toEqual(retained.event);
-    expect((retained.event.payload as { readAt: string }).readAt).toBe(readAt);
-    const src: RecruitingAssessmentSourceRef = {
-      ...f.input.sourceRefs[0]!,
-      url,
-      readAt,
-      quote: text,
-      anchor: {
-        kind: "artifact",
-        artifact: { artifactId: retained.artifact.id, sha256: hash },
-        locator: "text",
-      },
-      selection: { kind: "artifact_json_string", path: ["text"], start: 0, end: text.length },
-    };
-    const candidate = { ...f.input, sourceRefs: [src] };
-    for (const kind of ["candidate_statement", "recruiter_verified"] as const) {
-      const spoofed = { ...candidate, candidateKey: kind, sourceRefs: [{ ...src, kind }] };
-      const rejected = await assessmentAdmission(spoofed, {
-        runId: f.run.id,
-        threadId: f.thread.id,
-      });
-      await expect(
-        recruiting.saveRecruitingAssessment(prisma, actor, rejected.context, spoofed, [
-          ...rejected.artifacts,
-          { artifactId: retained.artifact.id, bytes },
-        ]),
-      ).rejects.toThrow(IsolationError);
-    }
-    const admission = await assessmentAdmission(candidate, {
-      runId: f.run.id,
-      threadId: f.thread.id,
-    });
-    const evidence = [...admission.artifacts, { artifactId: retained.artifact.id, bytes }];
-    const saved = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admission.context,
-      candidate,
-      evidence,
-    );
-    expect(saved.assessment.judgments.hardGate).toBe("met");
-    await prisma.event.delete({ where: { id: retained.event.id } });
-    await expect(
-      recruiting.saveRecruitingAssessment(prisma, actor, admission.context, candidate, evidence),
-    ).rejects.toThrow(IsolationError);
-  });
-  it("recovers a committed assessment after acknowledgement loss without a second version", async () => {
-    const f = await assessmentFixture();
-    const lostAck = {
-      $transaction: async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
-        await prisma.$transaction(callback);
-        throw new Error("simulated commit acknowledgement loss");
-      },
-    } as unknown as PrismaClient;
-    await expect(
-      recruiting.saveRecruitingAssessment(lostAck, actor, f.context, f.input, f.artifacts),
-    ).rejects.toThrow("acknowledgement loss");
-    const receipt = await prisma.externalEffect.findUniqueOrThrow({
-      where: { id: f.context.effectId },
-    });
-    expect(receipt.status).toBe("completed");
-    await prisma.run.update({
-      where: { id: f.run.id },
-      data: { status: "completed", leaseOwner: null, leaseExpiresAt: null },
-    });
-    const { sourceThreadId: _, ...definition } = roleInput(source(f.message.id));
-    await recruiting.reviseRecruitingRole(prisma, actor, {
-      ...definition,
-      roleId: f.role.role.id,
-      expectedRevision: 1,
-    });
-    const { contextArtifact: _contextArtifact, ...recovery } = f.context;
-    const restored = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      recovery,
-      f.input,
-      [],
-    );
-    expect(restored.isCurrent).toBe(false);
-    expect(restored.assessment).toEqual((receipt.result as { assessment: unknown }).assessment);
-    expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(1);
-    expect(
-      await prisma.event.count({ where: { runId: f.run.id, type: "recruiting.assessment.saved" } }),
-    ).toBe(1);
-    await expect(
-      recruiting.saveRecruitingAssessment(
-        prisma,
-        { ...actor, userId: otherUserId },
-        f.context,
-        f.input,
-        [],
-      ),
-    ).rejects.toThrow(IsolationError);
-    await prisma.message.delete({ where: { id: f.message.id } });
-    await expect(
-      recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, []),
-    ).rejects.toThrow(IsolationError);
-  });
-  it("serializes candidate CAS across separate thread locks and PostgreSQL pools", async () => {
-    const a = await assessmentFixture();
-    const b = await assessmentFixture();
-    await recruiting.bindRecruitingRole(prisma, actor, {
-      threadId: b.thread.id,
-      roleId: a.role.role.id,
-    });
-    const admitted = await assessmentAdmission(a.input, { runId: b.run.id, threadId: b.thread.id });
-    const second = createDb(databaseUrl!);
-    try {
-      const settled = await Promise.allSettled([
-        recruiting.saveRecruitingAssessment(prisma, actor, a.context, a.input, a.artifacts),
-        recruiting.saveRecruitingAssessment(
-          second.prisma,
-          actor,
-          admitted.context,
-          a.input,
-          admitted.artifacts,
-        ),
-      ]);
-      expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-      const rejected = settled.find((result) => result.status === "rejected");
-      expect(rejected?.status === "rejected" && rejected.reason).toBeInstanceOf(
-        recruiting.RecruitingConflictError,
-      );
-      expect(await prisma.recruitingAssessment.count({ where: { roleId: a.role.role.id } })).toBe(
-        1,
-      );
-    } finally {
-      await second.prisma.$disconnect();
-      await second.pool.end();
-    }
-  });
-  it("linearizes cancellation before assessment commit through the native thread lock", async () => {
-    const f = await assessmentFixture();
-    const second = createDb(databaseUrl!);
-    let release!: () => void;
-    let locked!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const lock = new Promise<void>((resolve) => {
-      locked = resolve;
-    });
-    const cancel = prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(
-        PrismaSql.sql`SELECT "id" FROM "threads" WHERE "id" = ${f.thread.id} FOR UPDATE`,
-      );
-      await recruiting.cancelRunsInTransaction(
-        tx,
-        [{ id: f.run.id, taskId: f.run.taskId }],
-        new Date(),
-      );
-      locked();
-      await gate;
-    });
-    await lock;
-    try {
-      const pending = recruiting.saveRecruitingAssessment(
-        second.prisma,
-        actor,
-        f.context,
-        f.input,
-        f.artifacts,
-      );
-      const observed = pending.then(
-        () => "saved",
-        () => "rejected",
-      );
-      expect(
-        await Promise.race([
-          observed,
-          new Promise((resolve) => setTimeout(() => resolve("blocked"), 100)),
-        ]),
-      ).toBe("blocked");
-      release();
-      await cancel;
-      expect(await observed).toBe("rejected");
-      expect(await prisma.recruitingAssessment.count({ where: { roleId: f.role.role.id } })).toBe(
-        0,
-      );
-    } finally {
-      release();
-      await cancel;
-      await second.prisma.$disconnect();
-      await second.pool.end();
     }
   });
   it("restores research through the owning role and validates action run/message/artifact links", async () => {
@@ -3636,95 +1976,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(await recruiting.listRecruitingResearch(prisma, actor, { roleId: firstRoleId })).toEqual(
       { tasks: [], actions: [], observations: [] },
     );
-  });
-  it("retains authorized historical sources and creator runs after a secondary thread changes role", async () => {
-    const current = (await recruiting.bindRecruitingRole(prisma, actor, {
-      threadId,
-      roleId: firstRoleId,
-    }))!;
-    const group = await prisma.chatGroup.create({
-      data: { spaceId, userId, name: "Owned secondary", members: { create: { botId } } },
-    });
-    const secondary = await prisma.thread.create({ data: { spaceId, userId, groupId: group.id } });
-    await recruiting.bindRecruitingRole(prisma, actor, {
-      threadId: secondary.id,
-      roleId: firstRoleId,
-    });
-    const message = await prisma.message.create({
-      data: {
-        threadId: secondary.id,
-        seq: 0,
-        role: "user",
-        blocks: [{ kind: "text", text: "Additional material" }],
-      },
-    });
-    const definition = roleInput(source(message.id));
-    const { sourceThreadId: _, ...revision } = definition;
-    const updated = await recruiting.reviseRecruitingRole(prisma, actor, {
-      ...revision,
-      roleId: firstRoleId,
-      expectedRevision: current.role.revision,
-    });
-    const task = await prisma.task.create({
-      data: {
-        spaceId,
-        userId,
-        botId,
-        threadId: secondary.id,
-        prompt: "Secondary",
-        status: "running",
-      },
-    });
-    const run = await prisma.run.create({
-      data: {
-        spaceId,
-        userId,
-        botId,
-        threadId: secondary.id,
-        taskId: task.id,
-        status: "running",
-        trigger: "user",
-        initialRecruitingRoleRevisionId: updated.revision.id,
-      },
-    });
-    const input = {
-      ...assessmentInput(firstRoleId, updated.revision.id, "secondary-row"),
-      sourceRefs: [assessmentSource(message.id, "Additional material")],
-    };
-    const admission = await assessmentAdmission(input, { runId: run.id, threadId: secondary.id });
-    const saved = await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admission.context,
-      input,
-      admission.artifacts,
-    );
-    const independent = await recruiting.createRecruitingRole(prisma, actor, {
-      ...definition,
-      sourceThreadId: secondary.id,
-    });
-    expect(independent.role.id).not.toBe(firstRoleId);
-    expect(
-      (await recruiting.getRecruitingWorkspace(prisma, actor, { threadId }))?.revision,
-    ).toEqual(updated.revision);
-    expect(
-      await recruiting.getRecruitingAssessment(prisma, actor, {
-        roleId: firstRoleId,
-        candidateKey: "secondary-row",
-      }),
-    ).toEqual(saved);
-    await expect(
-      recruiting.saveRecruitingAssessment(
-        prisma,
-        actor,
-        {
-          ...admission.context,
-          effectRequest: { operation: "save", ...input, expectedRevision: 1 },
-        },
-        { ...input, expectedRevision: 1 },
-        admission.artifacts,
-      ),
-    ).rejects.toThrow(IsolationError);
   });
   it("resolves a run Artifact by its actual external conversation even when the bot has a normal chat", async () => {
     expect(await prisma.thread.findUnique({ where: { botId } })).toMatchObject({ id: threadId });
@@ -5185,12 +3436,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(
       await prisma.recruitingRoleRevision.findUniqueOrThrow({ where: { id: f.role.revision.id } }),
     ).toEqual(original);
-    const historical = await recruiting.getRecruitingAssessment(prisma, actor, {
-      roleId: f.role.role.id,
-      candidateKey: assessment.candidateKey,
-    });
-    expect(historical?.isCurrent).toBe(false);
-    expect(historical?.roleRevision.id).toBe(f.role.revision.id);
     expect(
       await prisma.recruitingAssessment.findUniqueOrThrow({
         where: {
@@ -6191,8 +4436,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       sourceRows: 6,
       candidates: 4,
       identifiedCandidates: 2,
-      unassessed: 4,
-      assessed: 0,
       shortlisted: 0,
     });
     const next = await recruiting.listRecruitingCandidates(prisma, actor, {
@@ -6217,7 +4460,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const filtered = await recruiting.listRecruitingCandidates(prisma, actor, {
       roleId: f.role.role.id,
       query: "new company",
-      assessmentState: "unassessed",
     });
     expect(filtered.total).toBe(1);
     expect(filtered.items[0]).toMatchObject({
@@ -6225,7 +4467,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       name: "Example newest",
       company: "New Company",
       discoveryCount: 3,
-      latestAssessment: null,
     });
     const sources = await recruiting.listRecruitingCandidateSources(prisma, actor, {
       roleId: f.role.role.id,
@@ -6691,7 +4932,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       roleId: f.role.role.id,
     });
     expect(list.total).toBe(1);
-    expect(list.counts).toMatchObject({ sourceRows: 1, identifiedCandidates: 0, unassessed: 1 });
+    expect(list.counts).toMatchObject({ sourceRows: 1, identifiedCandidates: 0 });
     expect(list.items[0]).toMatchObject({
       name: null,
       linkedinUrl: null,
@@ -6740,7 +4981,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   });
 
   it("persists private notes and reads reminders across both person keys", async () => {
-    const f = await assessmentFixture();
+    const f = await roleRunFixture();
     const keys = ["sourced:profile-fixture", "crm:profile-fixture"];
     const note = await recruiting.createRecruitingCandidateNote(prisma, actor, {
       candidateKey: keys[0]!,
@@ -6785,86 +5026,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(
       (await recruiting.listRecruitingReminders(prisma, other, { candidateKeys: keys })).items,
     ).toHaveLength(0);
-  });
-
-  it("lists newly assessed candidates independently of discovery and separates shortlist CAS from qualification", async () => {
-    const f = await assessmentFixture();
-    await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
-    const page = await recruiting.listRecruitingCandidates(prisma, actor, {
-      roleId: f.role.role.id,
-      assessmentState: "current",
-      verdict: "met",
-    });
-    expect(page.total).toBe(1);
-    expect(page.items[0]).toMatchObject({
-      candidateKey: f.input.candidateKey,
-      discoveryCount: 0,
-      revision: 0,
-      latestAssessment: { isCurrent: true, hardGate: "met", version: 1 },
-    });
-    const input = {
-      threadId: f.thread.id,
-      roleId: f.role.role.id,
-      candidateKey: f.input.candidateKey,
-      expectedRevision: 0,
-      shortlisted: true,
-    };
-    expect(await recruiting.setRecruitingCandidateShortlist(prisma, actor, input)).toMatchObject({
-      shortlisted: true,
-      revision: 1,
-    });
-    const shortlisted = await recruiting.listRecruitingCandidates(prisma, actor, {
-      roleId: f.role.role.id,
-    });
-    const shortlistedAt = shortlisted.items[0]?.shortlistedAt;
-    expect(shortlistedAt).toEqual(expect.any(String));
-    expect(Number.isFinite(Date.parse(shortlistedAt!))).toBe(true);
-    const receipts = await prisma.message.count({ where: { threadId: f.thread.id } });
-    expect(
-      await recruiting.setRecruitingCandidateShortlist(prisma, actor, {
-        ...input,
-        expectedRevision: 1,
-      }),
-    ).toMatchObject({ revision: 1 });
-    expect(await prisma.message.count({ where: { threadId: f.thread.id } })).toBe(receipts);
-    await expect(recruiting.setRecruitingCandidateShortlist(prisma, actor, input)).rejects.toThrow(
-      recruiting.RecruitingConflictError,
-    );
-    const old = await prisma.recruitingAssessment.findFirstOrThrow({
-      where: { roleId: f.role.role.id, candidateKey: f.input.candidateKey },
-    });
-    await recruiting.reviseRecruitingRole(prisma, actor, {
-      sourceRefs: f.role.revision.sourceRefs,
-      criteria: f.role.revision.criteria,
-      preferences: [],
-      definitionQuestions: [],
-      roleId: f.role.role.id,
-      expectedRevision: f.role.role.revision,
-      title: "Updated assessment role",
-    });
-    const stale = await recruiting.listRecruitingCandidates(prisma, actor, {
-      roleId: f.role.role.id,
-      assessmentState: "outdated",
-      shortlisted: true,
-    });
-    expect(stale.items[0]?.latestAssessment?.isCurrent).toBe(false);
-    expect(stale.total).toBe(1);
-    expect(stale.items[0]?.shortlistedAt).toBe(shortlistedAt);
-    await recruiting.setRecruitingCandidateShortlist(prisma, actor, {
-      ...input,
-      expectedRevision: 1,
-      shortlisted: false,
-    });
-    const removed = await recruiting.listRecruitingCandidates(prisma, actor, {
-      roleId: f.role.role.id,
-    });
-    expect(removed.items[0]?.shortlistedAt).toBeNull();
-
-    expect(
-      await prisma.recruitingAssessment.findFirstOrThrow({
-        where: { roleId: f.role.role.id, candidateKey: f.input.candidateKey },
-      }),
-    ).toEqual(old);
   });
 
   it("offers score sort when provider scores are numeric strings and rank is Unknown", async () => {
@@ -7041,8 +5202,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       sourceRows: 5,
       candidates: 3,
       identifiedCandidates: 3,
-      unassessed: 3,
-      assessed: 0,
       shortlisted: 0,
     });
     expect(first.nextCursor).not.toBeNull();
@@ -7191,99 +5350,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toBe(1);
   });
 
-  it("joins an assessment saved with the native research row reference to the same discovered candidate", async () => {
-    const { f, prepared } = await mappedResearchFixture();
-    const page = await recordCandidatePage(f, prepared, "assessment-join", [
-      canonicalCandidateRow("Unresolved person", null),
-    ]);
-    const reference = page.saved.candidateRows[0]!;
-    expect(reference).toMatchObject({
-      rowIndex: 0,
-      candidateKey: `source-row:${page.input.effectId}:0`,
-    });
-    const input = {
-      ...assessmentInput(f.role.role.id, f.role.revision.id, reference.candidateKey),
-      sourceRefs: [],
-      questions: [],
-      atomJudgments: [],
-    };
-    const admission = await assessmentAdmission(input, { runId: f.run.id, threadId: f.thread.id });
-    await recruiting.saveRecruitingAssessment(
-      prisma,
-      actor,
-      admission.context,
-      input,
-      admission.artifacts,
-    );
-    const listed = await recruiting.listRecruitingCandidates(prisma, actor, {
-      roleId: f.role.role.id,
-    });
-    expect(listed.counts).toMatchObject({
-      candidates: 1,
-      sourceRows: 1,
-      assessed: 1,
-      unassessed: 0,
-    });
-    expect(listed.items).toHaveLength(1);
-    expect(listed.items[0]).toMatchObject({
-      candidateKey: reference.candidateKey,
-      discoveryCount: 1,
-      latestAssessment: { version: 1, isCurrent: true },
-    });
-  });
-  it("pages latest distinct assessments before the 200-row bound", async () => {
-    const f = await assessmentFixture();
-    await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
-    const original = await prisma.recruitingAssessment.findFirstOrThrow({
-      where: { roleId: f.role.role.id },
-    });
-    await prisma.recruitingAssessment.deleteMany({ where: { roleId: f.role.role.id } });
-    await prisma.recruitingAssessment.createMany({
-      data: Array.from({ length: 205 }, (_, index) =>
-        [1, 2].map((version) => ({
-          ...original,
-          candidateKey: `candidate-${String(index).padStart(3, "0")}`,
-          version,
-          basedOnVersion: version === 1 ? null : 1,
-          facts: original.facts as Prisma.InputJsonValue,
-          judgments: original.judgments as Prisma.InputJsonValue,
-          questions: original.questions as Prisma.InputJsonValue,
-          sourceRefs: original.sourceRefs as Prisma.InputJsonValue,
-        })),
-      ).flat(),
-    });
-    const first = await recruiting.listRecruitingAssessments(prisma, actor, {
-      roleId: f.role.role.id,
-      offset: 0,
-    });
-    const second = await recruiting.listRecruitingAssessments(prisma, actor, {
-      roleId: f.role.role.id,
-      offset: 200,
-    });
-    expect(first).toHaveLength(200);
-    expect(second).toHaveLength(5);
-    expect(
-      [...first, ...second].map((row) => [row.assessment.candidateKey, row.assessment.version]),
-    ).toEqual(
-      Array.from({ length: 205 }, (_, index) => [`candidate-${String(index).padStart(3, "0")}`, 2]),
-    );
-    expect(
-      await recruiting.listRecruitingAssessments(prisma, actor, {
-        roleId: f.role.role.id,
-        offset: 400,
-      }),
-    ).toEqual([]);
-    await expect(
-      recruiting.listRecruitingAssessments(
-        prisma,
-        { ...actor, userId: otherUserId },
-        { roleId: f.role.role.id, offset: 0 },
-      ),
-    ).rejects.toThrow(IsolationError);
-  });
-
   it("pages research tasks and actions independently including over 200 actions on one task", async () => {
-    const f = await assessmentFixture();
+    const f = await roleRunFixture();
     const server = await prisma.mcpServer.create({
       data: {
         spaceId,
@@ -7357,63 +5425,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     await expect(
       recruiting.listRecruitingResearch(prisma, actor, { roleId: f.role.role.id, offset: 200 }),
-    ).rejects.toThrow(IsolationError);
-  });
-
-  it("filters candidate questions before applying the 200-row offset", async () => {
-    const f = await questionFixture(true);
-    await recruiting.pauseRunForInput(prisma, f.pause);
-    const original = await prisma.event.findFirstOrThrow({
-      where: { runId: f.run.id, type: "recruiting.question.asked" },
-    });
-    const { id: _id, seq: _seq, ...event } = original;
-    const payload = original.payload as Record<string, Prisma.InputJsonValue>;
-    let seq = (
-      await prisma.event.aggregate({ where: { threadId: f.thread.id }, _max: { seq: true } })
-    )._max.seq!;
-    // Interleaved unrelated candidate receipts must not consume this candidate's page.
-    for (let index = 0; index < 204; index++) {
-      await prisma.event.create({
-        data: {
-          ...event,
-          seq: ++seq,
-          payload: {
-            ...payload,
-            target: {
-              kind: "candidate",
-              candidateKey: "different",
-              assessmentVersion: 1,
-              criterionIds: [],
-            },
-          },
-        },
-      });
-      await prisma.event.create({
-        data: { ...event, seq: ++seq, payload: payload as Prisma.InputJsonValue },
-      });
-    }
-    const input = {
-      threadId: f.thread.id,
-      roleId: f.role.role.id,
-      candidateKey: f.input.candidateKey,
-    };
-    const first = await recruiting.listRecruitingQuestions(prisma, actor, { ...input, offset: 0 });
-    const second = await recruiting.listRecruitingQuestions(prisma, actor, {
-      ...input,
-      offset: 200,
-    });
-    expect(first).toHaveLength(200);
-    expect(second).toHaveLength(5);
-    expect([...first, ...second].every((question) => question.effectId === f.effect.id)).toBe(true);
-    expect(
-      await recruiting.listRecruitingQuestions(prisma, actor, { ...input, offset: 400 }),
-    ).toEqual([]);
-    await expect(
-      recruiting.listRecruitingQuestions(
-        prisma,
-        { ...actor, userId: otherUserId },
-        { ...input, offset: 0 },
-      ),
     ).rejects.toThrow(IsolationError);
   });
 });

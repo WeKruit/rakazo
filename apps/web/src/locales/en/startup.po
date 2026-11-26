@@ -468,14 +468,6 @@ msgid "All contacts"
 msgstr "All contacts"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal assessments"
-msgstr "All internal assessments"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal verdicts"
-msgstr "All internal verdicts"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All matches"
 msgstr "All matches"
 
@@ -2500,34 +2492,6 @@ msgstr "Interested"
 msgid "Interjection picked up p50 · p95"
 msgstr "Interjection picked up p50 · p95"
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment"
-msgstr "Internal assessment"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: current"
-msgstr "Internal assessment: current"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: outdated"
-msgstr "Internal assessment: outdated"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict"
-msgstr "Internal verdict"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: met"
-msgstr "Internal verdict: met"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unknown"
-msgstr "Internal verdict: unknown"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unmet"
-msgstr "Internal verdict: unmet"
-
 #: src/pages/shell/ShellConversation.tsx
 msgid "Interrupted, resuming…"
 msgstr "Interrupted, resuming…"
@@ -3142,10 +3106,6 @@ msgstr "No emails sent yet."
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "No evidence provided."
 msgstr "No evidence provided."
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "No internal assessment"
-msgstr "No internal assessment"
 
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No loaded candidates match these filters."

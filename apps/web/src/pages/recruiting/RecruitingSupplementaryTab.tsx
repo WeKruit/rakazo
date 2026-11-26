@@ -14,14 +14,8 @@ const Sources = lazyPanel(() =>
 );
 
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Button, TabsContent } from "@rakazo/ui-web";
+import { TabsContent } from "@rakazo/ui-web";
 import type { useRecruitingWorkspace } from "./useRecruitingWorkspace";
-
-const AskCard = lazyPanel(() =>
-  withFeatureMessages(() => import("../../components/AskCard")).then((m) => m.AskCard),
-);
-
-import { rpc } from "../../lib/rpc";
 
 const FeedbackHistory = lazyPanel(() =>
   withFeatureMessages(() => import("./CandidateFeedback")).then((m) => m.FeedbackHistory),
@@ -39,10 +33,8 @@ export function RecruitingSupplementaryTab({
     readCache,
     readCacheScope,
     refreshSignal,
-    onRevealMessage,
     showDiagnostics,
     snapshot,
-    setRefresh,
     feedbackRefresh,
     activeTab,
     candidatePage,
@@ -53,7 +45,6 @@ export function RecruitingSupplementaryTab({
     unphrasedBriefFields,
     roleQuestions,
     roleSources,
-    assessments,
   } = model;
 
   return (
@@ -177,56 +168,6 @@ export function RecruitingSupplementaryTab({
       ) : null}
       {activeTab === "missing" ? (
         <TabsContent value="missing" className="space-y-5">
-          {snapshot?.questions.map((question) => {
-            const candidateKey =
-              question.target.kind === "candidate" ? question.target.candidateKey : null;
-            const target = question.groupId
-              ? { groupId: question.groupId }
-              : { botId: question.botId };
-            return (
-              <div
-                key={`${question.effectId}:${question.messageId}:${question.askIndex}`}
-                className="space-y-2 [&>div]:max-w-full"
-              >
-                <p className="text-xs text-muted-foreground">
-                  {question.target.kind === "candidate" ? (
-                    <>
-                      {showDiagnostics
-                        ? question.target.candidateKey
-                        : (candidatePage?.items.find(
-                            (candidate) => candidate.candidateKey === candidateKey,
-                          )?.name ?? t`Candidate question`)}{" "}
-                      ·{" "}
-                    </>
-                  ) : null}
-                  {question.isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
-                </p>
-                <AskCard
-                  block={question.block}
-                  canAnswer={question.canAnswer}
-                  expiresAt={question.expiresAt}
-                  onAnswer={async (answer) => {
-                    await rpc.threads.answer({
-                      ...target,
-                      runId: question.runId,
-                      messageId: question.messageId,
-                      answer,
-                    });
-                    setRefresh((value) => value + 1);
-                  }}
-                />
-                {onRevealMessage ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onRevealMessage({ ...target, messageId: question.messageId })}
-                  >
-                    <Trans>Open original question</Trans>
-                  </Button>
-                ) : null}
-              </div>
-            );
-          })}
           <div className="space-y-2">
             <h3 className="font-medium">
               <Trans>Role definition</Trans>
@@ -287,35 +228,6 @@ export function RecruitingSupplementaryTab({
                 <Trans>No saved questions</Trans>
               </p>
             ) : null}
-          </div>
-          <div className="space-y-3">
-            <h3 className="font-medium">
-              <Trans>Candidate facts</Trans>
-            </h3>
-            {!snapshot ? null : !assessments.length ? (
-              <p className="text-muted-foreground">
-                <Trans>No saved assessments</Trans>
-              </p>
-            ) : (
-              assessments.map(({ assessment, isCurrent }) => (
-                <div key={`${assessment.candidateKey}:${assessment.version}`} className="space-y-1">
-                  <p className="text-xs text-muted-foreground">
-                    {showDiagnostics
-                      ? assessment.candidateKey
-                      : (candidatePage?.items.find(
-                          (candidate) => candidate.candidateKey === assessment.candidateKey,
-                        )?.name ?? t`Unnamed candidate`)}{" "}
-                    · {isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
-                  </p>
-                  {[
-                    ...assessment.questions,
-                    ...assessment.judgments.criteria.flatMap((judgment) => judgment.missing),
-                  ].map((question, index) => (
-                    <p key={`${index}:${question}`}>{question}</p>
-                  ))}
-                </div>
-              ))
-            )}
           </div>
         </TabsContent>
       ) : null}

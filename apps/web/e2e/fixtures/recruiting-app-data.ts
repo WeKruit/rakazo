@@ -116,7 +116,6 @@ export const candidates: RecruitingCandidate[] = people.map((person, index) => (
   discoveryCount: 1,
   firstDiscoveredAt: checkedAt,
   lastDiscoveredAt: checkedAt,
-  latestAssessment: null,
   crm: null,
   latestSource: {
     providerTaskId: "fixture-task",
@@ -886,8 +885,6 @@ export async function mockRecruitingApp(
           sourceRows: 3,
           candidates: 3,
           identifiedCandidates: 3,
-          unassessed: 3,
-          assessed: 0,
           shortlisted: 1,
         },
       };
@@ -909,8 +906,7 @@ export async function mockRecruitingApp(
       };
     else if (method === "recruiting/listResearch")
       value = { observations: [], tasks: [], actions: [] };
-    else if (method === "recruiting/listQuestions") value = { questions: [] };
-    else if (["recruiting/listAssessments", "recruiting/listFeedback"].includes(method)) value = [];
+    else if (method === "recruiting/listFeedback") value = [];
     else if (method === "recruiting/listCandidateSources")
       value = {
         roleId: role.id,

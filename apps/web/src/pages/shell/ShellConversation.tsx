@@ -567,12 +567,6 @@ export function ShellConversation({
               onDiscussCandidate={discussCandidate}
               onCandidateFeedback={feedbackCandidate}
               candidateFeedbackRecipients={candidateFeedbackRecipients}
-              onRevealMessage={(target) =>
-                navigate({
-                  pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
-                  search: `?${new URLSearchParams({ view: "conversation", m: target.messageId })}`,
-                })
-              }
             />
             <div className="flex justify-end py-4">
               <Button variant="outline" onClick={() => openRoleChat()}>

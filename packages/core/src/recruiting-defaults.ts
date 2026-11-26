@@ -38,8 +38,6 @@ export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
   "spawn_bot",
   "update_bot",
   "archive_bot",
-  // Never called by a recruiting bot in a week of production runs; the search grades people.
-  "recruiting_assess",
   "render_view",
 ] as const;
 

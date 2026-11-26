@@ -23,7 +23,6 @@ export const VERBATIM_TOOL_RESULTS: ReadonlySet<string> = new Set([
   "read_memory",
   "recruiting_role",
   "recruiting_research",
-  "recruiting_assess",
   "recruiting_candidates",
 ]);
 const messageHash = (message: Message) =>

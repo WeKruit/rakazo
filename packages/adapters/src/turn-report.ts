@@ -52,7 +52,6 @@ const RECRUITING_WORK: Record<string, TurnWork> = {
   recruiting_role: "role",
   recruiting_feedback: "feedback",
   recruiting_shortlist: "candidates",
-  recruiting_assess: "candidates",
   recruiting_profiles: "candidates",
   recruiting_notes: "candidates",
   recruiting_crm_target: "crm",

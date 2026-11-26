@@ -7,22 +7,12 @@ import type {
 } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import {
-  RecruitingArtifactRefSchema,
-  RecruitingAssessmentToolInputSchema,
   RecruitingCandidatesToolInputSchema,
   RecruitingMaterialReadPayloadSchema,
 } from "@rakazo/contracts";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import type {
-  PrismaClient,
-  RecruitingAssessmentArtifactBytes,
-  RecruitingAssessmentSaveContext,
-  ThreadEvents,
-} from "@rakazo/db";
+import type { PrismaClient } from "@rakazo/db";
 import {
-  getRecruitingAssessment,
-  getRecruitingQuestion,
-  getRecruitingWorkspace,
   getRecruitingWorkspaceRoleId,
   IsolationError,
   listRecruitingCandidateSources,
@@ -33,11 +23,9 @@ import {
   readRecruitingCalibrationRound,
   readRecruitingResultsMarks,
   recordRecruitingWebMaterial,
-  saveRecruitingAssessment,
   scoped,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { inputPausedToolResult } from "./approval-effect.js";
 import { readRecruitingAccountView } from "./recruiting-account.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import {
@@ -104,12 +92,6 @@ async function noOpenRoles(prisma: Pick<PrismaClient, "recruitingRole">, actor: 
       : "No open or closed roles: this account has never had a role, so this is its whole record. Say so plainly, keep that answer when the recruiter insists they made some, and offer to open the roles they name now.",
   };
 }
-
-export type RecruitingAssessmentToolContext = RecruitingRunContext & {
-  save?: Omit<RecruitingAssessmentSaveContext, "runId" | "threadId" | "botId">;
-  attemptId?: string;
-  redactText?: (text: string) => string;
-};
 
 async function requireRecruitingRun(
   prisma: PrismaClient,
@@ -467,17 +449,7 @@ export async function executeRecruitingCandidatesTool(
         roleId: listRoleId,
         ...query,
       });
-      // The review is each person's ranking (their saved grade). The local-assessment fields
-      // stay empty for graded people, so staging aefd141e (what-happened x5) read
-      // "7 unassessed" beside a 52/Partial grade as a conflicting status in 5 of 5 runs.
-      const { assessed: _assessed, unassessed: _unassessed, ...counts } = listed.counts ?? {};
-      const result = {
-        ...listed,
-        ...(listed.counts ? { counts } : {}),
-        items: listed.items.map(({ latestAssessment, ...item }) =>
-          latestAssessment ? { ...item, latestAssessment } : item,
-        ),
-      };
+      const result = listed;
       queryMs = Math.round(performance.now() - queryStarted);
       itemCount = result.items.length;
       // A whole role in one read: 179 people at ten full rows a page took a helper 172 reads
@@ -784,127 +756,10 @@ export async function executeRecruitingCandidatesTool(
   }
 }
 
-export async function executeRecruitingAssessmentTool(
-  deps: {
-    prisma: PrismaClient;
-    artifacts?: ArtifactStore;
-    events?: Pick<ThreadEvents, "pauseRunForInput">;
-  },
-  trusted: RecruitingAssessmentToolContext,
-  untrusted: unknown,
-  context: AdapterContext,
-) {
-  const input = RecruitingAssessmentToolInputSchema.parse(untrusted);
-  await requireRecruitingRun(deps.prisma, trusted, context);
-  const { actor, runId, threadId, botId } = trusted;
-  if (input.operation === "read") {
-    const workspace = await getRecruitingWorkspace(deps.prisma, actor, { threadId });
-    const assessment = workspace
-      ? await getRecruitingAssessment(deps.prisma, actor, {
-          roleId: workspace.role.id,
-          candidateKey: input.candidateKey,
-        })
-      : null;
-    return { status: "current" as const, workspace, assessment };
-  }
-  const save = trusted.save;
-  if (
-    !deps.artifacts ||
-    !save?.leaseOwner ||
-    !Number.isInteger(save.leaseFence) ||
-    save.leaseFence < 0 ||
-    !save.effectId ||
-    save.effectRequest === undefined
-  )
-    throw new IsolationError();
-  const contextArtifact = save.contextArtifact
-    ? RecruitingArtifactRefSchema.parse(save.contextArtifact)
-    : undefined;
-  const references = new Map<string, string>();
-  if (contextArtifact) references.set(contextArtifact.artifactId, contextArtifact.sha256);
-  for (const source of input.operation === "ask" ? [] : input.sourceRefs) {
-    if (source.readState !== "read" || source.anchor.kind !== "artifact") continue;
-    const { artifactId, sha256 } = source.anchor.artifact;
-    const previous = references.get(artifactId);
-    if (previous !== undefined && previous !== sha256) throw new IsolationError();
-    references.set(artifactId, sha256);
-  }
-  const rows = await deps.prisma.artifact.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      userId: actor.userId,
-      OR: [...references].map(([id, hash]) => ({ id, hash })),
-    },
-    select: { id: true, spaceId: true, userId: true, hash: true, storageKey: true },
-  });
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  const authorized = [...references].map(([id, hash]) => {
-    const row = scoped(actor, byId.get(id) ?? null);
-    if (row.hash !== hash) throw new IsolationError();
-    return row;
-  });
-  const bytes: RecruitingAssessmentArtifactBytes[] = [];
-  for (const row of authorized) {
-    context.signal.throwIfAborted();
-    bytes.push({ artifactId: row.id, bytes: await deps.artifacts.get(row.storageKey, context) });
-  }
-  context.signal.throwIfAborted();
-  if (input.operation === "ask") {
-    if (!deps.events || !trusted.attemptId) throw new IsolationError();
-    const actions = input.options.map((label, index) => ({ id: `choice-${index + 1}`, label }));
-    const redact = trusted.redactText ?? ((text: string) => text);
-    const paused = await deps.events.pauseRunForInput({
-      spaceId: actor.spaceId,
-      threadId,
-      botId,
-      runId,
-      attemptId: trusted.attemptId,
-      leaseOwner: save.leaseOwner,
-      leaseFence: save.leaseFence,
-      blocks: [
-        {
-          kind: "ask",
-          text: redact(input.question),
-          status: "pending",
-          actions: actions.map(({ id, label }) => ({ id, label: redact(label) })),
-          ...(input.multiple ? { multiple: true } : {}),
-        },
-      ],
-      offeredActions: actions,
-      recruitingQuestion: {
-        actor,
-        effectId: save.effectId,
-        effectRequest: save.effectRequest,
-        ...(contextArtifact ? { contextArtifact } : {}),
-        artifacts: bytes,
-      },
-    });
-    if (!paused) throw new Error("Could not pause this run for the recruiting question");
-    const question = await getRecruitingQuestion(deps.prisma, actor, {
-      threadId,
-      roleId: input.roleId,
-      effectId: save.effectId,
-    });
-    if (!question) throw new IsolationError();
-    return question.canAnswer && question.runStatus === "waiting_input"
-      ? inputPausedToolResult()
-      : { question };
-  }
-  const { operation: _operation, ...assessment } = input;
-  return saveRecruitingAssessment(
-    deps.prisma,
-    actor,
-    { runId, threadId, botId, ...save, ...(contextArtifact ? { contextArtifact } : {}) },
-    assessment,
-    bytes,
-  );
-}
-
 /** The existing native reader supplies actual fetched content, never model-authored proof. */
 export async function retainRecruitingWebMaterial(
   deps: { prisma: PrismaClient; artifacts: ArtifactStore },
-  trusted: RecruitingRunContext &
-    Pick<RecruitingAssessmentSaveContext, "leaseOwner" | "leaseFence">,
+  trusted: RecruitingRunContext & { leaseOwner: string; leaseFence: number },
   result: WebFetchResult,
   context: AdapterContext,
 ) {
