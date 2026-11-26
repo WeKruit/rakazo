@@ -1326,6 +1326,54 @@ describe("local native Instantly thread history", () => {
     },
   );
   it.each([
+    ["the role emailed that person", true],
+    ["the role never emailed that person", false],
+  ])(
+    "reads a reply filed under another of the account's campaigns when %s",
+    async (_case, emailed) => {
+      const f = fixture();
+      const roleCampaign = "123e4567-e89b-42d3-a456-426614174009";
+      const reply = { ...structuredClone(anchor), lead: "person@example.test" };
+      f.state.callResult = { content: [], structuredContent: reply };
+      // The reply's campaign is the account's own, not the role's.
+      (f.prisma as unknown as { $queryRaw: unknown }).$queryRaw = vi.fn(async () => [
+        { kind: "instantly_role_campaign", result: { campaignId: anchor.campaign_id } },
+      ]);
+      f.state.page = {
+        items: emailed
+          ? [
+              {
+                ...structuredClone(anchor),
+                campaign_id: roleCampaign,
+                ue_type: 1,
+                lead: reply.lead,
+              },
+            ]
+          : [],
+      };
+      vi.spyOn(
+        f.connector as unknown as {
+          instantlyCampaignScope: () => Promise<{ campaignIds: string[] }>;
+        },
+        "instantlyCampaignScope",
+      ).mockResolvedValue({ campaignIds: [roleCampaign] });
+      try {
+        const events = await f.collect(
+          { id: anchor.id },
+          { ...route, toolName: "native_instantly_get_email" },
+        );
+        expect(events.at(-1)).toMatchObject({ type: emailed ? "result" : "error" });
+        const asked = f.rest.mock.calls
+          .map((call) => new URL(new Request(...call).url))
+          .find((url) => url.pathname === "/api/v2/emails");
+        expect(asked?.searchParams.get("campaign_id")).toBe(roleCampaign);
+        expect(asked?.searchParams.get("lead")).toBe(reply.lead);
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each([
     "native_instantly_get_email",
     "native_instantly_list_mailbox_emails",
     "native_instantly_reply_to_email",

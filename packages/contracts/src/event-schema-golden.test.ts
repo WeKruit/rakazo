@@ -47,6 +47,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   // 17: optional server-set facts on text blocks (a round list and its record, a card answer) and
   // on ask blocks (answered by a message typed in the chat).
   17: "8ad735f3f6ffe33efafa8105aacef93cbb5454fe0665ee9330fe2848507d24b8",
+  // 18: optional openQuestions on a mail reply (the candidate's questions the recruiter never answered).
+  18: "d5daefd350a8246a8171fef7019e2cf4b3aeab6107ce8458788bc980d01eea32",
 };
 
 const OLD_ROWS: unknown[] = [

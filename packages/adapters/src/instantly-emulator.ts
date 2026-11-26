@@ -19,6 +19,10 @@ const API = "/api/v2";
 const PICKUP_MINUTES = 2;
 const DAILY_LIMIT = 50;
 const MCP_TOOLS = ["get_email", "list_emails", "reply_to_email"] as const;
+/** The filters the product passes to the remote email list (it refuses a list without campaign_id). */
+const LIST_FILTERS = ["campaign_id", "lead", "eaccount", "search", "limit", "starting_after"];
+/** The one workspace every emulated email belongs to, as the real service stamps each row. */
+const ORGANIZATION = "00000000-0000-4000-8000-000000000001";
 
 export class InstantlyEmulator {
   private readonly campaigns = new Map<string, Campaign>();
@@ -145,7 +149,11 @@ export class InstantlyEmulator {
     return {
       emails_sent_count: sent.filter((email) => email.ue_type === 1).length,
       open_count_unique: 0,
-      reply_count_unique: 0,
+      reply_count_unique: new Set(
+        this.emails
+          .filter((email) => email.ue_type === 2 && (!id || email.campaign_id === id))
+          .map((email) => email.lead),
+      ).size,
     };
   }
 
@@ -269,10 +277,27 @@ export class InstantlyEmulator {
     if (!id && method === "GET") {
       const campaign = query.get("campaign_id");
       const lead = query.get("lead")?.toLowerCase();
-      const items = this.emails.filter(
-        (email) => (!campaign || email.campaign_id === campaign) && (!lead || email.lead === lead),
-      );
-      return { items, next_starting_after: null };
+      const eaccount = query.get("eaccount")?.toLowerCase();
+      const thread = query.get("search")?.match(/^thread:(.+)$/)?.[1];
+      const since = query.get("min_timestamp_created");
+      const all = this.emails
+        .filter(
+          (email) =>
+            (!campaign || email.campaign_id === campaign) &&
+            (!lead || email.lead === lead) &&
+            (!eaccount || email.eaccount === eaccount) &&
+            (!thread || email.thread_id === thread) &&
+            (!since || String(email.timestamp_created) >= since),
+        )
+        .reverse();
+      const after = query.get("starting_after");
+      const start = after ? all.findIndex((email) => email.id === after) + 1 : 0;
+      const limit = Math.min(Number(query.get("limit")) || 100, 100);
+      const items = all.slice(start, start + limit);
+      // The real service leaves the cursor out on the last page; the product refuses a null one.
+      return start + limit < all.length
+        ? { items, next_starting_after: items.at(-1)?.id }
+        : { items };
     }
     if (id === "reply" && method === "POST") {
       const original = this.emails.find((email) => email.id === body.reply_to_uuid);
@@ -282,14 +307,65 @@ export class InstantlyEmulator {
         String(original.lead),
         String(body.eaccount ?? original.eaccount),
         String(body.subject ?? ""),
-        String((body.body as Row | undefined)?.text ?? (body.body as Row | undefined)?.html ?? ""),
+        // REST sends a body envelope, the remote MCP tool flat body_text/body_html fields.
+        String(
+          (body.body as Row | undefined)?.text ??
+            (body.body as Row | undefined)?.html ??
+            body.body_text ??
+            body.body_html ??
+            "",
+        ),
         original.thread_id as string,
+        undefined,
+        // A reply sent through the API is a manually sent email (3), not a campaign step (1).
+        3,
       );
       return reply;
     }
     const email = this.emails.find((row) => row.id === id);
     if (!email) throw new Refused(404, "Email not found");
     return email;
+  }
+
+  /** Every email so far, sent and received, oldest first (a test harness reads what went out). */
+  outbox() {
+    this.advance();
+    return [...this.emails];
+  }
+
+  /**
+   * A candidate's answer to an email this service sent them: received mail in the same thread and
+   * campaign (or another campaign, as the real service files a reply under the lead's latest one).
+   */
+  receive(input: { replyTo: string; text: string; campaignId?: string }) {
+    const original = this.emails.find((email) => email.id === input.replyTo);
+    if (!original || ![1, 3].includes(Number(original.ue_type)))
+      throw new Refused(404, "Email not found");
+    const id = randomUUID();
+    const at = this.now().toISOString();
+    const subject = String(original.subject ?? "");
+    const reply = {
+      ...original,
+      id,
+      timestamp_created: at,
+      timestamp_email: at,
+      message_id: `<${id}@emulated.invalid>`,
+      subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`,
+      from_address_email: original.lead,
+      to_address_email_list: original.eaccount,
+      body: { text: input.text },
+      campaign_id: input.campaignId ?? original.campaign_id,
+      ue_type: 2,
+      is_unread: 1,
+    };
+    this.emails.push(reply);
+    for (const lead of this.leads.values())
+      if (lead.email === original.lead) {
+        lead.email_reply_count = Number(lead.email_reply_count ?? 0) + 1;
+        // stop_on_reply: a person who answered gets no further sequence email.
+        lead.status = 3;
+      }
+    return reply;
   }
 
   /** Emails the queued people whose turn has come in every active campaign. */
@@ -331,6 +407,7 @@ export class InstantlyEmulator {
     text: string,
     thread?: string,
     at = this.now().toISOString(),
+    ueType = 1,
   ) {
     const id = randomUUID();
     const email = {
@@ -345,7 +422,9 @@ export class InstantlyEmulator {
       campaign_id: campaign,
       lead,
       eaccount,
-      ue_type: 1,
+      ue_type: ueType,
+      organization_id: ORGANIZATION,
+      is_unread: 0,
       thread_id: thread ?? `thread-${id}`,
     };
     this.emails.push(email);
@@ -370,7 +449,14 @@ export class InstantlyEmulator {
         tools: MCP_TOOLS.map((name) => ({
           name,
           description: name,
-          inputSchema: { type: "object", properties: {}, additionalProperties: true },
+          inputSchema: {
+            type: "object",
+            properties:
+              name === "list_emails"
+                ? Object.fromEntries(LIST_FILTERS.map((filter) => [filter, { type: "string" }]))
+                : {},
+            additionalProperties: true,
+          },
           annotations: { readOnlyHint: name !== "reply_to_email" },
         })),
       });
@@ -439,9 +525,15 @@ function firstStep(campaign: Campaign) {
   return { subject: String(variants[0]?.subject ?? ""), body: String(variants[0]?.body ?? "") };
 }
 
-/** Lead variables as the service fills them: {{first_name}} and the lead's own variables. */
+/** Lead variables as the service fills them: {{firstName}} (from first_name) and the lead's own variables. */
 function fill(text: string, lead: Lead) {
-  const values: Row = { ...lead, ...(lead.payload as Row) };
+  const values: Row = {
+    ...lead,
+    firstName: lead.first_name,
+    lastName: lead.last_name,
+    companyName: lead.company_name,
+    ...(lead.payload as Row),
+  };
   return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, name: string) =>
     values[name] == null ? "" : String(values[name]),
   );

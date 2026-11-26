@@ -1,3 +1,4 @@
+import type { JobPublisher } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { createDb, Prisma } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -5,6 +6,7 @@ import type { RecruitingRoleReply } from "./recruiting-tools.js";
 
 const listRecruitingCandidates = vi.fn();
 const readRecruitingRoleRepliesSince = vi.fn();
+const getRecruitingCorrespondence = vi.fn();
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof import("@rakazo/db")>()),
   listRecruitingCandidates: (...args: unknown[]) => listRecruitingCandidates(...args),
@@ -12,14 +14,12 @@ vi.mock("@rakazo/db", async (original) => ({
 vi.mock("./recruiting-tools.js", () => ({
   readRecruitingRoleRepliesSince: (...args: unknown[]) => readRecruitingRoleRepliesSince(...args),
 }));
+vi.mock("./recruiting-reads.js", () => ({
+  getRecruitingCorrespondence: (...args: unknown[]) => getRecruitingCorrespondence(...args),
+}));
 
-const {
-  checkinToolRefusal,
-  checkinTools,
-  RECRUITING_CHECKIN_NONCE_PREFIX,
-  startRecruitingCheckin,
-  sweepRecruitingCheckins,
-} = await import("./recruiting-checkin.js");
+const { RECRUITING_CHECKIN_NONCE_PREFIX, startRecruitingCheckin, sweepRecruitingCheckins } =
+  await import("./recruiting-checkin.js");
 
 const now = Date.parse("2026-10-30T12:00:00Z");
 const target = {
@@ -82,7 +82,9 @@ function fixture(options: {
     botMcpServer: { findMany: vi.fn(async () => [{ botId: "outreach" }]) },
     $transaction: vi.fn(async (work: (client: typeof tx) => unknown) => work(tx)),
   } as unknown as PrismaClient;
-  const jobs = { enqueue: vi.fn(async () => undefined) };
+  const jobs = { enqueue: vi.fn(async () => undefined) } as unknown as JobPublisher & {
+    enqueue: ReturnType<typeof vi.fn>;
+  };
   readRecruitingRoleRepliesSince.mockResolvedValue({
     replies: options.replies ?? [],
     complete: true,
@@ -101,10 +103,11 @@ beforeEach(() => {
   listRecruitingCandidates.mockReset();
   listRecruitingCandidates.mockResolvedValue({ crmTarget: { target } });
   readRecruitingRoleRepliesSince.mockReset();
+  getRecruitingCorrespondence.mockReset();
 });
 
 describe("startRecruitingCheckin", () => {
-  it("opens one read-only turn for the lead when a candidate replied", async () => {
+  it("opens one turn for the lead when a candidate replied", async () => {
     const deps = fixture({
       replies: [
         reply("a", "Happy to talk. Does Thursday work?"),
@@ -124,10 +127,9 @@ describe("startRecruitingCheckin", () => {
       new RegExp(`^${RECRUITING_CHECKIN_NONCE_PREFIX}thread:`),
     );
     const prompt = String(deps.taskCreate.mock.calls[0]![0].data.prompt);
-    expect(prompt).toContain("2 candidate replies");
+    expect(prompt).toContain("2 candidates replied");
     expect(prompt).toContain("(reply id: a)");
     expect(prompt).toContain("(reply id: b)");
-    expect(prompt).toContain("can only read");
     // The bot that holds the CRM reads it; the first check-in looks back one day.
     const [, , context, since] = readRecruitingRoleRepliesSince.mock.calls[0]!;
     expect(context).toMatchObject({ botId: "outreach", spaceId: "space", userId: "user" });
@@ -186,11 +188,44 @@ describe("startRecruitingCheckin", () => {
     expect(deps.runCreate).not.toHaveBeenCalled();
   });
 
-  it("does nothing for a role without a CRM link", async () => {
+  it("reads a role without a CRM link from its own mailbox, and wakes it once per reply", async () => {
     listRecruitingCandidates.mockResolvedValue({ crmTarget: null });
-    const deps = fixture({ replies: [reply("a", "Interested!")] });
+    const mail = (id: string, direction: "sent" | "received") => ({
+      id: `source:${id}`,
+      providerMessageId: id,
+      direction,
+      sender: direction === "received" ? "ethan@example.test" : "me@mail.test",
+      recipients: [],
+      subject: "Re: Data role",
+      body: "What is the pay?",
+      date: "2026-10-30T11:30:00Z",
+    });
+    getRecruitingCorrespondence.mockResolvedValue({
+      status: "ready",
+      emails: [mail("sent-1", "sent"), mail("reply-1", "received")],
+    });
+    const deps = fixture({});
     await start(deps);
     expect(readRecruitingRoleRepliesSince).not.toHaveBeenCalled();
+    const [, , readTarget, view] = getRecruitingCorrespondence.mock.calls[0]!;
+    expect(readTarget).toMatchObject({ kind: "group", groupId: "group", threadId: "thread" });
+    expect(view).toBe("inbox");
+    expect(deps.runCreate).toHaveBeenCalledTimes(1);
+    expect(deps.runCreate.mock.calls[0]![0].data).toMatchObject({ botId: "main" });
+    const prompt = String(deps.taskCreate.mock.calls[0]![0].data.prompt);
+    expect(prompt).toContain("(reply id: reply-1)");
+    expect(prompt).not.toContain("sent-1");
+    // The same reply on the next sweep wakes nobody.
+    const again = fixture({
+      earlier: [
+        {
+          createdAt: new Date(now - 5 * 60_000),
+          checkinReplyIds: deps.runCreate.mock.calls[0]![0].data.checkinReplyIds,
+        },
+      ],
+    });
+    await start(again);
+    expect(again.runCreate).not.toHaveBeenCalled();
   });
 
   it("treats a failed read as unknown, not as no replies", async () => {
@@ -201,34 +236,12 @@ describe("startRecruitingCheckin", () => {
   });
 });
 
-describe("check-in tools", () => {
-  it("keeps only reads", () => {
-    const names = checkinTools(
-      [
-        "recruiting_candidates",
-        "read_history",
-        "ask_user",
-        "recruiting_feedback",
-        "mcp__crm__send",
-      ].map((name) => ({ name })),
-    ).map((tool) => tool.name);
-    expect(names).toEqual(["recruiting_candidates", "read_history"]);
-  });
-
-  it("refuses anything that writes or sends at dispatch", () => {
-    expect(checkinToolRefusal("recruiting_candidates")).toBeUndefined();
-    for (const name of [
-      "recruiting_feedback",
-      "connectors_execute_tool",
-      "mcp__instantly__reply_to_email",
-    ])
-      expect(checkinToolRefusal(name)).toMatch(/only reads/);
-  });
-});
-
 describe("sweepRecruitingCheckins", () => {
   it("offers each role once, from the conversation it was set up in", async () => {
     const prisma = {
+      externalEffect: {
+        findMany: vi.fn(async () => [{ request: { roleId: "sending-role" } }, { request: null }]),
+      },
       thread: {
         findMany: vi.fn(async () => [
           { id: "source", activeRecruitingRole: { sourceThreadId: "source" } },
@@ -246,6 +259,9 @@ describe("sweepRecruitingCheckins", () => {
         payload: { threadId: "source" },
       }),
     );
+    // Roles that email people are offered too, not only CRM-linked ones.
+    const where = (prisma.thread.findMany as ReturnType<typeof vi.fn>).mock.calls[0]![0].where;
+    expect(where.activeRecruitingRole.OR).toContainEqual({ id: { in: ["sending-role"] } });
   });
 });
 

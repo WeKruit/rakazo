@@ -15,6 +15,7 @@ export const DE_MESSAGES: Record<string, string> = {
   "Address change requested": "Adressänderung angefordert",
   "View email": "E-Mail anzeigen",
   "Hide email": "E-Mail ausblenden",
+  "The candidate asked what you haven't told me. Answer it in the reply:": "Die Person hat gefragt, was Sie mir noch nicht gesagt haben. Beantworten Sie es in der Antwort:",
   "Reply draft": "Antwortentwurf",
   "Needs approval": "Freigabe erforderlich",
   Discarded: "Verworfen",

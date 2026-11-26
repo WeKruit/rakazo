@@ -74,9 +74,12 @@ export function gradeOf(
   if (!words.length) return undefined;
   if (words.includes("Gap")) return "Partial";
   if (words.every((word) => word === "Met")) return "Strong";
-  return words.filter((word) => word === "Unknown").length * 2 > words.length
-    ? "Uncertain"
-    : "Promising";
+  // Promising is the search's word for most requirements shown and none contradicted. Staging
+  // 11-26: with every person short of a full match called Promising, people meeting one
+  // requirement of four counted as found and filled the next round.
+  return words.filter((word) => word === "Met").length * 2 > words.length
+    ? "Promising"
+    : "Uncertain";
 }
 
 /** A place tag as people read it: "there_before" is "there before". */

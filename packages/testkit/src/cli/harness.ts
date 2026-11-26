@@ -261,6 +261,25 @@ async function main() {
         if (new URL(request.url).pathname === "/__e2e/emails") {
           return Response.json(email.sent, { headers: { "cache-control": "no-store" } });
         }
+        // A served backend's outreach mail: the simulated candidates read what reached them and
+        // answer it (POST {replyTo, text}), as a person replying in their own mail client.
+        if (serveMode && new URL(request.url).pathname === "/__e2e/outreach") {
+          if (request.method !== "POST")
+            return Response.json(thirdParties.instantly.outbox(), {
+              headers: { "cache-control": "no-store" },
+            });
+          const body = (await request.json()) as { replyTo?: string; text?: string };
+          try {
+            return Response.json(
+              thirdParties.instantly.receive({
+                replyTo: String(body.replyTo ?? ""),
+                text: String(body.text ?? ""),
+              }),
+            );
+          } catch (error) {
+            return Response.json({ message: String(error) }, { status: 404 });
+          }
+        }
         activeRequests += 1;
         try {
           return await handles.app.fetch(request);

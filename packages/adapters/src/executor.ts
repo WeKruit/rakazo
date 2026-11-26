@@ -578,7 +578,6 @@ import {
   peopleToShow,
   retainRecruitingWebMaterial,
 } from "./recruiting-candidates-tool.js";
-import { checkinToolRefusal, checkinTools } from "./recruiting-checkin.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   loadRecruitingRunContext,
@@ -626,6 +625,11 @@ import {
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
+import {
+  openQuestionsAnsweredNote,
+  openQuestionsForEmail,
+  takeOpenQuestions,
+} from "./reply-open-questions.js";
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
@@ -3641,9 +3645,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const tools =
           run.trigger === "created"
             ? []
-            : run.trigger === "recruiting_checkin"
-              ? checkinTools(listedTools)
-              : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
+            : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
         setupMark("toolsReady");
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
@@ -4755,10 +4757,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             return {};
           };
-          if (run.trigger === "recruiting_checkin") {
-            const refusal = checkinToolRefusal(name);
-            if (refusal) return { error: refusal };
-          }
           if (
             blockedToolEffect({
               toolName: name,
@@ -5520,6 +5518,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 dispatched: false,
               };
             }
+          }
+          let replyOpenQuestions: string[] = [];
+          if (
+            connectorCall.route?.connectorId === "mcp" &&
+            ["reply_to_email", "native_instantly_reply_to_email"].includes(
+              connectorCall.route.toolName,
+            )
+          ) {
+            const open = takeOpenQuestions(args);
+            replyOpenQuestions = open.open;
+            args = open.args;
+            connectorCall = { ...connectorCall, args: takeOpenQuestions(connectorCall.args).args };
           }
           if (
             !catalogRemapped &&
@@ -7664,6 +7674,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       );
                 if (thread.activeRecruitingRoleId)
                   approvalBlock.mailReply.inReplyTo.roleId = thread.activeRecruitingRoleId;
+                if (replyOpenQuestions.length)
+                  approvalBlock.mailReply.openQuestions = replyOpenQuestions;
                 const proposed = approvalBlock.mailReply;
                 if (
                   replyDiscardActive &&
@@ -11831,6 +11843,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A recruiter clicked Send on a saved reply: replay the native approved request now,
         // before any model call. The regular tool path still owns preflight, claim and receipt.
         let sentReplyDirectly = false;
+        let replyAnswersToSave = false;
         const sendOutcomes: string[] = [];
         while (approvedEffectReplays.nextToolName()) {
           const request = approvedEffectReplays.nextRequest();
@@ -11996,9 +12009,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               error: String(error),
             });
           }
+          // A sent reply ends the run quietly, unless it carried the recruiter's answers to the
+          // candidate's open questions: then the agent gets the turn to save them in role memory.
+          if (replyOutcome === mailReplyOutcomeInstruction({ status: "sent" })) {
+            const answered = await openQuestionsForEmail(deps.prisma, {
+              spaceId: run.spaceId,
+              threadId: thread.id,
+              draft: replyDraft,
+            });
+            if (answered.length) {
+              replyOutcome = `${replyOutcome}\n${openQuestionsAnsweredNote(answered)}`;
+              replyAnswersToSave = true;
+            }
+          }
           sentReplyDirectly = true;
         }
-        if (sentReplyDirectly) probeFoundNothing = true;
+        if (sentReplyDirectly && !replyAnswersToSave) probeFoundNothing = true;
         const prompt = [
           ...promptParts.filter(
             (part) =>

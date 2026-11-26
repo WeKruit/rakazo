@@ -225,8 +225,13 @@ async function askJson(system, prompt, name) {
 function parse(text) {
   const start = text.indexOf("{");
   for (let end = text.lastIndexOf("}"); end > start; end = text.lastIndexOf("}", end - 1)) {
+    const candidate = text.slice(start, end + 1);
     try {
-      return JSON.parse(text.slice(start, end + 1));
+      return JSON.parse(candidate);
+    } catch {}
+    // A model sometimes writes a multi-line email inside a JSON string without escaping its lines.
+    try {
+      return JSON.parse(candidate.replace(/\r?\n/g, "\\n"));
     } catch {}
   }
   throw new Error(`no JSON in the model's reply: ${text.slice(0, 200)}`);
@@ -247,7 +252,16 @@ async function cardsOpen(rpc) {
         ),
       ]) {
         if (!message.runId || block.input === "secret") continue;
-        const text = [block.text, block.detail].filter(Boolean).join("\n");
+        const text = [
+          block.text,
+          block.detail,
+          // The page lists, above the reply box, what the candidate asked that the recruiter never said.
+          block.mailReply?.openQuestions?.length
+            ? `The candidate asked what you haven't told me. Answer it in the reply:\n${block.mailReply.openQuestions.map((question) => `- ${question}`).join("\n")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
         open.push({
           chat: group.name,
           groupId: group.id,
@@ -260,6 +274,7 @@ async function cardsOpen(rpc) {
           actions: block.actions ?? [],
           schema: block.requestedSchema,
           recipients: recipientsOf(block.text, block.detail ?? ""),
+          mailReply: block.mailReply,
         });
       }
   return open;
@@ -461,8 +476,8 @@ async function replyAfter(journey, rpc, since, quick = false) {
 }
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone), but make each message mean what your goal means: if a stranger could read it as a different question, reword it. Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
-{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button; for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "people": <how many new people this message asks Kruit to find or show now: "find 10" is 10, "swap these two" is 2, a first search with no number is 10, a later "more like these" with no number is 3; 0 when it asks for none>, "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
-Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
+{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "wait" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button, except on a reply draft, where a text is your edited reply as it should go out (the whole email); for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "people": <how many new people this message asks Kruit to find or show now: "find 10" is 10, "swap these two" is 2, a first search with no number is 10, a later "more like these" with no number is 3; 0 when it asks for none>, "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
+Use "wait" only when a goal tells you to wait or step away, and only as often as it says: you write nothing and come back when Kruit writes to you, or after a few minutes. Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
 // With --ui the recruiter works in the browser and can also open pages and press buttons.
 const UI_RULES = `${SIMULATOR_RULES}
 You are using the product in a browser and see the page described under "Your screen". Two more actions:
@@ -511,6 +526,13 @@ function looked(turns) {
     : "";
 }
 
+// Stepping away leaves no line in the conversation, so the recruiter is told it already did.
+function awayNote(turns) {
+  const away = turns.filter((turn) => turn.move.action === "wait" && !turn.invalid).length;
+  const last = turns.at(-1);
+  return `${away ? `\n\nYou already stepped away ${away === 1 ? "once" : `${away} times`} and are back now.` : ""}${last?.invalid ? `\nYour last move was not done: ${last.invalid}.` : ""}`;
+}
+
 async function simulate(journey, turns, view, cards, screen, tag, since) {
   // A reused account's pages still show earlier tests; only this session's messages count.
   const earlier =
@@ -529,7 +551,7 @@ async function simulate(journey, turns, view, cards, screen, tag, since) {
     screen
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}${screen.fields?.length ? `\nText boxes on it: ${screen.fields.join(" | ")}` : ""}`
       : ""
-  }${earlier}${looked(turns)}\n\nYour moves so far: ${turns.length}. Your next move:`;
+  }${earlier}${looked(turns)}${awayNote(turns)}\n\nYour moves so far: ${turns.length}. Your next move:`;
   return askJson(screen ? UI_RULES : SIMULATOR_RULES, prompt, SIMULATOR);
 }
 
@@ -570,6 +592,72 @@ async function withoutContactLookups(rpc) {
     throw new InfraError(
       `contact lookup still on for the copied account (${left.map((s) => s.slug)})`,
     );
+}
+
+// --- Simulated candidates -----------------------------------------------------------------------
+// A journey's candidates are people too: each is a model given a persona that reads the outreach
+// mail that actually reached them on a branch backend's emulated mail service and answers it in
+// its own words, as someone replying from their own mail client. Nothing is scripted.
+const CANDIDATE_RULES = `You play a job candidate who got an email from a recruiter. You get who you are and the whole email thread so far. Write your reply email body the way this person would: plain text, short, in English, signed with your first name, no subject line. Stay in character and keep to what you know; answer what the recruiter wrote and ask what you would want to know. When the thread needs no answer from you, or you would not answer, reply with null. Answer with one JSON object and nothing else: {"reply": "<email body>" | null}`;
+
+async function outreachMail() {
+  const response = await fetch(`${BASE}/__e2e/outreach`, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok)
+    throw new InfraError(
+      `this environment has no emulated candidate mailbox (${response.status}); candidate journeys play on pnpm sim:branch`,
+    );
+  return response.json();
+}
+
+/** Each candidate answers the newest email that reached them since their own last word. */
+async function candidatesAnswer(journey, tag, label) {
+  const mail = await outreachMail();
+  const answers = [];
+  for (const candidate of journey.candidates(RECIPIENTS, tag)) {
+    const address = candidate.address.toLowerCase();
+    const thread = mail.filter((email) => String(email.lead).toLowerCase() === address);
+    const last = thread.at(-1);
+    // The newest email is the recruiter's (1 a campaign step, 3 a reply), so the candidate answers it.
+    if (![1, 3].includes(last?.ue_type)) continue;
+    const text = thread
+      .map(
+        (email) =>
+          `${email.ue_type === 2 ? "You" : "Recruiter"} (${String(email.timestamp_created).slice(0, 16)} UTC), subject "${email.subject}":\n${email.body?.text ?? ""}`,
+      )
+      .join("\n\n");
+    const { reply } = await askJson(
+      CANDIDATE_RULES,
+      `Who you are:\n${candidate.persona}\n\nThe email thread (oldest first):\n${text}`,
+      SIMULATOR,
+    );
+    if (typeof reply !== "string" || !reply.trim()) continue;
+    const posted = await fetch(`${BASE}/__e2e/outreach`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ replyTo: last.id, text: reply }),
+    });
+    if (!posted.ok) throw new InfraError(`the candidate's reply was not filed (${posted.status})`);
+    log(
+      `${label}: candidate ${candidate.name} replied: ${reply.slice(0, 80).replace(/\s+/g, " ")}`,
+    );
+    answers.push({ name: candidate.name, at: new Date().toISOString(), text: reply });
+  }
+  return answers;
+}
+
+/** Whether the email Kruit was asked to send reached a candidate yet (sending starts ~2 min after a confirmed send). */
+async function mailReached(journey, tag, limitMs) {
+  const addresses = journey.candidates(RECIPIENTS, tag).map((c) => c.address.toLowerCase());
+  for (const until = Date.now() + limitMs; Date.now() < until; await sleep(15_000))
+    if (
+      (await outreachMail()).some(
+        (email) => email.ue_type === 1 && addresses.includes(String(email.lead).toLowerCase()),
+      )
+    )
+      return true;
+  return false;
 }
 
 // Real sign-ups carry the recruiter's own name, so a template Kruit signs can use it.
@@ -640,6 +728,7 @@ async function play(journey, label, owner, mailbox, out) {
     : null;
   if (ui) await ui.openChat(kruit.id);
   const turns = [];
+  let waited = 0;
   const chatNamed = async (name) =>
     (await groupsOf(rpc)).find((group) => group.name === name) ?? kruit;
   try {
@@ -661,6 +750,14 @@ async function play(journey, label, owner, mailbox, out) {
             throw new InfraError(`no network switch on this environment (${error.message})`);
           });
         await new Promise((resolve) => setTimeout(resolve, journey.blip.seconds * 1000));
+      }
+      // Candidates answer what reached them before the recruiter's next move.
+      if (journey.candidates && last) {
+        last.candidateMail = [
+          ...(last.candidateMail ?? []),
+          ...(await candidatesAnswer(journey, tag, label)),
+        ];
+        if (last.candidateMail.length) await sleep(20_000);
       }
       const move = await simulate(journey, turns, render(chats), cards, screen, tag, startedAt);
       // The planner model sometimes nests its text ({"text": {"zh": "…"}}); the recruiter types a string.
@@ -691,7 +788,30 @@ async function play(journey, label, owner, mailbox, out) {
         move.chat = card.chat;
       }
       let waitForKruit = true;
-      if (move.action === "say") {
+      if (move.action === "wait" && waited >= 2) {
+        turn.invalid = "you already stepped away twice: write to Kruit, or end with done";
+        log(`${label}:   ${turn.invalid}`);
+        turns.push(turn);
+        continue;
+      }
+      if (move.action === "wait") {
+        // The recruiter is away: candidates answer what reached them, and Kruit may write first.
+        waitForKruit = false;
+        log(`${label}: recruiter steps away`);
+        turn.candidateMail = journey.candidates ? await candidatesAnswer(journey, tag, label) : [];
+        // One real step away per play; a repeated wait is only a short pause, never 8 more minutes.
+        const minutes = waited++ ? 1 : 8;
+        const until = Date.now() + minutes * 60_000;
+        while (Date.now() < until && !(await newestBotMessageAfter(rpc, at)))
+          await changeOrTimeout(rpc, 30_000);
+        const wrote = await newestBotMessageAfter(rpc, at);
+        turn.firstReplySeconds = wrote
+          ? Math.round((Date.parse(wrote.createdAt) - at) / 1000)
+          : undefined;
+        log(
+          `${label}:   Kruit ${wrote ? `wrote first after ${turn.firstReplySeconds} s` : `said nothing in ${minutes} minutes`}`,
+        );
+      } else if (move.action === "say") {
         const chat = await chatNamed(move.chat);
         log(`${label}: recruiter: ${move.text}`);
         let typed = false;
@@ -740,17 +860,36 @@ async function play(journey, label, owner, mailbox, out) {
               ? "allow"
               : move.text;
         if (card.send) answer = guardSend(journey, card, answer, turn);
+        turn.approvedSend = card.send && answer === "allow";
         // The email on a send card is what goes out: a fill-in left in it is a product failure.
         const fillIn = card.send && card.text.match(PLACEHOLDER);
         if (fillIn) turn.placeholder = fillIn[0];
         log(
           `${label}: recruiter ${answer === "allow" ? "approves" : answer === "deny" ? "denies" : `answers "${answer}" on`} "${card.text.slice(0, 60)}"${turn.guard ? ` (${turn.guard})` : ""}`,
         );
-        const value = card.send ? answer : cardAnswer(card, answer);
-        let pressed = false;
-        if (ui) {
+        // A reply draft's Send carries the draft as shown, or as the recruiter edited it in the
+        // card's text box, as the page's Send button does.
+        const edited = card.mailReply && answer === "allow" && !ui && move.text?.trim();
+        if (edited) {
+          turn.editedReply = true;
+          log(`${label}: recruiter edits the reply before Send: ${edited.slice(0, 120)}`);
+        }
+        const value =
+          card.mailReply && answer === "allow"
+            ? { action: "send", body: edited || card.mailReply.body, cc: card.mailReply.cc ?? [] }
+            : card.send
+              ? answer
+              : cardAnswer(card, answer);
+        if (value === null) {
+          log(`${label}: recruiter writes under the card: ${answer}`);
+          if (ui) await ui.openChat(card.groupId);
+          if (!(ui && (await ui.say(answer)))) await send(rpc, card.groupId, answer);
+          turn.underCard = true;
+        }
+        let pressed = value === null;
+        if (ui && !pressed) {
           await ui.openChat(card.groupId);
-          const action = card.actions.find((item) => item.id === value);
+          const action = card.actions.find((item) => item.id === (card.mailReply ? answer : value));
           pressed = action
             ? await ui.clickLabel(action.label)
             : // A form card takes the typed text in its field; the API gets the parsed content.
@@ -808,6 +947,12 @@ async function play(journey, label, owner, mailbox, out) {
           `${label}:   Kruit's first reply after ${firstSeconds ?? "no reply"} s, last after ${doneSeconds ?? "-"} s`,
         );
       }
+      // A candidate can only answer mail that went out: after a confirmed send, wait for it.
+      if (journey.candidates && turn.approvedSend && !(await mailReached(journey, tag, 5 * 60_000)))
+        turn.ui = [
+          ...(turn.ui ?? []),
+          "no email reached the candidates within 5 minutes of the confirmed send",
+        ];
       turn.records = await records(rpc, startedAt, before);
       if (ui) turn.shot = await ui.shot(`turn-${turn.turn}-${move.action}`);
       turns.push(turn);
@@ -824,6 +969,8 @@ async function play(journey, label, owner, mailbox, out) {
       accountName: journey.account ? await user.name().catch(() => null) : ACCOUNT_NAME,
       chats: await transcripts(rpc, startedAt, journey.chinese),
       records: await records(rpc, startedAt, before),
+      // Every email the candidates got and wrote, for the judge to check what Kruit said of replies.
+      ...(journey.candidates ? { mail: await outreachMail() } : {}),
       variation: journey.variation,
     };
   } catch (error) {
@@ -963,7 +1110,7 @@ const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the cust
 A new role searches first (the product's order): its first people come straight from the JD as written, and at most one short question about something the recruiter left open comes beside them, never before them. Opening the role and saying its team is searching counts as answered when the role chat then shows that search; no question is expected, a question about something already said is "asked again", and a second question is "wordy". When the customer asks for something else (a template, an email), doing it is the right move and no role question is expected.
 What goes out is what was on the card the customer approved and what the records show, never a card the customer denied: a denied card's email was not queued or sent, so a reply that describes the approved email truthfully is "yes" even when a denied card said otherwise. Two send cards with different emails shown at once is its own problem ("other"), not a false claim.
 The simulated customer cannot complete an account sign-in (connecting Gmail or a calendar), so "I can't click that here" about a connection card is the test's limit, not Kruit's dead end. Judge whether Kruit showed the card, said in one step what connecting does, and kept the work for afterwards.
-When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; compare a number only with records of the same scope, so a total labelled for the account or all time is not wrong because one role shows less; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
+When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; compare a number only with records of the same scope, so a total labelled for the account or all time is not wrong because one role shows less; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for. A "wait" move asks nothing: judge "answered" by whether Kruit told the customer, unasked, about what happened meanwhile (a candidate's reply); saying nothing after a reply arrived is "did not act".
 Quote what each fault breaks. A correctness fault (false claim, asked again, broken email, did not act, a candidate who misses a requirement) needs, in the note, the exact sentence it breaks, quoted from these rules, the recruiter's messages or the JD; if you cannot quote one, it is not a fault and costs nothing. A candidate requirement is only something the JD or the recruiter says the person must have or be (skills, years, the place they must work from, a language). Terms the employer offers, such as the pay range, office days, benefits or the start date, are never candidate requirements: a person or list that does not show them misses nothing. Each fake block costs at least 3 points of the score.
 Judge an email or template only against what the customer actually told Kruit in the conversation: a draft without details the customer never gave (a role they only named, a salary they never said) is the honest result, not a fault and not a lower score.
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Write each move's note first, then its verdicts: answered, truthful and issues must agree with the note, so a label the note says does not apply is left out. Answer with one JSON object and nothing else:
@@ -980,10 +1127,10 @@ async function judge(journey, result, requests = []) {
   const moves = result.turns
     .map(
       (turn) =>
-        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}${turn.screen.fields?.length ? `\n    text boxes: ${turn.screen.fields.join(" | ")}` : ""}` : ""}`,
+        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.editedReply ? " (the recruiter rewrote the reply draft to this text and sent it: every fact in it is the recruiter's own)" : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.candidateMail?.length ? `\n  candidates replied after this move: ${turn.candidateMail.map((m) => `${m.name} at ${m.at.slice(11, 19)}: "${m.text}"`).join(" | ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}${turn.screen.fields?.length ? `\n    text boxes: ${turn.screen.fields.join(" | ")}` : ""}` : ""}`,
     )
     .join("\n");
-  const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? `This account is a test fixture that earlier plays used too: on a page, roles, campaigns, totals and messages from those plays (older or same-named entries) are the test's leftovers, not Kruit's fault.${result.accountName ? ` The account's own name is "${result.accountName}": an email signed with it, or with the sending mailbox's name, is signed by the sender, not a placeholder.` : ""}\n\n` : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
+  const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? `This account is a test fixture that earlier plays used too: on a page, roles, campaigns, totals and messages from those plays (older or same-named entries) are the test's leftovers, not Kruit's fault.${result.accountName ? ` The account's own name is "${result.accountName}": an email signed with it, or with the sending mailbox's name, is signed by the sender, not a placeholder.` : ""}\n\n` : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}${result.mail ? `\n\nEvery email between the role's mailbox and the candidates (the mail service's own record; ue_type 1 = sent to the candidate, 2 = the candidate's reply, 3 = the recruiter's reply to the candidate):\n${result.mail.map((email) => `${String(email.timestamp_created).slice(11, 19)} ${email.ue_type === 2 ? `from ${email.lead}` : `to ${email.lead}`}: "${email.subject}" ${String(email.body?.text ?? "").slice(0, 600)}`).join("\n")}\nThe candidates' replies are real mail the recruiter's inbox received: Kruit saying nobody replied after a reply arrived, or misquoting one, is a false claim.` : ""}`;
   // One reading flips on borderline moves, so three judges read the play and a finding stands
   // only when most of them give it (majority voting, as in self-consistency).
   const readings = (

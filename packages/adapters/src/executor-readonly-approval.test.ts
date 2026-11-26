@@ -16,8 +16,8 @@ import type { PauseRunForInput } from "@rakazo/db";
 import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
-import { changedPaths } from "./campaign-send-card.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
+import { changedPaths } from "./campaign-send-card.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
@@ -260,7 +260,12 @@ function fixture({
       async ({
         where,
       }: {
-        where?: { id?: string; runId?: string; status?: string | { in: string[] }; kind?: string };
+        where?: {
+          id?: string;
+          runId?: string;
+          status?: string | { in: string[] };
+          kind?: string | { endsWith: string };
+        };
       } = {}) =>
         effects.filter((effect) => {
           if (
@@ -270,7 +275,13 @@ function fixture({
               : where.status.in.includes(effect.status))
           )
             return false;
-          if (where?.kind && effect.kind !== where.kind) return false;
+          if (
+            where?.kind &&
+            (typeof where.kind === "string"
+              ? effect.kind !== where.kind
+              : !effect.kind.endsWith(where.kind.endsWith))
+          )
+            return false;
           if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
           if (where?.id && effect.id !== where.id) return false;
           return true;
@@ -2042,6 +2053,54 @@ describe.each([
   }
 });
 
+describe.each([false, true])("a reply to a candidate (catalog: %s)", (catalog) => {
+  const replyFixture = () =>
+    fixture({
+      name: "renamed_reply",
+      catalog,
+      readOnly: false,
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "reply_to_email",
+      },
+      inputSchema: { type: "object" },
+    });
+
+  it("shows the questions the recruiter never answered on its card, and still drafts it", async () => {
+    const f = replyFixture();
+    f.setCalls([
+      {
+        args: { ...replyArgs, open_questions: ["Do you offer relocation?"] },
+        executionId: "reply",
+      },
+    ]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            mailReply: expect.objectContaining({ openQuestions: ["Do you offer relocation?"] }),
+          }),
+        ],
+      }),
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it("goes to its card when none is open, and the mail service never sees the field", async () => {
+    const f = replyFixture();
+    f.setCalls([{ args: { ...replyArgs, open_questions: [] }, executionId: "reply" }]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual(replyArgs);
+  });
+});
+
 const sendActions = [
   { id: "allow", label: "Send" },
   { id: "deny", label: "Discard" },
@@ -2057,17 +2116,13 @@ describe("recruiter-instructed email send", () => {
     instruction = "可以，发吧",
     rules: ActionApprovalRule[] = [],
     args: Record<string, unknown> = replyArgs,
+    route = { connectorId: "mcp", toolName: "reply_to_email" },
   ) {
     const f = fixture({
-      name: "reply_to_email",
+      name: route.toolName,
       rules,
       readOnly: false,
-      route: {
-        connectorId: "mcp",
-        resourceId: "resource-1",
-        resourceRevision: 1,
-        toolName: "reply_to_email",
-      },
+      route: { ...route, resourceId: "resource-1", resourceRevision: 1 },
       inputSchema: { type: "object" },
     });
     Object.assign(await f.prisma.run.findUnique(), { sourceMessageId: "human-1" });
@@ -2102,6 +2157,27 @@ describe("recruiter-instructed email send", () => {
     expect(f.execute).not.toHaveBeenCalled();
   });
 
+  // "先发给我看看" (send it to me first) read as an order to send it to the candidate: every
+  // send of a new email waits for its own card, whatever the recruiter's words were.
+  it.each(["先发给我看看", "发吧"])(
+    "keeps the card for a new email after %s",
+    async (instruction) => {
+      const f = await instructedSend(
+        "To: candidate@example.test\nSubject: Seattle role\n\nPublic synthetic draft.",
+        instruction,
+        [],
+        {
+          recipient_email: "candidate@example.test",
+          subject: "Seattle role",
+          body: "Public synthetic draft.",
+        },
+        { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
+      );
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    },
+  );
+
   it("keeps the card when the exact text was never shown", async () => {
     const f = await instructedSend("我会回复他周二可以。");
     expect(f.execute).not.toHaveBeenCalled();
@@ -2115,7 +2191,7 @@ describe("recruiter-instructed email send", () => {
   });
 
   // A candidate's reply can ask the agent to "also bcc" an outside address.
-  it("keeps the card for an injected bcc, even with send when I say send saved", async () => {
+  it("keeps the card for an injected bcc, even with an always-allow rule saved", async () => {
     const f = await instructedSend(
       "收件人：candidate@example.test\n草稿：\n> Public synthetic draft.",
       "发吧",
@@ -2638,6 +2714,57 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
         blocks: [],
       }),
     );
+  });
+
+  it("gives the agent a turn to save the recruiter's answers once a reply listing open questions is sent", async () => {
+    const editedBody = "Relocation is up to $10,000.";
+    const f = replyFixture({ structuredContent: { ...sentEmail, body: { text: editedBody } } });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    effect.request = editMailReplyRequest(effect.request, draft, {
+      action: "send",
+      body: editedBody,
+      cc: [],
+    });
+    effect.result = {
+      mailReplyApproval: {
+        ...draft,
+        body: editedBody,
+        openQuestions: ["Do you offer relocation?"],
+        status: "sending",
+      },
+    };
+    effect.status = "approved";
+    f.runtimeRun.mockClear();
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.runtimeRun).toHaveBeenCalledOnce();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain('"Do you offer relocation?"');
+  });
+
+  it("also does when the recruiter discarded the card that listed them and answered in words", async () => {
+    const f = replyFixture({ structuredContent: sentEmail });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    f.effects.unshift({
+      ...effect,
+      id: "discarded-card",
+      kind: "instantly__demo__reply_to_email",
+      runId: "earlier-run",
+      idempotencyKey: "earlier-card",
+      status: "denied",
+      result: { mailReplyApproval: { ...draft, openQuestions: ["Can you transfer my H-1B?"] } },
+    });
+    effect.status = "approved";
+    effect.result = { mailReplyApproval: { ...draft, status: "sending" } };
+    f.runtimeRun.mockClear();
+    await f.run();
+    expect(f.runtimeRun).toHaveBeenCalledOnce();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain('"Can you transfer my H-1B?"');
   });
 
   it.each([

@@ -520,6 +520,14 @@ test("a send card's recipients are its To list, never the sending mailbox or the
   assert.deepEqual(recipientsOf("Confirm sending email → wei@test.example", ""), [
     "wei@test.example",
   ]);
+  // A reply card names its recipient on the To line; the From mailbox is never a recipient.
+  assert.deepEqual(
+    recipientsOf(
+      "Confirm reply",
+      "To: ethan@test.example\nFrom: me@mail.example\nSubject: Re: Seattle role",
+    ),
+    ["ethan@test.example"],
+  );
 });
 
 test("cardAnswer sends a button id, a filled form, or the typed text", () => {
@@ -545,6 +553,8 @@ test("cardAnswer sends a button id, a filled form, or the typed text", () => {
     action: "accept",
     content: { level: "会说", years: 5, note: "会说就行 5年" },
   });
+  // 11-26: "搬迁最高$10k" on a 提供/不提供 card was sent as the first choice.
+  assert.equal(cardAnswer(form, "看情况，最多三年"), null);
 });
 
 test("Chinese with English titles, skills or a quoted email is Chinese", () => {

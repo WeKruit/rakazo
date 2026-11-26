@@ -1799,6 +1799,10 @@ msgid "Delivery is not confirmed. Check the conversation before trying again."
 msgstr "送达尚未确认。请先查看对话，再决定是否重试。"
 
 #: src/components/MailReplyAskContent.tsx
+msgid "The candidate asked what you haven't told me. Answer it in the reply:"
+msgstr "候选人问了你还没告诉我的事，请在回复里答上："
+
+#: src/components/MailReplyAskContent.tsx
 msgid "Delivery unconfirmed"
 msgstr "发送结果待确认"
 
