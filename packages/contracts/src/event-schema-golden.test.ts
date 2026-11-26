@@ -39,6 +39,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   13: "e90ed4b7750f6a67737fc8ce1899e683947209f2f0e06c770eecc851f32a7e66",
   // 14: optional answerTarget on ask blocks (a role team's card shown in the delegating chat).
   14: "0080544f7957fff29512ddc4b5c0dd244ba91a53c0c6a5a3f2b738c4398375b7",
+  // 15: a profile view's candidateKey is "sourced:<key>"; views stored as "autumn:<key>" still read.
+  15: "0e016fa898d6d612cf71d65112dcaee5daadeac3f73aefbdfc774e04fb42d36a",
 };
 
 const OLD_ROWS: unknown[] = [

@@ -7681,7 +7681,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
 
   it("persists private notes and reads reminders across both person keys", async () => {
     const f = await assessmentFixture();
-    const keys = ["autumn:profile-fixture", "crm:profile-fixture"];
+    const keys = ["sourced:profile-fixture", "crm:profile-fixture"];
     const note = await recruiting.createRecruitingCandidateNote(prisma, actor, {
       candidateKey: keys[0]!,
       roleId: f.role.role.id,

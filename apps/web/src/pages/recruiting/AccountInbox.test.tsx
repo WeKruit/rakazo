@@ -146,7 +146,7 @@ it("joins one explicit email to saved summary facts and never joins mismatched C
     location: "Austin",
     email: "first@example.test",
     linkedinUrl: null,
-    autumn: {
+    sourced: {
       candidateKey: "person",
       score: 4,
       rank: 1,

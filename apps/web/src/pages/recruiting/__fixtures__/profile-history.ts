@@ -1,4 +1,4 @@
-// Synthetic proposed rich-profile display contract, not an observed Autumn payload.
+// Synthetic proposed rich-profile display contract, not an observed search payload.
 export const rawEmployerDescription = "Original employment narrative: ".concat(
   "This supplied paragraph describes responsibilities across several employers without a documented record delimiter. ".repeat(
     10,

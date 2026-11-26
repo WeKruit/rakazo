@@ -82,7 +82,7 @@ describe("recruiting candidate notes (db)", () => {
   it("creates and lists newest first across keys with authors", async () => {
     const { prisma } = fake();
     const first = await createRecruitingCandidateNote(prisma, alice, {
-      candidateKey: "autumn:k1",
+      candidateKey: "sourced:k1",
       roleId: "role",
       body: "Strong Go background",
     });
@@ -95,12 +95,12 @@ describe("recruiting candidate notes (db)", () => {
     await createRecruitingCandidateNote(prisma, alice, { candidateKey: "crm:99", body: "Other" });
     expect(first).toMatchObject({ createdBy: "user", authorName: "Alice", roleId: "role" });
     const listed = await listRecruitingCandidateNotes(prisma, alice, {
-      candidateKeys: ["autumn:k1", "crm:42"],
+      candidateKeys: ["sourced:k1", "crm:42"],
     });
     expect(listed.items.map((i) => i.body)).toEqual(["Prefers remote", "Strong Go background"]);
     expect(listed.items[0]).toMatchObject({ createdBy: "agent", authorName: "Sourcer" });
     const byRole = await listRecruitingCandidateNotes(prisma, alice, {
-      candidateKeys: ["autumn:k1", "crm:42"],
+      candidateKeys: ["sourced:k1", "crm:42"],
       roleId: "role",
     });
     expect(byRole.items).toHaveLength(1);
@@ -159,13 +159,13 @@ describe("recruiting candidate notes (db)", () => {
     const { prisma } = fake();
     const created = await executeRecruitingNotesTool(prisma, alice, "bot-1", {
       operation: "create",
-      candidateKey: "autumn:k1",
+      candidateKey: "sourced:k1",
       body: "Open to relocation",
     });
     expect(created).toMatchObject({ createdBy: "agent", authorName: "Sourcer" });
     const listed = await executeRecruitingNotesTool(prisma, alice, "bot-1", {
       operation: "list",
-      candidateKeys: ["autumn:k1"],
+      candidateKeys: ["sourced:k1"],
     });
     expect(listed).toMatchObject({ items: [{ body: "Open to relocation" }] });
     const id = (created as { id: string }).id;
@@ -193,7 +193,7 @@ it("keeps native attachments and refuses foreign owner or space artifact referen
   );
   const prisma = { ...base, artifact: { findMany } } as unknown as PrismaClient;
   const note = await createRecruitingCandidateNote(prisma, alice, {
-    candidateKey: "autumn:k1",
+    candidateKey: "sourced:k1",
     body: "Saved evidence",
     artifactIds: ["owned"],
   });
@@ -205,7 +205,7 @@ it("keeps native attachments and refuses foreign owner or space artifact referen
   );
   await expect(
     createRecruitingCandidateNote(prisma, alice, {
-      candidateKey: "autumn:k1",
+      candidateKey: "sourced:k1",
       body: "Foreign evidence",
       artifactIds: ["foreign"],
     }),
@@ -214,7 +214,7 @@ it("keeps native attachments and refuses foreign owner or space artifact referen
     createRecruitingCandidateNote(
       prisma,
       { ...alice, spaceId: "other" },
-      { candidateKey: "autumn:k1", body: "Other space", artifactIds: ["owned"] },
+      { candidateKey: "sourced:k1", body: "Other space", artifactIds: ["owned"] },
     ),
   ).rejects.toBeInstanceOf(IsolationError);
 });

@@ -12,11 +12,11 @@ vi.mock("./shared", () => ({
   useCrmPages: () => reads.pages,
 }));
 
-import { type AutumnCandidatesRead, useRoleCandidates } from "./useRoleCandidates";
+import { type SourcedCandidatesRead, useRoleCandidates } from "./useRoleCandidates";
 
 const ada = { candidateKey: "ada", name: "Ada", linkedinUrl: "https://linkedin.com/in/ada" };
 const crmAda = { ...ada, candidateId: "crm-ada" };
-const autumn = (extra = {}): AutumnCandidatesRead => ({
+const sourced = (extra = {}): SourcedCandidatesRead => ({
   items: [ada] as never[],
   total: 100,
   hasMore: true,
@@ -30,11 +30,11 @@ const autumn = (extra = {}): AutumnCandidatesRead => ({
 });
 let root: ReturnType<typeof createRoot>;
 let result: ReturnType<typeof useRoleCandidates>;
-function Probe({ value }: { value?: AutumnCandidatesRead }) {
-  result = useRoleCandidates({ roleId: "role", spaceId: "space", autumn: value });
+function Probe({ value }: { value?: SourcedCandidatesRead }) {
+  result = useRoleCandidates({ roleId: "role", spaceId: "space", sourced: value });
   return null;
 }
-async function render(value?: AutumnCandidatesRead) {
+async function render(value?: SourcedCandidatesRead) {
   await act(async () => root.render(<Probe value={value} />));
   return result;
 }
@@ -54,13 +54,13 @@ afterEach(async () => {
 });
 
 it("does not subtract only loaded overlaps from complete source totals", async () => {
-  const list = await render(autumn());
+  const list = await render(sourced());
   expect(list.total).toBeNull();
   expect(list.loadedCount).toBe(1);
 });
 it("uses the merged row count after both sources are exhausted", async () => {
   reads.pages = { ...reads.pages, data: { items: [crmAda], total: 1 }, hasMore: false };
-  const list = await render(autumn({ total: 1, hasMore: false }));
+  const list = await render(sourced({ total: 1, hasMore: false }));
   expect(list.total).toBe(1);
   expect(list.loadedCount).toBe(1);
 });
@@ -69,34 +69,34 @@ it.each(["loading", "failed", "unavailable"])(
   async (status) => {
     reads.crm = { status };
     reads.pages = { loading: status === "loading", failed: status === "failed" };
-    expect((await render(autumn({ total: 1, hasMore: false }))).total).toBeNull();
+    expect((await render(sourced({ total: 1, hasMore: false }))).total).toBeNull();
   },
 );
 it.each([{ loading: true }, { failed: true }, { total: null }])(
-  "does not treat an unread Autumn source as zero: %j",
+  "does not treat an unread search-result source as zero: %j",
   async (state) => {
-    expect((await render(autumn(state))).total).toBeNull();
+    expect((await render(sourced(state))).total).toBeNull();
   },
 );
 it("preserves a trusted single-source CRM total while pages remain", async () => {
   expect((await render()).total).toBe(100);
 });
 it.each(["excluded", "unbound"])(
-  "preserves a trusted Autumn total when CRM is %s",
+  "preserves a trusted search-result total when CRM is %s",
   async (state) => {
     if (state === "unbound") reads.crm = { status: "unbound" };
-    expect((await render(autumn({ includeCrm: state !== "excluded" }))).total).toBe(100);
+    expect((await render(sourced({ includeCrm: state !== "excluded" }))).total).toBe(100);
   },
 );
 it("does not report exact totals after a failed CRM read", async () => {
   reads.pages = { ...reads.pages, failed: true, hasMore: false };
-  expect((await render(autumn({ total: 1, hasMore: false }))).total).toBeNull();
+  expect((await render(sourced({ total: 1, hasMore: false }))).total).toBeNull();
 });
 
 it.each([true, false])(
-  "keeps total unknown when only one source has more pages (Autumn: %s)",
-  async (autumnHasMore) => {
-    reads.pages = { ...reads.pages, hasMore: !autumnHasMore };
-    expect((await render(autumn({ hasMore: autumnHasMore }))).total).toBeNull();
+  "keeps total unknown when only one source has more pages (search results: %s)",
+  async (sourcedHasMore) => {
+    reads.pages = { ...reads.pages, hasMore: !sourcedHasMore };
+    expect((await render(sourced({ hasMore: sourcedHasMore }))).total).toBeNull();
   },
 );

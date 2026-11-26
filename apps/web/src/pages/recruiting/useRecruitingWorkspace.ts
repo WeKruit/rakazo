@@ -111,7 +111,7 @@ export function useRecruitingWorkspace({
           : storedCandidateFilters,
     [presentation, view, storedCandidateFilters, filteredShortlistWeek],
   );
-  // Every returned candidate keeps Autumn's own result fields in the workspace table.
+  // Every returned candidate keeps the search's own result fields in the workspace table.
   const candidateTableDetails = presentation === "workspace" && !contactsView;
   const [selection, setSelection] = useState<RecruitingCandidate | null>(null);
   const candidateTrigger = useRef<HTMLButtonElement>(null);

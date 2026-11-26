@@ -25,7 +25,7 @@ const crmRow = (n: number) =>
 function pagedSources() {
   const reads: { offset: number; query: string | undefined }[] = [];
   const sources: RoleCandidatesSources = {
-    autumn: async () =>
+    sourced: async () =>
       ({
         items: [
           {
@@ -46,7 +46,7 @@ function pagedSources() {
         counts: { shortlisted: 0 },
         crmTarget: { target: {} },
       }) as never,
-    autumnLinkedinUrls: async () => ["https://www.linkedin.com/in/saved/"],
+    sourcedLinkedinUrls: async () => ["https://www.linkedin.com/in/saved/"],
     crm: async (_target, offset, query) => {
       reads.push({ offset, query });
       const end = Math.min(CRM_TOTAL, offset + CRM_PAGE);
@@ -80,7 +80,7 @@ describe("mergeRoleCandidates pages the CRM instead of reading it all", () => {
       cursor = page.nextCursor ?? undefined;
     } while (cursor && requests < 20);
     // The saved person is matched to CRM row 0, so it is listed once, on the saved side.
-    expect(keys[0]).toBe("autumn:saved");
+    expect(keys[0]).toBe("sourced:saved");
     expect(keys).not.toContain("crm:crm-0");
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys).toHaveLength(CRM_TOTAL);

@@ -38,13 +38,13 @@ export const accountItem = (
   candidates: {
     items: [
       {
-        key: `autumn:fixture-${index}`,
+        key: `sourced:fixture-${index}`,
         name: index ? "Blake Sample" : "Avery Example",
         title: role.title,
         location: "Remote",
         email: index ? "blake@example.test" : "avery@example.test",
         linkedinUrl: null,
-        autumn: null,
+        sourced: null,
         crm: null,
         shortlisted: true,
         shortlistedAt: checkedAt,

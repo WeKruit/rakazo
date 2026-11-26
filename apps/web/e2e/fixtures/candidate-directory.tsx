@@ -52,11 +52,11 @@ function candidate(
     location,
     email: null,
     linkedinUrl: name ? `https://example.test/people/${key}` : null,
-    autumn: {
+    sourced: {
       company,
       shortlisted: false,
       latestSource: { report: { fields } },
-    } as RoleCandidate["autumn"],
+    } as RoleCandidate["sourced"],
     crm: null,
   };
 }
@@ -117,7 +117,7 @@ const initial = [
   ),
   candidate("missing", null, null, null, null),
 ];
-initial[0]!.autumn!.shortlisted = true;
+initial[0]!.sourced!.shortlisted = true;
 initial[2]!.crm = {
   stage: "not_interested",
   company: "Demonstration Studio",
@@ -142,14 +142,14 @@ function Fixture() {
               size="sm"
               variant="outline"
               aria-label={`Shortlist ${row.name ?? "unnamed candidate"}`}
-              aria-pressed={row.autumn?.shortlisted ?? false}
+              aria-pressed={row.sourced?.shortlisted ?? false}
               onClick={() =>
                 setRows((current) =>
                   current.map((item) =>
-                    item.key === row.key && item.autumn
+                    item.key === row.key && item.sourced
                       ? {
                           ...item,
-                          autumn: { ...item.autumn, shortlisted: !item.autumn.shortlisted },
+                          sourced: { ...item.sourced, shortlisted: !item.sourced.shortlisted },
                         }
                       : item,
                   ),
@@ -159,9 +159,9 @@ function Fixture() {
               <Bookmark
                 size={13}
                 aria-hidden
-                fill={row.autumn?.shortlisted ? "currentColor" : "none"}
+                fill={row.sourced?.shortlisted ? "currentColor" : "none"}
               />
-              {row.autumn?.shortlisted ? "Shortlisted" : "Shortlist"}
+              {row.sourced?.shortlisted ? "Shortlisted" : "Shortlist"}
             </Button>
           )}
         />

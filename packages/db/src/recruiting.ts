@@ -9551,7 +9551,7 @@ async function nativeReplyContext(
         { id: raw.replyToEmailId },
       );
   if (!emailProof || !membershipProof) throw new IsolationError();
-  // A native CRM member need not have an Autumn occurrence; existing local hold/pass still applies.
+  // A native CRM member need not have a search occurrence; existing local hold/pass still applies.
   if (
     typeof candidate.linkedin_identity === "string" &&
     /^\/in\/[^/]+$/.test(candidate.linkedin_identity)
@@ -10692,7 +10692,7 @@ export async function listRecruitingCandidates(
     : result;
 }
 
-/** Every LinkedIn URL Autumn observed for a role (owner-fenced); identity only, never a profile. */
+/** Every LinkedIn URL the search observed for a role (owner-fenced); identity only, never a profile. */
 export async function listRecruitingCandidateLinkedinUrls(
   prisma: PrismaClient,
   actor: Actor,
@@ -10947,16 +10947,17 @@ export async function executeNativeRecruitingShortlist(
 }
 
 /**
- * The role's one saved person a key in another shape names: a list row's "autumn:<key>" or a
- * LinkedIn handle without its prefix. A play 11-24: "autumn:<handle>" was refused, the agent fell
- * back to the list's thin row and told the recruiter the profile showed no evidence.
+ * The role's one saved person a key in another shape names: a list row's "sourced:<key>"
+ * ("autumn:<key>" before the rename) or a LinkedIn handle without its prefix. A play 11-24: the
+ * prefixed handle was refused, the agent fell back to the list's thin row and told the recruiter
+ * the profile showed no evidence.
  */
 async function candidateByOtherKeyShape(
   tx: Pick<Tx, "recruitingCandidate">,
   roleId: string,
   given: string,
 ) {
-  const key = given.replace(/^autumn:/, "");
+  const key = given.replace(/^(sourced|autumn):/, "");
   const handle = key.split("/").pop();
   if (!handle) return null;
   const near = await tx.recruitingCandidate.findMany({
@@ -11090,11 +11091,11 @@ export async function listRecruitingCandidateSources(
 
 // ---------------------------------------------------------------------------
 // Calibration review rounds: which ten saved people each round showed the recruiter, and the
-// recruiter's decision to move on to finding more people. Autumn owns matching; this only keeps
+// recruiter's decision to move on to finding more people. The search owns matching; this only keeps
 // identity, ordering and the human decision.
 // ---------------------------------------------------------------------------
 
-/** A round rule the agent can fix by asking Autumn again; the message is safe to show the agent. */
+/** A round rule the agent can fix by asking the search again; the message is safe to show the agent. */
 export class RecruitingCalibrationRoundError extends Error {
   constructor(message: string) {
     super(message);
@@ -11440,10 +11441,13 @@ export async function approveRecruitingCalibrationRoundFromMessage(
 async function profileActivityTarget(tx: Tx, actor: Actor, input: ProfileActivityInput) {
   const role = await requireRole(tx, actor, input.roleId);
   let profileCrmSource: RecruitingCrmRoleReference | undefined;
-  if (input.candidateKey.startsWith("autumn:")) {
+  if (input.candidateKey.startsWith("sourced:")) {
     const candidate = await tx.recruitingCandidate.findUnique({
       where: {
-        roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey.slice(7) },
+        roleId_candidateKey: {
+          roleId: role.id,
+          candidateKey: input.candidateKey.slice("sourced:".length),
+        },
       },
       select: { candidateKey: true },
     });
@@ -11546,7 +11550,15 @@ function profileEventWhere(
     AND: [
       ...(crmSource ? [{ payload: { path: ["crmSource"], equals: crmSource } }] : []),
       { payload: { path: ["roleId"], equals: roleId } },
-      { payload: { path: ["candidateKey"], equals: candidateKey } },
+      // Views recorded before the key rename keep their stored "autumn:<key>".
+      {
+        OR: [
+          candidateKey,
+          ...(candidateKey.startsWith("sourced:")
+            ? [`autumn:${candidateKey.slice("sourced:".length)}`]
+            : []),
+        ].map((key) => ({ payload: { path: ["candidateKey"], equals: key } })),
+      },
       { payload: { path: ["actorUserId"], equals: actor.userId } },
       {
         payload: {

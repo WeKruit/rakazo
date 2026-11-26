@@ -53,7 +53,7 @@ export type RecruitingDetailTarget = {
   collection?: { label: string; index: number; total: number };
   person: RecruitingDetailPerson;
   role: Pick<RecruitingTabProps, "roleId" | "spaceId" | "conversation"> | null;
-  /** The person's Autumn search result, when they have one. */
+  /** The person's search result, when they have one. */
   candidate?: RecruitingCandidate;
   /** Definitions from the opening role; only used when the source revision matches exactly. */
   criterionRevision?: ProfileCriterionRevision;

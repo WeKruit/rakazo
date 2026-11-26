@@ -529,12 +529,12 @@ suite("stored global Inbox projection", () => {
     );
     expect(page.items).toHaveLength(1);
     expect(page.items[0]?.person).toMatchObject({
-      key: `autumn:${candidateKey}`,
+      key: `sourced:${candidateKey}`,
       name: "Exact Saved Person",
       title: "Platform Engineer",
       location: "Remote",
       shortlisted: true,
-      autumn: {
+      sourced: {
         candidateKey,
         savedProfile: {
           personKey: candidateKey,
@@ -558,7 +558,7 @@ suite("stored global Inbox projection", () => {
   it("refreshes cached persona grades against current role revision and later Reviewer evidence", async () => {
     const candidateKey = "linkedin:/in/synthetic-inbox-profile";
     const original = (await read({ query: "Subject exact-profile" })).items[0]!.person!;
-    expect(original.autumn?.ranking).toMatchObject({ grade: "Strong", state: "current" });
+    expect(original.sourced?.ranking).toMatchObject({ grade: "Strong", state: "current" });
     await projectRecruitingInboxMessages(prisma, actor, {
       roleId,
       emails: [message("cached-profile", { candidateKey })],
@@ -599,7 +599,7 @@ suite("stored global Inbox projection", () => {
       },
     });
     expect(
-      (await read({ query: "Subject cached-profile" })).items[0]?.person?.autumn?.ranking,
+      (await read({ query: "Subject cached-profile" })).items[0]?.person?.sourced?.ranking,
     ).toMatchObject({
       grade: "Partial",
       score: 55,
@@ -624,7 +624,7 @@ suite("stored global Inbox projection", () => {
       data: { currentRevisionId: revision, revision: 2 },
     });
     expect(
-      (await read({ query: "Subject cached-profile" })).items[0]?.person?.autumn?.ranking,
+      (await read({ query: "Subject cached-profile" })).items[0]?.person?.sourced?.ranking,
     ).toMatchObject({ grade: "Partial", state: "current", roleRevisionId: roleId });
   });
   it("indexes 24,000 saved messages off-request while reads remain read-only and page immediately", async () => {

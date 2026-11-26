@@ -55,11 +55,11 @@ function row(key: string, fields: RecruitingCandidateReport["fields"] = []): Rol
     location: "Example City",
     email: null,
     linkedinUrl: "https://example.test/source-profile",
-    autumn: {
+    sourced: {
       company: "Example Labs",
       shortlisted: false,
       latestSource: { report: { fields } },
-    } as RoleCandidate["autumn"],
+    } as RoleCandidate["sourced"],
     crm: null,
   };
 }
@@ -129,7 +129,7 @@ it("does not turn missing fields or unknown criteria into matches, partial match
     title: null,
     location: null,
     linkedinUrl: null,
-    autumn: null,
+    sourced: null,
   });
   const unknown = row("unknown", [
     { ...field("Rust", "unclear"), providerStatus: "unclear" },
@@ -153,7 +153,7 @@ it("keeps actual supplied fit states and stored statuses separate", async () => 
     { ...field("Rust", "miss"), providerStatus: "miss" },
   ]);
   candidate.crm = { stage: "not_interested", outreachStatus: "replied" } as RoleCandidate["crm"];
-  candidate.autumn!.shortlisted = true;
+  candidate.sourced!.shortlisted = true;
   const { view, render } = await mount(<CandidateDirectory rows={[candidate]} onOpen={vi.fn()} />);
   expect(view.textContent).toContain("Go · Match");
   expect(view.textContent).toContain("Rust · Gap");
@@ -239,9 +239,9 @@ it("uses source-revision-matched criterion definitions in table and cards, never
   const candidate = row("definition", [
     field("Requirements assessment", "R4: Partial - Prototype only."),
   ]);
-  candidate.autumn = {
-    ...candidate.autumn!,
-    latestSource: { ...candidate.autumn!.latestSource!, roleRevisionId: "revision-1" },
+  candidate.sourced = {
+    ...candidate.sourced!,
+    latestSource: { ...candidate.sourced!.latestSource!, roleRevisionId: "revision-1" },
   };
   const criterionRevision = {
     id: "revision-1",
@@ -302,7 +302,7 @@ it("shows education from a graded row and from the saved profile when the newest
     "saved",
     graded.fields.filter((item) => item.label !== "Education"),
   );
-  saved.autumn!.savedProfile = {
+  saved.sourced!.savedProfile = {
     personKey: "linkedin:/in/saved",
     provider: "people_search",
     fetchedAt: "2026-10-30T10:00:00.000Z",
@@ -332,11 +332,11 @@ it("shows education from a graded row and from the saved profile when the newest
 it("shows the same people in a board grouped only by their recorded states", async () => {
   const one = row("one");
   const two = row("two");
-  one.autumn!.shortlisted = true;
-  two.autumn!.decision = "hold";
+  one.sourced!.shortlisted = true;
+  two.sourced!.decision = "hold";
   // Fosp 11-20 (2a781497): people the recruiter turned down in chat showed unmarked.
   const three = row("three");
-  three.autumn!.recruiterVerdict = "not_fit";
+  three.sourced!.recruiterVerdict = "not_fit";
   const onOpen = vi.fn();
   const { view } = await mount(
     <CandidateDirectory rows={[one, two, three]} onOpen={onOpen} board />,
@@ -357,7 +357,7 @@ it("shows the same people in a board grouped only by their recorded states", asy
 it("shows a grade made before the brief changed as it was given", async () => {
   // Big-ask 11-25: one loosened requirement showed all 123 people as 需要重新评估.
   const graded = row("graded");
-  graded.autumn!.ranking = {
+  graded.sourced!.ranking = {
     source: "reviewer",
     state: "current",
     roleRevisionId: "earlier-brief",

@@ -10,8 +10,8 @@ export type CrmCandidate = Extract<
   { operation: "candidates" }
 >["items"][number];
 
-/** The role's Autumn results as the workbench already reads and validates them. */
-export type AutumnCandidatesRead = {
+/** The role's search results as the workbench already reads and validates them. */
+export type SourcedCandidatesRead = {
   items: readonly RecruitingCandidate[];
   loading: boolean;
   failed: boolean;
@@ -23,7 +23,7 @@ export type AutumnCandidatesRead = {
   email?: (candidate: RecruitingCandidate) => string | null;
   /** False keeps the server's chosen order (a sort other than score). */
   sortByScore: boolean;
-  /** False while an Autumn-only filter (shortlist, round, verdict) is active. */
+  /** False while a search-only filter (shortlist, round, verdict) is active. */
   includeCrm: boolean;
   query?: string;
 };
@@ -35,33 +35,33 @@ export type RoleCandidate = RoleCandidateRow<RecruitingCandidate, CrmCandidate>;
  * its own, and the merged rows are what the table shows. This hook is the single place that
  * knows where the rows come from, so a merged server read can replace both reads here.
  */
-export function useRoleCandidates(props: RecruitingTabProps & { autumn?: AutumnCandidatesRead }) {
-  const { autumn } = props;
+export function useRoleCandidates(props: RecruitingTabProps & { sourced?: SourcedCandidatesRead }) {
+  const { sourced } = props;
   const [reload, setReload] = useState(0);
   const crm = useRoleCrm(props);
-  const query = autumn?.query?.trim();
+  const query = sourced?.query?.trim();
   const crmPages = useCrmPages(
     crm,
     "candidates",
-    crm.status === "ready" && (autumn?.includeCrm ?? true)
+    crm.status === "ready" && (sourced?.includeCrm ?? true)
       ? { crmRoleId: crm.target.crmRoleId, ...(query ? { query } : {}) }
       : null,
     { ...props, reload },
   );
   const crmData = crmPages.data;
-  const autumnItems = autumn?.items;
+  const sourcedItems = sourced?.items;
   // Saved results already carry the role-wide server order, established before pagination.
   const sortByScore = false;
   // The email lookup is a new function on every parent render; its answers are what matter.
-  const emails = (autumnItems ?? []).map((candidate) => autumn?.email?.(candidate) ?? null);
+  const emails = (sourcedItems ?? []).map((candidate) => sourced?.email?.(candidate) ?? null);
   const emailKey = emails.join("\n");
   // Merged rows keep their identity across renders, so the table and its per-row profile
   // parsing do not redo work when only the open person or a tab changes.
   const rows = useMemo(
     () =>
       mergeRoleCandidates({
-        autumn: (autumnItems ?? []).map((candidate, index) => ({
-          key: `autumn:${candidate.candidateKey}`,
+        sourced: (sourcedItems ?? []).map((candidate, index) => ({
+          key: `sourced:${candidate.candidateKey}`,
           name: candidate.name,
           title: candidate.title,
           location: candidate.location,
@@ -82,7 +82,7 @@ export function useRoleCandidates(props: RecruitingTabProps & { autumn?: AutumnC
         fit: (candidate) => roleCandidateFit(candidate.latestSource?.report?.fields),
         sortByScore,
       }),
-    [autumnItems, crmData, sortByScore, emailKey],
+    [sourcedItems, crmData, sortByScore, emailKey],
   );
   const crmTotal = crmData?.total ?? null;
   const crmRead = {
@@ -90,35 +90,35 @@ export function useRoleCandidates(props: RecruitingTabProps & { autumn?: AutumnC
     failed: crm.status === "failed" || crmPages.failed,
     retry: () => setReload((value) => value + 1),
   };
-  const autumnMore = Boolean(autumn?.hasMore);
-  const includeCrm = (autumn?.includeCrm ?? true) && crm.status !== "unbound";
-  const autumnReady = !autumn || (!autumn.loading && !autumn.failed && autumn.total !== null);
+  const sourcedMore = Boolean(sourced?.hasMore);
+  const includeCrm = (sourced?.includeCrm ?? true) && crm.status !== "unbound";
+  const sourcedReady = !sourced || (!sourced.loading && !sourced.failed && sourced.total !== null);
   const crmReady = !includeCrm || (crm.status === "ready" && !!crmPages.data && !crmRead.failed);
   // Separate source totals cannot establish the union: unseen pages may contain overlaps.
   // Keep the source total for a successful single-source read, and count the merged rows
   // only after both included sources have been exhausted.
   const total =
-    !autumnReady || !crmReady
+    !sourcedReady || !crmReady
       ? null
       : !includeCrm
-        ? (autumn?.total ?? null)
-        : !autumn
+        ? (sourced?.total ?? null)
+        : !sourced
           ? crmTotal
-          : !autumnMore && !crmPages.hasMore
+          : !sourcedMore && !crmPages.hasMore
             ? rows.length
             : null;
   return {
     crm,
     rows,
-    autumn: autumn && { loading: autumn.loading, failed: autumn.failed, retry: autumn.retry },
+    sourced: sourced && { loading: sourced.loading, failed: sourced.failed, retry: sourced.retry },
     crmRead,
     /** Exact displayed-record total only when source and deduplication coverage permit it. */
     total,
     /** Already merged visible records; not an estimate of the complete population. */
     loadedCount: rows.length,
     more: {
-      hasMore: autumnMore || crmPages.hasMore,
-      loadMore: autumnMore ? autumn!.loadMore : crmPages.loadMore,
+      hasMore: sourcedMore || crmPages.hasMore,
+      loadMore: sourcedMore ? sourced!.loadMore : crmPages.loadMore,
       loadingMore: crmPages.loadingMore,
       moreFailed: crmPages.moreFailed,
     },

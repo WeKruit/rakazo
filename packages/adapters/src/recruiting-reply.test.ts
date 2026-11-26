@@ -351,7 +351,7 @@ describe("recruiting reply draft translation", () => {
     ).toMatchObject({ status: "blocked", reasons: ["crm_review_rejected"] });
   });
 
-  it("preflights a canonical CRM member without an Autumn import or an unrelated mailbox", async () => {
+  it("preflights a canonical CRM member without a search import or an unrelated mailbox", async () => {
     const membership = {
       membership_id: otherId,
       organization_id: orgId,

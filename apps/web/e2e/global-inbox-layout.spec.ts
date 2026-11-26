@@ -14,13 +14,13 @@ for (const width of [1440, 390, 320]) {
       const item = accountItem(role, roleIndex);
       if (item.candidates)
         item.candidates.items = Array.from({ length: 3 }, (_, index) => ({
-          key: `autumn:person-${roleIndex}-${index}`,
+          key: `sourced:person-${roleIndex}-${index}`,
           name: ["Avery Example", "Blake Sample", "Morgan Chen"][index]!,
           title: roleIndex ? "Senior product designer" : "Staff platform engineer",
           location: index ? "Chicago, IL" : "Austin, TX",
           email: `candidate${roleIndex}${index}@example.test`,
           linkedinUrl: null,
-          autumn: {
+          sourced: {
             candidateKey: `person-${roleIndex}-${index}`,
             score: 4,
             rank: index + 1,

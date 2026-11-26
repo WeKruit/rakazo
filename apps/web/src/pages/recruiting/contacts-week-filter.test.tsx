@@ -14,7 +14,7 @@ vi.mock("./useRoleCandidates", () => ({
         {
           key: "matching",
           name: "Matching",
-          autumn: {
+          sourced: {
             roleId: "role-a",
             candidateKey: "a",
             shortlisted: true,
@@ -24,14 +24,14 @@ vi.mock("./useRoleCandidates", () => ({
         {
           key: "old",
           name: "Old",
-          autumn: { roleId: "role-a", shortlisted: true, shortlistedAt: "2026-10-18T12:00:00Z" },
+          sourced: { roleId: "role-a", shortlisted: true, shortlistedAt: "2026-10-18T12:00:00Z" },
         },
         {
           key: "foreign",
           name: "Foreign",
-          autumn: { roleId: "role-b", shortlisted: true, shortlistedAt: "2026-10-20T12:00:00Z" },
+          sourced: { roleId: "role-b", shortlisted: true, shortlistedAt: "2026-10-20T12:00:00Z" },
         },
-        { key: "crm", name: "CRM only", autumn: null },
+        { key: "crm", name: "CRM only", sourced: null },
       ],
       total: 4,
       crm: { status: "unbound" },
@@ -63,7 +63,7 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
-it("shows only the exact Autumn role/date subset and withholds totals until remaining pages load", async () => {
+it("shows only the exact search-result role/date subset and withholds totals until remaining pages load", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -81,7 +81,7 @@ it("shows only the exact Autumn role/date subset and withholds totals until rema
           observedThrough: "2026-10-23T00:00:00Z",
         }}
         onClearShortlistWeekFilter={clear}
-        autumn={{
+        sourced={{
           items: [],
           loading: false,
           failed: false,
@@ -100,7 +100,7 @@ it("shows only the exact Autumn role/date subset and withholds totals until rema
     );
   try {
     await act(render);
-    expect(source.props).toMatchObject({ autumn: { includeCrm: false } });
+    expect(source.props).toMatchObject({ sourced: { includeCrm: false } });
     expect(container.textContent).toContain("Matching");
     for (const name of ["Old", "Foreign", "CRM only", "1 candidate"])
       expect(container.textContent).not.toContain(name);

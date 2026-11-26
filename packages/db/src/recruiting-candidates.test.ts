@@ -1900,7 +1900,7 @@ describe("saved sources by another key shape", () => {
     Object.assign(f.tx.recruitingCandidate, { findMany });
     const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
       roleId: f.input.roleId,
-      candidateKey: "autumn:some-handle",
+      candidateKey: "sourced:some-handle",
     });
     expect(sources.items).toHaveLength(1);
     expect(findMany.mock.calls[0]?.[0]).toMatchObject({
@@ -3024,7 +3024,7 @@ describe("durable recruiting reply linkage", () => {
     ).toEqual([]);
   });
   it.each(["direct", "catalog"])(
-    "admits a native canonical CRM member without an Autumn import and freezes proof in the original %s envelope",
+    "admits a native canonical CRM member without a search import and freezes proof in the original %s envelope",
     async (kind) => {
       const f = await nativeReplyFixture();
       if (kind === "catalog") {

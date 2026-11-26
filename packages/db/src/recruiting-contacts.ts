@@ -187,7 +187,7 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         r.id AS role_id, r.title AS role_title, r.group_id,
         c."candidateKey" AS role_candidate_key,
         r.thread_id, c.revision,
-        'autumn:' || c."candidateKey" AS note_key,
+        'sourced:' || c."candidateKey" AS note_key,
         c.shortlisted,
         occ.first_seen AS added_at,
         NULL::timestamp AS last_contacted,

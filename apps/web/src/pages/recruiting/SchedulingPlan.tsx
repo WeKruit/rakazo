@@ -280,10 +280,10 @@ export function SchedulingPlanForm({
       }),
   );
   const choices = (candidates.data?.items ?? []).flatMap((person) =>
-    person.autumn && person.name && person.email
+    person.sourced && person.name && person.email
       ? [
           {
-            candidateKey: person.autumn.candidateKey,
+            candidateKey: person.sourced.candidateKey,
             name: person.name,
             email: person.email,
           },

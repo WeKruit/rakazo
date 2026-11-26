@@ -169,7 +169,7 @@ function NoteForm({
 
 /**
  * The signed-in recruiter's notes on one person, newest first. `candidateKeys` lists every key the
- * person has ("autumn:<search key>", "crm:<CRM candidate id>"); new notes go under `createKey`.
+ * person has ("sourced:<search key>", "crm:<CRM candidate id>"); new notes go under `createKey`.
  */
 export function NotesTab({
   roleId,

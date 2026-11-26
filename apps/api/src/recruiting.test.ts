@@ -695,7 +695,7 @@ describe("saved recruiting correspondence", () => {
     return { ...state, membership, membershipCall: call, membershipResult, row };
   }
   it.each(["direct", "catalog", "text"])(
-    "projects a legacy CRM member's full mail from a %s receipt without an Autumn import",
+    "projects a legacy CRM member's full mail from a %s receipt without a search import",
     async (format) => {
       const state = crmMembershipFixture();
       if (format === "catalog")
@@ -7538,7 +7538,7 @@ describe("role campaign read", () => {
   });
 });
 
-describe("role candidates (Autumn + CRM merged list)", () => {
+describe("role candidates (search results + CRM merged list)", () => {
   const org = "10000000-0000-4000-8000-000000000001";
   const uuid = (n: number) => `30000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
   const person = (key: string, linkedinUrl: string | null, extra: Record<string, unknown> = {}) =>
@@ -7596,30 +7596,30 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       roleLabel: "Role",
     },
   };
-  // Autumn fake paging its list by an index cursor, like listCandidates' opaque cursor.
+  // Search-result fake paging its list by an index cursor, like listCandidates' opaque cursor.
   const sources = (
-    autumn: db.RecruitingCandidate[],
+    sourced: db.RecruitingCandidate[],
     crm: ReturnType<typeof contact>[] | "unavailable" | "unbound",
   ): api.RoleCandidatesSources => ({
-    async autumn(cursor, limit) {
+    async sourced(cursor, limit) {
       const start = cursor ? Number(cursor) : 0;
-      const items = autumn.slice(start, start + limit);
+      const items = sourced.slice(start, start + limit);
       return {
         items,
-        nextCursor: start + limit < autumn.length ? String(start + limit) : null,
-        total: autumn.length,
+        nextCursor: start + limit < sourced.length ? String(start + limit) : null,
+        total: sourced.length,
         counts: {
-          sourceRows: autumn.length,
-          candidates: autumn.length,
-          identifiedCandidates: autumn.length,
-          unassessed: autumn.length,
+          sourceRows: sourced.length,
+          candidates: sourced.length,
+          identifiedCandidates: sourced.length,
+          unassessed: sourced.length,
           assessed: 0,
-          shortlisted: autumn.filter((row) => row.shortlisted).length,
+          shortlisted: sourced.filter((row) => row.shortlisted).length,
         },
         crmTarget: crm === "unbound" ? null : crmTarget,
       };
     },
-    autumnLinkedinUrls: async () => autumn.flatMap((row) => row.linkedinUrl ?? []),
+    sourcedLinkedinUrls: async () => sourced.flatMap((row) => row.linkedinUrl ?? []),
     crm: async () =>
       crm === "unavailable" || crm === "unbound"
         ? { status: "unavailable" }
@@ -7656,9 +7656,9 @@ describe("role candidates (Autumn + CRM merged list)", () => {
     );
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({
-      key: "autumn:ada",
+      key: "sourced:ada",
       email: "ada@x.test",
-      autumn: { candidateKey: "ada", score: 9, rank: 1, tier: "Strong" },
+      sourced: { candidateKey: "ada", score: 9, rank: 1, tier: "Strong" },
       crm: { candidateId: uuid(1), serverId: "crm-server", organizationId: org },
     });
     expect(page.total).toBe(1);
@@ -7679,7 +7679,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
     expect(page.items.map((row) => row.key)).toEqual([`crm:${uuid(1)}`, `crm:${uuid(3)}`]);
   });
 
-  it("puts CRM-only rows after every Autumn row, sorted by score from the Autumn read", async () => {
+  it("puts CRM-only rows after every search row, sorted by score from the search-result read", async () => {
     const pages = await all(
       { limit: 2 },
       sources(
@@ -7688,13 +7688,19 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       ),
     );
     const keys = pages.flatMap((page) => page.items.map((row) => row.key));
-    expect(keys).toEqual(["autumn:a", "autumn:b", "autumn:c", `crm:${uuid(1)}`, `crm:${uuid(2)}`]);
+    expect(keys).toEqual([
+      "sourced:a",
+      "sourced:b",
+      "sourced:c",
+      `crm:${uuid(1)}`,
+      `crm:${uuid(2)}`,
+    ]);
     expect(pages.map((page) => page.items.length)).toEqual([2, 2, 1]);
     expect(pages.every((page) => page.total === 5)).toBe(true);
   });
 
   it("pages without overlap or gaps, and a merged CRM contact never reappears as CRM-only", async () => {
-    const autumn = Array.from({ length: 7 }, (_, n) =>
+    const sourced = Array.from({ length: 7 }, (_, n) =>
       person(`p${n}`, `https://linkedin.com/in/p${n}`),
     );
     const crm = [
@@ -7702,7 +7708,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       ...Array.from({ length: 5 }, (_, n) => contact(10 + n, { email: `c${n}@x.test` })),
     ];
     for (const limit of [1, 3, 4, 100]) {
-      const keys = (await all({ limit }, sources(autumn, crm))).flatMap((page) =>
+      const keys = (await all({ limit }, sources(sourced, crm))).flatMap((page) =>
         page.items.map((row) => row.key),
       );
       expect(new Set(keys).size).toBe(keys.length);
@@ -7715,26 +7721,26 @@ describe("role candidates (Autumn + CRM merged list)", () => {
           threadId: "thread",
           query: "other",
           cursor: (
-            await api.mergeRoleCandidates({ threadId: "thread", limit: 1 }, sources(autumn, crm))
+            await api.mergeRoleCandidates({ threadId: "thread", limit: 1 }, sources(sourced, crm))
           ).nextCursor!,
         },
-        sources(autumn, crm),
+        sources(sourced, crm),
       ),
     ).rejects.toBeInstanceOf(RecruitingConflictError);
   });
 
-  it("shortlistedOnly keeps shortlisted Autumn rows and drops CRM-only rows", async () => {
+  it("shortlistedOnly keeps shortlisted search rows and drops CRM-only rows", async () => {
     const from = sources(
       [person("a", null), person("b", null, { shortlisted: true })],
       [contact(1, { email: "z@x.test" })],
     );
-    const original = from.autumn;
-    from.autumn = async (cursor, limit) => {
+    const original = from.sourced;
+    from.sourced = async (cursor, limit) => {
       const page = await original(cursor, limit);
       return { ...page, items: page.items.filter((row) => row.shortlisted), total: 1 };
     };
     const page = await api.mergeRoleCandidates({ threadId: "thread", shortlistedOnly: true }, from);
-    expect(page.items.map((row) => row.key)).toEqual(["autumn:b"]);
+    expect(page.items.map((row) => row.key)).toEqual(["sourced:b"]);
     expect(page.total).toBe(1);
   });
 
@@ -7771,7 +7777,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
     expect(page.items.map((row) => row.key)).toEqual([`crm:${uuid(1)}`, `crm:${uuid(2)}`]);
   });
 
-  it("returns Autumn-only rows with crm null when the CRM is unbound or unavailable", async () => {
+  it("returns search-only rows with crm null when the CRM is unbound or unavailable", async () => {
     for (const [crm, status] of [
       ["unbound", "not_bound"],
       ["unavailable", "unavailable"],
@@ -7781,14 +7787,14 @@ describe("role candidates (Autumn + CRM merged list)", () => {
         sources([person("a", "https://linkedin.com/in/a")], crm),
       );
       expect(page).toMatchObject({ crmStatus: status, total: 1, nextCursor: null });
-      expect(page.items.map((row) => [row.key, row.crm])).toEqual([["autumn:a", null]]);
+      expect(page.items.map((row) => [row.key, row.crm])).toEqual([["sourced:a", null]]);
     }
   });
 
   it("wires the existing listCandidates read and reports an unbound CRM without CRM calls", async () => {
     vi.mocked(db.getRecruitingWorkspaceRoleId).mockResolvedValue("role");
     vi.mocked(db.listRecruitingCandidates).mockResolvedValue({
-      ...(await sources([person("a", null)], "unbound").autumn(undefined, 25)),
+      ...(await sources([person("a", null)], "unbound").sourced(undefined, 25)),
       sortAvailability: { rank: true, tier: false, score: true },
       roleId: "role",
       roleRevisionId: "revision",

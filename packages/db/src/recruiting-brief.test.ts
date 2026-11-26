@@ -2461,7 +2461,7 @@ async function nativeCalibrationFixture() {
 }
 
 describe("native calibration approval evidence", () => {
-  it("prepares ten retained Autumn rows and records the unchanged native request without assessments", async () => {
+  it("prepares ten retained search rows and records the unchanged native request without assessments", async () => {
     const f = await nativeCalibrationFixture();
     const prepared = await recruiting.prepareRecruitingApproval(
       f.prisma,

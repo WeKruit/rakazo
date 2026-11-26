@@ -6,7 +6,7 @@ const ASSESSMENT =
   "R1: Fact - PhD EE Stanford and MS/PhD-level background. R2: Gap - no explicit named sim stack hands-on evidence. R3: Partial - large-scale simulation mentioned. R4: hands-on robotics; [Sources read 2026-10-20: LINKEDIN, https://example.test/a, https://example.test/b/]";
 
 describe("requirementRows", () => {
-  it("splits Autumn's R-numbered assessment into rows and keeps its words", () => {
+  it("splits the search's R-numbered assessment into rows and keeps its words", () => {
     const { rows, sourceUrls } = requirementRows(ASSESSMENT);
     expect(rows.map((row) => [row.criterionId, row.status, row.text])).toEqual([
       ["R1", "match", "PhD EE Stanford and MS/PhD-level background."],

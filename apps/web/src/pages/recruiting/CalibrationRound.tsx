@@ -14,7 +14,7 @@ const emptyDraft: Draft = { votes: {}, notes: {}, direction: "" };
 /**
  * One calibration round: the ten people it showed. Feedback on any of them, or only on the
  * direction, goes out as a single message; accepting the round moves the role on to finding more
- * people. Autumn does the matching, so nothing here scores or ranks anyone.
+ * people. The search does the matching, so nothing here scores or ranks anyone.
  */
 export function CalibrationRoundView({
   round,

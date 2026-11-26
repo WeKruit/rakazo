@@ -894,7 +894,7 @@ it("lists every role's people in one server-paged table", async () => {
     linkedinUrl: null,
     email: null,
     status: "shortlisted",
-    noteKey: `autumn:${key}`,
+    noteKey: `sourced:${key}`,
     roles: [
       {
         id: "one",

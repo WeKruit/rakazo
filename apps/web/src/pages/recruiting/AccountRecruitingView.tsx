@@ -860,7 +860,7 @@ export function AccountRecruitingView({
                     const role = page?.roles.find((entry) => entry.id === roleId);
                     if (role?.groupId)
                       navigate(
-                        `/app/g/${encodeURIComponent(role.groupId)}?${new URLSearchParams({ view: "contacts", detail: `contact.${person.crm?.candidateId ?? person.autumn?.candidateKey ?? person.key}` })}`,
+                        `/app/g/${encodeURIComponent(role.groupId)}?${new URLSearchParams({ view: "contacts", detail: `contact.${person.crm?.candidateId ?? person.sourced?.candidateKey ?? person.key}` })}`,
                       );
                   }}
                   onOpenRole={(roleId) => {
@@ -952,7 +952,7 @@ export function AccountRecruitingView({
                                   className="block text-start font-semibold underline-offset-2 hover:underline"
                                   onClick={() =>
                                     navigate(
-                                      `/app/g/${encodeURIComponent(info.groupId!)}?${new URLSearchParams({ view: "contacts", detail: `contact.${candidate.crm?.candidateId ?? candidate.autumn?.candidateKey ?? candidate.key}` })}`,
+                                      `/app/g/${encodeURIComponent(info.groupId!)}?${new URLSearchParams({ view: "contacts", detail: `contact.${candidate.crm?.candidateId ?? candidate.sourced?.candidateKey ?? candidate.key}` })}`,
                                     )
                                   }
                                 >

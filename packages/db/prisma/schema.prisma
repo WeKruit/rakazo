@@ -1928,7 +1928,7 @@ model RecruitingReminder {
   owner User @relation("RecruitingReminderOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   roleId String?
   role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  /// "autumn:<key>" | "crm:<id>", same key space as roleCandidates items.
+  /// "sourced:<key>" | "crm:<id>", same key space as roleCandidates items.
   candidateKey String?
   title String
   note String?
@@ -1989,7 +1989,7 @@ model RecruitingCrmContact {
   email String?
   phone String?
   linkedinUrl String?
-  /// linkedin.com/in/<slug>, else lowercased email; matches Autumn rows for the same person.
+  /// linkedin.com/in/<slug>, else lowercased email; matches search rows for the same person.
   identityKey String?
   stage String?
   contactStatus String
@@ -2090,7 +2090,7 @@ model RecruitingCandidateNote {
   owner User @relation("RecruitingCandidateNoteOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   roleId String?
   role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  /// "autumn:<key>" | "crm:<id>", same key space as reminders.
+  /// "sourced:<key>" | "crm:<id>", same key space as reminders.
   candidateKey String
   body String
   artifactIds String[] @default([])

@@ -44,13 +44,13 @@ export type CandidateDirectoryProps = {
 
 function directoryProfile(row: RoleCandidate, revision?: ProfileCriterionRevision) {
   const fields = withSavedProfile(
-    row.autumn?.savedProfile,
-    row.autumn?.latestSource?.report?.fields ?? [],
+    row.sourced?.savedProfile,
+    row.sourced?.latestSource?.report?.fields ?? [],
   );
-  const company = row.crm?.company ?? row.autumn?.company ?? null;
+  const company = row.crm?.company ?? row.sourced?.company ?? null;
   const assets = profileAssets(fields, company);
   const sections = candidateSections(profileContentFields(fields), {
-    roleRevisionId: row.autumn?.latestSource?.roleRevisionId,
+    roleRevisionId: row.sourced?.latestSource?.roleRevisionId,
     revision,
   });
   const now = new Date();
@@ -67,7 +67,7 @@ function directoryProfile(row: RoleCandidate, revision?: ProfileCriterionRevisio
   const host = (name: string | null | undefined) =>
     name ? hosts.get(organizationKey(name)) : undefined;
   return {
-    ranking: row.autumn?.ranking,
+    ranking: row.sourced?.ranking,
     company,
     companyHost: host(company),
     assets,
@@ -296,14 +296,14 @@ const Fit = memo(function Fit({
 
 /** Passed on: a recorded pass, or the recruiter's own "not a fit" with no decision after it. */
 const passed = (row: RoleCandidate) =>
-  row.autumn?.decision === "pass" ||
-  (!row.autumn?.decision && row.autumn?.recruiterVerdict === "not_fit");
+  row.sourced?.decision === "pass" ||
+  (!row.sourced?.decision && row.sourced?.recruiterVerdict === "not_fit");
 
 const Status = memo(function Status({ row }: { row: RoleCandidate }) {
   const { t } = useLingui();
   const activity = row.crm?.stage
     ? statusText(row.crm.stage)
-    : row.autumn?.decision === "hold"
+    : row.sourced?.decision === "hold"
       ? t`On hold`
       : passed(row)
         ? t`Passed`
@@ -315,12 +315,12 @@ const Status = memo(function Status({ row }: { row: RoleCandidate }) {
           {activity}
         </Badge>
       ) : null}
-      {row.autumn?.shortlisted ? (
+      {row.sourced?.shortlisted ? (
         <Badge variant="secondary">
           <Trans>Shortlisted</Trans>
         </Badge>
       ) : null}
-      {!activity && !row.autumn?.shortlisted ? (
+      {!activity && !row.sourced?.shortlisted ? (
         <span className="text-muted-foreground">—</span>
       ) : null}
     </div>
@@ -375,11 +375,11 @@ export function CandidateDirectory({
     ) : null;
   const recordedStage = (row: RoleCandidate) =>
     row.crm?.stage ||
-    (row.autumn?.decision === "hold"
+    (row.sourced?.decision === "hold"
       ? t`On hold`
       : passed(row)
         ? t`Passed`
-        : row.autumn?.shortlisted
+        : row.sourced?.shortlisted
           ? t`Shortlisted`
           : t`Saved`);
   const nameButton = (row: RoleCandidate, index: number) => (
@@ -644,8 +644,8 @@ export function CandidateDirectory({
                   {ownerName ?? "—"}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-xs">
-                  {row.autumn?.firstDiscoveredAt
-                    ? new Date(row.autumn.firstDiscoveredAt).toLocaleDateString()
+                  {row.sourced?.firstDiscoveredAt
+                    ? new Date(row.sourced.firstDiscoveredAt).toLocaleDateString()
                     : "—"}
                 </td>
                 {showFit ? (

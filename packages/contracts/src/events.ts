@@ -869,6 +869,11 @@ export const RecruitingQuestionAskedPayloadSchema = z.strictObject({
 export type RecruitingQuestionAskedPayload = z.infer<typeof RecruitingQuestionAskedPayloadSchema>;
 
 export const RecruitingProfileViewedPayloadSchema = RecruitingProfileActivityInput.extend({
+  /** Stored rows are never rewritten: a view recorded before the key rename keeps "autumn:<key>". */
+  candidateKey: z
+    .string()
+    .max(300)
+    .regex(/^(sourced|autumn|crm):\S+$/),
   roleTitle: z.string(),
   /** Exact imported attachment provenance; never an execution or approval receipt. */
   crmSource: RecruitingCrmRoleReferenceSchema.optional(),
@@ -928,7 +933,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 14;
+export const EVENT_FORMAT_VERSION = 15;
 
 export const ProductEventSchema = z
   .object({

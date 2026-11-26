@@ -116,7 +116,7 @@ function recruiterField(field: Field): Field[] {
 }
 
 /**
- * Autumn's report fields sorted into the sections a recruiter reads, as returned and never
+ * The search's report fields sorted into the sections a recruiter reads, as returned and never
  * re-judged. Fields that fit no named section stay together as research findings.
  */
 export function candidateSections(
@@ -331,7 +331,7 @@ export type SkillEvidenceSource = {
   status?: RequirementStatus;
 };
 
-/** One requirement line of Autumn's own assessment, its words kept verbatim. */
+/** One requirement line of the search's own assessment, its words kept verbatim. */
 export type RequirementRow = {
   priority?: "hard" | "preferred";
   key: string;
@@ -340,7 +340,7 @@ export type RequirementRow = {
   /** Original source reference kept separately from the readable definition. */
   criterionId?: string;
   status: RequirementStatus;
-  /** Autumn's own short name and verdict for this criterion, when it returned them. */
+  /** The search's own short name and verdict for this criterion, when it returned them. */
   brief?: { name: string | null; verdict: string | null };
   text: string;
   sourceUrls: readonly string[];
@@ -415,7 +415,7 @@ function fieldText(field: Field, includeValue = true) {
 }
 
 /**
- * Splits Autumn's "R1: Fact - … R2: Gap - … [Sources read …]" assessment into one row per
+ * Splits the search's "R1: Fact - … R2: Gap - … [Sources read …]" assessment into one row per
  * requirement, keeping its status word's meaning and its evidence as written. Text it cannot
  * split stays one row with an unknown status. Cited source links are returned once.
  */
