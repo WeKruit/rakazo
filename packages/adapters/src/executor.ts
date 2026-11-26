@@ -4056,21 +4056,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             discardedMidTurnNarration = true;
             return;
           }
-          // Gate 27c0fd0c: a first line, a progress note and the answer said one thing three
-          // times. The note takes the line's place, and the answer takes the note's.
+          await postProgressLine(narration);
+        };
+        // Gate 27c0fd0c: a first line, a progress note and the answer said one thing three
+        // times. The note takes the line's place, and the answer takes the note's.
+        const postProgressLine = async (text: string) => {
           const progressNonce = userProgressClientNonce(run.id, midTurnProgressCount++);
-          if (!(await replaceLatestReply([{ kind: "text", text: narration }], progressNonce)))
+          if (!(await replaceLatestReply([{ kind: "text", text }], progressNonce)))
             quickReplyMessageId = (
               await publishMessage(
                 deps,
                 run,
                 "bot",
-                [{ kind: "text", text: narration }],
+                [{ kind: "text", text }],
                 undefined,
                 progressNonce,
               )
             )?.id;
-          midTurnUserTexts.push(narration);
+          midTurnUserTexts.push(text);
           publishedMidTurnUserMessage = true;
           steeredUnanswered = false;
         };
@@ -10990,6 +10993,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               rolesDelegatedInTurn.delete(target.threadId);
               return finish({ error: sent.error });
             }
+            // Gate 75f00f7b stop-then-continue: the team took 72 s and 105 s, and the recruiter
+            // saw only the role card. The model's own line shows now; its answer replaces it.
+            const line = visible(redactSecrets(String(args.line ?? ""), runSecrets)).trim();
+            if (line && oneLineNote(line) && runPromotesMidTurnNarration(run.trigger) && !quietRun)
+              await postProgressLine(line);
             await publishMessage(deps, run, "bot", [
               {
                 kind: "role_link",
