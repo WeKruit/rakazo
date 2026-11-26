@@ -303,7 +303,12 @@ async function requireRole(
   thread?: Awaited<ReturnType<typeof requireThread>>,
 ) {
   if (lock) {
-    // One existing row lock orders role revisions and candidate assessment CAS writes.
+    // One existing row lock orders role revisions and candidate assessment CAS writes. The role's
+    // conversation is locked first, the order every event append takes (it updates the
+    // conversation row): locking the role first deadlocked against live runs (staging 11-26).
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = (SELECT "sourceThreadId" FROM "recruiting_roles" WHERE "id" = ${roleId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId}) AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR NO KEY UPDATE`,
+    );
     await tx.$queryRaw(
       Prisma.sql`SELECT "id" FROM "recruiting_roles" WHERE "id" = ${roleId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
     );
@@ -1233,10 +1238,6 @@ export async function reviseRecruitingRole(
   const input = ReviseRecruitingRoleInput.parse(untrusted);
   const artifacts = await loadRoleMaterials(prisma, actor, input, material);
   return prisma.$transaction(async (tx) => {
-    // Match criteria, confirmation and native writes: lock the thread before the role.
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = (SELECT "sourceThreadId" FROM "recruiting_roles" WHERE "id" = ${input.roleId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId}) AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
-    );
     const role = await requireRole(tx, actor, input.roleId, true);
     const thread = await requireThread(tx, actor, role.sourceThreadId);
     return reviseRoleInTransaction(tx, actor, input, artifacts, role, thread);

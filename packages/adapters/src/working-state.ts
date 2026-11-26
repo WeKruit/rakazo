@@ -13,7 +13,6 @@ import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import { openRecruitingRoles } from "./open-recruiting-roles.js";
 import type { RoleRecord } from "./role-records.js";
 import { loadRoleRecords } from "./role-records.js";
-import { referredRole } from "./role-reference.js";
 import { isTurnWork, workDoneLabel } from "./turn-report.js";
 
 /**
@@ -435,7 +434,6 @@ export async function loadWorkingState(
   if (global) {
     let focusId: string | undefined;
     const roleById = new Map(roles.map((role) => [role.id, role]));
-    const reference = referredRole(recruiterTexts, roles);
     const lastHanded = handoffs
       .map((event) => (event.payload ?? {}) as Record<string, unknown>)
       .filter((payload) => payload.name === "delegate_to_role")
@@ -445,32 +443,12 @@ export async function loadWorkingState(
           : undefined,
       )
       .find((id): id is string => Boolean(id && roleById.has(id)));
-    if (reference?.kind === "saved")
+    if (lastHanded) {
       lines.push(
-        `- Role in focus: "${reference.role.title}" (roleId ${reference.role.id}), named in the recruiter's latest messages (${reference.by}).`,
+        `- This conversation last handed work to "${roleById.get(lastHanded)?.title}" (roleId ${lastHanded}).`,
       );
-    else if (reference?.kind === "new")
-      lines.push(`- Role in focus: a new role, ref ${reference.ref}, that no saved role has yet.`);
-    else if (lastHanded)
-      lines.push(
-        `- Role in focus: "${roleById.get(lastHanded)?.title}" (roleId ${lastHanded}), the role this conversation last handed work to; the recruiter has named no other since.`,
-      );
-    else {
-      // A short follow-up ("发了吗", "重试") names no role; the role is the one this conversation
-      // named last, never one found by a person's name (staging 11-14: a retry answered for
-      // another role that held the same two people).
-      const earlier = recruiterWords(recruiterRows.filter((row) => row.own))
-        .map((text) => referredRole([text], roles))
-        .find((found) => found?.kind === "saved");
-      lines.push(
-        earlier?.kind === "saved"
-          ? `- Role in focus: "${earlier.role.title}" (roleId ${earlier.role.id}), the role the recruiter last named in this conversation (${earlier.by}); the same person can be in several roles, so a person's name never picks the role.`
-          : "- Role in focus: none named yet.",
-      );
-      if (earlier?.kind === "saved") focusId = earlier.role.id;
+      focusId = lastHanded;
     }
-    if (reference?.kind === "saved") focusId = reference.role.id;
-    else if (reference?.kind !== "new" && lastHanded) focusId = lastHanded;
     // Feedback-round 11-16: Kruit spent 30 s resolving the people the recruiter turned down
     // before handing off, though the team gets only the recruiter's words while a round waits.
     const waiting = focusId

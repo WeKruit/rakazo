@@ -502,7 +502,6 @@ import {
   shouldEnqueueCompaction,
   steppedHistoryWindow,
 } from "./history-compaction.js";
-import { INTAKE_FIRST_STEP_NOTE } from "./intake-open-fields.js";
 import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
 import { describeReplyToEmail, type InstantlyReplyDisplay } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
@@ -639,7 +638,6 @@ import {
 import {
   executeRecruitingRoleTool,
   importRecruitingCandidateCsv,
-  createAsUpdate,
   normalizeRecruitingRoleArgs,
   PEOPLE_SEARCH_AUTOSAVE_KEY,
   RecruitingCsvImportError,
@@ -659,9 +657,6 @@ import {
   roleAlreadyOpenedHere,
   roleAlreadyOpenNote,
   startRoleFromRecruiterMessage,
-  TEMPLATE_NOT_ROLE_NOTE,
-  templateOnlyRequest,
-  writesToNamedPeople,
 } from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
@@ -749,15 +744,6 @@ import { createToolFixMemory, withKnownFix } from "./tool-fixes.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
 import { recruitingRoundListText } from "./turn-end-guard.js";
-import {
-  newRoleNote,
-  otherRoleNote,
-  referredRole,
-  roleRef,
-  savedRoleNote,
-  titleWithRef,
-} from "./role-reference.js";
-import type { SavedRole } from "./role-reference.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
 import {
@@ -810,15 +796,6 @@ export const NO_CAMPAIGN_TO_ACTIVATE =
   "Pass campaign_id: outside a role conversation, activate the campaign create_campaign returned (its id) with the same recipients. Nothing was sent.";
 // One mail page saves the files of at most this many received emails; a later read saves the rest.
 const MAX_ATTACHMENT_EMAILS = 5;
-
-/** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
-export function jobLinkIn(text: string): string | null {
-  for (const match of text.matchAll(/https?:\/\/[^\s<>"'()，。、]+/g)) {
-    const url = URL.parse(match[0].replace(/[.,;:!?]+$/, ""));
-    if (url && !/(^|\.)linkedin\.com$/i.test(url.hostname)) return url.href;
-  }
-  return null;
-}
 
 /** The saved form of a LinkedIn candidate key ("linkedin:/in/<profile>") from a key or link. */
 export function savedCandidateKeyForm(key: string): string {
@@ -959,8 +936,6 @@ export function lateNote(pending: Promise<string | undefined>) {
   };
 }
 
-/** The working title of a role saved before the recruiter has named it. */
-const NEW_ROLE_TITLE = "New role";
 /** Role conversations Kruit opens with start_role. */
 const KRUIT_ROLE_GROUP_PREFIX = "role-";
 const ACCOUNT_SETUP_STAYS_HERE =
@@ -1398,81 +1373,6 @@ export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined
   (blocks ?? []).some((block) =>
     block.kind === "text" ? block.text.trim().length > 0 : !SAYS_NOTHING.has(block.kind),
   );
-
-/** A short message that opens with a role lead-in, such as 「新岗位：仓库经理（Atlanta）。要求：…」. */
-const ROLE_LEAD_IN =
-  /^(?:新岗位|岗位|职位|招聘|new role|job title|job|role|position|hiring)\s*[:：]/i;
-
-/** Display width, with CJK characters counted twice. */
-const titleWidth = (text: string) =>
-  text.length + (text.match(/[\u3000-\u9fff\uff00-\uffef]/g)?.length ?? 0);
-const TITLE_WIDTH = 60;
-/** The text before the first top-level comma, so a parenthesised 「（亚特兰大，现场办公）」 stays whole. */
-function firstClause(text: string) {
-  let depth = 0;
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index] as string;
-    if ("([（【".includes(char)) depth++;
-    else if (")]）】".includes(char)) depth = Math.max(0, depth - 1);
-    else if (
-      depth === 0 &&
-      (char === "，" || char === "、" || (char === "," && text[index + 1] === " "))
-    )
-      return text.slice(0, index);
-  }
-  return text;
-}
-
-/**
- * The title of a JD pasted as a message: its first line, or the line after a label such as
- * 「新岗位：」 or "Job title:". A line that runs on into the JD keeps its first sentence, then its
- * first clause. Short messages are instructions, not a JD, unless they open with a role lead-in.
- */
-export function pastedJobTitle(text: string): string | null {
-  const trimmed = text.trim();
-  const ledIn = ROLE_LEAD_IN.test(trimmed);
-  // Width, not length: a Chinese JD says as much in half the characters.
-  if (titleWidth(trimmed) < (ledIn ? 60 : 400)) return null;
-  const lines = trimmed
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const first = lines[0] ?? "";
-  // Only a short label before the colon is a label; "…, Dallas TX. On-site: 3 days…" is the JD.
-  const label = first.match(/^([^:：]*)[:：]\s*/);
-  const labelled =
-    !!label &&
-    (ledIn || (titleWidth(label[1] as string) <= 24 && !/[.,;，。；]/.test(label[1] as string)));
-  const after = labelled ? first.slice((label as RegExpMatchArray)[0].length) : first;
-  let title = ((labelled && !after ? lines[1] : after) ?? "").replace(/^[#*\s]+|[*\s]+$/g, "");
-  if (ledIn || titleWidth(title) > TITLE_WIDTH) title = title.split(/[。；;]|\.\s/)[0] ?? "";
-  // "招一名奥斯汀的高级后端工程师" names the role after its lead-in, up to the first comma.
-  const hire = /^(?:帮我|我要|我想|我们要|我们想)?招(?:聘)?[一两几1-9](?:名|个|位)/;
-  if (titleWidth(title) > TITLE_WIDTH || hire.test(title)) title = firstClause(title);
-  return (
-    title
-      .replace(/^[#*\s]+|[*\s]+$/g, "")
-      .replace(hire, "")
-      .slice(0, 120) || null
-  );
-}
-
-/**
- * A working title for a short role request that is not a full JD: its first line, when the
- * message has more lines after it and that line reads as a name, not a sentence.
- */
-export function requestTitle(text: string): string | null {
-  const lines = text
-    .split("\n")
-    .map((line) => line.replace(/^[#*\s]+|[*\s]+$/g, ""))
-    .filter(Boolean);
-  const first = lines[0] ?? "";
-  // A clock time ("17:20") is part of a name; any other colon or sentence mark is not.
-  const marks = first.replace(/\d[:：]\d/g, "");
-  if (lines.length < 2 || titleWidth(first) > TITLE_WIDTH || /[.,;:?!，。；：？！]/.test(marks))
-    return null;
-  return first;
-}
 
 const NO_RECRUITING_ROLE_CONTEXT =
   "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Do what you can yourself, such as a role's campaign with its role_id. Showing a role's saved people is yours (recruiting_candidates list with its roleId, show true); finding new people for a role or changing them runs in that role's conversation (delegate_to_role), as does work a tool says that conversation is doing now; an interview booking for a person named with an email goes to Scheduling here. To open a new role use start_role when offered. A recruiter who asks how to use this or what to do first, or says they have no JD, gets the first step in words once (send the JD, or a job title with a few must-haves), never a question back or a card.";
@@ -4147,21 +4047,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             discardedMidTurnNarration = true;
             return;
           }
-          // Gate 27c0fd0c: a first line, a progress note and the answer said one thing three
-          // times. The note takes the line's place, and the answer takes the note's.
+          await postProgressLine(narration);
+        };
+        // Gate 27c0fd0c: a first line, a progress note and the answer said one thing three
+        // times. The note takes the line's place, and the answer takes the note's.
+        const postProgressLine = async (text: string) => {
           const progressNonce = userProgressClientNonce(run.id, midTurnProgressCount++);
-          if (!(await replaceLatestReply([{ kind: "text", text: narration }], progressNonce)))
+          if (!(await replaceLatestReply([{ kind: "text", text }], progressNonce)))
             quickReplyMessageId = (
               await publishMessage(
                 deps,
                 run,
                 "bot",
-                [{ kind: "text", text: narration }],
+                [{ kind: "text", text }],
                 undefined,
                 progressNonce,
               )
             )?.id;
-          midTurnUserTexts.push(narration);
+          midTurnUserTexts.push(text);
           publishedMidTurnUserMessage = true;
           steeredUnanswered = false;
         };
@@ -4306,8 +4209,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return occurrence;
         };
 
-        // Set before the first model step when a job link is saved as the thread's role.
-        let linkRole: { saving: Promise<unknown>; note: string } | undefined;
         // The model saved the recruiter's described role in this turn, so its first question plans searches.
         let roleCreatedInTurn = false;
         // Sender setup asks nothing until this turn read the account's sending email.
@@ -4323,7 +4224,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           !thread.groupId?.startsWith("recruiting-global-") &&
           !thread.activeRecruitingRoleId &&
           Boolean(recruitingBotKey(bot)) &&
-          !linkRole &&
           !attachedJob &&
           !roleCreatedInTurn;
         // Role saves run in the background, so later calls may name a revision this run moved past.
@@ -5050,14 +4950,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: newerRequestElsewhere(moved) };
             }
           }
-          // Tools that use the role from a job wait for its save; the first question and progress
-          // lines do not, so the save never holds them up. The turn still ends after the save.
-          if (
-            !executionId.startsWith(`${runId}:job-`) &&
-            name !== "ask_user" &&
-            name !== "message_user"
-          )
-            await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
           // instead of costing a rejected call and a retry.
           // import_csv still names its role, so it gets the thread's role instead.
@@ -10929,23 +10821,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error:
                   "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. An email to an address the recruiter gave needs no role: hand it to Outreach here with handoff_to_bot.",
               });
-            // The role the recruiter's own words name decides where the work goes; a second try
-            // at the same role after this note goes through.
-            const reference =
-              hideVendors && !roleReferenceOverruled.has(target.threadId)
-                ? referredRole(recruiterTexts, await savedRoles())
-                : undefined;
-            if (reference) roleReferenceOverruled.add(target.threadId);
-            // Staging 11-14: the role start_role had just opened was refused as "a new role".
-            if (
-              reference?.kind === "new" &&
-              !groupsStartedInTurn.has(target.groupId) &&
-              roleRef(target.title) !== reference.ref &&
-              tools.some((tool) => tool.name === "start_role")
-            )
-              return finish({ error: newRoleNote(reference.ref) });
-            if (reference?.kind === "saved" && !(await roleIsTarget(reference.role.id, target)))
-              return finish({ error: otherRoleNote(reference) });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
               .trim()
@@ -11021,6 +10896,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               rolesDelegatedInTurn.delete(target.threadId);
               return finish({ error: sent.error });
             }
+            // Gate 75f00f7b stop-then-continue: the team took 72 s and 105 s, and the recruiter
+            // saw only the role card. The model's own line shows now; its answer replaces it.
+            const line = visible(redactSecrets(String(args.line ?? ""), runSecrets)).trim();
+            if (line && oneLineNote(line) && runPromotesMidTurnNarration(run.trigger) && !quietRun)
+              await postProgressLine(line);
             await publishMessage(deps, run, "bot", [
               {
                 kind: "role_link",
@@ -11053,10 +10933,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           }
           if (name === "start_role") {
-            const title = titleWithRef(
-              visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim(),
-              lastRecruiterText,
-            );
+            const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
             const request = redactSecrets(String(args.message ?? ""), runSecrets).trim();
             if (!title) return finish({ error: "title is required" });
             if (!request && !run.sourceMessageId)
@@ -11067,29 +10944,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "start_role works only in the global conversation.",
               });
-            if (templateOnlyRequest(lastRecruiterText))
-              return finish({ error: TEMPLATE_NOT_ROLE_NOTE });
-            const savedReference = hideVendors
-              ? referredRole(recruiterTexts, await savedRoles())
-              : undefined;
-            if (savedReference?.kind === "saved" && savedReference.by.startsWith("ref "))
-              return finish({ error: savedRoleNote(savedReference) });
-            // A ref no saved role carries is a new role, even under a title opened here before:
-            // delegate_to_role refuses it as new, so this refusal sent the two back and forth
-            // (send-at-night 11-21, ref 06164 beside an earlier "Senior Data Engineer — Seattle").
-            // It is still open when its chat carries that ref (fosp 11-21: feedback after the
-            // role opened, before it was saved, opened the same role twice more).
-            const opened = await roleAlreadyOpenedHere(deps.prisma, {
+            const openHere = await roleAlreadyOpenedHere(deps.prisma, {
               spaceId: run.spaceId,
               userId: run.userId,
               threadId: run.threadId,
               title,
             });
-            const openHere =
-              savedReference?.kind === "new" &&
-              !opened?.title.toLowerCase().includes(savedReference.ref)
-                ? undefined
-                : opened;
             if (openHere && !roleReferenceOverruled.has(openHere.groupId)) {
               roleReferenceOverruled.add(openHere.groupId);
               return finish({ error: roleAlreadyOpenNote(openHere) });
@@ -11676,31 +11536,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           threadId: thread.id,
         });
         const credits = createCreditGuard();
-        // The server already saved this turn's role from the recruiter's job (startRoleFromJob).
-        // A second create from the model would open a duplicate role without the saved must-haves
-        // and take its place, so it becomes an update of the saved role instead.
-        const createAsUpdateOfJobRole = async (
-          call: Parameters<typeof applyToolNow>,
-        ): Promise<Parameters<typeof applyToolNow>> => {
-          const [name, rawArgs, executionId] = call;
-          if (name !== "recruiting_role" || rawArgs.operation !== "create" || !linkRole)
-            return call;
-          if (executionId === `${runId}:job-role`) return call;
-          await linkRole.saving;
-          const role = await deps.prisma.thread
-            .findUnique({
-              where: { id: thread.id },
-              select: {
-                activeRecruitingRole: {
-                  select: { id: true, revision: true, sourceThreadId: true },
-                },
-              },
-            })
-            .then((row) => row?.activeRecruitingRole)
-            .catch(() => null);
-          if (!role || role.sourceThreadId !== thread.id) return call;
-          return [name, createAsUpdate(rawArgs, role), executionId];
-        };
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
           const [name, rawArgs, executionId] = call;
           // Work after a handoff (a search, a save, a question) means this turn still owns the
@@ -11719,7 +11554,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const applied = (
             outOfCredits
               ? Promise.resolve<unknown>(outOfCredits)
-              : createAsUpdateOfJobRole(call).then((prepared) => applyToolNow(...prepared))
+              : applyToolNow(...call)
           ).then(
             async (result) => {
               const failure = toolResultError(result);
@@ -11993,8 +11828,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return read;
         };
-        // Files whose text a server-written note already carries (startRoleFromJob's JD).
-        const filesInNotes = new Set<string>();
         async function attachedFileReads() {
           if (!tools.some((tool) => tool.name === "artifact_read")) return [];
           // A specialist handed the work, or a harness continuation of the recruiter's turn, reads
@@ -12023,166 +11856,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               read: await readAttachedFile(file),
             })),
           );
-        }
-        async function startRoleFromJob() {
-          if (
-            thread.activeRecruitingRoleId ||
-            // Kruit's account-wide conversation never holds a role; it opens one with start_role.
-            thread.groupId?.startsWith("recruiting-global-") ||
-            nativeSources?.currentAnswer ||
-            currentTurnMessage?.role !== "user" ||
-            !deps.artifacts ||
-            !tools.some((tool) => tool.name === "recruiting_role") ||
-            !tools.some((tool) => tool.name === "web_fetch")
-          )
-            return undefined;
-          const texts = currentTurnMessage.blocks.filter(
-            (item): item is Extract<MessageBlock, { kind: "text" }> => item.kind === "text",
-          );
-          const linked = texts.find((item) => jobLinkIn(item.text) !== null);
-          const pasted = linked ? undefined : texts.find((item) => pastedJobTitle(item.text));
-          const block = linked ?? pasted;
-          const file = block
-            ? undefined
-            : currentTurnMessage.blocks.find(
-                (item): item is Extract<MessageBlock, { kind: "file" }> => item.kind === "file",
-              );
-          // A role team opened without a JD gets its role saved now when the message names it
-          // (a Kruit-opened role, or a title line above the requirements).
-          const request =
-            !block && !file && thread.groupId && recruitingBotKey(bot)
-              ? texts
-                  .map((item) => item.text)
-                  .join("\n")
-                  .trim()
-              : "";
-          if (!block && !file && !request) return undefined;
-          const create = (title: string, sourceRefs: unknown[], quote: string) =>
-            step(
-              "recruiting_role",
-              {
-                operation: "create",
-                title,
-                brief: null,
-                sourceRefs,
-                criteria: [],
-                preferences: [],
-                definitionQuestions: [],
-                intent: { basis: "direct", quote: quote.trim() },
-              },
-              `${runId}:job-role`,
-            ).catch((error) => {
-              getLogger().warn("role from the recruiter's job not saved", {
-                error: String(error),
-              });
-            });
-          // Asked to write to the people they named, the team writes to them: no question, no search.
-          const words = texts.map((item) => item.text).join("\n");
-          const ask = () =>
-            writesToNamedPeople(words)
-              ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
-              : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${INTAKE_FIRST_STEP_NOTE}`;
-          // A role Kruit opened (start_role) is already named after it: keep that title.
-          const roleChatName = async () => {
-            const named = thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
-              ? (
-                  await deps.prisma.chatGroup.findUnique({
-                    where: { id: thread.groupId },
-                    select: { name: true },
-                  })
-                )?.name.trim()
-              : undefined;
-            return named && named !== NEW_ROLE_TITLE ? named.slice(0, 120) : undefined;
-          };
-          if (request) {
-            const named = await roleChatName();
-            const title = named ?? requestTitle(request);
-            // A greeting or a question is not a role: the model saves one only once the recruiter
-            // has described it, so no empty role appears and no search runs for it.
-            if (!title) return undefined;
-            return {
-              saving: create(title, [], request),
-              note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask()}`,
-            };
-          }
-          try {
-            // A JD sent as a file is read here, like a pasted one, so the model's first step is
-            // the question instead of reading the file and writing the role itself.
-            if (file) {
-              const read = await readAttachedFile(file);
-              // Only a file that reads as a JD; a candidate list or other file stays with the model.
-              // Gate 14d33ed1: a one-page PDF JD was too short to name its own title, so no role
-              // was saved and the searches had nowhere to land; the role chat's name stands in.
-              const title =
-                typeof read?.text === "string" && !/csv|sheet|excel/i.test(file.mimeType)
-                  ? (pastedJobTitle(read.text) ?? (read.text.trim() ? await roleChatName() : null))
-                  : null;
-              if (!title || typeof read.text !== "string") return undefined;
-              filesInNotes.add(file.artifactId);
-              const quote =
-                texts
-                  .map((item) => item.text)
-                  .join("\n")
-                  .trim() || file.name;
-              return {
-                saving: create(title, [], quote),
-                note: `The recruiter's attached JD (${file.name}) is read and is being saved as a new role titled "${title}" with no brief yet. Do not read the file again and do not create, rename or update a role in this turn. Its text:\n\n${read.text}\n\n${ask()}`,
-              };
-            }
-            if (!block) return undefined;
-            if (pasted) {
-              const title = pastedJobTitle(pasted.text)!;
-              return {
-                saving: create(title, [], block.text),
-                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask()}`,
-              };
-            }
-            const url = jobLinkIn(block.text)!;
-            const read = (await step(
-              "web_fetch",
-              { url, maxChars: 24_000 },
-              `${runId}:job-link`,
-            )) as {
-              title?: unknown;
-              text?: unknown;
-              sourceMaterial?: {
-                artifact: { artifactId: string; sha256: string };
-                url: string;
-                readAt: string;
-              };
-            };
-            const material = read?.sourceMaterial;
-            if (!material || typeof read.text !== "string" || !read.text.trim()) return undefined;
-            const title =
-              (typeof read.title === "string" && read.title.trim().slice(0, 200)) || material.url;
-            return {
-              saving: create(
-                title,
-                [
-                  {
-                    id: "job-link",
-                    kind: "original_material",
-                    anchor: {
-                      kind: "artifact",
-                      artifact: material.artifact,
-                      locator: "text",
-                    },
-                    readState: "read",
-                    readAt: material.readAt,
-                    url: material.url,
-                    quote: read.text.trim().slice(0, 300).trim(),
-                  },
-                ],
-                block.text,
-              ),
-              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask()}`,
-            };
-          } catch (error) {
-            getLogger().warn("job link not read before the first step", {
-              error: String(error),
-            });
-            return undefined;
-          }
         }
         // Until the first round, later intake turns go straight to the people searches and carry
         // the job page the server already read, so the model never fetches it again.
@@ -12248,11 +11921,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return false;
         };
-        const [jobRole, intake, intakeSkill, replyContext, waitingCards, attached] =
+        const [intake, intakeSkill, replyContext, waitingCards, attached] =
           await ownTime(
             "turnNotes",
             Promise.all([
-              startRoleFromJob(),
               intakeTurnNote().catch((error) => {
                 getLogger().warn("saved job page not loaded", {
                   error: String(error),
@@ -12281,14 +11953,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ]),
           );
         const waitingCardsNote = waitingApprovalNote(waitingCards);
-        linkRole = jobRole;
         const fileNote =
           attached
             .filter(
-              ({ file, read }) =>
-                !filesInNotes.has(file.artifactId) &&
-                typeof read?.text === "string" &&
-                read.text.trim(),
+              ({ read }) => typeof read?.text === "string" && read.text.trim(),
             )
             .map(
               ({ file, read }) =>
@@ -12369,32 +12037,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   thread.id,
                 ).catch(() => recruiterLanguage(roleStartTexts))
               : recruiterLanguage(roleStartTexts)));
-        // The account's saved roles, read once a turn picks a role, for what the recruiter names.
-        let savedRoleList: Promise<SavedRole[]> | undefined;
-        const savedRoles = () =>
-          (savedRoleList ??= deps.prisma.recruitingRole
-            .findMany({
-              where: { spaceId: run.spaceId, userId: run.userId, archivedAt: null },
-              select: { id: true, title: true },
-              orderBy: { id: "desc" },
-              take: 500,
-            })
-            .catch(() => []));
-        const roleIsTarget = async (roleId: string, target: { threadId: string }) =>
-          (await deps.prisma.recruitingRole
-            .findFirst({
-              where: { id: roleId, sourceThreadId: target.threadId },
-              select: { id: true },
-            })
-            .catch(() => ({ id: roleId }))) !== null ||
-          (
-            await deps.prisma.thread
-              .findUnique({
-                where: { id: target.threadId },
-                select: { activeRecruitingRoleId: true },
-              })
-              .catch(() => null)
-          )?.activeRecruitingRoleId === roleId;
         const roleReferenceOverruled = new Set<string>();
         const creditsLeft = hideVendors
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
@@ -12455,7 +12097,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .join("\n\n")
             : basePrompt,
           intakeSkillNote,
-          linkRole?.note,
           fileNote,
           awayNote,
           languageNote,
@@ -12463,7 +12104,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           signingNote,
           mailboxNote,
           sendNowNote,
-          !linkRole &&
           !fileNote &&
           !thread.groupId?.startsWith("recruiting-global-") &&
           !thread.activeRecruitingRoleId &&
@@ -12472,7 +12112,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           tools.some((tool) => tool.name === "recruiting_role")
             ? FILE_JOB_NOTE
             : undefined,
-          !linkRole &&
           !fileNote &&
           thread.groupId &&
           !thread.groupId.startsWith("recruiting-global-") &&
@@ -12567,9 +12206,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? undefined
             : (initialRecruitingContext?.text ??
               [
-                // A role being saved from this message has its own note; "not saved, create it"
-                // beside "being saved, do not create" stopped a first turn (gate 2d92e0d2).
-                jobRole ? undefined : noRoleContext(thread.groupId),
+                noRoleContext(thread.groupId),
                 // The turn that saves a role also produces its first round, so it carries the
                 // round rules a saved role's context has: without them it ran one or two searches
                 // with no profile evidence and recorded ten unchecked or unknown people.
@@ -12933,7 +12570,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // A role team whose role is not saved yet is still in intake: its questions
                 // are what the recruiter waits on, so they skip reasoning too.
                 recruitingIntake:
-                  Boolean(linkRole) ||
                   firstRoundPending ||
                   (Boolean(thread.groupId) &&
                     // Kruit's account-wide conversation is never a role's intake.
@@ -14047,7 +13683,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
 
-          await linkRole?.saving;
           await withinDeadline<unknown>(Promise.all(savesInFlight), SAVE_WAIT_MS, () =>
             getLogger().warn("run.end.saves_still_running", { runId }),
           );

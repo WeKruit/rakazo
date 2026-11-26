@@ -1093,16 +1093,17 @@ export async function projectRecruitingCandidateProfiles(
   });
   const key = `recruiting-profile-project:${page.effectId}:${page.artifactHash}`;
   // The transaction that appends the change event updates the conversation row, so it takes
-  // that row's write lock up front: a shared lock upgraded later deadlocks against live runs
-  // appending their own events to the same conversation.
+  // that row's write lock up front. Either way the conversation is locked in its own statement
+  // before the role: a shared lock upgraded later, or one statement locking the role before the
+  // conversation, deadlocked against live runs appending events and role writes, which lock the
+  // conversation first (staging 11-26).
   const authorized = async (tx: Pick<PrismaClient, "$queryRaw">, appendsEvent = false) => {
-    const rows = appendsEvent
-      ? await tx.$queryRaw<
-          Array<{ id: string }>
-        >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,sm FOR NO KEY UPDATE OF t`
-      : await tx.$queryRaw<
-          Array<{ id: string }>
-        >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,t,sm`;
+    await (appendsEvent
+      ? tx.$queryRaw`SELECT id FROM threads WHERE id=${run.threadId} AND "userId"=${userId} AND "spaceId"=${spaceId} FOR NO KEY UPDATE`
+      : tx.$queryRaw`SELECT id FROM threads WHERE id=${run.threadId} AND "userId"=${userId} AND "spaceId"=${spaceId} FOR SHARE`);
+    const rows = await tx.$queryRaw<
+      Array<{ id: string }>
+    >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,sm`;
     return rows.length === 1;
   };
   // Membership and the current role stay locked only for writes, never while fetching pixels.

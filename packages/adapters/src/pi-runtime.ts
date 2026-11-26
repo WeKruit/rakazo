@@ -58,6 +58,7 @@ import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
+import { databaseConflictText } from "./connector-safety.js";
 import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
 import {
   RECORD_TOOL_DEADLINE_MS,
@@ -2126,6 +2127,9 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
         );
       } catch (error) {
         failure = error;
+        // A database conflict reaches the model as plain words, never its SQL or code.
+        const conflict = databaseConflictText(error);
+        if (conflict) throw new Error(conflict, { cause: error });
         throw error;
       } finally {
         clearTimeout(promotionTimer);
