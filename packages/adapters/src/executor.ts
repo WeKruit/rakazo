@@ -597,7 +597,6 @@ import {
   peopleToShow,
   retainRecruitingWebMaterial,
 } from "./recruiting-candidates-tool.js";
-import { checkinToolRefusal, checkinTools } from "./recruiting-checkin.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   loadRecruitingRunContext,
@@ -3776,9 +3775,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const tools =
           run.trigger === "created"
             ? []
-            : run.trigger === "recruiting_checkin"
-              ? checkinTools(listedTools)
-              : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
+            : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
         setupMark("toolsReady");
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
@@ -4998,10 +4995,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             return {};
           };
-          if (run.trigger === "recruiting_checkin") {
-            const refusal = checkinToolRefusal(name);
-            if (refusal) return { error: refusal };
-          }
           if (
             blockedToolEffect({
               toolName: name,

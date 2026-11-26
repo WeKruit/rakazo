@@ -63,6 +63,7 @@ import {
   roleCampaignIds,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
+import type { InstantlyEmail } from "./instantly-reply.js";
 import {
   readInstantlyEmail,
   readInstantlyEmailPage,
@@ -1819,7 +1820,16 @@ export class McpConnector implements ConnectorProvider {
         const email = readInstantlyEmail(original);
         if (
           !email?.campaign_id ||
-          !emailScope.campaignIds.includes(email.campaign_id) ||
+          !(
+            emailScope.campaignIds.includes(email.campaign_id) ||
+            (await this.roleCandidateReply(
+              instantlyRest(safeFetch, credential.key, context.signal),
+              context,
+              credential.server.id,
+              emailScope.campaignIds,
+              email,
+            ))
+          ) ||
           email.id !== call.args.reply_to_uuid ||
           (call.args.eaccount !== undefined &&
             !sameInstantlyAddresses(email.eaccount, String(call.args.eaccount)))
@@ -1884,7 +1894,16 @@ export class McpConnector implements ConnectorProvider {
         const email = readInstantlyEmail(result);
         if (
           !email?.campaign_id ||
-          !emailScope.campaignIds.includes(email.campaign_id) ||
+          !(
+            emailScope.campaignIds.includes(email.campaign_id) ||
+            (await this.roleCandidateReply(
+              rest,
+              context,
+              credential.server.id,
+              emailScope.campaignIds,
+              email,
+            ))
+          ) ||
           email.id !== call.args.id
         )
           throw new IsolationError("Email does not belong to the current role campaign");
@@ -2226,6 +2245,35 @@ export class McpConnector implements ConnectorProvider {
     );
     if (!campaignIds.length) throw new IsolationError(NO_OUTREACH_CAMPAIGN_YET);
     return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
+  }
+
+  /**
+   * A reply the mail service filed under another of this account's own campaigns (it files a
+   * person's reply under their newest campaign) still belongs to the role when the person who
+   * wrote it is someone one of the role's campaigns emailed. Never another account's mail.
+   */
+  private async roleCandidateReply(
+    rest: ReturnType<typeof instantlyRest>,
+    context: AdapterContext,
+    serverId: string,
+    roleCampaignIds: readonly string[],
+    email: InstantlyEmail,
+  ): Promise<boolean> {
+    const lead = email.lead?.trim().toLowerCase();
+    if (email.ue_type !== 2 || !lead || !email.campaign_id) return false;
+    const owned = await ownedInstantly(this.prisma, context.spaceId, serverId, context.userId);
+    if (!owned.campaigns.includes(email.campaign_id)) return false;
+    for (const campaignId of roleCampaignIds.slice(0, 10)) {
+      const query = new URLSearchParams({ campaign_id: campaignId, lead, limit: "1" });
+      const page = readInstantlyEmailPage(await rest("GET", `/emails?${query}`));
+      if (
+        page?.items.some(
+          (item) => item.campaign_id === campaignId && item.lead?.trim().toLowerCase() === lead,
+        )
+      )
+        return true;
+    }
+    return false;
   }
 
   /** Existing campaign identity only; reading mail must never create or infer a campaign by name. */

@@ -19,6 +19,7 @@ import { returnBotMessageOutcome } from "./bot-messages.js";
 import { scheduleComputerControlExpiry } from "./computer-control.js";
 import { watchOpenStages } from "./group-handoff.js";
 import { rearmRecruitingAgentRunWaits } from "./recruiting-agent-run-wait.js";
+import { RECRUITING_CHECKIN_INTERVAL_MS, sweepRecruitingCheckins } from "./recruiting-checkin.js";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
 import { reconcileStuckWork } from "./stuck-work.js";
 import { isLoopGuardStopText } from "./tool-loop.js";
@@ -170,6 +171,7 @@ export function createJobReconciler(
   let controlScanDeadline: Date | undefined;
   let stagesWatchedAt = 0;
   let searchWaitsArmedAt = 0;
+  let checkinsOfferedAt = 0;
   // Set on stop: an in-flight pass ends at its next step instead of querying a closing pool.
   let stopped = false;
 
@@ -236,6 +238,16 @@ export function createJobReconciler(
           await rearmRecruitingAgentRunWaits(deps, now, batchSize);
         } catch (error) {
           getLogger().error("search follow-up re-arm", error);
+        }
+      }
+      if (stopped) return;
+      // Candidates' replies are read without anyone opening a page, and wake the role's agent.
+      if (now.getTime() - checkinsOfferedAt >= RECRUITING_CHECKIN_INTERVAL_MS) {
+        checkinsOfferedAt = now.getTime();
+        try {
+          await sweepRecruitingCheckins({ prisma: deps.prisma, jobs: deps.jobs, now, batchSize });
+        } catch (error) {
+          getLogger().error("reply check-in sweep", error);
         }
       }
       if (stopped) return;
