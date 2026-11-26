@@ -212,32 +212,6 @@ export function screenLanguage(uiLocale: string | undefined): ReplyLanguage | un
   return /^zh\b/i.test(uiLocale) ? "zh" : "en";
 }
 
-/** An email signed by a team ("Best, Recruiting") instead of the person sending it. */
-export function signedAsTeam(body: string): boolean {
-  const last =
-    body
-      .replace(/<[^>]+>/g, "\n")
-      .trim()
-      .split(/\n/)
-      .at(-1)
-      ?.trim() ?? "";
-  return /^(?:(?:the\s+)?(?:recruiting|recruitment|talent(?:\s+acquisition)?|hiring|hr)(?:\s+(?:team|department))?|kruit(?:\s+team)?)[.!]?$/i.test(
-    last,
-  );
-}
-
-/** An email that greets one person by a written-in name ("Hi Noah,") instead of {{firstName}}. */
-export function greetsByName(body: string): boolean {
-  const first =
-    body
-      .replace(/<[^>]+>/g, "\n")
-      .trim()
-      .split(/\n/)[0]
-      ?.trim() ?? "";
-  const name = /^(?:[Hh]i|[Hh]ello|[Hh]ey|[Dd]ear)\s+(\p{Lu}[\p{L}'-]*)\s*[,!:]/u.exec(first)?.[1];
-  return name !== undefined && !/^(?:there|all|everyone|team|folks)$/i.test(name);
-}
-
 /** The merge fields the sending account fills in for each person; any other {{...}} goes out as written. */
 export const EMAIL_VARIABLES: readonly string[] = [
   "firstName",
@@ -250,29 +224,18 @@ export const EMAIL_VARIABLES: readonly string[] = [
 ];
 
 /**
- * A fill-in-the-blank left in an email ("[Candidate Name]", "{{회사명}}"), which would go out as
- * written: a bracketed blank, or a merge field that is not one of EMAIL_VARIABLES.
+ * A merge field in an email that is not one of EMAIL_VARIABLES ("{{회사명}}"), which would go out
+ * as written.
  */
 export function unfilledPlaceholder(text: string): string | undefined {
-  const plain = text.replace(/<[^>]+>/g, " ");
-  const bracket = /\[[^[\]\n]{0,60}\p{L}[^[\]\n]{0,60}\](?!\()/u.exec(plain)?.[0];
-  if (bracket) return bracket;
-  for (const match of plain.matchAll(/\{\{\s*([^{}]*?)\s*\}\}/g))
+  for (const match of text.matchAll(/\{\{\s*([^{}]*?)\s*\}\}/g))
     if (!EMAIL_VARIABLES.includes(match[1]!)) return match[0];
   return undefined;
 }
 
-/** Model-facing: why an email with a fill-in-the-blank is refused. */
+/** Model-facing: why an email with an unknown merge field is refused. */
 export const PLACEHOLDER_NOTE =
-  "This email still has a fill-in-the-blank (square brackets, or a {{...}} other than {{firstName}}, {{lastName}}, {{companyName}} and {{personalization}}), which would be sent exactly as written. Put in the real text: {{firstName}} for each person's first name in a campaign, their actual name in a one-person email, the recruiter's name or the mailbox's display name in the signature, and leave out a fact nobody gave.";
-
-/** Model-facing: why a shared email that greets someone by name is refused. */
-export const NAMED_GREETING_NOTE =
-  "Greet with {{firstName}} instead of writing a name in: this email goes to everyone added to the campaign, and each person's first name from add_leads fills it in. To email several people, put them all in one campaign so one card confirms them together.";
-
-/** Model-facing: why an email signed by a team is refused. */
-export const TEAM_SIGNATURE_NOTE =
-  "Sign the email as the person sending it: the recruiter's saved signature or name, else the sending mailbox's display name; if no name is known, end with the sign-off alone. Never sign as a team such as Recruiting, or as Kruit.";
+  "This email has a {{...}} field other than {{firstName}}, {{lastName}}, {{companyName}} and {{personalization}}, which would be sent exactly as written. Use one of those fields or put in the real text.";
 
 export const RECRUITER_LANGUAGE = `You are Kruit, the recruiter's colleague. Speak in the first person and never mention teammates, other conversations or handovers (岗位团队、团队已接手); Kruit is your name, never a role.
 

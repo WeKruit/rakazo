@@ -51,15 +51,6 @@ export function isSenderRead(name: string, args: Record<string, unknown>): boole
   return /ensure_sender$/.test(target) && toolOperation(args) === "read";
 }
 
-/** A question asking which company name candidates should see, which only sender setup asks. */
-export function asksSenderCompanyName(question: string): boolean {
-  return /公司名|company name/i.test(question);
-}
-
-/** Model-facing: the sending email is read before any setup question. */
-export const SENDER_READ_FIRST =
-  "Not asked: call ensure_sender operation read first and do what it returns. Ask a company name only when it returns selfSetup true with no sender.";
-
 function noSelfSetup(ownEmail: boolean) {
   if (ownEmail)
     return 'No product sending mailbox: this account sends from the recruiter\'s own connected email, one send_message per person, each on its own card. Once send_message is among your tools (for example they just connected Gmail), put each email they already asked to send on its card at once, with no question or new draft first. When send_message is not among your tools, Gmail is not connected yet: write the full email (Subject: and body, signed with the recruiter\'s name, else the sign-off alone, never Recruiting Team) once, in the reply that first drafts it, opened by one line that it is written and goes out from their own address once they press Connect on the card below (never "no sending mailbox" or "send confirmation card"), then call request_connection once with provider gmail and a one-sentence reason in the recruiter\'s language saying the email above has not gone out, is kept and goes out on its own card once Gmail is connected. Never say you started, sent or made a connection request: the card is there for them to press. If they say they cannot sign in to Gmail, say in one line that this account sends from their own email (another Google account they can sign in to works too), then give the subject and body once, ready to copy and send themselves; never say that no sender or mailbox exists. Once an email is written and the recruiter asks to send it, which mailbox sends or whether the draft is kept, answer in one short reply without pasting it again (unless they ask for it): it has not gone out; the one step is pressing Connect on the card (call request_connection again so it sits with this reply, with a reason saying it has not gone out); the draft is kept and goes out on its own card once Gmail is connected. With nothing written yet, write it first. If they say they have no Gmail or cannot connect one, say plainly in one line that this account sends only from a connected Google email (Gmail or a company email hosted on Google), so nothing can go out until one is connected, and give the subject and body once, ready to copy, so they can send it themselves. Never say there is nothing to do and never claim another mailbox. Never ask for a company name or propose an address; drafts and contact lookups still work.';

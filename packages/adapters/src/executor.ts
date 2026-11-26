@@ -503,12 +503,10 @@ import {
   readInstantlyReplyRequest,
 } from "./instantly-reply.js";
 import {
-  asksSenderCompanyName,
   isSenderRead,
   OUTREACH_MAILBOX_ONLY_NOTE,
   ownMailboxSendingAllowed,
   SEND_NOW_WITHOUT_GMAIL_NOTE,
-  SENDER_READ_FIRST,
   senderApprovalDisplay,
 } from "./instantly-senders.js";
 import type { TextJudge } from "./judge.js";
@@ -690,12 +688,11 @@ import {
   SILENT_RUN_STOP_TEXT,
 } from "./silence-watch.js";
 import {
-  isAgentBrief,
   isExactNoResponse,
   NO_RESPONSE,
   personWrote,
   stripNoResponseReply,
-  withoutAgentBrief,
+  withoutEchoedNudge,
   withoutNudge,
 } from "./silent-reply.js";
 import {
@@ -734,11 +731,7 @@ import { recruitingRoundListText } from "./turn-end-guard.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
 import {
-  questionStatesWork,
   readsOnly,
-  lastOwnUpdate,
-  restatesUpdate,
-  sameWords,
   TurnReportLedger,
   turnReportText,
 } from "./turn-report.js";
@@ -4014,14 +4007,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             return;
           }
-          // A handoff brief the model wrote out as text is for the teammate, not the recruiter.
-          if (hideVendors && isAgentBrief(narration)) {
-            assembled = "";
-            hasStreamedText = false;
-            pendingProgress = "";
-            discardedMidTurnNarration = true;
-            return;
-          }
           assembled = "";
           hasStreamedText = false;
           pendingProgress = "";
@@ -4157,8 +4142,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         // The model saved the recruiter's described role in this turn, so its first question plans searches.
         let roleCreatedInTurn = false;
-        // Sender setup asks nothing until this turn read the account's sending email.
-        let senderRead = false;
         // A role team with no role yet has no question to ask: a greeting or an unrelated question
         // gets a plain answer, never a card, until the recruiter's role is saved.
         // Role conversations start_role opened this run: handing work to one is not another role.
@@ -4462,21 +4445,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         /** The server's short report of work the model left unreported. */
         const turnReportFor = (work: readonly TurnWork[]) =>
           turnReportText(work, turnLanguage === "zh");
-        /** Text of the last message this run already put in the conversation. */
-        const lastRunMessageText = async () => {
-          try {
-            const last = await deps.prisma.message.findFirst({
-              where: { threadId: thread.id, runId, botId: run.botId },
-              orderBy: { seq: "desc" },
-              select: { blocks: true },
-            });
-            return (Array.isArray(last?.blocks) ? (last.blocks as MessageBlock[]) : [])
-              .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
-              .join("\n");
-          } catch {
-            return undefined;
-          }
-        };
         /**
          * Gate 01e9467c: the recruiter changed the ask while the teammate worked, and this bot
          * already handed it the new brief. The finished report is for the old one: the new stage
@@ -4502,51 +4470,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return Boolean(newer);
           } catch {
             return false;
-          }
-        };
-        /**
-         * The finished teammate already answered the recruiter's latest message: its result is
-         * shown above its report, so this bot's own text would be a second answer. Gate 0f20231b,
-         * mobile-first-look: the teammate said where Contacts is, then Main said it again.
-         * A question for the recruiter still goes out.
-         */
-        const handbackAnswered = async (reply: string) => {
-          if (!handback || /[?？]\s*$/.test(reply)) return false;
-          try {
-            const recent = await deps.prisma.message.findMany({
-              where: { threadId: thread.id },
-              orderBy: { seq: "desc" },
-              take: 12,
-              select: { role: true, botId: true, blocks: true, clientNonce: true },
-            });
-            for (const message of recent) {
-              if (message.role === "user" && !message.clientNonce?.startsWith("autocontinue:"))
-                return false;
-              if (
-                message.botId === handback.fromBotId &&
-                message.role === "bot" &&
-                (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : []).some(
-                  (block) => block.kind === "text" && block.text.trim().length > 0,
-                )
-              )
-                return true;
-            }
-          } catch {
-            return false;
-          }
-          return false;
-        };
-        const lastOwnReplyText = async () => {
-          try {
-            const rows = await deps.prisma.message.findMany({
-              where: { threadId: thread.id },
-              orderBy: { seq: "desc" },
-              take: 12,
-              select: { role: true, botId: true, blocks: true, runId: true, clientNonce: true },
-            });
-            return lastOwnUpdate(rows, run.botId, runId);
-          } catch {
-            return undefined;
           }
         };
         /** The person's newest message since this run began that a different run answers. */
@@ -10634,12 +10557,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ok: true,
                 note: "Not shown: the automatic continuation is for you, never the recruiter.",
               });
-            // A handoff brief is for the teammate it is handed to, never the recruiter.
-            if (hideVendors && isAgentBrief(text))
-              return finish({
-                ok: true,
-                note: "Not shown: a handoff brief goes in the handoff's own message, never to the recruiter.",
-              });
             const truncated = isProgressMessageTruncated(rawMessage);
             await flushProgress();
             await publishMidTurnNarration();
@@ -11462,10 +11379,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ).then(
             async (result) => {
               const failure = toolResultError(result);
-              if (failure === undefined && isSenderRead(name, rawArgs)) {
-                senderRead = true;
-                if (needsSenderNotice(result)) void notifyMissingSender(deps, run);
-              }
+              if (failure === undefined && isSenderRead(name, rawArgs) && needsSenderNotice(result))
+                void notifyMissingSender(deps, run);
               turnReport.settle(executionId, {
                 ok: failure === undefined,
                 result,
@@ -12826,10 +12741,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     streamRoundPicks(call);
                     streamQuestion(call);
                   },
-                  beforeAsk: async (question) => {
+                  beforeAsk: async () => {
                     if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
-                    if (!senderRead && asksSenderCompanyName(question))
-                      return { instead: SENDER_READ_FIRST };
                     // One question at a time: a card already waiting here is answered first.
                     const waiting = hideVendors ? await openQuestionElsewhere() : undefined;
                     if (waiting !== undefined) return { instead: questionAlreadyWaiting(waiting) };
@@ -13162,7 +13075,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
                 throw new Error("Ask form contains protected input");
               // The card never replaces a report: unreported work gets the server's report first.
-              if (questionStatesWork(event.text)) turnReport.report();
               const unreportedWork = turnReport.owed();
               if (unreportedWork.length) {
                 const report = await turnReportFor(unreportedWork);
@@ -13587,7 +13499,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? stripNoResponseReply(assembled, messageSegments)
               : { assembled, blocks: messageSegments };
           if (hideVendors)
-            silentReply = withoutAgentBrief(silentReply.assembled, silentReply.blocks);
+            silentReply = withoutEchoedNudge(silentReply.assembled, silentReply.blocks);
           // Consequential work ends with a report of it: when the model wrote none (its report
           // step included), the server reports from the run's own records.
           const unreportedAtEnd = handedOff ? [] : turnReport.owed();
@@ -13644,45 +13556,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             throw new Error(TOOL_STEPS_WITHOUT_RESPONSE);
           }
-          // The update just sent already said it: no second, near-identical message. A turn that
-          // went on in the background may have sent that update before it resumed, so the
-          // run's last saved message counts too.
-          // A teammate's report relayed after this bot already said the same adds nothing either,
-          // and neither does a second answer after a finished teammate's result, nor the same
-          // text this bot already posted with no one writing since (gate 493e9f2e: a second brief
-          // for the same template, and the teammate posted it again word for word).
           const textOnly =
             blocks.some((block) => block.kind === "text") &&
             blocks.every((block) => block.kind === "text" || block.kind === "steps");
-          const ownLast = textOnly ? await lastOwnReplyText() : undefined;
           // Which check dropped the reply is logged: gate b2005684's onemail reply vanished with
           // no trace of why.
-          const dropped = !textOnly
-            ? undefined
-            : sameWords(text, ownLast)
-              ? "same_as_own_last"
-              : run.trigger === "bot_message"
-                ? hideVendors && restatesUpdate(text, ownLast)
-                  ? "restates_own_last"
-                  : undefined
-                : restatesUpdate(text, midTurnUserTexts.at(-1))
-                  ? "restates_mid_turn_message"
-                  : restatesUpdate(text, await lastRunMessageText())
-                    ? "restates_run_update"
-                    : (await handbackAnswered(text))
-                      ? "handback_answered"
-                      : (await handbackSuperseded())
-                        ? "handback_superseded"
-                        : // Gate 95185659, change-mind: the old 60–80万 version came after the
-                          // recruiter changed the base; the coordinator hands the change on with
-                          // the request. The server's retry of a turn is past it too (gate c8855b72).
-                          hideVendors &&
-                            (handedIn ||
-                              historyMessages.find((message) => message.id === run.sourceMessageId)
-                                ?.internal === true) &&
-                            (await newerMessageAnsweredElsewhere()) !== undefined
-                          ? "newer_message_answered"
-                          : undefined;
+          const dropped =
+            !textOnly || run.trigger === "bot_message"
+              ? undefined
+              : (await handbackSuperseded())
+                ? "handback_superseded"
+                : // Gate 95185659, change-mind: the old 60–80万 version came after the
+                  // recruiter changed the base; the coordinator hands the change on with
+                  // the request. The server's retry of a turn is past it too (gate c8855b72).
+                  hideVendors &&
+                    (handedIn ||
+                      historyMessages.find((message) => message.id === run.sourceMessageId)
+                        ?.internal === true) &&
+                    (await newerMessageAnsweredElsewhere()) !== undefined
+                  ? "newer_message_answered"
+                  : undefined;
           if (dropped) {
             getLogger().info("final_reply.dropped", {
               runId,
