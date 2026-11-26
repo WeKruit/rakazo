@@ -44,6 +44,39 @@ describe("typeSafeJudge", () => {
     expect(vi.mocked(fetchImpl)).toHaveBeenCalledTimes(1);
     expect(verdicts?.get("spark")).toEqual({ level: "strong", confidence: 0.9, against: 0.01 });
   });
+
+  it("asks for an overall grade in the same request and returns only a grade it offered", async () => {
+    const grades = { Strong: "all shown", Partial: "one not met" };
+    const fetchImpl = answer({
+      answers: {
+        q0: { choice: "strong", confidence: 0.9 },
+        overall: { choice: "Strong", confidence: 0.7 },
+      },
+    });
+    const verdicts = await typeSafeJudge("key", fetchImpl).criteria?.(
+      { profile: "Spark" },
+      [{ id: "spark", statement: "hands-on Spark" }],
+      undefined,
+      grades,
+    );
+    expect(vi.mocked(fetchImpl)).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(vi.mocked(fetchImpl).mock.calls[0]![1]?.body));
+    expect(body.questions.overall).toMatchObject({ type: "choice", criteria: grades });
+    expect(verdicts?.overall).toBe("Strong");
+    const other = answer({
+      answers: { q0: { choice: "strong", confidence: 0.9 }, overall: { choice: "Great" } },
+    });
+    expect(
+      (
+        await typeSafeJudge("key", other).criteria?.(
+          {},
+          [{ id: "a", statement: "a" }],
+          undefined,
+          grades,
+        )
+      )?.overall,
+    ).toBeUndefined();
+  });
 });
 
 describe("language check", () => {

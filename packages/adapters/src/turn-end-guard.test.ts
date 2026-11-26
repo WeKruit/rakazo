@@ -175,7 +175,8 @@ describe("recruitingRoundListText", () => {
       threadId: "thread-1",
       spaceId: "space-1",
       roleId: "role-1",
-      candidateKeys: ["a", "b", "c"],
+      // The group's people are not next to each other: its heading is still printed once.
+      candidateKeys: ["a", "c", "b"],
       groupOf: { a: "Meet everything asked", b: "Meet everything asked", c: "Years not stated" },
     });
     expect(text).toBe(
