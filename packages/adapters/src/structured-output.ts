@@ -54,24 +54,25 @@ function structuredOutputInstruction(schema: unknown): string {
   return `End with only a JSON value that matches this JSON Schema, no other text: ${JSON.stringify(schema)}`;
 }
 
-const ended = (result: string) => result === "stopped" || result.startsWith("Subagent failed:");
+/** What one helper turn returned; `ended` when it failed or was stopped, so there is no result. */
+export type HelperTurn = { text: string; ended: boolean };
 
 /** One helper turn whose result must match the caller's schema, with one correction turn. */
 export async function structuredTurn(
-  turn: (prompt: string) => Promise<string>,
+  turn: (prompt: string) => Promise<HelperTurn>,
   task: string,
   declared: unknown,
   schema: z.ZodType,
 ): Promise<string> {
   let result = await turn(`${task}\n\n${structuredOutputInstruction(declared)}`);
-  if (ended(result)) return result;
-  let check = checkStructuredOutput(result, schema);
+  if (result.ended) return result.text;
+  let check = checkStructuredOutput(result.text, schema);
   if (!check.ok) {
     result = await turn(structuredOutputRetry(check.reason));
-    if (ended(result)) return result;
-    check = checkStructuredOutput(result, schema);
+    if (result.ended) return result.text;
+    check = checkStructuredOutput(result.text, schema);
   }
   return check.ok
     ? check.json
-    : `${result}\n\n(This does not match output_schema: ${check.reason})`;
+    : `${result.text}\n\n(This does not match output_schema: ${check.reason})`;
 }

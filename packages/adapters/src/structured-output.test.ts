@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { HelperTurn } from "./structured-output.js";
 import { checkStructuredOutput, outputSchema, structuredTurn } from "./structured-output.js";
 
 const schema = {
@@ -47,9 +48,9 @@ describe("structured helper turns", () => {
 
   it("asks once for a correction, then returns the JSON", async () => {
     const turn = vi
-      .fn<(prompt: string) => Promise<string>>()
-      .mockResolvedValueOnce("Ada has seven years.")
-      .mockResolvedValueOnce('{"name":"Ada","years":7}');
+      .fn<(prompt: string) => Promise<HelperTurn>>()
+      .mockResolvedValueOnce({ text: "Ada has seven years.", ended: false })
+      .mockResolvedValueOnce({ text: '{"name":"Ada","years":7}', ended: false });
     expect(await structuredTurn(turn, "Summarize Ada", schema, built())).toBe(
       '{"name":"Ada","years":7}',
     );
@@ -58,12 +59,12 @@ describe("structured helper turns", () => {
   });
 
   it("returns the text with the reason after a second miss, and passes failures through", async () => {
-    const miss = vi.fn(async () => "still prose");
+    const miss = vi.fn(async () => ({ text: "still prose", ended: false }));
     expect(await structuredTurn(miss, "x", schema, built())).toContain(
       "does not match output_schema",
     );
     expect(miss).toHaveBeenCalledTimes(2);
-    const failed = vi.fn(async () => "Subagent failed: model down");
+    const failed = vi.fn(async () => ({ text: "Subagent failed: model down", ended: true }));
     expect(await structuredTurn(failed, "x", schema, built())).toBe("Subagent failed: model down");
     expect(failed).toHaveBeenCalledOnce();
   });

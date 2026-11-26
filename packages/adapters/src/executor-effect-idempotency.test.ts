@@ -6019,7 +6019,13 @@ describe("integration hunks: shell scope, external-text refusal, interject, memo
 
 describe("remembered tool fixes", () => {
   it("learns the change that fixed a failed call and hands it to the next run's same error", async () => {
-    const saved: Array<{ path: string; content: string; scope: string; botId?: string }> = [];
+    const saved: Array<{
+      path: string;
+      content: string;
+      data?: unknown;
+      scope: string;
+      botId?: string;
+    }> = [];
     const first = fixture("run-fix-1");
     first.memoryCommit.mockImplementation((async (request: (typeof saved)[number]) => {
       saved.push(request);
@@ -6047,7 +6053,15 @@ describe("remembered tool fixes", () => {
     second.memoryRead.mockImplementation(async (request: { scope: string; path?: string }) => ({
       documents:
         request.scope === "bot" && request.path === "tool-fixes.md"
-          ? [{ id: "doc-1", path: "tool-fixes.md", content: fixes!.content, revision: 1 }]
+          ? [
+              {
+                id: "doc-1",
+                path: "tool-fixes.md",
+                content: fixes!.content,
+                data: fixes!.data,
+                revision: 1,
+              },
+            ]
           : [],
     }));
     (second.web.search as ReturnType<typeof vi.fn>).mockImplementation(async () => {

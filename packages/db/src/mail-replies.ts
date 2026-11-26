@@ -14,7 +14,8 @@ import {
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { htmlToPlainText } from "@rakazo/core/node/html-text";
-import type { Prisma, PrismaClient } from "./client.js";
+import type { PrismaClient } from "./client.js";
+import { Prisma } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
 import { IsolationError } from "./scope.js";
 
@@ -523,6 +524,29 @@ export async function publishMailReplyCard(prisma: PrismaClient, actor: Actor, e
 }
 
 /**
+ * The receipt a completed campaign send leaves on its effect: the campaign and the people the send
+ * tool returned, as fields. A refused or failed send has none, and neither does a result that is
+ * only text.
+ */
+export function campaignSendReceipt(
+  result: unknown,
+): { campaignId: string; recipients: string[] } | undefined {
+  const outer = object(result);
+  const receipt = object(object(outer?.structuredContent)?.result) ?? outer;
+  if (!outer || !receipt || "error" in outer || "error" in receipt) return undefined;
+  if (typeof receipt.campaignId !== "string") return undefined;
+  const recipients = Array.isArray(receipt.recipients) ? receipt.recipients : [];
+  return {
+    campaignId: receipt.campaignId,
+    recipients: recipients.filter((entry): entry is string => typeof entry === "string"),
+  };
+}
+
+const RECEIPT_SQL = Prisma.sql`COALESCE(result #> '{structuredContent,result}', result)`;
+/** The same receipt's campaign id in SQL, for an `external_effects` row; NULL when it has none. */
+export const CAMPAIGN_SEND_RECEIPT_ID_SQL = Prisma.sql`(CASE WHEN result -> 'error' IS NULL AND ${RECEIPT_SQL} -> 'error' IS NULL THEN ${RECEIPT_SQL} ->> 'campaignId' END)`;
+
+/**
  * The people of a planned send whom this account already sent a confirmed first email to from
  * another campaign (a second role for the same job, an earlier send), with when. Same person, two
  * campaigns, two first emails is the duplicate a card must not hide.
@@ -539,22 +563,20 @@ export async function earlierConfirmedSends(
   const rows = await prisma.$queryRaw<{ result: unknown; updatedAt: Date }[]>`
     SELECT result, "updatedAt" FROM external_effects
     WHERE "spaceId" = ${spaceId} AND status = 'completed'
-      AND kind LIKE '%activate_campaign' AND result::text NOT LIKE ${`%${campaignId}%`}
-      AND result::text NOT LIKE '%"error"%' AND result::text NOT LIKE '%already_waiting%'
-      AND lower(result::text) LIKE ANY(${wanted.map((email) => `%${email}%`)}::text[])
+      AND kind LIKE '%activate_campaign'
+      AND ${CAMPAIGN_SEND_RECEIPT_ID_SQL} <> ${campaignId}
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(
+          CASE WHEN jsonb_typeof(${RECEIPT_SQL} -> 'recipients') = 'array'
+            THEN ${RECEIPT_SQL} -> 'recipients' ELSE '[]'::jsonb END
+        ) AS recipient(email)
+        WHERE lower(btrim(recipient.email)) = ANY(${wanted}::text[]))
     ORDER BY "updatedAt" DESC LIMIT 200`;
-  for (const row of rows) {
-    const value = row.result as {
-      recipients?: unknown;
-      structuredContent?: { result?: { recipients?: unknown } };
-    } | null;
-    const recipients = value?.structuredContent?.result?.recipients ?? value?.recipients;
-    if (!Array.isArray(recipients)) continue;
-    for (const entry of recipients) {
-      const email = typeof entry === "string" ? entry.trim().toLowerCase() : "";
+  for (const row of rows)
+    for (const entry of campaignSendReceipt(row.result)?.recipients ?? []) {
+      const email = entry.trim().toLowerCase();
       if (wanted.includes(email) && !found.has(email))
         found.set(email, row.updatedAt.toISOString());
     }
-  }
   return found;
 }

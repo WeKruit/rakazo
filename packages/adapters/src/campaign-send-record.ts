@@ -1,5 +1,6 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
+import { CAMPAIGN_SEND_RECEIPT_ID_SQL } from "@rakazo/db";
 
 /** What a campaign has sent and who confirmed it, from the provider's records and our cards. */
 
@@ -20,8 +21,8 @@ export async function confirmedSends(
   const rows = await prisma.$queryRaw<{ updatedAt: Date }[]>`
     SELECT "updatedAt" FROM external_effects
     WHERE "spaceId" = ${context.spaceId} AND status = 'completed'
-      AND kind LIKE '%activate_campaign' AND result::text LIKE ${`%${campaignId}%`}
-      AND result::text NOT LIKE '%"error"%' AND result::text NOT LIKE '%already_waiting%'
+      AND kind LIKE '%activate_campaign'
+      AND ${CAMPAIGN_SEND_RECEIPT_ID_SQL} = ${campaignId}
     ORDER BY "updatedAt" DESC LIMIT 5`;
   return rows.length
     ? {
