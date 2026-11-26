@@ -777,7 +777,9 @@ async function play(journey, label, owner, mailbox, out) {
         turn.firstReplySeconds = wrote
           ? Math.round((Date.parse(wrote.createdAt) - at) / 1000)
           : undefined;
-        log(`${label}:   Kruit ${wrote ? `wrote first after ${turn.firstReplySeconds} s` : "said nothing in 8 minutes"}`);
+        log(
+          `${label}:   Kruit ${wrote ? `wrote first after ${turn.firstReplySeconds} s` : "said nothing in 8 minutes"}`,
+        );
       } else if (move.action === "say") {
         const chat = await chatNamed(move.chat);
         log(`${label}: recruiter: ${move.text}`);
