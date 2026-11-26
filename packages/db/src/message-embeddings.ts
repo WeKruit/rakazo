@@ -44,7 +44,8 @@ async function tokensToday(prisma: Pick<PrismaClient, "$queryRaw">, model: strin
 /**
  * Gives recent messages that have text but no vector one, for every user, newest first, until the
  * daily token cap. Each person's spend is recorded on their own Space. A failed batch ends the pass
- * and is retried on the next one; it never affects search, which falls back to words.
+ * and is retried on the next one; it never affects search, which falls back to words. `swept` says
+ * nothing from `since` on was left to embed.
  */
 export async function embedRecentMessages(
   prisma: PrismaClient,
@@ -52,12 +53,16 @@ export async function embedRecentMessages(
   options: {
     maxTokensPerDay: number;
     now?: Date;
+    /** Only messages created at or after this; a worker passes its last full sweep less a margin. */
+    since?: Date;
     signal?: AbortSignal;
     onError?: (error: unknown) => void;
   },
 ) {
   const now = options.now ?? new Date();
-  const total = { embedded: 0, tokens: 0, failed: 0 };
+  const total = { embedded: 0, tokens: 0, failed: 0, swept: false };
+  const recent = new Date(now.getTime() - RECENT_DAYS * 86_400_000);
+  const from = options.since && options.since > recent ? options.since : recent;
   let spent = await tokensToday(prisma, embedder.model, now);
   while (spent < options.maxTokensPerDay && !options.signal?.aborted) {
     const rows = await prisma.$queryRaw<
@@ -71,12 +76,15 @@ export async function embedRecentMessages(
     >(Prisma.sql`
       SELECT m.id, m."threadId", ${plainText} AS text, t."spaceId", t."userId"
       FROM messages m JOIN threads t ON t.id = m."threadId"
-      WHERE m."createdAt" >= ${new Date(now.getTime() - RECENT_DAYS * 86_400_000)}
+      WHERE m."createdAt" >= ${from}
         AND m.role IN ('user', 'bot')
         AND ${searchableText} <> '[][][]'
         AND NOT EXISTS (SELECT 1 FROM message_embeddings e WHERE e."messageId" = m.id)
       ORDER BY m."createdAt" DESC LIMIT ${BATCH}`);
-    if (!rows.length) break;
+    if (!rows.length) {
+      total.swept = true;
+      break;
+    }
     // Group by owner so each person's spend is recorded on their own Space.
     const owners = new Map<string, typeof rows>();
     for (const row of rows) {
