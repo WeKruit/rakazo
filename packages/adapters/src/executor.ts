@@ -12336,6 +12336,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               firstModelEventMs,
               runtimeMs: Date.now() - runtimeStartedAt,
               modelCalls: promptCache.calls,
+              // The tools between model calls, in order: what a slow turn spent its steps on.
+              tools: runToolNames.join(" "),
               promptSize: promptCache.promptTokens,
               cachedPromptSize: promptCache.cachedTokens,
               promptCacheHitRate: promptCache.promptTokens
@@ -12343,6 +12345,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : null,
             });
           let runToolCalls = 0;
+          const runToolNames: string[] = [];
           // Pi runs a tool the moment it queues the "tool" event, so a fast tool's completion
           // audit raced ahead of the "called" audit this loop appends after flushing narration.
           // Completions wait for the matching called append; the stream's close releases
@@ -13090,6 +13093,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return;
               }
               runToolCalls += 1;
+              runToolNames.push(event.name);
               const loopGuard = advanceToolCallLoopGuard(toolCallStreak, event.name, event.args);
               toolCallStreak = loopGuard.streak;
               if (loopGuard.stuck) {
