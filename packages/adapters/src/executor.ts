@@ -637,6 +637,7 @@ import {
   openQuestionsAnsweredNote,
   openQuestionsForEmail,
   takeOpenQuestions,
+  withoutOpenQuestions,
 } from "./reply-open-questions.js";
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
@@ -5890,7 +5891,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const liveSchema = (resolvedTool ?? connectorTools.get(name))?.inputSchema;
               if (liveSchema) {
                 try {
-                  assertConnectorToolArgs(liveSchema, args);
+                  assertConnectorToolArgs(withoutOpenQuestions(liveSchema), args);
                 } catch (error) {
                   return { error: sanitizeConnectorError(error) };
                 }
