@@ -43,6 +43,6 @@ A turn that needs a skill pays one `skill_read` model step (~1.6 s p50 per model
 ## Steps
 
 1. Base instructions + our skills + role context data-only + turn facts + upgrade delete list (this branch, now).
-2. Rebase on the harness thread's agent-judges merge; drop in its sourcing skills (`/mnt/project-files/eval/skill-routing-20261126/sourcing-skills.md`).
+2. Merge the harness thread's agent-judges change; drop in its sourcing skills (from its hand-off in the project folder).
 3. Typecheck, unit shards for touched packages, `pnpm check:standard`.
 4. Branch plays before/after; merge to stage; release thread deploys; gate.
