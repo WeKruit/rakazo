@@ -462,8 +462,8 @@ async function replyAfter(journey, rpc, since, quick = false) {
 }
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone), but make each message mean what your goal means: if a stranger could read it as a different question, reword it. Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
-{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button; for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "people": <how many new people this message asks Kruit to find or show now: "find 10" is 10, "swap these two" is 2, a first search with no number is 10, a later "more like these" with no number is 3; 0 when it asks for none>, "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
-Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
+{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "wait" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button; for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "people": <how many new people this message asks Kruit to find or show now: "find 10" is 10, "swap these two" is 2, a first search with no number is 10, a later "more like these" with no number is 3; 0 when it asks for none>, "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
+Use "wait" only when a goal tells you to wait or step away: you write nothing and come back when Kruit writes to you, or after a few minutes. Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
 // With --ui the recruiter works in the browser and can also open pages and press buttons.
 const UI_RULES = `${SIMULATOR_RULES}
 You are using the product in a browser and see the page described under "Your screen". Two more actions:
@@ -765,7 +765,20 @@ async function play(journey, label, owner, mailbox, out) {
         move.chat = card.chat;
       }
       let waitForKruit = true;
-      if (move.action === "say") {
+      if (move.action === "wait") {
+        // The recruiter is away: candidates answer what reached them, and Kruit may write first.
+        waitForKruit = false;
+        log(`${label}: recruiter steps away`);
+        turn.candidateMail = journey.candidates ? await candidatesAnswer(journey, tag, label) : [];
+        const until = Date.now() + 8 * 60_000;
+        while (Date.now() < until && !(await newestBotMessageAfter(rpc, at)))
+          await changeOrTimeout(rpc, 30_000);
+        const wrote = await newestBotMessageAfter(rpc, at);
+        turn.firstReplySeconds = wrote
+          ? Math.round((Date.parse(wrote.createdAt) - at) / 1000)
+          : undefined;
+        log(`${label}:   Kruit ${wrote ? `wrote first after ${turn.firstReplySeconds} s` : "said nothing in 8 minutes"}`);
+      } else if (move.action === "say") {
         const chat = await chatNamed(move.chat);
         log(`${label}: recruiter: ${move.text}`);
         let typed = false;
@@ -1058,7 +1071,7 @@ const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the cust
 A new role searches first (the product's order): its first people come straight from the JD as written, and at most one short question about something the recruiter left open comes beside them, never before them. Opening the role and saying its team is searching counts as answered when the role chat then shows that search; no question is expected, a question about something already said is "asked again", and a second question is "wordy". When the customer asks for something else (a template, an email), doing it is the right move and no role question is expected.
 What goes out is what was on the card the customer approved and what the records show, never a card the customer denied: a denied card's email was not queued or sent, so a reply that describes the approved email truthfully is "yes" even when a denied card said otherwise. Two send cards with different emails shown at once is its own problem ("other"), not a false claim.
 The simulated customer cannot complete an account sign-in (connecting Gmail or a calendar), so "I can't click that here" about a connection card is the test's limit, not Kruit's dead end. Judge whether Kruit showed the card, said in one step what connecting does, and kept the work for afterwards.
-When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; compare a number only with records of the same scope, so a total labelled for the account or all time is not wrong because one role shows less; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
+When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; compare a number only with records of the same scope, so a total labelled for the account or all time is not wrong because one role shows less; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for. A "wait" move asks nothing: judge "answered" by whether Kruit told the customer, unasked, about what happened meanwhile (a candidate's reply); saying nothing after a reply arrived is "did not act".
 Quote what each fault breaks. A correctness fault (false claim, asked again, broken email, did not act, a candidate who misses a requirement) needs, in the note, the exact sentence it breaks, quoted from these rules, the recruiter's messages or the JD; if you cannot quote one, it is not a fault and costs nothing. A candidate requirement is only something the JD or the recruiter says the person must have or be (skills, years, the place they must work from, a language). Terms the employer offers, such as the pay range, office days, benefits or the start date, are never candidate requirements: a person or list that does not show them misses nothing. Each fake block costs at least 3 points of the score.
 Judge an email or template only against what the customer actually told Kruit in the conversation: a draft without details the customer never gave (a role they only named, a salary they never said) is the honest result, not a fault and not a lower score.
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Write each move's note first, then its verdicts: answered, truthful and issues must agree with the note, so a label the note says does not apply is left out. Answer with one JSON object and nothing else:
