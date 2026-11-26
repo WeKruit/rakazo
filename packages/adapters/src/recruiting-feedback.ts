@@ -24,18 +24,6 @@ import {
 import type { ZodError } from "zod";
 import { criteriaAssessment } from "./recruiting-criteria-check.js";
 
-/** Why a preference naming the chat's role is not saved to memory shared by every role. */
-export const ROLE_PREFERENCE_ERROR =
-  'Not saved: shared preferences apply to every role, so a requirement for one role goes on that role. Save it with recruiting_role update (or recruiting_feedback target:"role"), and keep only what the recruiter said for all roles as a preference.';
-
-/** Why a pasted job description or new-role request is not saved as a shared preference. */
-export const NEW_ROLE_PREFERENCE_ERROR =
-  "Not saved: this is a role's job description or a new role, not a preference for every role. Open the role first (start_role in the recruiter's own chat, otherwise recruiting_role) and keep its requirements on that role; save a preference only for what the recruiter said applies to all roles.";
-
-/** A job description or new-role request: a title or new-role label at the start, or a "Job Title:" line. */
-const NEW_ROLE_TEXT =
-  /^\s*(?:新(?:的)?(?:岗位|职位)|(?:岗位|职位)(?:名称)?|new (?:role|position|job|opening)|job title)\s*[:：]|(?:^|\n)\s*job title\s*[:：]/i;
-
 /**
  * Round direction marks no one. fosp x5 11-20 (753783e2): "4、5、7不行…" and a turn-down naming three
  * people were saved as round scope with no people, so Results showed none of them as not a fit
@@ -293,21 +281,6 @@ async function recordRecruitingFeedback(
     throw new RecruitingFeedbackValidationError(
       "Memory target does not match the recruiting preference proposal",
     );
-  // Shared preferences apply to every role; a line naming this chat's role belongs on the role.
-  if (feedback.operation !== "revoke") {
-    if (NEW_ROLE_TEXT.test(feedback.content))
-      throw new RecruitingFeedbackValidationError(NEW_ROLE_PREFERENCE_ERROR);
-    const role = await deps.prisma.thread
-      .findUnique({
-        where: { id: threadId },
-        select: { activeRecruitingRole: { select: { title: true } } },
-      })
-      .then((found) => found?.activeRecruitingRole?.title.trim());
-    if (role && role.length >= 6 && feedback.content.toLowerCase().includes(role.toLowerCase()))
-      throw new RecruitingFeedbackValidationError(
-        `${ROLE_PREFERENCE_ERROR} This one names the role "${role}".`,
-      );
-  }
   const target = {
     scope: feedback.scope,
     path: feedback.path,

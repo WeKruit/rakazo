@@ -5,7 +5,6 @@ import {
   greetsByName,
   isChineseText,
   isEnglishText,
-  namesPeopleToEmail,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
@@ -208,16 +207,6 @@ describe("creditEstimateNote", () => {
     expect(note).toContain("9,876 left");
     expect(note).toContain("150 people about 600 to 1,000");
     expect(note).toContain("Never ask permission because of cost alone");
-  });
-});
-
-describe("namesPeopleToEmail", () => {
-  it("is a send to named addresses, never a reply to someone's email (staging gate 60b7e937)", () => {
-    expect(namesPeopleToEmail(["Email alex@example.com about the data engineer role"])).toBe(true);
-    expect(
-      namesPeopleToEmail(["回复 noah@example.com 那封邮件（同一个线程），正文只写：Test note."]),
-    ).toBe(false);
-    expect(namesPeopleToEmail(["Reply to alex@example.com's email: thanks"])).toBe(false);
   });
 });
 

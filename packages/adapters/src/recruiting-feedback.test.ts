@@ -140,57 +140,6 @@ describe("recruiting feedback", () => {
     );
   });
 
-  it("refuses to save one role's requirement as a preference shared by every role", async () => {
-    // Staging saved "For the Senior Talent Acquisition Partner (in-house) role, require …" to the
-    // shared preferences, while the role itself kept no criteria.
-    const f = fixture("keep this preference", 1, "Senior Talent Acquisition Partner (in-house)");
-    await expect(
-      executeRecruitingFeedback(
-        f.deps,
-        trusted,
-        {
-          ...preference,
-          content:
-            "For the Senior Talent Acquisition Partner (in-house) role, require experience hiring hardware engineers.",
-        },
-        context,
-      ),
-    ).rejects.toThrow(/goes on that role[\s\S]*Senior Talent Acquisition Partner \(in-house\)/);
-    expect(f.commit).not.toHaveBeenCalled();
-    // A preference for every role saves as usual in that same chat.
-    await executeRecruitingFeedback(
-      f.deps,
-      trusted,
-      { ...preference, content: "Never show people from staffing agencies" },
-      context,
-    );
-    expect(f.commit).toHaveBeenCalledOnce();
-  });
-
-  it("refuses to save a pasted job description as a preference shared by every role", async () => {
-    // Staging: a new account pasted a Chinese JD in Kruit and the agent saved all of it as a
-    // cross-role preference instead of opening the role.
-    const f = fixture();
-    for (const content of [
-      "新岗位：华东区销售总监，常驻上海，医疗器械行业，10年以上销售经验。必须会说普通话和英语。",
-      "职位：高级前端工程师，北京，5年以上经验",
-      "New role: Senior Account Executive, Austin, 5+ years SaaS sales",
-      "Hiring for our team.\nJob Title: Staff Engineer\nLocation: remote",
-    ])
-      await expect(
-        executeRecruitingFeedback(f.deps, trusted, { ...preference, content }, context),
-      ).rejects.toThrow(/job description or a new role[\s\S]*start_role/);
-    expect(f.commit).not.toHaveBeenCalled();
-    // Preferences that only mention new roles still save.
-    await executeRecruitingFeedback(
-      f.deps,
-      trusted,
-      { ...preference, content: "以后所有新岗位都先问我预算" },
-      context,
-    );
-    expect(f.commit).toHaveBeenCalledOnce();
-  });
-
   it("constructs and commits one reusable preference with runtime provenance and the loaded revision", async () => {
     const f = fixture();
     const result = await executeRecruitingFeedback(f.deps, trusted, preference, context);
