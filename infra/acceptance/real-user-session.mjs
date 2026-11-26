@@ -341,7 +341,13 @@ const cardDetails = (message) =>
         block.input !== "secret" &&
         (!block.status || block.status === "pending" || block.status === "answered"),
     )
-    .map((block) => block.detail);
+    .map((block) =>
+      // While the reply waited, the page listed above it what the candidate asked that the
+      // recruiter never said.
+      block.mailReply?.openQuestions?.length
+        ? `${block.detail}\nListed above the reply: the candidate asked what you haven't told me:\n${block.mailReply.openQuestions.map((question) => `- ${question}`).join("\n")}`
+        : block.detail,
+    );
 // What a card offers on the page, so a reader of the text transcript knows which buttons exist.
 // The newest connect card per service keeps Connect until a sign-in finishes, as the app shows it.
 function cardControls(message, newestConnect, chinese) {
