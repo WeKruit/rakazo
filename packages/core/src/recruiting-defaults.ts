@@ -102,11 +102,11 @@ ${RECRUITING_REQUIRED_LANGUAGE}`;
 
 /** Returned with a saved people search, so the pick happens in the next step for every account. */
 export const RECRUITING_SEARCH_SAVED_NEXT_STEP =
-  "People whose row has a grade are already checked. Hand only the people in candidateRows with no grade to Reviewer check helpers by their candidateKeys (the round rule says how) and wait for them once; never read or judge the profiles yourself. Then call calibration_round with the checked people, best first; a required language's evidence level on a row (confirmed, strong, unknown) goes to the helpers with it, and an unknown language never rules someone out. Save the brief only after the round is recorded.";
+  "People whose row has a grade, or alreadyGraded, are already checked. Hand only the people in candidateRows with no grade to Reviewer check helpers by their candidateKeys (the round rule says how) and wait for them once; never read or judge the profiles yourself. Then call calibration_round with the checked people, best first; a required language's evidence level on a row (confirmed, strong, unknown) goes to the helpers with it, and an unknown language never rules someone out. Save the brief only after the round is recorded.";
 
 /** Returned with each people search the server saved as it returned. */
 export const RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP =
-  "These people are already saved and shown in Results; do not call save_search for this search. People whose row has a grade are already checked. Once the searches of this step have returned, hand only the people with no grade to Reviewer check helpers by the candidateKeys in these rows (the round rule says how) and wait for them once; never read or judge the profiles yourself. Then call calibration_round with the checked people, best first, and this expectedRoleRevision; save the brief only after the round is recorded.";
+  "These people are already saved and shown in Results; do not call save_search for this search. People whose row has a grade, or alreadyGraded, are already checked. Once the searches of this step have returned, hand only the people with no grade to Reviewer check helpers by the candidateKeys in these rows (the round rule says how) and wait for them once; never read or judge the profiles yourself. Then call calibration_round with the checked people, best first, and this expectedRoleRevision; save the brief only after the round is recorded.";
 
 /** Returned when the recruiter confirms the brief, so the first round starts without a role read. */
 export function recruitingBriefConfirmedNextStep(revision: number) {

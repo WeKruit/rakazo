@@ -35,7 +35,7 @@ export type CriteriaCheck = {
   match_score: number;
 };
 
-/** The grade a person's verdicts give: who clearly lacks a requirement is not a fit. */
+/** The grade a person's verdicts give: who clearly contradicts a requirement is not a fit. */
 export function criteriaGrade(
   verdicts: readonly CriterionVerdict[],
   searched?: { tier: string; score: number },
