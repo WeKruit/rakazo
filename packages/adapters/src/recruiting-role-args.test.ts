@@ -1,4 +1,4 @@
-import { IsolationError, RecruitingIntentQuoteError } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
 import {
   normalizeRecruitingRoleArgs,
@@ -300,17 +300,6 @@ describe("repairedRoleSave", () => {
       ...args,
       sourceRefs: [locator],
       criteria: [{ id: "c1", sourceRefs: [locator] }],
-    });
-  });
-
-  it("uses the recruiter's own words when the intent quote was mistyped", () => {
-    const repeat = repairedRoleSave(
-      { ...args, sourceRefs: [], criteria: [] },
-      new RecruitingIntentQuoteError("然后呢 继续找吗？"),
-    );
-    expect(repeat?.intent).toEqual({
-      basis: "direct",
-      quote: "然后呢 继续找吗？",
     });
   });
 

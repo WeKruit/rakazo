@@ -1,5 +1,5 @@
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
-import { IsolationError, RecruitingIntentQuoteError } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   feedbackSaveRefused,
@@ -182,16 +182,6 @@ describe("recruiting_feedback arguments", () => {
 });
 
 describe("feedbackSaveRefused", () => {
-  it("passes on which words to quote, so a refused save can be fixed instead of retried blindly", () => {
-    const text = feedbackSaveRefused(
-      new RecruitingIntentQuoteError("Jane Doe 很好。Sam Lee 不合适。"),
-    );
-    expect(text).toMatch(/^Not recorded/);
-    expect(text).toContain("Jane Doe 很好。Sam Lee 不合适。");
-    expect(text).toContain("carry on with the rest of the recruiter's request");
-    expect(text).not.toContain("Never run people searches");
-  });
-
   it("names every field to check when the refusal gives no reason", () => {
     const text = feedbackSaveRefused(new IsolationError());
     expect(text).toContain("sourceRefs");

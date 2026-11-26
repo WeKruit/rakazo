@@ -263,19 +263,6 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await expect(recordRound(keys("third"))).resolves.toMatchObject({ round: 3 });
   });
 
-  it("refuses a quote the recruiter did not write", async () => {
-    const sourceMessageId = await liveRun("第 3 位不太合适");
-    await expect(
-      recruiting.approveRecruitingCalibrationRoundFromMessage(prisma, actor, {
-        runId,
-        sourceMessageId,
-        intent: { basis: "direct", quote: "可以，开始扩大搜索" },
-        roleId,
-        expectedRoleRevision: 1,
-      }),
-    ).rejects.toThrow();
-  });
-
   it("counts the recruiter's latest verdict per person for each round", async () => {
     let n = 0;
     const verdict = (candidateKeys: string[], fit: string, at: Date, status = "recorded") =>

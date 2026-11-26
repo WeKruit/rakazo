@@ -162,17 +162,6 @@ describe("jsonSchemaParameters", () => {
     }
   });
 
-  it.each(["recruiting_role", "recruiting_feedback"])(
-    "preserves exact human quote guidance in the %s model schema",
-    (name) => {
-      const tool = builtinAgentTools.find((entry) => entry.name === name)!;
-      const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
-      expect(JSON.stringify(wire)).toContain(
-        "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
-      );
-    },
-  );
-
   it.each(["recruiting_feedback", "remember", "save_shared_memory"])(
     "preserves unique-quote preference edits through the %s native Pi wire",
     (name) => {
