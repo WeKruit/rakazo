@@ -21,7 +21,6 @@ import {
   PATH_REFUSAL_NOTE,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
-  SHARED_MAIL_DISCOVERY_BUDGET_MS,
   scopeRefusal,
   sharedInstantlyAccount,
 } from "./mcp-connector.js";
@@ -375,31 +374,6 @@ describe("local native Instantly thread history", () => {
       ).toMatchObject([{ type: "result" }]);
     } finally {
       await f.connector.close();
-    }
-  });
-  it("answers with the shared account's local mail tools while its remote list is still connecting", async () => {
-    vi.stubEnv("INSTANTLY_API_KEY", "platform-mail-key");
-    const f = fixture();
-    const inner = globalThis.fetch;
-    const pending: ((error: Error) => void)[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: string | URL | Request, init?: RequestInit) =>
-        new URL(logicalHref(input, init)).origin === "https://mcp.instantly.ai"
-          ? new Promise<Response>((_resolve, reject) => pending.push(reject))
-          : inner(input, init),
-      ),
-    );
-    try {
-      const startedAt = performance.now();
-      const names = (await f.connector.discoverTools(f.context as never)).map((tool) => tool.name);
-      expect(performance.now() - startedAt).toBeLessThan(SHARED_MAIL_DISCOVERY_BUDGET_MS + 1_000);
-      expect(names).toContain("instantly__demo__activate_campaign");
-      expect(names.some((name) => name.startsWith("mcp__"))).toBe(false);
-    } finally {
-      for (const reject of pending) reject(new Error("connection closed"));
-      await f.connector.close();
-      vi.unstubAllEnvs();
     }
   });
   it("discovers a separate read-only local tool and retains exact native anchor, REST page and controls", async () => {
@@ -6307,7 +6281,12 @@ describe("local native Instantly campaign and lead tools", () => {
 describe("MCP discovery tool-list cache", () => {
   function fixture() {
     const state = { failNext: false, unreachable: 0, initializations: 0, lists: 0 };
-    const fetch = mcpFetch(state);
+    const example = mcpFetch(state);
+    const exa = mcpFetch(state, `${PLATFORM_PEOPLE_SEARCH_ENDPOINT},agent_run`);
+    const fetch = (input: string | URL | Request, init?: RequestInit) =>
+      new URL(logicalHref(input, init)).origin === "https://mcp.exa.ai"
+        ? exa(input, init)
+        : example(input, init);
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       if (state.unreachable > 0) {
         state.unreachable -= 1;
@@ -6371,6 +6350,24 @@ describe("MCP discovery tool-list cache", () => {
     }
   });
 
+  it("lists a server reached with the deployment's key once for every account", async () => {
+    const f = fixture();
+    try {
+      f.setAssignment({ server: { ...SERVER, endpoint: PLATFORM_PEOPLE_SEARCH_ENDPOINT } });
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      const other = { ...(f.context as object), spaceId: "w2", userId: "u2" } as never;
+      expect(await f.connector.discoverTools(other)).toHaveLength(1);
+      expect(f.state.lists).toBe(1);
+      // A server without the deployment's key keeps its list per account.
+      f.setAssignment({ server: { ...SERVER, revision: 2 } });
+      await f.connector.discoverTools(f.context);
+      await f.connector.discoverTools(other);
+      expect(f.state.lists).toBe(3);
+    } finally {
+      await f.connector.close();
+    }
+  });
+
   it("lists again for a refresh discovery even while the cached list is fresh", async () => {
     const f = fixture();
     try {
@@ -6404,7 +6401,10 @@ describe("MCP discovery tool-list cache", () => {
       expect(tools[0]!.route?.resourceRevision).toBe(2);
       await f.connector.discoverTools(f.context);
       expect(f.state.lists).toBe(2);
+      // An old list still answers at once and is listed again in the background.
       await vi.advanceTimersByTimeAsync(DISCOVERY_CACHE_TTL_MS);
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      await vi.waitFor(() => expect(f.state.lists).toBe(3));
       await f.connector.discoverTools(f.context);
       expect(f.state.lists).toBe(3);
     } finally {
@@ -6474,12 +6474,13 @@ describe("MCP discovery tool-list cache", () => {
       f.setAssignment({ server: { ...SERVER, revision: 2 } });
       expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
       expect(f.state.lists).toBe(1);
-      // TTL expiry retries.
+      // A failed background re-list of an old list never hides the server from a run.
       f.state.failNext = true;
       await vi.advanceTimersByTimeAsync(DISCOVERY_CACHE_TTL_MS);
-      expect(await f.connector.discoverTools(f.context)).toEqual([]);
-      f.state.failNext = false;
-      await vi.advanceTimersByTimeAsync(DISCOVERY_FAILURE_TTL_MS);
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      await vi.waitFor(() =>
+        expect(sink.events.some((event) => event.message === "discovery.relist_failed")).toBe(true),
+      );
       expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
     } finally {
       await f.connector.close();
