@@ -176,9 +176,10 @@ export function turnWork(
   if (READ_ACTION.test(action) || (operation && READ_ACTION.test(operation))) return undefined;
   // A send runs only once its card is confirmed. A direct send that returned went out; a
   // campaign send is what its result says.
-  if (/^(?:native_[a-z]+_)?activate_campaign$/.test(action))
-    return campaignSendWork(settled?.result);
-  if (/^(?:native_[a-z]+_)?(?:send_email|send_message|send)$/.test(action)) return "sent";
+  // The tool's own name, without a native integration's "native_<app>_" prefix.
+  const operationName = action.startsWith("native_") ? action.split("_").slice(2).join("_") : action;
+  if (operationName === "activate_campaign") return campaignSendWork(settled?.result);
+  if (["send_email", "send_message", "send"].includes(operationName)) return "sent";
   if (/sender|mailbox|sending_account/.test(action)) return "sender";
   // Ensuring a campaign that already exists, without new copy, changed nothing (staging 11-13:
   // each status check reported 「已完成：存好了邮件草稿」).
