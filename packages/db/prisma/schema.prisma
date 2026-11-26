@@ -1696,7 +1696,7 @@ model RecruitingCalibrationRound {
   approvedByUserId String?
   /// What carried the human decision: {kind:"control"} or {kind:"message",messageId} or {kind:"approval",effectId}.
   approvalSource Json?
-  /// checking: held for the Reviewer; checked: graded, waiting for its owner to show it; shown.
+  /// Always "shown": the hold for the retired quality check wrote the other values. Stored rows keep theirs.
   status String @default("shown")
   /// The bot whose run recorded the round; only it shows the checked round.
   ownerBotId String?

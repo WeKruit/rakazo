@@ -9,7 +9,7 @@ function harness(option = {}) {
     threadId: "original-thread",
     spaceId: "space",
     name: "Main",
-    members: ["Main", "Sourcer", "Outreach", "Scheduling", "Reviewer"].map((name) => ({ name })),
+    members: ["Main", "Sourcer", "Outreach", "Scheduling"].map((name) => ({ name })),
   };
   const copy = { ...original, id: "copy", threadId: "copy-thread" };
   const roles = fixture.roles.map(({ roleId }) => ({

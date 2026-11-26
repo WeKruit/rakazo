@@ -610,8 +610,8 @@ export async function returnBotMessageOutcome(
   // A teammate's progress or empty status is not that (send-at-night 11-16: each one woke Kruit,
   // which posted again and asked the team a second time); only a failure goes back at once.
   if (source.returnThreadId && (intent === "result" || !options?.forceUnread)) {
-    // fosp 11-22 (352978a2): the team's "found no 5" was marked returned, then dropped because the
-    // Reviewer was still running, and Kruit said "still searching" three times. A result the team
+    // fosp 11-22 (352978a2): the team's "found no 5" was marked returned, then dropped because a
+    // teammate was still running, and Kruit said "still searching" three times. A result the team
     // is still working on stays unreturned, so the reconciler offers it again until it goes back.
     if ((await returnDelegatedTeamOutcome(deps, run)) === "later") return false;
     await markBotOutcomeReturned(deps.prisma, run.id);

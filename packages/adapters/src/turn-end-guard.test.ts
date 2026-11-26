@@ -47,48 +47,6 @@ describe("recruitingRoundListText", () => {
     expect(text).toContain("10. **Person 9** · Warehouse Manager · Example Co · Atlanta");
   });
 
-  it("shows the check's reason for a person in place of the search's passage", async () => {
-    // Branch fr 11-21: a checked person's line quoted his team's name from the search, not the
-    // Spark and Kafka work the check had read, and the recruiter took him for a backend engineer.
-    const prisma = {
-      externalEffect: {
-        findMany: vi.fn(async () => [
-          {
-            request: { operation: "save_search" },
-            result: {
-              candidateRows: [
-                { candidateKey: "linkedin:/in/kt", name: "KT", reason: "Joined the ECS team" },
-                { candidateKey: "linkedin:/in/ana", name: "Ana", reason: "Built warehouse ops" },
-              ],
-            },
-          },
-          {
-            request: {
-              operation: "save_grades",
-              rows: [
-                {
-                  linkedin_url: "https://www.linkedin.com/in/kt/",
-                  fit_reasons: "Runs Spark streaming pipelines on Kafka topics in production.",
-                },
-              ],
-            },
-            result: {},
-          },
-        ]),
-      },
-      recruitingCandidateOccurrence: { findMany: vi.fn(async () => []) },
-    } as never;
-    const text = await recruitingRoundListText(prisma, {
-      threadId: "thread-1",
-      spaceId: "space-1",
-      roleId: "role-1",
-      candidateKeys: ["linkedin:/in/kt", "linkedin:/in/ana"],
-    });
-    expect(text).toContain("> Runs Spark streaming pipelines on Kafka topics in production.");
-    expect(text).not.toContain("ECS team");
-    expect(text).toContain("> Built warehouse ops");
-  });
-
   it("describes a judged person by the verdicts, never by the profile's opening words", async () => {
     const prisma = {
       externalEffect: {

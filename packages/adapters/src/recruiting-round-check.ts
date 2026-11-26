@@ -165,8 +165,8 @@ export type RoundCheckResult = { ok: true; unverified: Record<string, string> };
 
 /**
  * The picks' own verdicts, where the lead gave them: what no
- * row shows becomes the round list's "Not verified" note. Verdicts are optional: the Reviewer
- * grades every round after feedback from full profiles, and asking the lead for a verdict on every
+ * row shows becomes the round list's "Not verified" note. Verdicts are optional: the search
+ * grades the people it returns, and asking the lead for a verdict on every
  * criterion of every pick cost refusals and up to a minute a round (staging 11-15/16).
  */
 export function checkRound(input: {

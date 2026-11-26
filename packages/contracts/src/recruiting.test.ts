@@ -1844,25 +1844,24 @@ describe("calibration round keys", () => {
   });
 });
 
-describe("quality-check grades", () => {
-  it("saves a degree given as an object as one line of text", () => {
-    // fr 11-21 (8ef94139): Reviewer saves were refused for education objects.
-    const row = {
-      name: "Ada",
-      linkedin_url: "https://www.linkedin.com/in/ada",
-      education: [
-        { school: "State University", degree: "MS, Computer Science", dates: "2014–2016" },
+describe("stored quality-check grade pages", () => {
+  it("still reads a stored request and no longer takes one as tool input", () => {
+    const request = {
+      operation: "save_grades",
+      expectedRoleRevision: 1,
+      rows: [
+        {
+          name: "Ada",
+          linkedin_url: "https://www.linkedin.com/in/ada",
+          education: [{ school: "State University", degree: "MS" }],
+          match_score: 80,
+          match_tier: "Promising",
+          fit_reasons: "Senior Data Engineer",
+          requirements_assessment: [{ requirement: "Kafka", status: "met", evidence: "Kafka" }],
+        },
       ],
-      match_score: 80,
-      match_tier: "Promising",
-      fit_reasons: "Senior Data Engineer",
-      requirements_assessment: [{ requirement: "Kafka", status: "met", evidence: "Kafka" }],
     };
-    expect(contracts.RecruitingGradeRowSchema.parse(row).education).toEqual([
-      "State University | MS, Computer Science | 2014–2016",
-    ]);
-    expect(contracts.RecruitingGradeRowSchema.safeParse({ ...row, education: [{}] }).success).toBe(
-      false,
-    );
+    expect(contracts.RecruitingStoredGradesRequestSchema.safeParse(request).success).toBe(true);
+    expect(contracts.RecruitingResearchToolInputSchema.safeParse(request).success).toBe(false);
   });
 });

@@ -27,7 +27,7 @@ describe("checkRound", () => {
 
   it("records picks with or without verdicts and notes what is unknown", () => {
     // Staging 11-15/16: asking for a verdict on every criterion of every pick cost refusals and up
-    // to a minute a round; the Reviewer grades rounds from full profiles.
+    // to a minute a round; the search grades the people it returns.
     expect(checkRound({ ...base, keys: ["a", "b"], checks: { a: all("shown") } })).toEqual({
       ok: true,
       unverified: {},

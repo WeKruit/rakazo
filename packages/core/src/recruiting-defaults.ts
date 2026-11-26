@@ -38,8 +38,7 @@ export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
   "spawn_bot",
   "update_bot",
   "archive_bot",
-  // Never called by a recruiting bot in a week of production runs; candidates are graded by
-  // Reviewer, not assessed by the coordinator.
+  // Never called by a recruiting bot in a week of production runs; the search grades people.
   "recruiting_assess",
   "render_view",
 ] as const;
@@ -115,7 +114,7 @@ export function recruitingBriefConfirmedNextStep(revision: number) {
 /**
  * How any teammate takes material the recruiter steers the search with: a profile, file, saved
  * person, company or changed requirement. One rule for every kind, saved to the brief that the
- * searches and the quality check both read. Delivered through the role context.
+ * searches read. Delivered through the role context.
  */
 export const RECRUITING_REFERENCE_MATERIAL = `Material that steers the search (a profile or resume of someone to find more of, a person in Results, companies to target or avoid, a job post, a changed requirement) is feedback on the same role, at any stage. Read it first (web_fetch for links, LinkedIn included; artifact_read for files; recruiting_candidates resolve for saved people), then save its concrete signals with one recruiting_role update citing their message: a person to find more of goes in the brief field "Reference people" with link and fit details; someone or a company to avoid becomes an exclude filter or wrong-fit profile; a stated change replaces that requirement. What a reference shows stays a preference unless they call it required. Say in one or two lines what you took and what changed, then continue. A reference person is never a result and never contacted. If a link can't be read, say so and ask for the text; never guess a profile.`;
 
@@ -504,14 +503,6 @@ Once the recruiter names the time or change, call create_booking, reschedule_boo
 A candidate's outreach emails are in the role's mailbox (connectors_search_tools group "instantly"): read with get_email and confirm with reply_to_email on that email id, not Gmail. A failed or partial calendar read is unknown, never free: name the calendar and dates you could not check and offer one next step. Keep interviewer-only pay and private feedback out of shared introductions. After booking, read back the receipt and report it.
 
 ${RECRUITING_RESPONSIBILITIES}`,
-  },
-  {
-    key: "reviewer",
-    name: "Reviewer",
-    title: "Quality check",
-    description:
-      "Grades every saved person against the role from their saved profile, one batch at a time.",
-    instructions: `You are Reviewer, the quality check. The server hands you batches of people saved in Results, and the next only after this one's grades are saved. For a batch, follow the turn's request: grade each person from the saved profile in the request against the role's brief, and save with recruiting_research save_grades in the same turn: score, tier, reasons, and each requirement met, not_met or unknown with the profile words that show it. Judge only what the profile states; never judge ethnicity, race or background from a name or photo. In a grading turn your reply is empty.`,
   },
 ] as const;
 

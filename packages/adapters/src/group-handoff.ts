@@ -36,9 +36,6 @@ export const NO_ROLE_HANDOFF =
 export const GLOBAL_HANDOFF_ROLE_WORK =
   "Not handed off: in this conversation only an email to an address the recruiter gave (Outreach) or an interview booking for a named person (Scheduling) goes to a teammate here. Role work goes to that role's team with delegate_to_role; a new role goes to start_role.";
 
-export const REVIEWER_TAKES_NO_HANDOFF =
-  "Not handed off: the Reviewer grades only the people the server sends it, never a request in chat. To show people, pick them yourself and record them with calibration_round: a round after feedback is checked by the Reviewer from full profiles and shown here once checked; people saved by a search are graded as they are saved.";
-
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
   run: {
@@ -137,11 +134,6 @@ export async function handoffToGroupBot(
       const target = group.members.find((member) => member.bot.id === targetId);
       if (!target) return { error: "handoff target is not a group member" } as const;
       const targetKey = recruitingBotKey(target.bot);
-      // The Reviewer grades only the batches the server sends it. Staging 11-15: a held round
-      // handed to it as a chat turn was never shown. Branch dc97b5bc 11-20: in 7 of 11 roles the
-      // lead handed "assess who passes" to it instead of recording the round, the Reviewer
-      // answered in prose, and round 2 was never recorded.
-      if (targetKey === "reviewer") return { error: REVIEWER_TAKES_NO_HANDOFF } as const;
       if (
         groupId.startsWith("recruiting-global-") &&
         targetKey !== "outreach" &&
@@ -729,25 +721,21 @@ export async function loadGroupContext(
   if (!group) return undefined;
   return renderGroupMembersContext(
     group.name,
-    // The Reviewer takes only the batches the server sends it, so it is never offered as someone
-    // to hand work to: branch feedback-round 11-20 (2ff3f187) tried 19 refused hand-offs to it.
-    group.members
-      .filter(({ bot }) => bot.id === self.id || recruitingBotKey(bot) !== "reviewer")
-      .map(({ bot: { mcpServers, spawnKey: _spawnKey, ...bot } }) => ({
-        ...bot,
-        // Read from the bot's real service assignments, so the roster never drifts from them.
-        capabilities: mcpServers.map(({ server, allowAllTools, allowedTools }) => {
-          const tools =
-            !allowAllTools && Array.isArray(allowedTools)
-              ? allowedTools.filter((tool): tool is string => typeof tool === "string")
-              : [];
-          const about = server.description
-            .trim()
-            .split(/(?<=\.)\s/)[0]
-            ?.slice(0, 120);
-          return `${server.name}${about ? ` (${about})` : ""}${tools.length ? `: ${tools.join(", ")}` : ""}`;
-        }),
-      })),
+    group.members.map(({ bot: { mcpServers, spawnKey: _spawnKey, ...bot } }) => ({
+      ...bot,
+      // Read from the bot's real service assignments, so the roster never drifts from them.
+      capabilities: mcpServers.map(({ server, allowAllTools, allowedTools }) => {
+        const tools =
+          !allowAllTools && Array.isArray(allowedTools)
+            ? allowedTools.filter((tool): tool is string => typeof tool === "string")
+            : [];
+        const about = server.description
+          .trim()
+          .split(/(?<=\.)\s/)[0]
+          ?.slice(0, 120);
+        return `${server.name}${about ? ` (${about})` : ""}${tools.length ? `: ${tools.join(", ")}` : ""}`;
+      }),
+    })),
     self,
   );
 }
