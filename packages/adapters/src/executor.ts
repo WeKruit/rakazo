@@ -11516,6 +11516,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           botId: bot.id,
           runId,
           threadId: thread.id,
+          onSaved: (path) => contextWatch?.acknowledge("memory", `bot: ${path}`),
         });
         const credits = createCreditGuard();
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
