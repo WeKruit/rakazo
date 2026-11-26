@@ -520,6 +520,27 @@ function firstEmail(campaign: Record<string, unknown> | undefined) {
     : null;
 }
 
+/** A follow-up the campaign sends after the first email: every version of each later step. */
+type FollowUp = { after: string; subject: string; body: string };
+function followUps(campaign: Record<string, unknown> | undefined): FollowUp[] {
+  const list = Array.isArray(campaign?.sequences) ? campaign.sequences : [];
+  const steps = (list[0] as { steps?: unknown } | undefined)?.steps;
+  return (Array.isArray(steps) ? steps.slice(1) : []).flatMap((raw) => {
+    const step = raw as { delay?: unknown; delay_unit?: unknown; variants?: unknown };
+    const delay = typeof step.delay === "number" ? step.delay : 0;
+    const unit = typeof step.delay_unit === "string" ? step.delay_unit : "days";
+    const after = `${delay} ${delay === 1 ? unit.replace(/s$/, "") : unit} after the email before`;
+    return (Array.isArray(step.variants) ? step.variants : []).flatMap((variant) => {
+      const v = variant as { subject?: unknown; body?: unknown };
+      return typeof v?.body === "string"
+        ? [{ after, subject: typeof v.subject === "string" ? v.subject : "", body: v.body }]
+        : [];
+    });
+  });
+}
+const hasVariables = (emails: readonly FirstEmail[]) =>
+  emails.some((email) => `${email.subject} ${email.body}`.match(VARIABLE));
+
 /**
  * One-person first emails. The role campaign keeps its one sequence, but once a person has their
  * own email its first step reads the lead's custom variables (POST /leads/add and PATCH
@@ -804,8 +825,10 @@ export type InstantlyActivationDisplay = {
     email: string;
     emailType?: "work" | "personal";
     personalization?: string;
-    /** This person's own first email, when it is not the role's. */
+    /** The first email exactly as this person gets it, when it is not the one shown for all. */
     firstEmail?: FirstEmail;
+    /** The follow-ups exactly as this person gets them, when they are not the ones shown for all. */
+    followUps?: FollowUp[];
     /** When this account already sent them a first email from another campaign. */
     alreadyEmailedAt?: string;
   }[];
@@ -813,8 +836,13 @@ export type InstantlyActivationDisplay = {
   recipientCount: number | null;
   stopOnReply: boolean | null;
   schedule: string | null;
-  /** The first email; null when the campaign has none, omitted when it could not be read. */
+  /**
+   * The first email everyone shown gets; null when the campaign has none, omitted when it could
+   * not be read or each person gets their own (then each recipient carries it).
+   */
   firstEmail?: { subject: string; body: string } | null;
+  /** The follow-ups everyone shown gets, in order; omitted when each person carries their own. */
+  followUps?: FollowUp[];
   /** Why this send cannot be shown as exact recipients; no card is shown. */
   refusal?: string;
   /** People a paused campaign never emailed who this send takes out of it, unemailed. */
@@ -1573,6 +1601,18 @@ export async function describeCampaignActivation(
       : wanted
         ? { refusal: "This campaign could not be read, so nothing was sent; try again." }
         : { send: "activate" as const, recipients: people, remove: [] };
+  // The card shows what each person actually gets: an email with variables is shown filled in
+  // for each recipient from the lead data the send uses (audit 11-26: raw {{firstName}}).
+  const roleEmail = !campaign
+    ? undefined
+    : !templated
+      ? (firstEmail(campaign) ?? undefined)
+      : binding?.roleEmail
+        ? { subject: binding.roleEmail.subject, body: bodyHtml(binding.roleEmail.body) }
+        : undefined;
+  const later = campaign ? followUps(campaign) : [];
+  const fillEach = roleEmail ? hasVariables([roleEmail]) : false;
+  const fillLater = hasVariables(later);
   let roleCopyShown = false;
   const recipients = ("refusal" in plan ? [] : plan.recipients).map((person) => {
     const emailType = types.get(person.email.toLowerCase());
@@ -1588,32 +1628,29 @@ export async function describeCampaignActivation(
         ? { subject: own[OWN_SUBJECT], body: own[OWN_BODY] }
         : undefined;
     if (!theirs) roleCopyShown = true;
+    const received = theirs ?? (fillEach && roleEmail ? fillFor(roleEmail, person) : undefined);
     return {
       name: fullName(person) || null,
       email: person.email,
       ...(emailType ? { emailType } : {}),
-      ...(person.personalization && !theirs ? { personalization: person.personalization } : {}),
-      ...(theirs ? { firstEmail: theirs } : {}),
+      ...(person.personalization && !received ? { personalization: person.personalization } : {}),
+      ...(received ? { firstEmail: received } : {}),
+      ...(fillLater
+        ? { followUps: later.map((step) => ({ ...step, ...fillFor(step, person) })) }
+        : {}),
     };
   });
   // A templated campaign's own step is variables: the card shows the role's email instead, and
-  // only when someone on it gets that email.
+  // only when someone on it gets that email and it reads the same for all of them.
   const shownEmail = !campaign
     ? {}
-    : !templated
-      ? { firstEmail: firstEmail(campaign) }
-      : binding?.roleEmail
-        ? roleCopyShown
-          ? {
-              firstEmail: {
-                subject: binding.roleEmail.subject,
-                body: bodyHtml(binding.roleEmail.body),
-              },
-            }
-          : {}
-        : recipients.length && !roleCopyShown
-          ? {}
-          : { firstEmail: null };
+    : !roleEmail
+      ? recipients.length && !roleCopyShown
+        ? {}
+        : { firstEmail: null }
+      : (roleCopyShown || !templated) && !(fillEach && recipients.length)
+        ? { firstEmail: roleEmail }
+        : {};
   return {
     ...("refusal" in plan ? { refusal: plan.refusal } : {}),
     ...(campaign?.senderState &&
@@ -1640,6 +1677,7 @@ export async function describeCampaignActivation(
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
     schedule: sendTime(campaign, binding, sendNow),
     ...shownEmail,
+    ...(later.length && !(fillLater && recipients.length) ? { followUps: later } : {}),
     ...("remove" in plan && plan.remove.length && campaign?.status !== DRAFT
       ? { takenOut: plan.remove.map((person) => person.email) }
       : {}),

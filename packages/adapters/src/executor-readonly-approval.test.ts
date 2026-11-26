@@ -17,7 +17,7 @@ import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
-import { changedPaths } from "./campaign-send-card.js";
+import { changedPaths, sendCard } from "./campaign-send-card.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
@@ -1754,6 +1754,41 @@ describe("native Instantly activation card", () => {
       }),
     ).toEqual(["recipients[0].name", "recipients[1].emailType"]);
     expect(changedPaths(undefined, shown)).toEqual(["card not recorded"]);
+  });
+
+  it("catches a follow-up changed after its send card was shown", () => {
+    // Audit 11-26: only the first email was compared, so later steps could change after approval.
+    const followUp = { after: "3 days after the email before", subject: "", body: "<p>Bump</p>" };
+    const display = {
+      campaignName: "Founding Engineer",
+      status: "Draft",
+      mailbox: "me@x.test",
+      recipients: [{ name: "Ada", email: "a@x.test" }],
+      recipientCount: 1,
+      stopOnReply: true,
+      schedule: "now",
+      firstEmail: { subject: "Hi", body: "<p>Hello</p>" },
+      followUps: [followUp],
+    };
+    expect(
+      changedPaths(
+        sendCard(display, false),
+        sendCard({ ...display, followUps: [{ ...followUp, body: "<p>Changed</p>" }] }, false),
+      ),
+    ).toEqual(["followUps[0].body"]);
+    expect(
+      changedPaths(
+        sendCard(display, false),
+        sendCard(
+          {
+            ...display,
+            followUps: undefined,
+            recipients: [{ name: "Ada", email: "a@x.test", followUps: [followUp] }],
+          },
+          false,
+        ),
+      ),
+    ).toEqual(["recipients[0].followUps", "followUps"]);
   });
 
   it("sends the card confirmed on a second identical call, not the first call's refusal", async () => {

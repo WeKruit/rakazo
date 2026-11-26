@@ -7496,10 +7496,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 instantlyActivation?.refusal ??
                 (instantlyActivation?.firstEmail === null
                   ? "This campaign has no email yet; save it with ensure_role_campaign steps, then activate again."
-                  : instantlyActivation?.firstEmail &&
-                      unfilledPlaceholder(
-                        `${instantlyActivation.firstEmail.subject}\n${instantlyActivation.firstEmail.body}`,
-                      )
+                  : instantlyActivation &&
+                      [
+                        instantlyActivation.firstEmail,
+                        ...(instantlyActivation.followUps ?? []),
+                        ...instantlyActivation.recipients.flatMap((r) => [
+                          r.firstEmail,
+                          ...(r.followUps ?? []),
+                        ]),
+                      ].some((email) => email && unfilledPlaceholder(`${email.subject}\n${email.body}`))
                     ? `${PLACEHOLDER_NOTE} Save the corrected email with ensure_role_campaign steps, then activate again.`
                     : instantlyActivation?.recipientCount === 0
                       ? "This campaign has no recipients yet. Add the people the recruiter named (recruiting_candidates) with add_shortlist_leads, then activate again."

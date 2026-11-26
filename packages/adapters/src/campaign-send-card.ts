@@ -79,12 +79,14 @@ export async function describeSend(input: {
   return { campaignId, display };
 }
 
-/** What the recruiter approves on a send card: who gets which first email, and when. */
+/** What the recruiter approves on a send card: who gets which emails, and when. */
 export const sendCard = (display: InstantlyActivationDisplay, sendNow: boolean) => ({
   sendNow,
   // When each was confirmed before is shown beside the card, not part of what is approved.
   recipients: display.recipients.map(({ alreadyEmailedAt: _shown, ...recipient }) => recipient),
   firstEmail: display.firstEmail ?? null,
+  // Every later email goes out on the same approval, so it is part of what was approved.
+  ...(display.followUps?.length ? { followUps: display.followUps } : {}),
   ...(display.takenOut?.length ? { takenOut: display.takenOut } : {}),
 });
 

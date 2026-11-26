@@ -247,7 +247,7 @@ describe("activation card for one person's own first email", () => {
     const display = await describeCampaignActivation(fromTool, "c-1", null, binding);
     expect(JSON.stringify(display)).not.toContain(OWN_EMAIL_STEP);
     expect(display.recipients[0]?.firstEmail?.subject).toBe("Ada, your compiler work");
-    expect(display.firstEmail?.subject).toBe("Founding role");
+    expect(display.recipients[1]?.firstEmail?.subject).toBe("Founding role");
   });
 
   it("names the sending mailbox from get_campaign when no role says it", async () => {
@@ -260,16 +260,65 @@ describe("activation card for one person's own first email", () => {
     expect(display.mailbox).toBe("me@x.test");
   });
 
-  it("shows the role's email for the people who keep it", async () => {
+  it("shows the role's email filled in for each person who keeps it, never its variables", async () => {
+    // Audit 11-26: the card showed the raw {{firstName}} instead of what each person receives.
     const display = await describeCampaignActivation(read, "c-1", null, binding);
-    expect(display.recipients.map((r) => r.firstEmail?.subject ?? null)).toEqual([
-      "Ada, your compiler work",
-      null,
+    expect(display.recipients.map((r) => r.firstEmail)).toEqual([
+      { subject: "Ada, your compiler work", body: "Hi Ada,<br /><br />Just you." },
+      { subject: "Founding role", body: "<p>Hi Bob,</p><p>Open to a chat?</p>" },
     ]);
-    expect(display.firstEmail).toEqual({
-      subject: "Founding role",
-      body: "<p>Hi {{firstName}},</p><p>Open to a chat?</p>",
-    });
+    expect(display).not.toHaveProperty("firstEmail");
+    expect(JSON.stringify(display)).not.toContain("{{");
+  });
+
+  it("shows every follow-up the campaign will send, filled in for each person", async () => {
+    // Audit 11-26: steps 2 and 3 went out without ever being on the card the recruiter approved.
+    const plain = {
+      id: "c-2",
+      name: "Founding Engineer",
+      status: 0,
+      email_list: ["me@x.test"],
+      sequences: [
+        {
+          steps: [
+            { variants: [{ subject: "Founding role", body: "<p>Hi there</p>" }] },
+            { delay: 3, delay_unit: "days", variants: [{ subject: "", body: "<p>Bumping this</p>" }] },
+            {
+              delay: 1,
+              delay_unit: "days",
+              variants: [{ subject: "Last note", body: "<p>{{firstName}}, closing the loop</p>" }],
+            },
+          ],
+        },
+      ],
+    };
+    const display = await describeCampaignActivation(
+      async (tool) => (tool === "native_instantly_get_campaign" ? plain : { items: leads }),
+      "c-2",
+    );
+    expect(display.firstEmail).toEqual({ subject: "Founding role", body: "<p>Hi there</p>" });
+    expect(display).not.toHaveProperty("followUps");
+    expect(display.recipients.map((r) => r.followUps)).toEqual(
+      ["Ada", "Bob"].map((name) => [
+        { after: "3 days after the email before", subject: "", body: "<p>Bumping this</p>" },
+        {
+          after: "1 day after the email before",
+          subject: "Last note",
+          body: `<p>${name}, closing the loop</p>`,
+        },
+      ]),
+    );
+    const same = await describeCampaignActivation(
+      async (tool) =>
+        tool === "native_instantly_get_campaign"
+          ? { ...plain, sequences: [{ steps: plain.sequences[0]!.steps.slice(0, 2) }] }
+          : { items: leads },
+      "c-2",
+    );
+    expect(same.followUps).toEqual([
+      { after: "3 days after the email before", subject: "", body: "<p>Bumping this</p>" },
+    ]);
+    expect(same.recipients.every((r) => !r.followUps && !r.firstEmail)).toBe(true);
   });
 
   it("shows a waiting person the email the send will add for them", async () => {

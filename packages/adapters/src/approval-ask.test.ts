@@ -505,6 +505,51 @@ describe("buildApprovalAskBlock", () => {
     expect(card(null)).toContain("Body: no email content yet");
   });
 
+  it("shows every email the send approves, each person's as they get it, in plain words", () => {
+    // Audit 11-26: follow-ups were never on the card, and it showed raw stored states.
+    const block = buildApprovalAskBlock("e", "instantly__demo__activate_campaign", {}, [], {
+      oneTimeOnly: true,
+      instantlyActivation: {
+        senderState: { state: "active", warmup: "active", readyAt: null },
+        campaignName: "Founding Engineer",
+        status: "Paused",
+        mailbox: "team@example.test",
+        recipients: [
+          {
+            name: "Ada Lovelace",
+            email: "ada@example.test",
+            firstEmail: { subject: "Founding role", body: "<p>Hi Ada</p>" },
+            followUps: [{ after: "3 days after the email before", subject: "", body: "<p>Ada?</p>" }],
+          },
+        ],
+        recipientCount: 1,
+        stopOnReply: true,
+        schedule: "now",
+      },
+    });
+    expect(block.detail).toBe(
+      [
+        "Role: Founding Engineer",
+        "From: team@example.test",
+        "Sending address: ready to send",
+        "Warmup: warming up",
+        "To (1):",
+        "- Ada Lovelace <ada@example.test>",
+        "  Subject: Founding role",
+        "  Body:",
+        "  Hi Ada",
+        "  Follow-up 1, 3 days after the email before:",
+        "  Subject: (a reply in the same thread)",
+        "  Body:",
+        "  Ada?",
+        "Send time: now",
+        "Campaign: paused; this send resumes it",
+        "",
+        "Confirm sending these emails to these recipients",
+      ].join("\n"),
+    );
+  });
+
   it("shows a vendor-free reply card that sends only on confirmation", () => {
     const block = buildApprovalAskBlock(
       "reply-effect",
