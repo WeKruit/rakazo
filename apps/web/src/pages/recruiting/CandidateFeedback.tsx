@@ -327,7 +327,9 @@ export function FeedbackHistory({
               </>
             ) : null}
           </p>
-          <p className="whitespace-pre-wrap break-words text-sm">{record.source.quote}</p>
+          <p className="whitespace-pre-wrap break-words text-sm">
+            {record.source.quote ?? record.feedback.intent.quote}
+          </p>
         </div>
       ))}
       {failed ? (

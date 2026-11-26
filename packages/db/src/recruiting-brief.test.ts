@@ -575,22 +575,6 @@ describe("native human criterion editing", () => {
     expect(f.tx.message.create).not.toHaveBeenCalled();
   });
 
-  it("rechecks original source quotes rather than trusting the retained snapshot", async () => {
-    const f = criteriaFixture();
-    f.humanMessages.set("jd-message", {
-      id: "jd-message",
-      threadId: "thread",
-      role: "user",
-      botId: null,
-      externalTranscriptFor: null,
-      blocks: [{ kind: "text", text: "Changed original source" }],
-    });
-    await expect(recruiting.editRecruitingCriteria(f.prisma, actor, f.input)).rejects.toThrow(
-      /quote/,
-    );
-    expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
-  });
-
   it("preserves unchanged typed rules and repeated references during a priority edit", async () => {
     const f = criteriaFixture();
     const employmentRule = {

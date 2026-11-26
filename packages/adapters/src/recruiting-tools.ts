@@ -20,7 +20,6 @@ import {
   IsolationError,
   listRecruitingCandidates,
   listRunToolResults,
-  RecruitingIntentQuoteError,
   RecruitingSourceValidationError,
   recruitingCsvImportReceipt,
   recruitingPeopleSearchReceipt,
@@ -1080,8 +1079,8 @@ export async function resolveRecruitingContactAcrossRoles(
 
 /**
  * The arguments for the server's one repeat of a refused role save: every citation becomes a plain
- * locator (no quote to match), and a mistyped intent quote becomes the recruiter's own words. The
- * repeat passes the same ownership checks; undefined when it would change nothing.
+ * locator (no quote to match). The repeat passes the same ownership checks; undefined when it
+ * would change nothing.
  */
 export function repairedRoleSave(
   args: Record<string, unknown>,
@@ -1109,16 +1108,6 @@ export function repairedRoleSave(
   };
   const { intent, ...rest } = args;
   const repaired = strip(rest) as Record<string, unknown>;
-  const quote = error instanceof RecruitingIntentQuoteError ? error.quote : undefined;
-  const intentRecord =
-    intent && typeof intent === "object" ? (intent as Record<string, unknown>) : {};
-  if (quote && quote !== intentRecord.quote) changed = true;
   if (!changed) return undefined;
-  return {
-    ...repaired,
-    ...(intent === undefined && !quote
-      ? {}
-      : { intent: { ...intentRecord, ...(quote ? { quote } : {}) } }),
-  };
+  return { ...repaired, ...(intent === undefined ? {} : { intent }) };
 }
-
