@@ -51,6 +51,8 @@ function fixture(options: {
   earlier?: Array<{ createdAt: Date; checkinReplyIds: unknown }>;
   /** A conversation with no role that emailed people from its own one-off campaigns. */
   direct?: Array<{ request: unknown; result: unknown }>;
+  /** Saved receipts of emails sent from the recruiter's own Gmail. */
+  gmail?: Array<{ request: unknown; result: unknown }>;
 }) {
   const runCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({
     id: "checkin-run",
@@ -74,7 +76,13 @@ function fixture(options: {
           : { id: "role", userId: "user", archivedAt: null },
       })),
     },
-    externalEffect: { findMany: vi.fn(async () => options.direct ?? []) },
+    externalEffect: {
+      // Saved tool calls (the Gmail sends) are matched by their catalog marker.
+      findMany: vi.fn(async (args: { where: { request?: { path?: string[] } } }) =>
+        args.where.request?.path?.[0] === "0" ? (options.gmail ?? []) : (options.direct ?? []),
+      ),
+    },
+    mcpServer: { findMany: vi.fn(async () => [{ id: "gmail-server" }]) },
     run: {
       findFirst: vi.fn(async () => (options.busy ? { id: "busy" } : null)),
       findMany: vi.fn(async () => options.earlier ?? []),
@@ -326,6 +334,81 @@ describe("startRecruitingCheckin", () => {
     expect(again.runCreate).not.toHaveBeenCalled();
   });
 
+  it("wakes the conversation when someone it emailed from Gmail answers in that thread", async () => {
+    // A Gmail one-off was never read again, so its answer reached nobody.
+    listRecruitingCandidates.mockResolvedValue({ crmTarget: null });
+    getRecruitingCorrespondence.mockResolvedValue({ status: "ready", emails: [] });
+    const route = {
+      connectorId: "mcp",
+      resourceId: "gmail-server",
+      resourceRevision: 2,
+      toolName: "send_message",
+    };
+    const execute = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        data: {
+          structuredContent: {
+            id: "t1",
+            messages: [
+              {
+                id: "sent-1",
+                sender: "Recruiter <me@mail.test>",
+                date: "2026-10-30T11:00:00Z",
+                subject: "Data role",
+              },
+              {
+                id: "other",
+                sender: "someone@else.test",
+                date: "2026-10-30T11:20:00Z",
+                subject: "Re: Data role",
+              },
+              {
+                id: "reply-1",
+                sender: "Ethan Park <Ethan@Example.test>",
+                date: "2026-10-30T11:30:00Z",
+                subject: "Re: Data role",
+                plaintextBody: "What is the pay?",
+              },
+            ],
+          },
+        },
+      };
+    });
+    const deps = fixture({
+      gmail: [
+        {
+          request: [
+            "__rakazoCatalogTool",
+            "direct",
+            { route, args: { to: ["ethan@example.test"], subject: "Data role", body: "Hi" } },
+          ],
+          result: {
+            structuredContent: {
+              sent: true,
+              to: "ethan@example.test",
+              messageId: "sent-1",
+              threadId: "t1",
+            },
+          },
+        },
+      ],
+    });
+    await startRecruitingCheckin(
+      { prisma: deps.prisma, jobs: deps.jobs, connector: { execute } },
+      { threadId: "thread" },
+      now,
+    );
+    const [call] = execute.mock.calls[0] as unknown as [{ route: unknown; args: unknown }];
+    expect(call.route).toMatchObject({ resourceId: "gmail-server", toolName: "get_thread" });
+    expect(call.args).toEqual({ threadId: "t1", messageFormat: "FULL_CONTENT" });
+    expect(deps.runCreate).toHaveBeenCalledTimes(1);
+    expect(deps.runCreate.mock.calls[0]![0].data.checkinReplyIds).toEqual(["reply-1"]);
+    const prompt = String(deps.taskCreate.mock.calls[0]![0].data.prompt);
+    expect(prompt).toContain("(reply id: reply-1)");
+    expect(prompt).toContain("What is the pay?");
+  });
+
   it("treats a failed read as unknown, not as no replies", async () => {
     const deps = fixture({});
     readRecruitingRoleRepliesSince.mockRejectedValue(new Error("CRM unavailable"));
@@ -338,12 +421,18 @@ describe("sweepRecruitingCheckins", () => {
   it("offers each role once, from the conversation it was set up in", async () => {
     const prisma = {
       externalEffect: {
-        findMany: vi.fn(async () => [
-          { request: { roleId: "sending-role" }, run: { threadId: "source" } },
-          { request: null, run: { threadId: "x" } },
-          { request: { serverId: "mail", direct: true }, run: { threadId: "main" } },
-        ]),
+        findMany: vi.fn(async (args: { where: { kind: unknown } }) =>
+          typeof args.where.kind === "string"
+            ? [
+                { request: { roleId: "sending-role" }, run: { threadId: "source" } },
+                { request: null, run: { threadId: "x" } },
+                { request: { serverId: "mail", direct: true }, run: { threadId: "main" } },
+              ]
+            : // Emails sent from a recruiter's own Gmail.
+              [{ run: { threadId: "gmail-thread" } }],
+        ),
       },
+      mcpServer: { findMany: vi.fn(async () => [{ slug: "gmail" }]) },
       thread: {
         findMany: vi.fn(async () => [
           { id: "source", activeRecruitingRole: { sourceThreadId: "source" } },
@@ -369,7 +458,12 @@ describe("sweepRecruitingCheckins", () => {
     // Roles that email people are offered too, not only CRM-linked ones.
     const where = (prisma.thread.findMany as ReturnType<typeof vi.fn>).mock.calls[0]![0].where;
     expect(where.OR[0].activeRecruitingRole.OR).toContainEqual({ id: { in: ["sending-role"] } });
-    expect(where.OR[1]).toEqual({ id: { in: ["main"] }, activeRecruitingRoleId: null });
+    expect(where.OR[1]).toEqual({ id: { in: ["main", "gmail-thread"] } });
+    expect(prisma.externalEffect.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ kind: { in: ["mcp__gmail__send_message"] } }),
+      }),
+    );
   });
 });
 

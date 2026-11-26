@@ -8,12 +8,16 @@ import type {
 import { recruitingCheckinStartJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { Actor, RunTrigger } from "@rakazo/contracts";
 import { automaticReplyVerdict, recruitingBotKey } from "@rakazo/core";
-import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import { listRecruitingCandidates } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { readInstantlyEmailPage } from "./instantly-reply.js";
-import { htmlToPlainText } from "./keyless-http-web.js";
+import {
+  directCampaigns,
+  directRepliesSince,
+  gmailRepliesSince,
+  gmailSends,
+  recentGmailSenders,
+} from "./recruiting-checkin-mail.js";
 import type { RecruitingThreadTarget } from "./recruiting-reads.js";
 import { getRecruitingCorrespondence } from "./recruiting-reads.js";
 import type { RecruitingRoleReply } from "./recruiting-tools.js";
@@ -71,6 +75,9 @@ export async function sweepRecruitingCheckins(deps: {
     if (typeof request?.roleId === "string") sending.add(request.roleId);
     else if (request?.direct === true) direct.add(effect.run.threadId);
   }
+  // Conversations that emailed people from the recruiter's own Gmail: replies land in its threads.
+  for (const threadId of await recentGmailSenders(deps.prisma, recent, deps.batchSize * 4))
+    direct.add(threadId);
   const threads = await deps.prisma.thread.findMany({
     where: {
       OR: [
@@ -85,7 +92,7 @@ export async function sweepRecruitingCheckins(deps: {
           },
           runs: { some: { updatedAt: { gte: recent } } },
         },
-        { id: { in: [...direct] }, activeRecruitingRoleId: null },
+        { id: { in: [...direct] } },
       ],
     },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
@@ -251,100 +258,6 @@ async function mailboxRepliesSince(
   };
 }
 
-/** The campaigns this conversation created to email people outside a role. */
-async function directCampaigns(prisma: PrismaClient, thread: CheckinThread) {
-  const effects = await prisma.externalEffect.findMany({
-    where: {
-      spaceId: thread.spaceId,
-      kind: "instantly_role_campaign",
-      status: "completed",
-      request: { path: ["direct"], equals: true },
-      run: { threadId: thread.id, userId: thread.userId, spaceId: thread.spaceId },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-    select: { request: true, result: true },
-  });
-  return effects.flatMap((effect) => {
-    const serverId = (effect.request as { serverId?: unknown } | null)?.serverId;
-    const campaignId = (effect.result as { campaignId?: unknown } | null)?.campaignId;
-    return typeof serverId === "string" && typeof campaignId === "string"
-      ? [{ serverId, campaignId }]
-      : [];
-  });
-}
-
-/**
- * Received emails from `since` on in the campaigns a conversation created outside a role, read
- * by a member the mail connection is assigned to, with the same scoped list the agent uses.
- */
-async function directRepliesSince(
-  deps: { prisma: PrismaClient; connector: Pick<ConnectorProvider, "execute"> },
-  thread: CheckinThread,
-  memberBotIds: readonly string[],
-  campaigns: readonly { serverId: string; campaignId: string }[],
-  context: AdapterContext,
-  since: string,
-): Promise<{ replies: RecruitingRoleReply[]; complete: boolean }> {
-  const replies: RecruitingRoleReply[] = [];
-  let complete = true;
-  for (const { serverId, campaignId } of campaigns) {
-    const assignment = await deps.prisma.botMcpServer.findFirst({
-      where: {
-        spaceId: thread.spaceId,
-        userId: thread.userId,
-        botId: { in: [...memberBotIds] },
-        serverId,
-        server: { enabled: true },
-      },
-      select: { botId: true, server: { select: { revision: true } } },
-    });
-    if (!assignment) throw new Error("no member reads this mail");
-    let result: unknown;
-    for await (const event of deps.connector.execute(
-      {
-        tool: "list_emails",
-        route: {
-          connectorId: "mcp",
-          resourceId: serverId,
-          resourceRevision: assignment.server.revision,
-          toolName: "list_emails",
-        },
-        args: { campaign_id: campaignId, limit: 50 },
-        executionId: randomUUID(),
-      },
-      { ...context, botId: assignment.botId },
-    )) {
-      if (event.type === "error") throw new Error("mail read failed");
-      if (event.type === "result") result = event.data;
-    }
-    const structured = (result as { structuredContent?: { result?: unknown } } | undefined)
-      ?.structuredContent;
-    const page = readInstantlyEmailPage(structured?.result ?? mcpObject(result) ?? structured);
-    if (!page) throw new Error("unreadable mail page");
-    complete &&= !page.next_starting_after;
-    for (const email of page.items)
-      if (
-        email.ue_type === 2 &&
-        email.campaign_id === campaignId &&
-        Date.parse(email.timestamp_email) >= Date.parse(since)
-      )
-        replies.push({
-          id: email.id,
-          crmCandidateId: "",
-          name: null,
-          email: email.from_address_email ?? email.lead ?? null,
-          at: email.timestamp_email,
-          from: email.from_address_email ?? null,
-          subject: email.subject,
-          body:
-            email.body.text ||
-            (email.body.html ? htmlToPlainText(email.body.html) : (email.content_preview ?? "")),
-        });
-  }
-  return { replies, complete };
-}
-
 /**
  * One check-in for a role conversation, or for a conversation that emailed people outside a role.
  * Quiet unless a candidate replied since the last one: no new reply, only automatic replies or no
@@ -383,9 +296,11 @@ export async function startRecruitingCheckin(
   if (!thread) return skipped("no conversation");
   const role = thread.activeRecruitingRole;
   if (role && (role.archivedAt || role.userId !== thread.userId)) return skipped("no role");
-  // Outside a role, the conversation's own one-off campaigns are where its candidates answer.
+  // Outside a role, the conversation's own one-off campaigns are where its candidates answer;
+  // an email sent from the recruiter's own Gmail is answered in its Gmail thread.
   const direct = role ? [] : await directCampaigns(deps.prisma, thread);
-  if (!role && !direct.length) return skipped("nothing sent");
+  const gmail = await gmailSends(deps.prisma, thread, new Date(now - ACTIVE_WITHIN_MS));
+  if (!role && !direct.length && !gmail.length) return skipped("nothing sent");
   const offerAgain = () =>
     deps.jobs
       .enqueue(
@@ -440,19 +355,13 @@ export async function startRecruitingCheckin(
     botId: bots.reader,
     signal: AbortSignal.timeout(60_000),
   };
+  const mail = { prisma: deps.prisma, connector: deps.connector };
   let read: Awaited<ReturnType<typeof readRecruitingRoleRepliesSince>>;
   try {
     read = target
       ? await readRecruitingRoleRepliesSince(deps.connector, target, context, since)
       : !role
-        ? await directRepliesSince(
-            { prisma: deps.prisma, connector: deps.connector },
-            thread,
-            members.ids,
-            direct,
-            context,
-            since,
-          )
+        ? await directRepliesSince(mail, thread, members.ids, direct, context, since)
         : await mailboxRepliesSince(
             {
               prisma: deps.prisma,
@@ -472,6 +381,13 @@ export async function startRecruitingCheckin(
             since,
             context.signal,
           );
+    if (gmail.length) {
+      const threads = await gmailRepliesSince(mail, thread, members.ids, gmail, context, since);
+      read = {
+        replies: [...read.replies, ...threads.replies],
+        complete: read.complete && threads.complete,
+      };
+    }
   } catch (error) {
     // The next sweep tries again; a check-in never reports a failed read as "no replies".
     return skipped("read failed", { error: String(error) });
