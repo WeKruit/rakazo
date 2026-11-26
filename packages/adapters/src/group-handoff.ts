@@ -23,7 +23,6 @@ import { getLogger } from "@rakazo/logging";
 import { COMPLETION_EMAIL_OFFER, completionEmailAnswered } from "./completion-email.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { blocksText } from "./reply-suggestion.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
@@ -296,21 +295,6 @@ async function confirmedSend(
   return sent !== null;
 }
 
-/** Whether the recruiter's latest message in the thread is a question. */
-async function latestUserMessageAsks(
-  tx: Pick<PrismaClient, "message">,
-  threadId: string,
-): Promise<boolean> {
-  const latest = await tx.message.findFirst({
-    where: { threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    select: { blocks: true },
-  });
-  const parsed = MessageBlock.array().safeParse(latest?.blocks ?? []);
-  if (!parsed.success) return false;
-  return /[?？]\s*$/.test(blocksText(parsed.data).trim());
-}
-
 /** Whether a card in the thread is still waiting for the recruiter's answer. */
 async function cardWaitsOnRecruiter(
   tx: Pick<PrismaClient, "message">,
@@ -395,10 +379,6 @@ export async function reportGroupHandoffOutcome(
       if (botMessageHopExhausted(hop)) return undefined;
       const mail = await readMailReplyOutcomeReport(tx, run);
       const posted = outcome.status === "completed" && !mail && (await postedResult(tx, run.id));
-      // Staging 11-13: a teammate answered the recruiter's question, then the sender restated it
-      // or handed it back for proof, so one question got two or three answers. An answered
-      // question needs nothing more from the sender.
-      if (posted && (await latestUserMessageAsks(tx, run.threadId))) return undefined;
       // Staging 11-13: after the recruiter confirmed a send and Outreach said it went out, the
       // report woke Main, which listed the account's roles unasked. A confirmed send is done.
       if (posted && (await confirmedSend(tx, run.id))) return undefined;

@@ -118,36 +118,8 @@ export const RECRUITING_REFERENCE_MATERIAL = `Material that steers the search (a
 
 export const RECRUITING_ROUND_NEXT_STEP = `calibration_round already lists the round's people in chat, each with what was looked up in their profile (shownToRecruiter is that message, word for word): never list them again, and say nothing about them that it does not say. When it shows a point the recruiter stressed as not stated or not met for someone, never call that person a match on it. While the request is still short of the number the recruiter asked for (a first round is ten, whatever they called it), search on now with no question. After a later round there is no brief save, card or question: end on one line saying how many are still missing, if any (the list already ends with the count), and add nothing when a next-step card is already open, as when a check comes back after it. After the first round, your next step, with no text, starts the two searches of the Behind-the-first-ten rule and, in that same step, completes the brief saved with the searches: one recruiting_role update with the round's expectedRevision and brief.fields only (short English labels; origin jd or user_instruction, inferred for a range you propose), for any requirement stated and not yet saved. When the recruiter asked for more than ten, the step after is the search for the rest, and the card below waits until their number is reached: a card stops all work until it is answered. Otherwise the step after is only one ask_user card in the recruiter's language: the one open fact that most changes who is searched for, else the next step ("Find 20 more similar people", "Draft the outreach emails", "Run another round"). Never end a first round on a bare list or "any feedback?".`;
 
-/** Any version of the next-step card, whatever number it offers: its answer is not an intake answer. */
-export function isRecruitingNextStepCard(text: string): boolean {
-  return /^(?:下一步怎么做？|What's next\?|合格的人不到十个。|Fewer than ten fit\.)/.test(
-    text.trim(),
-  );
-}
-
 export const RECRUITING_SCALE_START = `The recruiter accepts a round with the panel's accept control, the card's find-more option, or their own words to find more, scale up or go ahead ("find 100", "just search"). Record it at once with recruiting_feedback target "round" operation "approve" and their words; never ask again or show an approval card. A message that turns anyone down or changes who to look for is feedback for the next round of ten, even when it also says find more; judge by the recruiter's quoted words, also in a handoff from the global conversation. A note that conflicts with a confirmed requirement never holds the scale: scale first, then ask.
 Once accepted, in the same turn carry on to the number they named as the Short-round rule says (20 more when they named none; "more" with 100 or more held: ask how many with ask_user, 50 or 100 more plus custom). The number is people shown in rounds and not turned down, never how many Results hold: every search and round result gives it as counted. Scaling never starts an email draft.`;
-
-/**
- * A recruiter message asking for contacts, an email draft or a send. Round 1 of the playtest saw
- * the lead answer these itself and decline; they belong to Outreach.
- */
-/** A role opened to email people the recruiter named with addresses has no search. */
-export function namesPeopleToEmail(texts: readonly string[]): boolean {
-  // A reply to someone's email stays a reply card, never a new send (staging gate 60b7e937).
-  return texts.some(
-    (text) =>
-      /[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(text) &&
-      asksForOutreach(text) &&
-      !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(text),
-  );
-}
-
-export function asksForOutreach(text: string): boolean {
-  return /\b(?:send|e-?mails?|contacts?|outreach|campaign|draft)\b|发(?:\s*\d+|给|送|邮件|出去)|邮件|邮箱|联系方式|草稿|外联/i.test(
-    text,
-  );
-}
 
 /**
  * Typical credits per step, from 14 days of the usage ledger (200 credits = $1 of cost; p50 to
@@ -204,17 +176,6 @@ export function isEnglishText(text: string): boolean {
 export function recruiterLanguageText(newestFirst: string[]): string {
   return newestFirst.find((text) => textLanguage(text)) ?? newestFirst[0] ?? "";
 }
-
-/** A request for one email template naming no one: the coordinator writes it in its reply. */
-export function asksForTemplate(text: string): boolean {
-  return (
-    /模板|template/i.test(text) && !/序列|系列|三封|sequence|campaign|这些人|these/i.test(text)
-  );
-}
-
-/** Model-facing, in a new role's conversation opened to email people the recruiter named. */
-export const NAMED_SEND_ROLE_NOTE =
-  "The recruiter named the people to email, with their addresses: this role has no search unless they ask for one. Never run people searches, never ask whether to look for others and never show or record a round; save the role from what they wrote and put the email for exactly those people on its send card.";
 
 /** What a recruiter may see. The executor adds this to every recruiting run's instructions. */
 /**

@@ -33,7 +33,6 @@ import {
   recordRecruitingContextAdoption,
 } from "@rakazo/db";
 import type { LoadedAgentMemoryContext } from "./memory-context.js";
-import { namedWithoutVerdict, namedWithoutVerdictText } from "./unrecorded-verdicts.js";
 
 /**
  * How a round is searched, checked, picked and ended. A role's own conversation carries it from
@@ -120,7 +119,7 @@ export async function loadRecruitingRunContext(
   if (!workspace) return undefined;
   // Always reauthorize saved source material, including the trusted-workspace fast path.
   // It and the feedback below are independent reads, so they share one wait.
-  const [crmSourceMaterial, recent, quality, patterns, unsaved] = await Promise.all([
+  const [crmSourceMaterial, recent, quality, patterns] = await Promise.all([
     // A CRM link that no longer checks out (a reconnected or disabled CRM) leaves its material
     // out instead of failing the turn; CRM tools verify the link again when they run.
     getRecruitingWorkspaceCrmSourceMaterial(deps.prisma, actor, {
@@ -133,7 +132,6 @@ export async function loadRecruitingRunContext(
     listRecruitingFeedback(deps.prisma, actor, { roleId: workspace.role.id, limit: 20 }),
     readRecruitingSearchQuality(deps.prisma, actor, { roleId: workspace.role.id }),
     readRecruitingVerdictPatterns(deps.prisma, actor, { roleId: workspace.role.id }),
-    namedWithoutVerdict(deps.prisma, actor, { roleId: workspace.role.id, threadId: run.threadId }),
   ]);
   const redact = options.redact ?? ((value: string) => value);
   const roleText = [
@@ -188,7 +186,6 @@ export async function loadRecruitingRunContext(
         ]
       : []),
     ...(qualityText ? [qualityText] : []),
-    ...(unsaved ? [redact(namedWithoutVerdictText(unsaved))] : []),
     ...(patternText ? [patternText] : []),
     ...(recent.feedback.length > feedback.length || recent.nextCursor
       ? [

@@ -31,17 +31,12 @@ import {
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
   isActive,
-  isStatusQuestion,
-  isWorkActivity,
   ONCE_ROUTINE_CRON,
   projectMessages,
   resolveGroupTargetBotIds,
   runFailureError,
   runsBesidePerson,
-  statusAnswer,
   takesPersonMessages,
-  typicalDurationMs,
-  workActivityForTool,
   writesChinese,
 } from "@rakazo/core";
 import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-quote";
@@ -119,82 +114,6 @@ const STEERABLE_RUN_STATUSES = new Set(["queued", "leased", "running", "waiting_
  * per-bot execution lease, and both can reply. Composer text answers a waiting ask only when no
  * steerable run is active. When one is, the text steers that run and the ask stays on its card.
  */
-/**
- * A side question about progress ("how's it going?") sent while a conversational run works is
- * answered from the live work, Workloop's btw: the work is neither interrupted nor told.
- */
-async function answerStatusQuestion(
-  tx: Prisma.TransactionClient,
-  actor: Actor,
-  threadId: string,
-  botId: string,
-  run: { id: string; status: string; trigger?: string | null },
-  text: string | undefined,
-): Promise<boolean> {
-  if (run.status !== "running" || !steersUserMessage(run) || !isStatusQuestion(text)) return false;
-  const [called, timing, past] = await Promise.all([
-    tx.event.findFirst({
-      where: { runId: run.id, type: "agent.tool.called" },
-      orderBy: { seq: "desc" },
-      select: { payload: true },
-    }),
-    tx.run.findUnique({ where: { id: run.id }, select: { startedAt: true, createdAt: true } }),
-    // The same person's recent finished runs of this agent and kind give the estimate.
-    tx.run.findMany({
-      where: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        botId,
-        trigger: run.trigger ?? undefined,
-        status: "completed",
-        startedAt: { not: null },
-        completedAt: { not: null },
-        id: { not: run.id },
-      },
-      orderBy: { completedAt: "desc" },
-      take: 20,
-      select: { startedAt: true, completedAt: true },
-    }),
-  ]);
-  const calledPayload = called?.payload as { name?: unknown; category?: unknown } | null;
-  const tool = calledPayload?.name;
-  const since = timing?.startedAt ?? timing?.createdAt;
-  const blocks: MessageBlock[] = [
-    {
-      kind: "text",
-      text: statusAnswer({
-        activity: isWorkActivity(calledPayload?.category)
-          ? calledPayload.category
-          : typeof tool === "string"
-            ? workActivityForTool(tool)
-            : "working",
-        elapsedMs: since ? Date.now() - since.getTime() : 0,
-        typicalMs: typicalDurationMs(
-          past.flatMap((done) =>
-            done.startedAt && done.completedAt
-              ? [done.completedAt.getTime() - done.startedAt.getTime()]
-              : [],
-          ),
-        ),
-      }),
-    },
-  ];
-  const reply = await createThreadMessageInTransaction(tx, {
-    threadId,
-    role: "bot",
-    botId,
-    blocks,
-  });
-  await appendEventInTransaction(tx, {
-    spaceId: actor.spaceId,
-    threadId,
-    botId,
-    type: "thread.message.created",
-    payload: { messageId: reply.id, role: "bot", blocks },
-  });
-  return true;
-}
-
 /**
  * A typed message moves past an open form card: the form closes as cancelled, its run resumes
  * and the message steers it. Approval, secret and connect cards stay open.
@@ -1168,30 +1087,19 @@ export async function sendThreadMessage(
           const active = activeRuns.find(steersUserMessage) ?? activeRuns[0];
           if (active) {
             const steers = steersUserMessage(active);
-            const queued =
-              queueMode === "follow_up" ||
-              !(await answerStatusQuestion(
-                tx,
-                actor,
-                target.threadId,
-                target.botId,
-                active,
-                input.text,
-              ));
-            if (queued)
-              await tx.steeringMessage.create({
-                data: {
-                  messageId: message.id,
-                  botId: target.botId,
-                  userId: actor.userId,
-                  runId: steers ? active.id : null,
-                  ...(queueMode === "follow_up"
-                    ? { originTrigger: "follow_up" }
-                    : steers && input.interrupt
-                      ? { originTrigger: "interrupt" }
-                      : {}),
-                },
-              });
+            await tx.steeringMessage.create({
+              data: {
+                messageId: message.id,
+                botId: target.botId,
+                userId: actor.userId,
+                runId: steers ? active.id : null,
+                ...(queueMode === "follow_up"
+                  ? { originTrigger: "follow_up" }
+                  : steers && input.interrupt
+                    ? { originTrigger: "interrupt" }
+                    : {}),
+              },
+            });
             await tx.message.update({ where: { id: message.id }, data: { runId: active.id } });
             const event = await appendEventInTransaction(tx, {
               spaceId: actor.spaceId,
@@ -1207,7 +1115,7 @@ export async function sendThreadMessage(
                 replyToMessageId,
                 replyQuote,
                 replyPreview,
-                ...(queued ? { queued: true } : {}),
+                queued: true,
               },
             });
             return { message, runs: [active], eventSeq: event.seq };
@@ -1301,42 +1209,6 @@ export async function sendThreadMessage(
           clientNonce: input.clientNonce,
         });
         await assertCorrespondenceScope();
-        // In a crew the work may be running on any teammate, not only the one addressed.
-        const busy =
-          input.queueMode !== "follow_up" && isStatusQuestion(input.text)
-            ? (
-                await tx.run.findMany({
-                  where: {
-                    threadId: target.threadId,
-                    botId: { in: memberBotIds },
-                    status: "running",
-                  },
-                  orderBy: { createdAt: "desc" },
-                  select: { id: true, taskId: true, botId: true, status: true, trigger: true },
-                })
-              ).find((run) => run.status === "running" && steersUserMessage(run))
-            : undefined;
-        if (busy) {
-          await touchGroupUpdatedAt(tx, target.groupId);
-          const asked = await appendEventInTransaction(tx, {
-            spaceId: actor.spaceId,
-            threadId: target.threadId,
-            botId: busy.botId,
-            type: "thread.message.created",
-            payload: {
-              messageId: message.id,
-              role: "user",
-              blocks,
-              callId,
-              runIds: [busy.id],
-              replyToMessageId,
-              replyQuote,
-              replyPreview,
-            },
-          });
-          await answerStatusQuestion(tx, actor, target.threadId, busy.botId, busy, input.text);
-          return { message, runs: [busy], eventSeq: asked.seq };
-        }
         const live = await tx.run.findMany({
           where: {
             threadId: target.threadId,
@@ -1446,25 +1318,20 @@ export async function sendThreadMessage(
           const active = activeByBotId.get(botId);
           if (active) {
             const steers = steersUserMessage(active);
-            if (
-              queueMode === "follow_up" ||
-              !(await answerStatusQuestion(tx, actor, target.threadId, botId, active, input.text))
-            ) {
-              steeredCount += 1;
-              await tx.steeringMessage.create({
-                data: {
-                  messageId: message.id,
-                  botId,
-                  userId: actor.userId,
-                  runId: steers ? active.id : null,
-                  ...(queueMode === "follow_up"
-                    ? { originTrigger: "follow_up" }
-                    : steers && input.interrupt
-                      ? { originTrigger: "interrupt" }
-                      : {}),
-                },
-              });
-            }
+            steeredCount += 1;
+            await tx.steeringMessage.create({
+              data: {
+                messageId: message.id,
+                botId,
+                userId: actor.userId,
+                runId: steers ? active.id : null,
+                ...(queueMode === "follow_up"
+                  ? { originTrigger: "follow_up" }
+                  : steers && input.interrupt
+                    ? { originTrigger: "interrupt" }
+                    : {}),
+              },
+            });
             runs.push(active);
             continue;
           }

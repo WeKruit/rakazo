@@ -37,14 +37,13 @@ describe("countdowns for big work", () => {
       test.prisma,
       run,
       mcp({ id: "agent_run_1", status: "running" }),
-      { query: "Find 500 more USC alumni" },
     );
-    expect(note).toContain("about 10 minutes");
+    expect(note).toContain("about 2 minutes");
     expect(note).toContain("email_when_done");
     expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
       kind: "work_estimate",
       idempotencyKey: "work_estimate:agent_run_1",
-      request: { kind: "search", people: 500, estimateMs: 10 * 60_000 },
+      request: { kind: "search", people: 100, estimateMs: 2 * 60_000 },
     });
   });
 
@@ -73,24 +72,9 @@ describe("countdowns for big work", () => {
       test.prisma,
       run,
       mcp({ id: "agent_run_1", status: "running" }),
-      { query: "Find 100 more" },
     );
     expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
       request: { people: 100, roleId: "role", saved: 518 },
-    });
-  });
-
-  it("counts up for a small search without a note", async () => {
-    const test = store();
-    const note = await workEstimateAfterAgentRun(
-      test.prisma,
-      run,
-      mcp({ id: "agent_run_1", status: "running" }),
-      { query: "Find 30 nurses" },
-    );
-    expect(note).toBeNull();
-    expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
-      request: { people: 30, estimateMs: null },
     });
   });
 
@@ -100,7 +84,6 @@ describe("countdowns for big work", () => {
       test.prisma,
       run,
       mcp({ id: "agent_run_1", status: "completed" }),
-      {},
     );
     expect(test.create).not.toHaveBeenCalled();
     expect(test.updateMany).toHaveBeenCalledWith({

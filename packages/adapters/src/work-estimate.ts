@@ -1,7 +1,7 @@
 import type { WorkEstimate, WorkEstimateKind } from "@rakazo/core";
 import {
   estimateWorkMs,
-  peopleNamedIn,
+  WORK_DEFAULT_PEOPLE,
   workCountdownLeftMs,
   workCountdownsElapsed,
 } from "@rakazo/core";
@@ -372,7 +372,6 @@ export async function workEstimateAfterAgentRun(
   prisma: PrismaClient,
   run: Turn,
   result: unknown,
-  args: Record<string, unknown> | undefined,
 ): Promise<string | null> {
   try {
     const body = mcpObject(result);
@@ -385,7 +384,7 @@ export async function workEstimateAfterAgentRun(
     const started = await startWorkEstimate(prisma, run, {
       ref: id,
       kind: "search",
-      people: peopleNamedIn(args?.query),
+      people: WORK_DEFAULT_PEOPLE,
     });
     return started?.estimateMs ? workStartNote("search", started.estimateMs) : null;
   } catch {
