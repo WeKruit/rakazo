@@ -33,7 +33,8 @@ import type {
 import {
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
-  MEMORY_REVISION_CONFLICT_ERROR,
+  ByteLimitError,
+  MemoryRevisionConflictError,
   notificationRetryJob,
   pollCloseJob,
   recruitingAgentRunWaitJob,
@@ -323,7 +324,7 @@ import {
 } from "./approval-effect.js";
 import {
   artifactReadFromTool,
-  INTERNAL_ARTIFACT_ERROR,
+  InternalArtifactError,
   readActorArtifact,
 } from "./artifact-read.js";
 import {
@@ -683,8 +684,6 @@ import {
   NO_RESPONSE,
   personWrote,
   stripNoResponseReply,
-  withoutEchoedNudge,
-  withoutNudge,
 } from "./silent-reply.js";
 import {
   listAgentSkillRecords,
@@ -3978,9 +3977,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
         const publishMidTurnNarration = async () => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
-          // The server's continuation nudge echoed back is never for the recruiter.
           // What the model wrote is shown as written (11-16: wording checks cut correct answers).
-          const narration = withoutNudge(visible(redactSecrets(extracted.text, runSecrets))).trim();
+          const narration = visible(redactSecrets(extracted.text, runSecrets)).trim();
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration || (hideVendors && handedOff) || (await teammateAnsweredHandoff())) {
@@ -4294,14 +4292,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
           };
         };
-        const showRoundList = async (text: string) => {
+        const showRoundList = async (text: string, roundId?: string) => {
           const messageId = roundStream?.messageId;
+          const blocks: MessageBlock[] = [
+            { kind: "text", text, recruitingRoundList: roundId ? { roundId } : {} },
+          ];
           if (!messageId) {
-            const message = await publishMessage(deps, run, "bot", [{ kind: "text", text }]);
+            const message = await publishMessage(deps, run, "bot", blocks);
             if (roundStream && message) roundStream.messageId = message.id;
             return;
           }
-          const blocks: MessageBlock[] = [{ kind: "text", text }];
           await deps.prisma.message.update({
             where: { id: messageId },
             data: { blocks: blocks as Prisma.InputJsonValue },
@@ -8177,7 +8177,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 maxBytes: MAX_MODEL_FILE_BYTES,
               });
             } catch (error) {
-              if (error instanceof Error && /exceeds \d+ bytes/.test(error.message)) {
+              if (error instanceof ByteLimitError) {
                 return {
                   error: "file is too large for model context",
                   path: filePath,
@@ -8221,8 +8221,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return finish({
                   error:
                     error instanceof IsolationError
-                      ? error.message === INTERNAL_ARTIFACT_ERROR
-                        ? INTERNAL_ARTIFACT_ERROR
+                      ? error instanceof InternalArtifactError
+                        ? error.message
                         : "Artifact is unavailable."
                       : "Saved artifact could not be read or verified.",
                 });
@@ -8725,11 +8725,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
-              if (
-                error instanceof Error &&
-                error.message === MEMORY_REVISION_CONFLICT_ERROR &&
-                recruitingPreference
-              ) {
+              if (error instanceof MemoryRevisionConflictError && recruitingPreference) {
                 const current = await deps.memory.read(
                   {
                     scope: recruitingPreference.scope,
@@ -8836,12 +8832,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   roundShown = text;
                   await roundStream?.posting;
                   await (roundStream?.messageId
-                    ? showRoundList(text)
+                    ? showRoundList(text, applied.effect.id)
                     : publishMessage(
                         deps,
                         run,
                         "bot",
-                        [{ kind: "text", text }],
+                        [
+                          {
+                            kind: "text",
+                            text,
+                            recruitingRoundList: { roundId: applied.effect.id },
+                          },
+                        ],
                         undefined,
                         `recruiting-round-list:${applied.effect.id}`,
                       )
@@ -9265,11 +9267,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 revision: saved.revision,
               });
             } catch (error) {
-              const message = error instanceof Error ? error.message : "Could not save memory";
-              if (message !== MEMORY_REVISION_CONFLICT_ERROR) throw error;
+              if (!(error instanceof MemoryRevisionConflictError)) throw error;
               const current = await deps.memory.read({ scope, botId, groupId, path }, context);
               return finish({
-                error: message,
+                error: error.message,
                 currentRevision: current.documents[0]?.revision ?? 0,
               });
             }
@@ -10321,14 +10322,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if ((hideVendors && handedOff) || (await teammateAnsweredHandoff()))
               return finish({ ok: true, note: HANDED_OFF_NOT_SHOWN });
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
-            const unnudged = clampUserProgressMessage(withoutNudge(rawMessage));
-            const text = unnudged;
+            const text = clampUserProgressMessage(rawMessage);
             if (!rawMessage.trim()) return finish({ error: "message is required" });
-            if (!text)
-              return finish({
-                ok: true,
-                note: "Not shown: the automatic continuation is for you, never the recruiter.",
-              });
             const truncated = isProgressMessageTruncated(rawMessage);
             await flushProgress();
             await publishMidTurnNarration();
@@ -11702,6 +11697,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               formatCompactedSummary(compactedHistory.summary, thread.historyCompactedUpToSeq!),
               runSecrets,
             ),
+            summary: true,
           });
         }
         // Recall follows each new message, so it changes on most turns.
@@ -11709,6 +11705,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           turnHistory.push({
             role: "user",
             content: redactSecrets(recalledMemory, runSecrets),
+            summary: true,
           });
         }
         const modelImageBudget =
@@ -13268,8 +13265,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             quietRun || probeFoundNothing || hideVendors
               ? stripNoResponseReply(assembled, messageSegments)
               : { assembled, blocks: messageSegments };
-          if (hideVendors)
-            silentReply = withoutEchoedNudge(silentReply.assembled, silentReply.blocks);
           // Consequential work ends with a report of it: when the model wrote none (its report
           // step included), the server reports from the run's own records.
           const unreportedAtEnd = handedOff ? [] : turnReport.owed();
@@ -14954,7 +14949,9 @@ export { isExactNoResponse, NO_RESPONSE, stripNoResponseReply };
 export const LONG_WORK_PROGRESS_GUIDANCE =
   "On work that runs longer than a few minutes, send a one-line progress update with message_user at each natural checkpoint (a batch saved, a stage done) so the user can see what you are doing; if you need their input, put the question in your final reply instead. Keep them brief and high-signal (a sentence or two, not a dump). Do not narrate every tool call. Thinking stays private. message_user is capped at 500 characters and will be silently cut off if you exceed it \u2014 never put your final answer, a report, or any long-form deliverable in it. Always put the complete final answer in your normal reply, never split across message_user calls, and never assume a message_user update already delivered your content.";
 
-export const ROUTINE_SILENT_REPLY_GUIDANCE = `If this routine's prompt says to stay silent when there is nothing to report, the entire final assistant reply must be exactly ${NO_RESPONSE} — no surrounding prose, no variants, no progress updates, no all-clear, and no meta note that you are staying silent. Do not call message_user unless you have something to report.`;
+const ROUTINE_SILENT_REPLY = `If this routine's prompt says to stay silent when there is nothing to report, the entire final assistant reply must be exactly ${NO_RESPONSE} — no surrounding prose, no variants, no progress updates, no all-clear, and no meta note that you are staying silent.`;
+
+export const ROUTINE_SILENT_REPLY_GUIDANCE = `${ROUTINE_SILENT_REPLY} Do not call message_user unless you have something to report.`;
 
 export function runAllowsSilentEmpty(trigger: string): boolean {
   return trigger === "routine" || isBackgroundRunTrigger(trigger);
@@ -14978,18 +14975,12 @@ export function runReplyGuidance(trigger: string): string {
     : LONG_WORK_PROGRESS_GUIDANCE;
 }
 
-function replyGuidanceForOfferedTools(
-  guidance: string,
-  disabled?: ReadonlySet<string>,
-): string | undefined {
+function replyGuidanceForOfferedTools(guidance: string, disabled?: ReadonlySet<string>): string {
   if (!disabled?.has("message_user")) return guidance;
   if (guidance === LONG_WORK_PROGRESS_GUIDANCE) {
     return "Always put the complete final answer in your normal reply.";
   }
-  if (guidance === ROUTINE_SILENT_REPLY_GUIDANCE) {
-    return guidance.replace(" Do not call message_user unless you have something to report.", "");
-  }
-  return guidance.includes("message_user") ? undefined : guidance;
+  return guidance === ROUTINE_SILENT_REPLY_GUIDANCE ? ROUTINE_SILENT_REPLY : guidance;
 }
 
 export const DELEGATED_EMPTY_NOTICE =

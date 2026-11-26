@@ -1,6 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { isLocalMcpHost } from "@rakazo/contracts";
+import { ResponseTooLargeError } from "@rakazo/core";
 import type { ResolvedAddress, ResolveHostname } from "./network-address.js";
 import { createPrivateNetworkFetch } from "./remote-mcp.js";
 import { readBodyCapped } from "./web-ssrf.js";
@@ -239,7 +240,7 @@ export async function searchSupermemory(
       results: parseSearchResults(await readSupermemoryJson(response, requestAbort)),
     };
   } catch (error) {
-    if (error instanceof Error && error.message === "Supermemory response is too large.") {
+    if (error instanceof ResponseTooLargeError) {
       return { ok: false, error: error.message };
     }
     return { ok: false, error: unreachableError(error) };
@@ -250,14 +251,14 @@ async function readSupermemoryJson(response: Response, signal?: AbortSignal): Pr
   const declared = Number(response.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > MAX_SUPERMEMORY_RESPONSE_BYTES) {
     await response.body?.cancel().catch(() => undefined);
-    throw new Error("Supermemory response is too large.");
+    throw new ResponseTooLargeError("Supermemory response is too large.");
   }
   let bytes: Uint8Array;
   try {
     bytes = await readBodyCapped(response, MAX_SUPERMEMORY_RESPONSE_BYTES, signal);
   } catch (error) {
-    if (error instanceof Error && error.message === "Response is too large") {
-      throw new Error("Supermemory response is too large.");
+    if (error instanceof ResponseTooLargeError) {
+      throw new ResponseTooLargeError("Supermemory response is too large.");
     }
     throw error;
   }

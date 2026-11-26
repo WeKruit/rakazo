@@ -327,6 +327,12 @@ export async function stopTeachingSession(
   return mapTaughtSkill(finalized);
 }
 
+const teachingActive = () =>
+  new ORPCError("CONFLICT", {
+    message: "A teaching session is already active",
+    data: { teachingActive: true },
+  });
+
 export function createTaughtSkillsService(deps: TaughtSkillsDeps) {
   return {
     async list(actor: Actor, botId: string, offset?: number): Promise<TaughtSkill[]> {
@@ -356,7 +362,7 @@ export function createTaughtSkillsService(deps: TaughtSkillsDeps) {
         select: { id: true },
       });
       if (alreadyRecording) {
-        throw new ORPCError("CONFLICT", { message: "A teaching session is already active" });
+        throw teachingActive();
       }
       await cancelActiveRuns(deps, actor, botId);
       bot = await ensureGraphicalComputer(deps, actor, bot);
@@ -371,7 +377,7 @@ export function createTaughtSkillsService(deps: TaughtSkillsDeps) {
             where: { botId, status: "recording" },
           });
           if (existing) {
-            throw new ORPCError("CONFLICT", { message: "A teaching session is already active" });
+            throw teachingActive();
           }
           return tx.taughtSkill.create({
             data: {
@@ -394,7 +400,7 @@ export function createTaughtSkillsService(deps: TaughtSkillsDeps) {
           "code" in error &&
           (error as { code?: string }).code === "P2002"
         ) {
-          throw new ORPCError("CONFLICT", { message: "A teaching session is already active" });
+          throw teachingActive();
         }
         throw error;
       }

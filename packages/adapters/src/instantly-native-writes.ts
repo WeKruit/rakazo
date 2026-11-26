@@ -23,6 +23,7 @@ import {
   EnsureSenderInput,
   ensureSendingIdentity,
   requireSendingMailboxReady,
+  SendingMailboxError,
   sendingMailboxState,
   sendingToday,
 } from "./instantly-senders.js";
@@ -761,6 +762,11 @@ export async function lastUsedMailbox(
 }
 
 const NO_MAILBOX = "No sending mailbox is set up for this account yet";
+class NoMailboxError extends Error {
+  constructor() {
+    super(`${NO_MAILBOX}; tell the recruiter instead of creating a campaign`);
+  }
+}
 /** Default sender: the last-used mailbox if still connected, else the first connected one. */
 async function defaultMailbox(
   prisma: PrismaClient,
@@ -776,7 +782,7 @@ async function defaultMailbox(
     .filter((email): email is string => typeof email === "string");
   const last = await lastUsedMailbox(prisma, context.spaceId, serverId, context.userId);
   const picked = emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
-  if (!picked) throw new Error(`${NO_MAILBOX}; tell the recruiter instead of creating a campaign`);
+  if (!picked) throw new NoMailboxError();
   return picked;
 }
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -1719,13 +1725,7 @@ export async function requireReplySendingMailboxReady(
       return await requireSendingMailboxReady(prisma, rest, context, email);
     } catch (error) {
       throw new MailReplySendingError(
-        error instanceof IsolationError
-          ? "sender_unavailable"
-          : error instanceof Error && error.message.includes("display name changed")
-            ? "sender_changed"
-            : error instanceof Error && error.message.includes("not active yet")
-              ? "sender_not_ready"
-              : "sender_unavailable",
+        error instanceof SendingMailboxError ? error.code : "sender_unavailable",
       );
     }
   }
@@ -1977,8 +1977,7 @@ async function ensureRoleCampaign(
       (stale ? existing!.binding.eaccount : await defaultMailbox(prisma, rest, context, serverId));
   } catch (error) {
     // Saving the role's email needs no mailbox: it waits on the role until a campaign exists.
-    if (!input.steps || !(error instanceof Error) || !error.message.startsWith(NO_MAILBOX))
-      throw error;
+    if (!input.steps || !(error instanceof NoMailboxError)) throw error;
     return saveRoleEmail(prisma, context, emailKey, role, serverId, input.steps);
   }
   const steps = input.steps ?? (await savedRoleEmail(prisma, context, emailKey));
@@ -3809,7 +3808,7 @@ export async function runInstantlyWrite(
       const ensure = () => ensureRoleCampaign(prisma, rest, context, serverId, input);
       return oneAtATime(prisma, lock, ensure).catch(async (error: unknown) => {
         // No mailbox yet: the role's saved email is still there to show.
-        if (!(error instanceof Error) || !error.message.startsWith(NO_MAILBOX)) throw error;
+        if (!(error instanceof NoMailboxError)) throw error;
         const roleId = input.role_id ?? (await activeRoleId(prisma, context));
         const steps =
           roleId &&

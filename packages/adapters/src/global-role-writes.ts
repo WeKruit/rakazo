@@ -95,16 +95,6 @@ export async function globalRoleWriteRefusal(
 }
 
 /**
- * The recruiter's words in a hand-in written by roleRequestMessage, or undefined for other text.
- * Kruit's brief or note may follow the closing quote; it is never the recruiter's request.
- */
-export function handedInRecruiterWords(text: string): string | undefined {
-  return /^The recruiter wrote, word for word:\n"([\s\S]*?)"(?:\n\nKruit's [\s\S]*)?$/.exec(
-    text,
-  )?.[1];
-}
-
-/**
  * What Kruit's handoff of the recruiter's turn tells a role's team. Staging 11-15: "3 and 10
  * aren't a fit, find more like the rest" reached the team as Kruit's brief "find the next 20
  * people", so it scaled out and the next round was never built. The recruiter's own words go

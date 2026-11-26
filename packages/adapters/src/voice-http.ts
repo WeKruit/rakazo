@@ -1,4 +1,5 @@
 import type { VoiceVerifyResult } from "@rakazo/adapter-kit";
+import { ResponseTooLargeError } from "@rakazo/core";
 import { readBodyCapped } from "./web-ssrf.js";
 
 /** A 2,000-character utterance should stay far below this, even at high MP3 bitrates. */
@@ -22,13 +23,13 @@ async function readVoiceBytes(
   const declared = Number(res.headers?.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > maxBytes) {
     cancelResponseBody(res);
-    throw new Error("Voice response is too large.");
+    throw new ResponseTooLargeError("Voice response is too large.");
   }
   try {
     return await readBodyCapped(res, maxBytes, signal);
   } catch (error) {
-    if (error instanceof Error && error.message === "Response is too large") {
-      throw new Error("Voice response is too large.");
+    if (error instanceof ResponseTooLargeError) {
+      throw new ResponseTooLargeError("Voice response is too large.");
     }
     throw error;
   }
@@ -60,7 +61,7 @@ export async function readVoiceJson(
   try {
     bytes = await readVoiceBytes(res, MAX_VOICE_JSON_BYTES);
   } catch (error) {
-    if (error instanceof Error && error.message === "Voice response is too large.") throw error;
+    if (error instanceof ResponseTooLargeError) throw error;
     if (options.requireValid) throw new Error("Voice provider response could not be read.");
     return null;
   }

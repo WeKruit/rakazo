@@ -39,7 +39,6 @@ export function cleanSuggestion(raw: string): string | null {
     .replace(/^["'“”「」]+|["'“”「」]+$/g, "")
     .trim();
   if (!line || line.length > MAX_SUGGESTION_CHARS) return null;
-  if (/^(?:I hit a problem:|Unknown model |No response\. Try again\.)/i.test(line)) return null;
   return line;
 }
 
