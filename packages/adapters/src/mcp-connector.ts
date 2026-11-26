@@ -2665,8 +2665,9 @@ export class McpConnector implements ConnectorProvider {
       // sequence field and Lead.status (2 Paused, 3 Completed) is readOnly. POST
       // /api/v2/leads/update-interest-status is documented to complete leads and trigger
       // automations/subsequences, not to stop a sequence, so it is not used as a stop.
-      // The native stop is the campaign setting GET /api/v2/campaigns/{id} stop_on_reply
-      // ("Whether to stop the campaign on reply"); report it, never fabricate a stop.
+      // The campaign setting GET /api/v2/campaigns/{id} stop_on_reply ("Whether to stop the
+      // campaign on reply") is reported; when it does not stop them, the agent stops that one
+      // person with pause_campaign and their email, which takes them out of the campaign.
       // https://developer.instantly.ai/api-reference/campaign/get-campaign
       const repliedCampaigns = [
         ...new Set(
@@ -2718,10 +2719,7 @@ export class McpConnector implements ConnectorProvider {
           ...(stopOnReply
             ? {}
             : {
-                warning:
-                  stopOnReply === false
-                    ? "The lead replied but this campaign's stop_on_reply is off, so Instantly keeps sending follow-ups. Turn on stop on reply for the campaign in Instantly."
-                    : "The lead replied but whether this campaign stops on reply could not be confirmed; check stop on reply for the campaign in Instantly.",
+                warning: `This person replied, but ${stopOnReply === false ? "this campaign keeps sending them its follow-ups" : "whether this campaign stops their follow-ups could not be confirmed"}. Unless the recruiter wants the follow-ups to continue, call pause_campaign with their email and campaign_id ${campaignId}: it stops only them and sends nothing. Tell the recruiter in plain words that their follow-ups were stopped, never naming the mail service.`,
               }),
         });
       }
