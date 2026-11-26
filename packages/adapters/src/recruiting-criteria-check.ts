@@ -67,6 +67,17 @@ const ABOUT_THE_PERSON = (statement: string) =>
 const STATES_A_PLACE = (statement: string) =>
   `Does this requirement state where the person must live or be based (a city, region or country), rather than a skill, an employer or the job's work mode? Requirement: "${statement}"`;
 
+const STATES_A_LANGUAGE = (statement: string) =>
+  `Does this requirement state a language the person must speak or work in, rather than a skill, a place or a programming language? Requirement: "${statement}"`;
+/**
+ * Profiles rarely list languages, so a language requirement asked plainly came back "not stated"
+ * for nearly everyone (Mandarin for engineers who studied and work in Shanghai, 11-26). It is read
+ * the way the deployment's language check reads it (infra/cloudflare/language-judge.js), inside
+ * the one request that judges the person's other requirements.
+ */
+const SHOWN_LANGUAGE =
+  "Count what the text states: a Languages entry, posts or other content written in that language, a degree, school or job in a place where it is spoken, or work stated to use it.";
+
 /**
  * The requirements a profile can be judged on, one fact each: a field holding several ("Shanghai;
  * hybrid three days") is split, and terms of the offer (pay, office days) are left out since no
@@ -104,6 +115,7 @@ async function personRequirements(
       facts.flatMap((fact) => [
         [fact.id, ABOUT_THE_PERSON(fact.statement)],
         [`place:${fact.id}`, STATES_A_PLACE(fact.statement)],
+        [`language:${fact.id}`, STATES_A_LANGUAGE(fact.statement)],
       ]),
     ),
     { requirements: facts.map((fact) => fact.statement) },
@@ -111,7 +123,11 @@ async function personRequirements(
   // A judge that did not answer leaves every requirement in, asked the plain way.
   return [
     ...(about ? facts.filter((fact) => (about.get(fact.id) ?? 1) >= 0.5) : facts).map((fact) =>
-      (about?.get(`place:${fact.id}`) ?? 0) >= 0.5 ? { ...fact, place: true } : fact,
+      (about?.get(`place:${fact.id}`) ?? 0) >= 0.5
+        ? { ...fact, place: true }
+        : (about?.get(`language:${fact.id}`) ?? 0) >= 0.5
+          ? { ...fact, rule: SHOWN_LANGUAGE }
+          : fact,
     ),
     ...turnedDown,
   ];
@@ -216,7 +232,7 @@ export async function checkPeopleCriteria(
           const { match_tier: tier, match_score: score } = entry.row;
           entry.check = {
             requirementsRevision: role.revision,
-            criteria: answered.map(({ place: _place, ...requirement }) => {
+            criteria: answered.map(({ place: _place, rule: _rule, ...requirement }) => {
               const verdict = verdicts.get(requirement.id)!;
               return {
                 ...requirement,
