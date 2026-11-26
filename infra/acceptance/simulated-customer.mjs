@@ -572,6 +572,71 @@ async function withoutContactLookups(rpc) {
     );
 }
 
+// --- Simulated candidates -----------------------------------------------------------------------
+// A journey's candidates are people too: each is a model given a persona that reads the outreach
+// mail that actually reached them on a branch backend's emulated mail service and answers it in
+// its own words, as someone replying from their own mail client. Nothing is scripted.
+const CANDIDATE_RULES = `You play a job candidate who got an email from a recruiter. You get who you are and the whole email thread so far. Write your reply email body the way this person would: plain text, short, in English, signed with your first name, no subject line. Stay in character and keep to what you know; answer what the recruiter wrote and ask what you would want to know. When the thread needs no answer from you, or you would not answer, reply with null. Answer with one JSON object and nothing else: {"reply": "<email body>" | null}`;
+
+async function outreachMail() {
+  const response = await fetch(`${BASE}/__e2e/outreach`, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok)
+    throw new InfraError(
+      `this environment has no emulated candidate mailbox (${response.status}); candidate journeys play on pnpm sim:branch`,
+    );
+  return response.json();
+}
+
+/** Each candidate answers the newest email that reached them since their own last word. */
+async function candidatesAnswer(journey, tag, label) {
+  const mail = await outreachMail();
+  const answers = [];
+  for (const candidate of journey.candidates(RECIPIENTS, tag)) {
+    const address = candidate.address.toLowerCase();
+    const thread = mail.filter((email) => String(email.lead).toLowerCase() === address);
+    const last = thread.at(-1);
+    if (!last || last.ue_type !== 1) continue;
+    const text = thread
+      .map(
+        (email) =>
+          `${email.ue_type === 2 ? "You" : "Recruiter"} (${String(email.timestamp_created).slice(0, 16)} UTC), subject "${email.subject}":\n${email.body?.text ?? ""}`,
+      )
+      .join("\n\n");
+    const { reply } = await askJson(
+      CANDIDATE_RULES,
+      `Who you are:\n${candidate.persona}\n\nThe email thread (oldest first):\n${text}`,
+      SIMULATOR,
+    );
+    if (typeof reply !== "string" || !reply.trim()) continue;
+    const posted = await fetch(`${BASE}/__e2e/outreach`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ replyTo: last.id, text: reply }),
+    });
+    if (!posted.ok) throw new InfraError(`the candidate's reply was not filed (${posted.status})`);
+    log(
+      `${label}: candidate ${candidate.name} replied: ${reply.slice(0, 80).replace(/\s+/g, " ")}`,
+    );
+    answers.push({ name: candidate.name, at: new Date().toISOString(), text: reply });
+  }
+  return answers;
+}
+
+/** Whether the email Kruit was asked to send reached a candidate yet (sending starts ~2 min after a confirmed send). */
+async function mailReached(journey, tag, limitMs) {
+  const addresses = journey.candidates(RECIPIENTS, tag).map((c) => c.address.toLowerCase());
+  for (const until = Date.now() + limitMs; Date.now() < until; await sleep(15_000))
+    if (
+      (await outreachMail()).some(
+        (email) => email.ue_type === 1 && addresses.includes(String(email.lead).toLowerCase()),
+      )
+    )
+      return true;
+  return false;
+}
+
 // Real sign-ups carry the recruiter's own name, so a template Kruit signs can use it.
 const ACCOUNT_NAME = "Alex Morgan";
 
@@ -662,6 +727,14 @@ async function play(journey, label, owner, mailbox, out) {
           });
         await new Promise((resolve) => setTimeout(resolve, journey.blip.seconds * 1000));
       }
+      // Candidates answer what reached them before the recruiter's next move.
+      if (journey.candidates && last) {
+        last.candidateMail = [
+          ...(last.candidateMail ?? []),
+          ...(await candidatesAnswer(journey, tag, label)),
+        ];
+        if (last.candidateMail.length) await sleep(20_000);
+      }
       const move = await simulate(journey, turns, render(chats), cards, screen, tag, startedAt);
       // The planner model sometimes nests its text ({"text": {"zh": "…"}}); the recruiter types a string.
       if (move.text != null && typeof move.text !== "string")
@@ -740,6 +813,7 @@ async function play(journey, label, owner, mailbox, out) {
               ? "allow"
               : move.text;
         if (card.send) answer = guardSend(journey, card, answer, turn);
+        turn.approvedSend = card.send && answer === "allow";
         // The email on a send card is what goes out: a fill-in left in it is a product failure.
         const fillIn = card.send && card.text.match(PLACEHOLDER);
         if (fillIn) turn.placeholder = fillIn[0];
@@ -808,6 +882,12 @@ async function play(journey, label, owner, mailbox, out) {
           `${label}:   Kruit's first reply after ${firstSeconds ?? "no reply"} s, last after ${doneSeconds ?? "-"} s`,
         );
       }
+      // A candidate can only answer mail that went out: after a confirmed send, wait for it.
+      if (journey.candidates && turn.approvedSend && !(await mailReached(journey, tag, 5 * 60_000)))
+        turn.ui = [
+          ...(turn.ui ?? []),
+          "no email reached the candidates within 5 minutes of the confirmed send",
+        ];
       turn.records = await records(rpc, startedAt, before);
       if (ui) turn.shot = await ui.shot(`turn-${turn.turn}-${move.action}`);
       turns.push(turn);
@@ -824,6 +904,8 @@ async function play(journey, label, owner, mailbox, out) {
       accountName: journey.account ? await user.name().catch(() => null) : ACCOUNT_NAME,
       chats: await transcripts(rpc, startedAt, journey.chinese),
       records: await records(rpc, startedAt, before),
+      // Every email the candidates got and wrote, for the judge to check what Kruit said of replies.
+      ...(journey.candidates ? { mail: await outreachMail() } : {}),
       variation: journey.variation,
     };
   } catch (error) {
@@ -980,10 +1062,10 @@ async function judge(journey, result, requests = []) {
   const moves = result.turns
     .map(
       (turn) =>
-        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}${turn.screen.fields?.length ? `\n    text boxes: ${turn.screen.fields.join(" | ")}` : ""}` : ""}`,
+        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.candidateMail?.length ? `\n  candidates replied after this move: ${turn.candidateMail.map((m) => `${m.name} at ${m.at.slice(11, 19)}: "${m.text}"`).join(" | ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}${turn.screen.fields?.length ? `\n    text boxes: ${turn.screen.fields.join(" | ")}` : ""}` : ""}`,
     )
     .join("\n");
-  const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? `This account is a test fixture that earlier plays used too: on a page, roles, campaigns, totals and messages from those plays (older or same-named entries) are the test's leftovers, not Kruit's fault.${result.accountName ? ` The account's own name is "${result.accountName}": an email signed with it, or with the sending mailbox's name, is signed by the sender, not a placeholder.` : ""}\n\n` : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
+  const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? `This account is a test fixture that earlier plays used too: on a page, roles, campaigns, totals and messages from those plays (older or same-named entries) are the test's leftovers, not Kruit's fault.${result.accountName ? ` The account's own name is "${result.accountName}": an email signed with it, or with the sending mailbox's name, is signed by the sender, not a placeholder.` : ""}\n\n` : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}${result.mail ? `\n\nEvery email between the role's mailbox and the candidates (the mail service's own record; ue_type 1 = sent to the candidate, 2 = the candidate's reply):\n${result.mail.map((email) => `${String(email.timestamp_created).slice(11, 19)} ${email.ue_type === 2 ? `from ${email.lead}` : `to ${email.lead}`}: "${email.subject}" ${String(email.body?.text ?? "").slice(0, 600)}`).join("\n")}\nThe candidates' replies are real mail the recruiter's inbox received: Kruit saying nobody replied after a reply arrived, or misquoting one, is a false claim.` : ""}`;
   // One reading flips on borderline moves, so three judges read the play and a finding stands
   // only when most of them give it (majority voting, as in self-consistency).
   const readings = (

@@ -15,6 +15,7 @@ import {
   requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
+import { readInstantlyEmailPage } from "./instantly-reply.js";
 import { mailReplyFromAnchor } from "./mail-reply.js";
 
 const ORIGINAL = {
@@ -995,5 +996,43 @@ describe("emulated outreach mail service", () => {
     const sent = await rest("GET", `/emails?campaign_id=${campaign.id}`);
     expect(sent.items).toMatchObject([{ subject: "Hi Ada", lead: "ada@x.test" }]);
     await expect(rest("GET", "/accounts/other@mail.test")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("files a candidate's answer in the sent email's thread, in a page the product can read", async () => {
+    let now = new Date("2026-11-20T15:00:00Z");
+    const mail = new InstantlyEmulator([{ email: "me@mail.test" }], () => now);
+    const rest = instantlyRest(
+      (url, init) => mail.fetch(url, init),
+      "any-key",
+      new AbortController().signal,
+    );
+    const campaign = await rest("POST", "/campaigns", {
+      name: "Role",
+      email_list: ["me@mail.test"],
+      sequences: [{ steps: [{ variants: [{ subject: "Data role", body: "Hello" }] }] }],
+    });
+    await rest("POST", "/leads/add", {
+      campaign_id: campaign.id,
+      leads: [{ email: "ada@x.test" }],
+    });
+    await rest("POST", `/campaigns/${campaign.id}/activate`);
+    now = new Date("2026-11-20T15:03:00Z");
+    const [sent] = mail.outbox();
+    now = new Date("2026-11-20T15:10:00Z");
+    const reply = mail.receive({ replyTo: String(sent!.id), text: "Interested, what is the pay?" });
+    const page = readInstantlyEmailPage(
+      await rest("GET", `/emails?campaign_id=${campaign.id}&search=thread:${sent!.thread_id}`),
+    );
+    expect(page?.items.map((email) => [email.ue_type, email.subject])).toEqual([
+      [2, "Re: Data role"],
+      [1, "Data role"],
+    ]);
+    expect(page?.next_starting_after).toBeUndefined();
+    expect(reply).toMatchObject({
+      from_address_email: "ada@x.test",
+      to_address_email_list: "me@mail.test",
+    });
+    const [lead] = (await rest("POST", "/leads/list", { campaign: campaign.id })).items;
+    expect(lead).toMatchObject({ email_reply_count: 1 });
   });
 });
