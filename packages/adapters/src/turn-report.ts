@@ -205,21 +205,6 @@ export function turnReportText(work: readonly TurnWork[], chinese = false): stri
   return `Done: ${items.map((item) => WORK_DONE[item]).join(", ")}.`;
 }
 
-/** A question that also states something ("The pool is now 139. Keep going?") reports it. */
-export function questionStatesWork(question: string): boolean {
-  return question
-    .trim()
-    .split(/(?<=[.!?。！？\n])/)
-    .map((sentence) => sentence.trim())
-    .some((sentence) => sentence.length >= 12 && !/[?？]$/.test(sentence));
-}
-
-const ASK_CARRIES: readonly TurnWork[] = ["role", "feedback"];
-
-/** Model-facing: the one extra step before a question card when the work is unreported. */
-export const REPORT_BEFORE_ASK =
-  "Not asked yet: you have not told the user what you just did. Report it briefly with message_user (counts and names, no internal ids), then ask again.";
-
 /** Model-facing: the last silent-turn continuation when the work is unreported. */
 export const REPORT_BEFORE_END =
   "Finish the original task from the latest tool result, then give the user the final answer: report what you did (counts and names, no internal ids) and show in full anything they asked to see, such as a draft.";
@@ -246,7 +231,6 @@ export class TurnReportLedger {
   private asksSeen = 0;
   private asksWaited = 0;
   private wake: (() => void) | undefined;
-  private askBounced = false;
 
   constructor(readonly enabled: boolean) {}
 
@@ -360,141 +344,4 @@ export class TurnReportLedger {
     }
     this.wake = undefined;
   }
-
-  /** The note for a question asked over unreported work, once per attempt; else undefined. */
-  bounceAsk(question: string): string | undefined {
-    // Saving the role or the recruiter's answers is how intake leads to its next question; the
-    // card itself carries on from them, so only other work needs a report first.
-    const owed = this.owed().filter((work) => !ASK_CARRIES.includes(work));
-    if (this.askBounced || !owed.length || questionStatesWork(question)) return undefined;
-    this.askBounced = true;
-    return REPORT_BEFORE_ASK;
-  }
-}
-
-/** What a person asked for, by kind of capability. */
-export type Capability = "send" | "contacts" | "schedule" | "draft" | "search";
-
-export type DeclineKind = "decline" | "defer" | "pick" | "text_question";
-/** `keep` is the reply without the question, when the reply also delivered a draft. */
-export type Declined = { sentence: string; kind: DeclineKind; keep?: string };
-
-/** Where a drafted email starts in a reply: an "Email N" heading or a Subject: line. */
-const _DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:|主题[:：]|第\s*\d+\s*封)/i;
-
-export type Teammate = { id: string; name: string; about: string };
-
-/**
- * `keep` is the part of the reply still shown, when the reply also delivered a draft. `card` is a
- * question the retry still typed into its reply: it goes on a question card instead.
- */
-export type DeclineRetry = { sentence: string; note: string; keep?: string; card?: string };
-
-/**
- * Whether a brief carries the recruiter's message: most of the message's character pairs, spaces
- * and punctuation aside, appear in the brief, as they do when it is quoted.
- */
-export function quotesMessage(brief: string, message: string): boolean {
-  const flat = (text: string) => text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
-  const pairs = (text: string) =>
-    Array.from({ length: Math.max(0, text.length - 1) }, (_, at) => text.slice(at, at + 2));
-  const wanted = pairs(flat(message));
-  if (wanted.length < 4) return false;
-  const shown = new Set(pairs(flat(brief)));
-  return wanted.filter((pair) => shown.has(pair)).length / wanted.length >= 0.8;
-}
-
-// Chinese and Japanese have no spaces: a run of their characters counts by its character pairs.
-const CJK_RUN = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{2,}$/u;
-const words = (text: string) =>
-  new Set(
-    text
-      .toLowerCase()
-      .replace(/[*_`#>[\]()]/g, " ")
-      .split(/[^\p{L}\p{N}]+|(?<=\p{Script=Han})(?=[a-z0-9])|(?<=[a-z0-9])(?=\p{Script=Han})/u)
-      .filter(Boolean)
-      .flatMap((word) =>
-        CJK_RUN.test(word)
-          ? Array.from({ length: word.length - 1 }, (_, i) => word.slice(i, i + 2))
-          : [word],
-      ),
-  );
-
-/**
- * A final reply that only says again what the turn's last progress update just said (same
- * facts, not much longer) adds a duplicate message, so the update stands as the answer.
- */
-type HistoryRow = {
-  role: string;
-  botId: string | null;
-  blocks: unknown;
-  runId?: string | null;
-  clientNonce?: string | null;
-};
-const rowText = (blocks: unknown, kind: string) =>
-  (Array.isArray(blocks) ? blocks : [])
-    .flatMap((block) =>
-      block && typeof block === "object" && block.kind === kind && typeof block.text === "string"
-        ? [block.text]
-        : [],
-    )
-    .join("\n");
-
-/**
- * This bot's newest reply in the conversation, newest-first rows, when the recruiter has not
- * written since: a teammate's report relayed after it adds nothing if it only says it again.
- */
-export function lastOwnUpdate(
-  rows: readonly HistoryRow[],
-  botId: string,
-  runId?: string,
-): string | undefined {
-  for (const row of rows) {
-    // This turn's own lines are not an earlier reply; the person's messages it answers are still
-    // the person writing since (staging 11-21, aftercard: the same question asked again after a
-    // card got no answer, as its answer matched the last one). A server nudge is not the person.
-    if (runId && row.role !== "user" && row.runId === runId) continue;
-    if (row.clientNonce?.startsWith("autocontinue:")) continue;
-    const relayed =
-      Array.isArray(row.blocks) &&
-      row.blocks.some(
-        (block) => block && typeof block === "object" && block.kind === "bot_message_received",
-      );
-    if (row.role === "user" && !relayed) return undefined;
-    const text = row.botId === botId && row.role !== "user" ? rowText(row.blocks, "text") : "";
-    if (text.trim()) return text;
-  }
-  return undefined;
-}
-
-/** The reply's sentences with their end marks, in order. */
-const _sentencesOf = (text: string) =>
-  text.match(/[^。！？!?；;\n]+(?:[。！？!?；;]+|\n+|$)/g) ?? [];
-
-function _sameSentence(a: string, b: string): boolean {
-  const x = words(a);
-  const y = words(b);
-  if (x.size < 4 || y.size < 4) return false;
-  let shared = 0;
-  for (const word of x) if (y.has(word)) shared += 1;
-  // Gate 8cc8cc5b: the same invitation reworded each time (「发来」/「把…发给我」) overlaps by half.
-  return shared / (x.size + y.size - shared) >= 0.5;
-}
-
-/** The same message again, apart from spacing. */
-export function sameWords(reply: string, earlier: string | undefined): boolean {
-  const flat = (text: string) => text.replace(/\s+/g, " ").trim();
-  return earlier !== undefined && flat(reply) !== "" && flat(reply) === flat(earlier);
-}
-
-export function restatesUpdate(reply: string, update: string | undefined): boolean {
-  if (!update?.trim() || !reply.trim()) return false;
-  if (reply.trim().length > update.trim().length * 1.5) return false;
-  const a = words(reply);
-  const b = words(update);
-  let shared = 0;
-  for (const word of a) if (b.has(word)) shared += 1;
-  // A reply that only repeats the update's closing question or one of its sentences says nothing new.
-  if (a.size >= 5 && shared / a.size >= 0.9) return true;
-  return shared / (a.size + b.size - shared) >= 0.55;
 }

@@ -13,7 +13,6 @@ import {
 import {
   adoptAssignedSenders,
   adoptLegacySender,
-  asksSenderCompanyName,
   defaultSendingMailbox,
   ensureSendingIdentity,
   isSenderRead,
@@ -721,11 +720,7 @@ it("does not send a credit account with a hand-assigned mailbox to its own Gmail
   expect(await ownMailboxSendingAllowed(prisma(0) as never, scope)).toBe(true);
 });
 
-it("asks no company name until the turn read the sending email", () => {
-  // Kruit once asked "which company name" first on an account that cannot set one up.
-  expect(asksSenderCompanyName("请提供用于准备发件地址的公司名称")).toBe(true);
-  expect(asksSenderCompanyName("Which company name should candidates see?")).toBe(true);
-  expect(asksSenderCompanyName("这个岗位的地点是？")).toBe(false);
+it("recognizes a read of the sending email and tells the model to read first", () => {
   expect(isSenderRead("instantly__mail__ensure_sender", { operation: "read" })).toBe(true);
   expect(
     isSenderRead("connectors_execute_tool", {

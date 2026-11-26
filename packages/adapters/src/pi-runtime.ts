@@ -1976,15 +1976,6 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                 details: args,
               };
             }
-            // ponytail: "?" count and numbered lines; a form (requestedSchema) may still hold several fields.
-            // Chinese question marks and "2、" count too: a Chinese card asked two questions at once.
-            if (
-              (question.match(/[?？]/g)?.length ?? 0) > 1 ||
-              /(^|\n)\s*2(?:[.)]\s|、)/.test(question)
-            )
-              throw new Error(
-                "Ask one question at a time: ask only the single most decision-affecting question first, with options.",
-              );
             const helped = await subagentResultsBeforePause(host);
             if (helped) return helped;
             // A message the user sent while this question was being written may already answer

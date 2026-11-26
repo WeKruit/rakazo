@@ -4,11 +4,7 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
-import {
-  createRunExecutor,
-  saysSomething,
-  withoutPolls,
-} from "./executor.js";
+import { createRunExecutor, saysSomething, withoutPolls } from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
@@ -166,14 +162,10 @@ async function runWithModel(
     stepsAfterEndedLine?: boolean;
     /** This bot handed the teammate a newer brief after the report this run answers. */
     newerBrief?: boolean;
-    /** The last message of the teammate that reported back, as its own latest posts return it. */
-    teammateResult?: string;
     /** The coordinator's first line, then its brief handing this bot the request. */
     briefAfterLine?: string;
     /** Tools the run calls, with their arguments. */
     toolCalls?: Array<[string, Record<string, unknown>]>;
-    /** This bot's last text in the thread, from an earlier run, with no person writing since. */
-    ownLastText?: string;
   } = {},
 ) {
   recruiterTexts.current = options.currentText;
@@ -331,64 +323,45 @@ async function runWithModel(
           select?: { runId?: boolean; clientNonce?: boolean };
           take?: number;
         }) =>
-          options.ownLastText !== undefined && args.select?.clientNonce && args.take === 12
-            ? [
-                { role: "bot", botId: "bot-1", blocks: [{ kind: "handoff", report: "completed" }] },
-                { role: "bot", botId: "bot-main", blocks: [{ kind: "handoff", toBotId: "bot-1" }] },
-                {
-                  role: "bot",
-                  botId: "bot-1",
-                  blocks: [{ kind: "text", text: options.ownLastText }],
-                },
-              ]
-            : args.take === 6 && args.select?.runId && !args.where?.runId && !args.where?.role
-              ? // The thread's newest messages: what came after the first line, then the line.
-                [
-                  ...(
-                    await Promise.all(
-                      prisma.message.create.mock.results.map((result) => result.value),
-                    )
+          args.take === 6 && args.select?.runId && !args.where?.runId && !args.where?.role
+            ? // The thread's newest messages: what came after the first line, then the line.
+              [
+                ...(
+                  await Promise.all(
+                    prisma.message.create.mock.results.map((result) => result.value),
                   )
-                    .map((message) => ({ runId: "run-1", role: "bot", ...message }))
-                    .reverse(),
-                  ...(options.hiddenContinuation ? [hiddenRow] : []),
-                  ...silentRows,
-                  ...(options.ackFromEndedRun ? [endedRunAck] : []),
-                  ...coordinatorRows,
-                ]
-              : options.briefAfterLine && args.take === 8
-                ? coordinatorRows
-                : options.ackFromEndedRun && args.take === 8
-                  ? [...(options.hiddenContinuation ? [hiddenRow] : []), ...silentRows, endedRunAck]
-                  : options.replyAfterTurn && args.take === 8 && !args.select?.runId
-                    ? [
-                        {
-                          role: "bot",
-                          blocks: [{ kind: "text", text: "I'm writing the template now." }],
-                        },
-                        { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
-                      ]
-                    : options.teammateResult && args.take === 12
-                      ? [
-                          {
-                            role: "bot",
-                            botId: "bot-main",
-                            blocks: [{ kind: "text", text: options.teammateResult }],
-                          },
-                          { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
-                        ]
-                      : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
-                        ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-                        : [],
+                )
+                  .map((message) => ({ runId: "run-1", role: "bot", ...message }))
+                  .reverse(),
+                ...(options.hiddenContinuation ? [hiddenRow] : []),
+                ...silentRows,
+                ...(options.ackFromEndedRun ? [endedRunAck] : []),
+                ...coordinatorRows,
+              ]
+            : options.briefAfterLine && args.take === 8
+              ? coordinatorRows
+              : options.ackFromEndedRun && args.take === 8
+                ? [...(options.hiddenContinuation ? [hiddenRow] : []), ...silentRows, endedRunAck]
+                : options.replyAfterTurn && args.take === 8 && !args.select?.runId
+                  ? [
+                      {
+                        role: "bot",
+                        blocks: [{ kind: "text", text: "I'm writing the template now." }],
+                      },
+                      { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
+                    ]
+                  : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+                    ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+                    : [],
       ),
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.newerBrief && args?.where?.id === options.sourceMessage?.id
-            ? { seq: options.sourceMessage?.seq }
-            : options.briefAfterLine && args?.where?.id === "line-main"
-              ? coordinatorRows[1]
-              : args?.where?.id === "published-final"
-                ? ((await prisma.message.create.mock.results.at(-1)?.value) ?? null)
-                : null,
+          ? { seq: options.sourceMessage?.seq }
+          : options.briefAfterLine && args?.where?.id === "line-main"
+            ? coordinatorRows[1]
+            : args?.where?.id === "published-final"
+              ? ((await prisma.message.create.mock.results.at(-1)?.value) ?? null)
+              : null,
       ),
       count: vi.fn(async () => 0),
       findFirst: vi.fn(
@@ -790,50 +763,6 @@ describe("handed-in stage", () => {
       sourceMessage: report,
       newerBrief: true,
       finalText: "Here is the updated template, signed Alex Morgan.",
-    });
-    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
-  });
-
-  // Gate 0f20231b, mobile-first-look: the teammate said where Contacts is, then Main said it
-  // again in other words.
-  it("posts nothing after a finished teammate already answered the message", async () => {
-    const report = handoff("bot-1");
-    report.blocks[0] = { ...report.blocks[0], report: "completed" } as never;
-    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      trigger: "follow_up",
-      sourceMessage: report,
-      teammateResult: "可以在手机上打开工作区，点「候选人」查看候选人和联系信息。",
-      finalText: "手机上打开工作区，进入「候选人」查看。具体按钮位置我无法从这里确认。",
-    });
-    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("按钮位置");
-  });
-
-  // Gate edfa2b9e, korean-recruiter-template: the teammate posted the template and reported
-  // back, and Main posted the same template again.
-  it("posts nothing when the answer to a finished teammate repeats its result", async () => {
-    const report = handoff("bot-1");
-    report.blocks[0] = { ...report.blocks[0], report: "completed" } as never;
-    const template =
-      "**Subject:** Senior Backend Engineer (Java/Spring) opportunity in Seoul\n\nHi {{firstName}},\n\nI'm reaching out about a Senior Backend Engineer opportunity in Seoul that focuses on Java and Spring.\n\nBest,\nAlex Morgan";
-    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      trigger: "follow_up",
-      sourceMessage: report,
-      teammateResult: `\n\n${template}`,
-      finalText: template,
-    });
-    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
-  });
-
-  // Gate 493e9f2e, change-mind-mid-run: Main handed the teammate a second brief for the same
-  // template, and the teammate posted the identical template again.
-  it("posts nothing that is the same as this bot's last message, with no one writing since", async () => {
-    const template =
-      "**Subject:** Staff Frontend Engineer opportunity in Beijing\n\nHi Wei,\n\nThe role is based in Beijing.\n\nBest,\nAlex Morgan";
-    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      trigger: "follow_up",
-      sourceMessage: handoff("bot-1"),
-      ownLastText: template,
-      finalText: `${template}\n`,
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
   });
