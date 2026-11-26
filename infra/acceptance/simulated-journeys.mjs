@@ -414,6 +414,30 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "stressed-point-few-meet",
+    // Each play opens its own role, so one play's rejects and passes never seed the next.
+    leftover: /^测试固定 · 数据工程师 8 · \d{4,5}/,
+    mechanisms: ["reference", "long-task"],
+    paid: true,
+    title: "强调的要求很少人写明：全部给出来并分开说明，不扣人",
+    area: "search",
+    source:
+      "11-26 user: 「可以混入一些不完全合格的…列出来…他们可以自己做判断，而不是一直这样死死的卡住」; branch play s135: 19 fitting people found, 2 shown, the third 2.5 minutes later",
+    account: "batch",
+    chinese: true,
+    maxTurns: 6,
+    waitMs: 12 * 60_000,
+    persona: `${AGENCY_RECRUITER} You care most about one requirement and say so, but you would rather see every reasonable person, told apart by how well they meet it, than wait for perfect ones.`,
+    facts: (_recipients, tag) =>
+      `The role is named 「测试固定 · 数据工程师 8 · ${tag}」: Senior Data Engineer, Shanghai, hybrid 3 days in office, 5+ years building batch and streaming pipelines (Spark or Flink), data warehouse modelling, Mandarin and working English, base 500k–700k RMB. Do not approve any send. Keep any search small (10 people per round, 16 in all).`,
+    goals: [
+      "Give Kruit the role under that exact name with all its details in one message and ask it to find people.",
+      "When the first people show, say that the five years on batch and streaming pipelines matters most to you, and ask for 3 more people.",
+      "Check the 3 arrive together in one list, not some now and some later, and that the list tells apart people who meet everything from people whose profile leaves a point open, naming the point.",
+      "Check what Kruit says about each new person matches the line under that person in the list.",
+    ],
+  },
+  {
     name: "five-asks-one-role",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
     leftover: /^测试固定 · 数据工程师 7 · \d{4,5}/,

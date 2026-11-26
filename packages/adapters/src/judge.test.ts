@@ -170,11 +170,12 @@ describe("JudgeSettings", () => {
     const requirements = await personRequirements({ yes: async () => undefined }, [
       {
         id: "brief:experience",
-        statement: "experience: 5+ years of batch and streaming pipelines",
+        statement: "5+ years of batch and streaming pipelines",
+        field: "experience",
       },
       { id: "hard-1", statement: "Languages: Mandarin" },
     ]);
-    expect(requirements.map(({ statement, shown }) => shown ?? statement)).toEqual([
+    expect(requirements.map(({ shown }) => shown)).toEqual([
       "5+ years of batch and streaming pipelines",
       "Languages: Mandarin",
     ]);
