@@ -545,6 +545,8 @@ import {
   modelAcceptsImageInput,
   modelIdSupportsImages,
 } from "./model-vision.js";
+import { outreachStopRefusal, outreachStops } from "./outreach-stops.js";
+import { ownMailboxSendRefusal } from "./own-mailbox-sends.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
@@ -6142,6 +6144,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return {
               error: `This account already sent ${OWN_MAILBOX_DAILY_SENDS} emails from the recruiter's own mailbox in the last 24 hours, the daily limit that protects it from being flagged as spam. Tell the recruiter the rest can go out tomorrow; never try another way to send them.`,
             };
+          // The checks a campaign send makes, before a card is shown for someone it must not reach.
+          if (
+            connectorCall.route?.connectorId === "mcp" &&
+            nativeMcpWriteServer?.endpoint?.replace(/\/$/, "") === GMAIL_MCP_ENDPOINT &&
+            connectorCall.route.toolName === "send_message" &&
+            Array.isArray(args.to) &&
+            typeof args.to[0] === "string"
+          ) {
+            const refusal = await ownMailboxSendRefusal(deps.prisma, context, {
+              to: args.to[0],
+              replyThreadId: typeof args.replyThreadId === "string" ? args.replyThreadId : undefined,
+              resend: args.resend === true,
+            });
+            if (refusal) return { error: refusal };
+          }
           // Every email send shows its card: the card is the recruiter's confirmation.
           const sendOperation =
             connectorCall.route?.connectorId === "mcp"
@@ -7487,8 +7504,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const at = repeats.get(r.email.toLowerCase());
                   return at ? { ...r, alreadyEmailedAt: at } : r;
                 });
+              // Nobody stopped, on hold or passed gets a card, the same check the send makes.
+              const stops =
+                approvalRoute.toolName === "native_instantly_activate_campaign" &&
+                instantlyActivation?.recipients.length
+                  ? await outreachStops(
+                      deps.prisma,
+                      context,
+                      thread.activeRecruitingRoleId ?? null,
+                      instantlyActivation.recipients.map((r) => r.email),
+                    )
+                  : new Map();
               // A send card is only for something that would send: an email and its recipients.
               const unsendable =
+                (stops.size ? outreachStopRefusal(stops) : null) ??
                 (repeats.size && args.resend !== true ? repeatedSendRefusal(repeats) : null) ??
                 (approvalRoute.toolName === "native_instantly_activate_campaign" && !campaignId
                   ? NO_CAMPAIGN_TO_ACTIVATE

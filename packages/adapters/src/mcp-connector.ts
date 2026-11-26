@@ -82,6 +82,7 @@ import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
 import { McpNotConnectedError, type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { addressTypedInConversation } from "./named-address.js";
+import { ownMailboxSendRefusal, recordOwnMailboxSend } from "./own-mailbox-sends.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   excludeFoundPeople,
@@ -508,6 +509,12 @@ const GmailSendInput = z.strictObject({
     .regex(/^[0-9a-f]{6,64}$/i)
     .optional()
     .describe("To follow up, the Gmail thread id of the earlier email to this person."),
+  resend: z
+    .boolean()
+    .optional()
+    .describe(
+      "Only when the recruiter asks for a new separate email to someone this account already emailed.",
+    ),
 });
 
 /**
@@ -2026,6 +2033,16 @@ export class McpConnector implements ConnectorProvider {
           `${server.name} is not connected; call request_connection with serverId "${server.id}".`,
         );
       redactions.push(token);
+      // The same checks a campaign send makes, from records, right before it goes out.
+      const refusal = await ownMailboxSendRefusal(this.prisma, context, {
+        to: input.to[0]!,
+        replyThreadId: input.replyThreadId,
+        resend: input.resend,
+      });
+      if (refusal) {
+        yield { type: "error", message: refusal };
+        return;
+      }
       const gmail = async (path: string, init?: RequestInit) => {
         const response = await safeFetch(
           new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`),
@@ -2060,12 +2077,32 @@ export class McpConnector implements ConnectorProvider {
           ...(input.replyThreadId ? { threadId: input.replyThreadId } : {}),
         }),
       });
+      const sentAt = new Date().toISOString();
+      const mailbox = await gmail("profile")
+        .then((profile) => (typeof profile.emailAddress === "string" ? profile.emailAddress : null))
+        .catch(() => null);
+      // The send's record, keyed by the mailbox's own message and thread ids.
+      if (typeof sent.id === "string")
+        await recordOwnMailboxSend(this.prisma, context, {
+          sourceId: server.id,
+          sourceName: server.name,
+          mailbox,
+          to: input.to[0]!,
+          subject: input.subject,
+          body: input.body,
+          messageId: sent.id,
+          threadId: typeof sent.threadId === "string" ? sent.threadId : null,
+          sentAt,
+        });
       yield {
         type: "result",
         data: {
           structuredContent: {
             sent: true,
             to: input.to[0],
+            ...(mailbox ? { from: mailbox } : {}),
+            subject: input.subject,
+            sentAt,
             messageId: sent.id,
             threadId: sent.threadId,
           },
