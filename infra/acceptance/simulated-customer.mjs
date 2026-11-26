@@ -775,6 +775,12 @@ async function play(journey, label, owner, mailbox, out) {
         move.chat = card.chat;
       }
       let waitForKruit = true;
+      if (move.action === "wait" && waited >= 2) {
+        turn.invalid = "you already stepped away twice: write to Kruit, or end with done";
+        log(`${label}:   ${turn.invalid}`);
+        turns.push(turn);
+        continue;
+      }
       if (move.action === "wait") {
         // The recruiter is away: candidates answer what reached them, and Kruit may write first.
         waitForKruit = false;

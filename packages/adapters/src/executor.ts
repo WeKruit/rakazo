@@ -12310,6 +12310,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A recruiter clicked Send on a saved reply: replay the native approved request now,
         // before any model call. The regular tool path still owns preflight, claim and receipt.
         let sentReplyDirectly = false;
+        let replyAnswersToSave = false;
         const sendOutcomes: string[] = [];
         while (approvedEffectReplays.nextToolName()) {
           const request = approvedEffectReplays.nextRequest();
@@ -12475,14 +12476,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
               error: String(error),
             });
           }
+          // A sent reply ends the run quietly, unless it carried the recruiter's answers to the
+          // candidate's open questions: then the agent gets the turn to save them in role memory.
           if (
             replyDraft.openQuestions?.length &&
             replyOutcome === mailReplyOutcomeInstruction({ status: "sent" })
-          )
+          ) {
             replyOutcome = `${replyOutcome}\n${openQuestionsAnsweredNote(replyDraft.openQuestions)}`;
+            replyAnswersToSave = true;
+          }
           sentReplyDirectly = true;
         }
-        if (sentReplyDirectly) probeFoundNothing = true;
+        if (sentReplyDirectly && !replyAnswersToSave) probeFoundNothing = true;
         const prompt = [
           ...promptParts.filter(
             (part) =>

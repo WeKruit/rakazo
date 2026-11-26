@@ -2821,6 +2821,34 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     );
   });
 
+  it("gives the agent a turn to save the recruiter's answers once a reply listing open questions is sent", async () => {
+    const editedBody = "Relocation is up to $10,000.";
+    const f = replyFixture({ structuredContent: { ...sentEmail, body: { text: editedBody } } });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    effect.request = editMailReplyRequest(effect.request, draft, {
+      action: "send",
+      body: editedBody,
+      cc: [],
+    });
+    effect.result = {
+      mailReplyApproval: {
+        ...draft,
+        body: editedBody,
+        openQuestions: ["Do you offer relocation?"],
+        status: "sending",
+      },
+    };
+    effect.status = "approved";
+    f.runtimeRun.mockClear();
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.runtimeRun).toHaveBeenCalledOnce();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain('"Do you offer relocation?"');
+  });
+
   it.each([
     null,
     { effectId: "read", result: { structuredContent: { ...replyAnchor, ue_type: 3 } } },
