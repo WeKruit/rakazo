@@ -20,8 +20,9 @@ export const RecruitingCandidateRankingSchema = z.strictObject({
 export type RecruitingCandidateRanking = z.infer<typeof RecruitingCandidateRankingSchema>;
 
 /**
- * Presentation of saved grades only: never infer Reviewer authorship from a tier or score. A
- * person keeps their latest Reviewer grade when the role's requirements change: grades are never
+ * Presentation of saved grades only. Source "reviewer" is a person's newest saved tier, whoever
+ * gave it (the search grades the people it returns); "provider" is a bare score with no tier. A
+ * person keeps their latest grade when the role's requirements change: grades are never
  * redone or marked stale (big-ask 11-25: one loosened requirement showed all 123 people as
  * needing a new review and hid the 70 Strong/Promising).
  */

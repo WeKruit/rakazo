@@ -7195,7 +7195,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ]);
   });
 
-  it("keeps ranking provider scores in the visible result domain and recognizes Reviewer batch provenance", async () => {
+  it("ranks people by their newest saved grade, whichever search or batch gave it", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const row = (key: string, score: number, tier: Prisma.InputJsonValue) => ({
       ...canonicalCandidateRow(`Ranking ${key}`, `https://www.linkedin.com/in/ranking-${key}`),
@@ -7221,40 +7221,21 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         roleId: f.role.role.id,
         sort: "ranking",
       });
-    const provider = await list();
+    // A tier the search saved with the person is their grade: no separate grading page needed.
+    const graded = await list();
     expect(
-      provider.items.map((item) => [
+      graded.items.map((item) => [
         item.candidateKey,
-        item.match?.score,
-        item.ranking?.score,
-        item.ranking?.group,
-      ]),
-    ).toEqual([
-      ["linkedin:/in/ranking-b", 60, 60, "unreviewed"],
-      ["linkedin:/in/ranking-a", null, null, "unscored"],
-    ]);
-    expect(provider.items[0]?.ranking?.sourceEffectId).toBe(latest.input.effectId);
-    expect(provider.items[1]?.ranking?.sourceEffectId).toBeNull();
-    // These are legitimate provider-backed Reviewer results from a server-created grading run.
-    await prisma.run.update({
-      where: { id: f.run.id },
-      data: {
-        clientNonce: `${recruiting.RECRUITING_GRADE_NONCE_PREFIX}${f.thread.id}:ranking-batch`,
-      },
-    });
-    const reviewer = await list();
-    expect(
-      reviewer.items.map((item) => [
         item.ranking?.source,
-        item.ranking?.state,
         item.ranking?.grade,
         item.ranking?.group,
+        item.ranking?.score,
       ]),
     ).toEqual([
-      ["reviewer", "current", "Strong", "strong_match"],
-      ["reviewer", "current", "Partial", "partial"],
+      ["linkedin:/in/ranking-a", "reviewer", "Strong", "strong_match", 91],
+      ["linkedin:/in/ranking-b", "reviewer", "Partial", "partial", 60],
     ]);
-    expect(reviewer.items.map((item) => item.ranking?.score)).toEqual([91, 60]);
+    expect(graded.items[1]?.ranking?.sourceEffectId).toBe(latest.input.effectId);
     const first = await recruiting.listRecruitingCandidates(prisma, actor, {
       roleId: f.role.role.id,
       sort: "ranking",
