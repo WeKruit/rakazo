@@ -1,6 +1,7 @@
-import type { PrismaClient } from "@rakazo/db";
+import type { Prisma, PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { CriterionQuestion, TextJudge } from "./judge.js";
+import type { PageReader } from "./keyless-http-web.js";
 import { roundCriteria } from "./recruiting-round-check.js";
 
 /**
@@ -41,8 +42,9 @@ const ASSESSED = {
 };
 
 /**
- * The verdicts as the person's "Requirements assessment" in Results, one numbered line each in
- * the form that page already reads. A turned-down reason is listed only when the profile shows it.
+ * The verdicts as the person's "Requirements assessment" in Results: one line per requirement,
+ * the verdict and then the requirement in the recruiter's words, which is the line's name there.
+ * A turned-down reason is listed only when the profile shows it.
  */
 export function criteriaAssessment(
   criteria: ReadonlyArray<{ statement: string; level: string; avoid?: boolean; place?: string }>,
@@ -50,10 +52,10 @@ export function criteriaAssessment(
   return criteria
     .filter((item) => !item.avoid || item.level === "opposite")
     .map(
-      (item, index) =>
-        `R${index + 1}: ${ASSESSED[item.level as keyof typeof ASSESSED] ?? "Unknown"} - ${item.statement.replace(/[;；]\s*/g, ", ")}${item.place ? ` (${placeWords(item.place)})` : ""}`,
+      (item) =>
+        `${ASSESSED[item.level as keyof typeof ASSESSED] ?? "Unknown"} - ${item.statement.replace(/\s*\n\s*/g, " ")}${item.place ? ` (${placeWords(item.place)})` : ""}`,
     )
-    .join("; ");
+    .join("\n");
 }
 
 /** A place tag as people read it: "there_before" is "there before". */
@@ -116,27 +118,41 @@ async function personRequirements(
 }
 
 /**
- * What the judge reads about a person: the profile's full text when the search returned it (dated
- * jobs with their own descriptions), else the row. The search's own sentence on why the person
- * fits is never passed: with it, the judge agreed "5+ years" for people whose dated jobs showed
- * about three (five real profiles, 11-26).
+ * What the judge reads about a person: the profile's full text (dated jobs with their own
+ * descriptions), never a search's short row. The search's own sentence on why the person fits is
+ * never passed: with it, the judge agreed "5+ years" for people whose dated jobs showed about
+ * three (five real profiles, 11-26).
  */
-function profileState(row: Record<string, unknown>): Record<string, unknown> {
-  const {
-    _profile,
-    _profile_text: full,
-    _profile_image_source_url,
-    profile_image_url,
-    email,
-    match_score,
-    match_tier,
-    why_recommended,
-    ...shown
-  } = row;
-  if (typeof full === "string" && full)
-    return { name: shown.name, location: shown.location, profile: full.slice(0, PROFILE_CHARS) };
-  const text = JSON.stringify(shown);
-  return text.length > PROFILE_CHARS ? { profile: text.slice(0, PROFILE_CHARS) } : shown;
+function profileState(row: Record<string, unknown>): Record<string, unknown> | undefined {
+  const full = row._profile_text;
+  return typeof full === "string" && full
+    ? { name: row.name, location: row.location, profile: full.slice(0, PROFILE_CHARS) }
+    : undefined;
+}
+
+const PROFILE_READ_MS = 15_000;
+
+/**
+ * A deeper search returns a short row per person, so each row without the profile's full text
+ * gets it by its profile link from the search service's reader (the same text a quick search
+ * returns). A person whose text could not be read stays without it and is not judged.
+ */
+async function readMissingProfiles(
+  read: PageReader | undefined,
+  entries: Array<{ row: Record<string, unknown> }>,
+): Promise<void> {
+  if (!read) return;
+  const signal = AbortSignal.timeout(PROFILE_READ_MS);
+  await Promise.all(
+    entries.map(async ({ row }) => {
+      if (row._profile_text || typeof row.linkedin_url !== "string" || !row.linkedin_url) return;
+      const page = await read(row.linkedin_url, PROFILE_CHARS, signal).catch((error) => {
+        getLogger().warn("recruiting.criteria.profile not read", { error: String(error) });
+        return undefined;
+      });
+      if (page?.text) row._profile_text = page.text;
+    }),
+  );
 }
 
 /**
@@ -161,6 +177,7 @@ export async function checkPeopleCriteria(
   prisma: PrismaClient,
   role: { roleId: string; spaceId: string; revision: number },
   entries: Array<{ row: Record<string, unknown>; check?: CriteriaCheck }>,
+  readProfile?: PageReader,
 ): Promise<void> {
   try {
     const judge = await judgeSettings?.resolve();
@@ -182,11 +199,13 @@ export async function checkPeopleCriteria(
     const questions = requirements.map((requirement) =>
       asksYears(requirement) ? { ...requirement, rule: COUNTED_YEARS } : requirement,
     );
+    await readMissingProfiles(readProfile, entries);
     const deadline = AbortSignal.timeout(12_000);
     for (let at = 0; at < entries.length && !deadline.aborted; at += TOGETHER)
       await Promise.all(
         entries.slice(at, at + TOGETHER).map(async (entry) => {
-          const verdicts = await judge.criteria?.(profileState(entry.row), questions, deadline);
+          const profile = profileState(entry.row);
+          const verdicts = profile && (await judge.criteria?.(profile, questions, deadline));
           if (!verdicts) return;
           for (const requirement of requirements) {
             const verdict = verdicts.get(requirement.id);
@@ -220,8 +239,101 @@ export async function checkPeopleCriteria(
       requirements: requirements.length,
       people: entries.length,
       checked: entries.filter((entry) => entry.check).length,
+      withoutFullProfile: entries.filter((entry) => !entry.row._profile_text).length,
     });
   } catch (error) {
     getLogger().warn("recruiting.criteria.check failed", { error: String(error) });
+  }
+}
+
+/**
+ * People saved before the role had requirements were never judged: the first quick searches run
+ * before the brief is saved (play 11-26: all first ten stayed without a verdict). So each save of
+ * the role judges its people who have no verdicts yet and writes them on their newest saved row.
+ */
+const judgingRoles = new Set<string>();
+
+export async function checkUnjudgedPeople(
+  judgeSettings: { resolve(): Promise<TextJudge | undefined> } | undefined,
+  prisma: PrismaClient,
+  role: { roleId: string; spaceId: string },
+  readProfile?: PageReader,
+): Promise<void> {
+  // Several saves of one role land together (four within a second, 11-26): one pass serves them.
+  if (judgingRoles.has(role.roleId)) return;
+  judgingRoles.add(role.roleId);
+  try {
+    const [saved, occurrences] = await Promise.all([
+      prisma.recruitingRole.findUnique({ where: { id: role.roleId }, select: { revision: true } }),
+      prisma.recruitingCandidateOccurrence.findMany({
+        where: { roleId: role.roleId },
+        orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+        select: {
+          pageId: true,
+          rowIndex: true,
+          candidateKey: true,
+          name: true,
+          location: true,
+          linkedinUrl: true,
+          matchFields: true,
+          report: true,
+        },
+      }),
+    ]);
+    if (!saved) return;
+    const newest = new Map<string, (typeof occurrences)[number]>();
+    for (const row of occurrences)
+      if (!newest.has(row.candidateKey)) newest.set(row.candidateKey, row);
+    const judged = new Set(
+      occurrences
+        .filter((row) =>
+          Array.isArray((row.matchFields as { criteria?: unknown } | null)?.criteria),
+        )
+        .map((row) => row.candidateKey),
+    );
+    const unjudged = [...newest.values()].filter((row) => !judged.has(row.candidateKey));
+    const entries = unjudged.map(
+      (row): { row: Record<string, unknown>; check?: CriteriaCheck } => ({
+        row: { name: row.name, location: row.location, linkedin_url: row.linkedinUrl },
+      }),
+    );
+    await checkPeopleCriteria(
+      judgeSettings,
+      prisma,
+      { ...role, revision: saved.revision },
+      entries,
+      readProfile,
+    );
+    await Promise.all(
+      entries.map(async ({ row, check }, at) => {
+        if (!check) return;
+        const { pageId, rowIndex, matchFields, report } = unjudged[at]!;
+        const fields = (report as { fields?: unknown[] } | null)?.fields;
+        const added = [
+          ["Requirements assessment", row.requirements_assessment],
+          ["Location tag", row.location_tag],
+        ].flatMap(([label, value]) =>
+          typeof value === "string" ? [{ label, value, sourceUrls: [] }] : [],
+        );
+        await prisma.recruitingCandidateOccurrence.update({
+          where: { pageId_rowIndex: { pageId, rowIndex } },
+          data: {
+            matchFields: { ...(matchFields as object | null), ...check } as Prisma.InputJsonObject,
+            ...(Array.isArray(fields)
+              ? {
+                  report: {
+                    ...(report as object),
+                    fields: [...fields, ...added],
+                  } as Prisma.InputJsonObject,
+                }
+              : {}),
+          },
+        });
+      }),
+    );
+  } catch (error) {
+    getLogger().warn("recruiting.criteria.unjudged failed", { error: String(error) });
+  } finally {
+    judgingRoles.delete(role.roleId);
   }
 }

@@ -57,10 +57,13 @@ type RoundPerson = {
   title?: string | null;
   company?: string | null;
   location?: string | null;
-  snippet?: string | null;
+  /** The search's own sentence on why it returned the person. */
+  reason?: string | null;
+  /** How the person's full profile was judged on each requirement of the role, when it was. */
+  verdicts?: Array<{ statement: string; level: string; avoid?: boolean }>;
 };
 
-/** The saved people behind round keys, each with the profile passage its search returned. */
+/** The saved people behind round keys, each with its search's reason and the judged verdicts. */
 export async function recruitingRoundPeople(
   prisma: RoundPrisma,
   input: { threadId: string; spaceId: string; roleId: string; candidateKeys: readonly string[] },
@@ -80,21 +83,77 @@ export async function recruitingRoundPeople(
     }),
     prisma.recruitingCandidateOccurrence.findMany({
       where: { roleId: input.roleId, candidateKey: { in: [...input.candidateKeys] } },
-      select: { candidateKey: true, name: true, title: true, company: true, location: true },
+      select: {
+        candidateKey: true,
+        name: true,
+        title: true,
+        company: true,
+        location: true,
+        matchFields: true,
+      },
       orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
     }),
   ]);
   const people = new Map<string, RoundPerson>();
-  for (const row of occurrences)
+  const judged = new Map<string, RoundPerson["verdicts"]>();
+  for (const { matchFields, ...row } of occurrences) {
     if (!people.has(row.candidateKey)) people.set(row.candidateKey, row);
+    const criteria = (matchFields as { criteria?: RoundPerson["verdicts"] } | null)?.criteria;
+    if (Array.isArray(criteria) && criteria.length && !judged.has(row.candidateKey))
+      judged.set(row.candidateKey, criteria);
+  }
   for (const search of searches) {
     const rows = (search.result as { candidateRows?: unknown } | null)?.candidateRows;
     if (!Array.isArray(rows)) continue;
     for (const row of rows as Array<RoundPerson & { candidateKey?: unknown }>)
-      if (typeof row.candidateKey === "string" && row.snippet)
-        people.set(row.candidateKey, { ...people.get(row.candidateKey), ...row });
+      if (typeof row.candidateKey === "string" && row.reason)
+        people.set(row.candidateKey, {
+          ...row,
+          ...people.get(row.candidateKey),
+          reason: row.reason,
+        });
+  }
+  for (const [key, verdicts] of judged) {
+    const person = people.get(key);
+    if (person) people.set(key, { ...person, verdicts });
   }
   return people;
+}
+
+/**
+ * One line under a listed person: how many of the role's requirements the full profile meets and
+ * which ones it does not show or contradicts; a person not judged yet gets the search's own
+ * reason instead. A row used to quote the profile's opening words, and
+ * "Aug 2021 - Present (4 years and 11 months)", one job's length, read as the person's whole
+ * experience: a recruiter turned down someone judged to meet five years (11-26).
+ */
+export function roundVerdictLine(
+  verdicts: NonNullable<RoundPerson["verdicts"]>,
+  chinese: boolean,
+): string | undefined {
+  const asked = verdicts.filter((item) => !item.avoid);
+  if (!asked.length) return undefined;
+  const at = (...levels: string[]) =>
+    asked.filter((item) => levels.includes(item.level)).map((item) => item.statement);
+  const met = at("strong", "medium").length;
+  const parts = chinese
+    ? ([
+        ["部分符合：", at("weak")],
+        ["资料未写：", at("silent")],
+        ["不符合：", at("opposite")],
+      ] as const)
+    : ([
+        ["partly: ", at("weak")],
+        ["not stated: ", at("silent")],
+        ["does not meet: ", at("opposite")],
+      ] as const);
+  const rest = parts.flatMap(([label, items]) =>
+    items.length ? [`${label}${items.join(chinese ? "、" : ", ")}`] : [],
+  );
+  const head = chinese
+    ? `符合 ${met}/${asked.length} 项要求`
+    : `Meets ${met} of ${asked.length} requirements`;
+  return [head, ...rest].join(chinese ? "；" : "; ");
 }
 
 /**
@@ -135,7 +194,12 @@ export async function recruitingRoundListText(
     : input.candidateKeys;
   if (input.knownOnly && !keys.length) return "";
   // The same open must-haves under every person say nothing about any one of them: say them once.
-  const notes = keys.map((key) => input.unverified?.[key]?.trim() ?? "");
+  // A person whose full profile was judged is described by that judgement alone.
+  const judgedLine = (key: string) => {
+    const verdicts = people.get(key)?.verdicts;
+    return verdicts ? roundVerdictLine(verdicts, !!input.chinese) : undefined;
+  };
+  const notes = keys.map((key) => (judgedLine(key) ? "" : (input.unverified?.[key]?.trim() ?? "")));
   const shared =
     keys.length > 1 && notes[0] && notes.every((note) => note === notes[0]) ? notes[0] : undefined;
   const lines = keys.map((key, index) => {
@@ -147,8 +211,9 @@ export async function recruitingRoundListText(
     const head = [name ? `**${name}**` : null, person?.title, person?.company, person?.location]
       .filter(Boolean)
       .join(" · ");
-    const passage = input.brief ? undefined : roundPassage(person?.snippet);
-    const unknown = shared ? undefined : input.unverified?.[key]?.trim();
+    const judged = judgedLine(key);
+    const passage = input.brief ? undefined : (judged ?? roundPassage(person?.reason));
+    const unknown = shared || judged ? undefined : input.unverified?.[key]?.trim();
     const unverifiedLabel = input.chinese ? "未核实：" : "Not verified: ";
     return `${(input.firstNumber ?? 1) + index}. ${head}${passage ? `\n   > ${passage}` : ""}${unknown ? `\n   ${unverifiedLabel}${unknown}` : ""}`;
   });

@@ -358,6 +358,7 @@ const STATUS_WORDS: [RegExp, RequirementStatus][] = [
   [/^(?:fact|match|met|good match|strong|yes|pass|符合|满足|事实)$/i, "match"],
   [/^(?:gap|miss|not met|no match|not a match|no|fail|missing|不符合|缺口|差距|缺失)$/i, "gap"],
 ];
+const VERDICT_LINE = /^([^-–—:：]{1,24}?)\s*[-–—]\s*(\S.*)$/;
 const CITATION = /\[\s*sources?\b[^\]]*\]/gi;
 const LINK = /https?:\/\/[^\s,;\]]+/g;
 
@@ -436,6 +437,20 @@ export function requirementRows(
   const parts = body
     ? body.split(/(?:^|\s|[;；])(?=R\d+\s*[:：])/).filter((part) => part.trim())
     : [];
+  // The requirement check writes one line per requirement, "Verdict - the requirement as the
+  // recruiter said it", with no reference number: the requirement itself is the row's name.
+  const lines = body.split("\n").map((line) => VERDICT_LINE.exec(line.trim()));
+  if (body && lines.every((line) => line && statusOf(line[1]!)))
+    return {
+      rows: lines.map((line, index) => ({
+        key: `row:${index}`,
+        label: line![2]!.trim(),
+        status: statusOf(line![1]!)!,
+        text: "",
+        sourceUrls: [],
+      })),
+      sourceUrls,
+    };
   const rows = parts.map((part, index): RequirementRow => {
     const match = /^(R\d+)\s*[:：]\s*(.*)$/s.exec(part.trim());
     const rest = (match?.[2] ?? part).trim();

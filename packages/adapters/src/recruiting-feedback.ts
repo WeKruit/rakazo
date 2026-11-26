@@ -18,9 +18,11 @@ import type { PrismaClient } from "@rakazo/db";
 import {
   approveRecruitingCalibrationRoundFromMessage,
   executeNativeRecruitingCandidateDecision,
+  Prisma,
   readRecruitingFeedbackContext,
 } from "@rakazo/db";
 import type { ZodError } from "zod";
+import { criteriaAssessment } from "./recruiting-criteria-check.js";
 
 /** Why a preference naming the chat's role is not saved to memory shared by every role. */
 export const ROLE_PREFERENCE_ERROR =
@@ -101,6 +103,9 @@ export type RecruitingFeedbackResult = {
   feedback: RecruitingFeedbackInput;
   source: RecruitingSourceRef;
   workspace: { role: RecruitingRole; revision: RecruitingRoleRevision } | null;
+  /** Per named person, how their profile was judged on each requirement of the role. */
+  profilesShow?: Record<string, string>;
+  profilesShowNote?: string;
 } & (
   | { status: "needs_clarification" }
   | {
@@ -127,7 +132,44 @@ export type RecruitingFeedbackResult = {
     }
 );
 
+/**
+ * A recruiter's reason for a decision on a person can differ from what the person's profile was
+ * judged to show (a recruiter said "under five years" of someone judged to meet five years, and
+ * the next search carried that reason, 11-26). The decision is theirs and is recorded as given;
+ * its result carries the saved verdicts so the reply rests on them, not on the reason alone.
+ */
 export async function executeRecruitingFeedback(
+  ...args: Parameters<typeof recordRecruitingFeedback>
+): Promise<RecruitingFeedbackResult> {
+  const result = await recordRecruitingFeedback(...args);
+  const { feedback } = result;
+  if (feedback.target !== "candidate") return result;
+  const judged = await args[0].prisma.recruitingCandidateOccurrence.findMany({
+    where: {
+      roleId: feedback.roleId,
+      candidateKey: { in: [...feedback.candidateKeys] },
+      matchFields: { path: ["criteria"], not: Prisma.AnyNull },
+    },
+    orderBy: { page: { observedAt: "desc" } },
+    select: { candidateKey: true, name: true, matchFields: true },
+  });
+  const profilesShow: Record<string, string> = {};
+  for (const row of judged) {
+    const criteria = (row.matchFields as { criteria?: Parameters<typeof criteriaAssessment>[0] })
+      .criteria;
+    const name = row.name ?? row.candidateKey;
+    if (Array.isArray(criteria) && criteria.length && !(name in profilesShow))
+      profilesShow[name] = criteriaAssessment(criteria);
+  }
+  return Object.keys(profilesShow).length
+    ? { ...result, profilesShow, profilesShowNote: PROFILES_SHOW_NOTE }
+    : result;
+}
+
+const PROFILES_SHOW_NOTE =
+  "profilesShow is how each named person's profile was judged on the role's requirements. The recruiter's decision stands as recorded. Where their reason differs from it, say in one line what the profile shows, and leave that reason out of the next search.";
+
+async function recordRecruitingFeedback(
   deps: { prisma: PrismaClient; memory: MemoryStore },
   trusted: { actor: Actor; runId: string; sourceMessageId: string | null },
   untrusted: unknown,
