@@ -22,7 +22,6 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
-import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey, peopleFromSearch } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
@@ -171,13 +170,12 @@ export async function requireQuickSearchBeforeResearch(
     select: { trigger: true, thread: { select: { activeRecruitingRoleId: true } } },
   });
   const roleId = run?.thread.activeRecruitingRoleId;
-  // Grading people a search already found is not a search.
-  if (!roleId || run.trigger === "recruiting_grade") return;
+  if (!roleId) return;
   const [searchAssigned, earlierResearch, acceptedRound] = await Promise.all([
     prisma.botMcpServer.count({
       where: { ...scope, server: { ...scope, slug: "people-search", enabled: true } },
     }),
-    prisma.recruitingResearchTask.count({ where: { roleId, ...NOT_GRADING_TASK } }),
+    prisma.recruitingResearchTask.count({ where: { roleId } }),
     prisma.recruitingCalibrationRound.count({ where: { roleId, approvedAt: { not: null } } }),
   ]);
   if (!searchAssigned || earlierResearch || acceptedRound) return;
