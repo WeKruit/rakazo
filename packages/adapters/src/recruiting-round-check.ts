@@ -32,7 +32,7 @@ export async function roundCriteria(
   });
   const fields = (role?.currentRevision.brief as { fields?: unknown } | null)?.fields;
   const criteria = role?.currentRevision.criteria;
-  return [
+  const all: RoundCriterion[] = [
     ...(Array.isArray(fields) ? (fields as BriefField[]) : []).flatMap((field) =>
       typeof field?.key === "string" &&
       typeof field.value === "string" &&
@@ -52,6 +52,12 @@ export async function roundCriteria(
       .filter((criterion) => criterion?.priority === "hard" && criterion.expression)
       .map((criterion) => ({ id: criterion.id, statement: statementOf(criterion.expression) })),
   ];
+  // A requirement saved in both places is judged once (staging 11-26: "数仓建模、数仓建模").
+  const seen = new Set<string>();
+  return all.filter((criterion) => {
+    const same = criterion.statement.trim().toLowerCase();
+    return !seen.has(same) && Boolean(seen.add(same));
+  });
 }
 
 /** What a recorded round's read says about repeats: the round record refuses anyone already seen. */

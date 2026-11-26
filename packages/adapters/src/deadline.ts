@@ -11,7 +11,6 @@ export const RECORD_TOOLS: ReadonlySet<string> = new Set([
   "recruiting_notes",
   "recruiting_reminders",
   "recruiting_crm_target",
-  "recruiting_request_approval",
   "read_memory",
   "remember",
   "save_shared_memory",

@@ -123,7 +123,6 @@ import {
 import { McpOAuthConfigInput } from "./mcp.js";
 import { MessageReactionSchema } from "./reactions.js";
 import {
-  ConfirmRecruitingBriefInput,
   CreateRecruitingCandidateNoteInput,
   CreateRecruitingReminderInput,
   CreateRecruitingRoleInput,
@@ -1003,7 +1002,6 @@ export const appContract = {
         .input(DeleteRecruitingCandidateNoteInput)
         .output(z.strictObject({ ok: z.literal(true) })),
     },
-    confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
     editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),
     listResearch: oc
       .input(z.strictObject({ roleId: RecruitingId }).safeExtend(listPageFields))

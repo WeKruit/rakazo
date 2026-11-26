@@ -1,4 +1,3 @@
-import { RecruitingApprovalToolInputSchema } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
@@ -14,41 +13,6 @@ describe("buildApprovalAskBlock", () => {
       { id: "deny", label: "Change the address", outcome: "cancelled" },
     ]);
     expect(JSON.stringify(block)).not.toMatch(/instantly|always/i);
-  });
-  it("confirms exact server-owned requirements in the original one-time card without model display fields", () => {
-    const request = RecruitingApprovalToolInputSchema.parse({
-      stage: "brief",
-      roleId: "internal-role",
-      expectedRoleRevision: 3,
-    });
-    const requirements = `Salary range: GBP 90,000 to 120,000\n${"Exact saved requirement. ".repeat(220)}`;
-    const block = buildApprovalAskBlock(
-      "original-effect",
-      "recruiting_request_approval",
-      request,
-      [],
-      {
-        reviewReason: "Model-supplied substitute requirements",
-        recruiting: { roleTitle: "Platform engineer", requirements },
-      },
-    );
-    expect(block.text).toBe("Role requirements");
-    expect(block.actions).toEqual([
-      { id: "allow", label: "Looks good, start searching" },
-      { id: "deny", label: "Needs changes" },
-    ]);
-    expect(block.detail).toBe(`Role: Platform engineer\n${requirements}`);
-    expect(block.detail).not.toContain("internal-role");
-    expect(block.detail!.length).toBeGreaterThan(4_000);
-    expect(() =>
-      buildApprovalAskBlock("original-effect", "recruiting_request_approval", request, []),
-    ).toThrow(/verified/i);
-    expect(
-      RecruitingApprovalToolInputSchema.safeParse({
-        ...request,
-        requirements: "Model-supplied substitute",
-      }).success,
-    ).toBe(false);
   });
   it.each([false, true])("shows the complete trusted routine update (%s)", (active) => {
     const prompt = `  Exact instruction.\n${"Keep this paragraph. ".repeat(240)}Ending token-secret  `;
@@ -903,116 +867,6 @@ describe("buildApprovalAskBlock", () => {
     });
     if (block.kind !== "ask") throw new Error("expected ask block");
     expect(block.detail).toContain("stay separate from other spaces");
-  });
-
-  it("offers only one-time approval or denial of the exact document package", () => {
-    const request = RecruitingApprovalToolInputSchema.parse({
-      stage: "documents",
-      roleId: "role",
-      expectedRoleRevision: 3,
-      documents: {
-        jdText: { artifactId: "jd", sha256: "a".repeat(64) },
-        namedPdf: { artifactId: "named-pdf", sha256: "b".repeat(64) },
-        anonymousPdf: null,
-        deck: null,
-      },
-    });
-    const block = buildApprovalAskBlock(
-      "documents-effect",
-      "recruiting_request_approval",
-      request,
-      [],
-    );
-
-    expect(block).toMatchObject({
-      kind: "ask",
-      approvalEffectId: "documents-effect",
-      text: "Approve documents",
-      actions: [
-        { id: "allow", label: "Approve documents" },
-        { id: "deny", label: "Deny" },
-      ],
-      detail: [
-        "Role version: 3",
-        "Job description: attached",
-        "Named JD PDF: attached",
-        "Anonymous JD PDF: not provided",
-        "Deck: not provided",
-      ].join("\n"),
-    });
-    if (block.kind !== "ask") throw new Error("expected ask block");
-    for (const value of [request.roleId, "named-pdf", "a".repeat(64), "b".repeat(64)])
-      expect(block.detail).not.toContain(value);
-  });
-
-  it("shows all ten calibration profiles and every rule beyond the generic detail limit", () => {
-    const request = RecruitingApprovalToolInputSchema.parse({
-      stage: "calibration",
-      roleId: "role",
-      expectedRoleRevision: 3,
-      documentsApprovalEffectId: "documents-effect",
-      profiles: Array.from({ length: 10 }, (_, index) => ({
-        candidateKey: `candidate-${index}`,
-        source: {
-          effectId: "saved-page",
-          rowIndex: index,
-          providerTaskId: "task",
-          roleRevisionId: "revision",
-          artifactRef: { artifactId: "artifact", sha256: "a".repeat(64) },
-        },
-        linkedinUrl: `https://www.linkedin.com/in/candidate-${index}`,
-        evidenceUrl: `https://example.test/evidence/${index}?source=${"context".repeat(80)}`,
-      })),
-      ruleChanges: Array.from(
-        { length: 5 },
-        (_, index) => `Rule ${index}: ${"retain exact evidence; ".repeat(30)}token-secret`,
-      ),
-    });
-    if (request.stage !== "calibration") throw new Error("expected calibration request");
-    const block = buildApprovalAskBlock(
-      "calibration-effect",
-      "recruiting_request_approval",
-      request,
-      ["token-secret"],
-      {
-        recruiting: {
-          roleTitle: "Systems engineer",
-          profiles: request.profiles.map((profile, index) => ({
-            name: `Verified person ${index}`,
-            linkedinUrl: profile.linkedinUrl,
-            evidenceUrl: profile.evidenceUrl,
-          })),
-        },
-      },
-    );
-
-    expect(block).toMatchObject({
-      kind: "ask",
-      approvalEffectId: "calibration-effect",
-      text: "Approve calibration",
-      actions: [
-        { id: "allow", label: "Approve calibration" },
-        { id: "deny", label: "Deny" },
-      ],
-    });
-    if (block.kind !== "ask") throw new Error("expected ask block");
-    expect(block.detail?.length).toBeGreaterThan(4_000);
-    expect(block.detail).toContain("Role version: 3");
-    expect(block.detail).not.toContain("token-secret");
-    expect(block.detail).not.toContain("documents-effect");
-    expect(block.detail).not.toContain("candidateKey");
-    expect(block.detail).toContain("Role: Systems engineer");
-    for (let index = 0; index < 10; index++)
-      expect(block.detail).toContain(`Verified person ${index}`);
-    for (const internal of ["saved-page", "artifact", "providerTaskId", "roleRevisionId"])
-      expect(block.detail).not.toContain(internal);
-    for (const profile of request.profiles) {
-      expect(block.detail).toContain(profile.linkedinUrl);
-      expect(block.detail).toContain(profile.evidenceUrl);
-      expect(block.detail).not.toContain("Assessment version");
-    }
-    for (const rule of request.ruleChanges)
-      expect(block.detail).toContain(rule.replace("token-secret", "[redacted]"));
   });
 
   it("shows a send from the recruiter's own mailbox as the email itself, confirmed once", () => {

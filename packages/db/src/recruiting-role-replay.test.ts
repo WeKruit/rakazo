@@ -372,7 +372,7 @@ describe("pre-brief immutable recruiting role receipt replay", () => {
       if (boundary === "thread") f.saved.workspace.role.sourceThreadId = "other-thread";
       if (boundary === "brief")
         Object.assign(f.row, {
-          brief: { searchFilters: [], fields: [], questions: [], rules: [], confirmation: null },
+          brief: { searchFilters: [], fields: [], questions: [], rules: [] },
         });
       await expect(
         executeRecruitingRoleMutation(f.prisma, actor, f.context, f.input),

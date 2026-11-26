@@ -31,15 +31,16 @@ function recruiterBlocks(message: {
   );
 }
 
-/** The recruiter's latest own message in a conversation, with the blocks a role starts from. */
-async function latestRecruiterMessage(
+/** The recruiter's own messages in a conversation, newest first, with the blocks a role starts from. */
+async function recruiterMessages(
   prisma: Pick<PrismaClient, "message">,
   threadId: string,
-): Promise<{ id: string; blocks: MessageBlock[] } | undefined> {
+  count: number,
+): Promise<{ id: string; blocks: MessageBlock[] }[]> {
   const recent = await prisma.message.findMany({
     where: { threadId, role: "user", botId: null },
     orderBy: { seq: "desc" },
-    take: 10,
+    take: 10 + count,
     select: {
       id: true,
       role: true,
@@ -49,11 +50,20 @@ async function latestRecruiterMessage(
       externalTranscriptFor: { select: { id: true } },
     },
   });
-  for (const message of recent) {
-    const blocks = message.externalTranscriptFor ? undefined : recruiterBlocks(message);
-    if (blocks) return { id: message.id, blocks };
-  }
-  return undefined;
+  return recent
+    .flatMap((message) => {
+      const blocks = message.externalTranscriptFor ? undefined : recruiterBlocks(message);
+      return blocks ? [{ id: message.id, blocks }] : [];
+    })
+    .slice(0, count);
+}
+
+/** The recruiter's latest own message in a conversation. */
+async function latestRecruiterMessage(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<{ id: string; blocks: MessageBlock[] } | undefined> {
+  return (await recruiterMessages(prisma, threadId, 1))[0];
 }
 
 /** The id of the role conversation opened under a key. */
@@ -194,13 +204,23 @@ export async function startRoleFromRecruiterMessage(
     title?: string;
     /** Requirements Kruit gathered from earlier messages, when the latest one alone lacks them. */
     earlier?: string;
+    /**
+     * How many of the recruiter's messages before the latest also belong to this role, as Kruit
+     * counted them. They are copied with the latest one, oldest first. Staging 11-26: after
+     * Stop the recruiter wrote 「继续吧」 and the role opened with only those words, no JD.
+     */
+    earlierMessages?: number;
   },
 ): Promise<boolean> {
   if (!run.sourceMessageId) return false;
   // The recruiter's latest message here: a turn resumed by answering a card keeps the
   // card's original message as its source, but the role was asked for in the answer.
-  const blocks = (await latestRecruiterMessage(deps.prisma, run.threadId))?.blocks;
-  if (!blocks) return false;
+  const blocks = (
+    await recruiterMessages(deps.prisma, run.threadId, 1 + (role.earlierMessages ?? 0))
+  )
+    .reverse()
+    .flatMap((message) => message.blocks);
+  if (!blocks.length) return false;
   // A JD sent only as a file still starts the role; its team reads the file.
   const text = blocks
     .flatMap((block) =>

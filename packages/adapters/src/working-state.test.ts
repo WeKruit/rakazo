@@ -29,6 +29,8 @@ function fakePrisma(input: {
   round?: Row | null;
   /** Each card role's latest calibration round. */
   rounds?: Row[];
+  /** Saved rows of the people those rounds showed. */
+  shownPeople?: Row[];
   /** The account's active roles, and its archived ones. */
   roleCount?: number;
   archivedCount?: number;
@@ -36,8 +38,11 @@ function fakePrisma(input: {
   return {
     recruitingCalibrationRound: {
       findFirst: vi.fn(async () => input.round ?? null),
-      findMany: vi.fn(async () => input.rounds ?? []),
+      findMany: vi.fn(async () =>
+        (input.rounds ?? []).map((round) => ({ candidateKeys: [], ...round })),
+      ),
     },
+    recruitingCandidateOccurrence: { findMany: vi.fn(async () => input.shownPeople ?? []) },
     chatGroup: { findMany: vi.fn(async () => input.groups ?? []) },
     recruitingRole: {
       findMany: vi.fn(async ({ where }: { where: { id?: unknown } }) =>
@@ -443,21 +448,6 @@ describe("loadWorkingState", () => {
       now,
     );
     expect(handedOff.language).toBe("zh");
-    // fosp 11-23 (d6c65687): the brief confirmation the product posts as the recruiter's is
-    // English, and made a Chinese recruiter's role conversation English.
-    const confirmed = await loadWorkingState(
-      fakePrisma({
-        recruiter: [
-          text("Confirm recruiting brief for Senior Data Engineer · 上海 (requirements version 2)."),
-        ],
-        account: [text("候选人要会普通话")],
-      }) as never,
-      scope,
-      thread,
-      (t) => t,
-      now,
-    );
-    expect(confirmed.language).toBe("zh");
   });
 
   it("takes no language from the copy of the recruiter's message a new role opens with", async () => {
@@ -577,7 +567,12 @@ describe("loadWorkingState", () => {
                 status: "shown",
                 statusAt: new Date(now - 5 * 60_000),
                 approvedAt: null,
+                candidateKeys: ["k1", "k2"],
               },
+            ],
+            shownPeople: [
+              { roleId: "role-1", name: "Steven Choi" },
+              { roleId: "role-1", name: "Wensong Jing" },
             ],
             messagesByThread: {
               t1: [
@@ -602,6 +597,8 @@ describe("loadWorkingState", () => {
     expect(none).toContain("calendar: none connected");
     expect(none).toContain("12 people saved · round 2 shown in the role team's chat 5 min ago");
     expect(none).toContain("(Sourcer, 30 min ago; its counts may be older");
+    // Staging 11-26: three people named without their role cost seven reads before the first line.
+    expect(none).toContain("People in its latest round: Steven Choi, Wensong Jing");
     expect(await card({ id: "gcal" }, null)).not.toContain("calendar: none connected");
     expect(await card(null, { id: "composio-gcal" })).not.toContain("calendar: none connected");
   });

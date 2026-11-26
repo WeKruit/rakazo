@@ -29,6 +29,12 @@ describe("roundCriteria", () => {
               expression: { kind: "atom", statement: "data engineer titles only" },
               sourceRefs: [{ id: "x", anchor: { kind: "message", messageId: "m-after" } }],
             },
+            // Also saved as a field: judged once.
+            {
+              id: "place",
+              priority: "hard",
+              expression: { kind: "atom", statement: "Seattle metro, hybrid" },
+            },
           ],
           brief: {
             fields: [

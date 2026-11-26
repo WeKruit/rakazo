@@ -27,7 +27,7 @@ function deps(source: unknown, already: unknown = null) {
     tx,
     deps: {
       prisma: {
-        message: { findMany: vi.fn(async () => (source ? [source] : [])) },
+        message: { findMany: vi.fn(async () => (source ? [source].flat() : [])) },
         $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
       },
       events: { notify: vi.fn(async () => undefined) },
@@ -93,6 +93,23 @@ describe("startRoleFromRecruiterMessage", () => {
             /^Start finding candidates now\n\n.*earlier.*\nSenior nurse, Austin TX, 5\+ years ICU$/s,
           ),
         }),
+      }),
+    );
+  });
+
+  it("hands over the earlier message with the JD when the latest only says to go on (staging 2026-11-26, stop-then-continue)", async () => {
+    const mine = { role: "user", botId: null, clientNonce: null, externalTranscriptFor: null };
+    const { deps: d, tx } = deps([
+      { ...mine, id: "m-2", blocks: [{ kind: "text", text: "继续吧" }] },
+      { ...mine, id: "m-1", blocks: [{ kind: "text", text: "高级数据工程师，上海，5 年以上" }] },
+      { ...mine, id: "m-0", blocks: [{ kind: "text", text: "你好" }] },
+    ]);
+    expect(
+      await startRoleFromRecruiterMessage(d as never, run, { ...role, earlierMessages: 1 }),
+    ).toBe(true);
+    expect(tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ prompt: "高级数据工程师，上海，5 年以上\n继续吧" }),
       }),
     );
   });

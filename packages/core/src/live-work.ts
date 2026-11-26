@@ -116,7 +116,6 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   recruiting_reply: "drafting",
   recruiting_crm_target: "crm",
   recruiting_crm_import: "crm",
-  recruiting_request_approval: "question",
   ask_user: "question",
   run_subagent: "specialist",
   wait_for_work: "waiting",

@@ -355,7 +355,6 @@ import {
   approveRecruitingCalibrationRound,
   archiveRecruitingRole,
   bindRecruitingRole,
-  confirmRecruitingBrief,
   createRecruitingCandidateNote,
   createRecruitingReminder,
   createRecruitingRole,
@@ -4459,14 +4458,6 @@ export function createRouter(deps: RouterDeps) {
       ),
       editCriteria: authed.recruiting.editCriteria.handler(async ({ context, input }) => {
         const saved = await editRecruitingCriteria(deps.prisma, context.actor, input, {
-          artifacts: deps.artifacts,
-          context: connectionContext(context.actor, randomUUID()),
-        });
-        await notifyRecruitingChange(deps, context.actor, input.threadId);
-        return saved;
-      }),
-      confirmBrief: authed.recruiting.confirmBrief.handler(async ({ context, input }) => {
-        const saved = await confirmRecruitingBrief(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
           context: connectionContext(context.actor, randomUUID()),
         });

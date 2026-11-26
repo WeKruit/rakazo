@@ -410,7 +410,7 @@ export const JOURNEYS = [
       "When the first people show, tell Kruit which two or three are not a fit and why, in one short message.",
       "Check Kruit says plainly what it changed for the next people, without asking you to rate everyone.",
       "Ask for a few more people and check none of the rejected ones come back and the new ones follow your feedback.",
-      "Open the role's Results page and check the rejected people are marked and the new people show.",
+      "Open the role's Results page; type one rejected person's name in its search box and check that row's status says Passed (the first screen holds only the best matches, and people you turned down sort below them), then check the new people show.",
     ],
   },
   {
