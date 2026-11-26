@@ -328,7 +328,7 @@ export function nextPlaybookStep(
             stage,
             label: "Find the first 10 people",
             next: { step: "find_first_10", count: CALIBRATION_TARGET },
-            prompt: `The role is saved. In this turn, run the calibration quick search with the platform people search now (issue four web_search_advanced_exa people searches in the same step; each result is saved automatically → pick ${CALIBRATION_TARGET} people → calibration_round), and list them directly without a progress message first. ${ONLY_OWN_LIST}`,
+            prompt: `The role is saved. In this turn, run the calibration quick search with the platform people search now (issue four web_search_advanced_exa people searches in the same step; each result is saved automatically → their grading run → pick ${CALIBRATION_TARGET} graded people → calibration_round), and list them directly without a progress message first. ${ONLY_OWN_LIST}`,
           }
         : {
             stage,

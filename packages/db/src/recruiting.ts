@@ -7995,8 +7995,9 @@ export async function saveRecruitingCandidatePeopleSearch(
       actor,
       { run, thread, role, saving, trusted, file },
       {
-        // A person's grade for the role is given once: the check that ran on this search, or the
-        // search's own grade. Someone already graded keeps theirs when a later search finds them.
+        // A person's grade for the role is given once, by the search that graded them (the
+        // requirement check's verdicts ride with it and never grade anyone). Someone already
+        // graded keeps theirs when a later search finds them.
         rows: captured.rows.map((entry) => {
           const key = normalizeRecruitingCandidateRow(entry.row, {
             schemaKnown: true,
@@ -8004,11 +8005,10 @@ export async function saveRecruitingCandidatePeopleSearch(
           if (key && graded.has(key)) return entry;
           const check = (entry as { check?: Prisma.InputJsonObject }).check;
           const { match_tier: tier, match_score: score } = check ?? entry.row;
-          return typeof tier === "string" &&
-            SEARCH_MATCH_TIERS.has(tier) &&
-            typeof score === "number"
-            ? { ...entry, matchFields: check ?? { match_score: score, match_tier: tier } }
-            : entry;
+          if (typeof tier === "string" && SEARCH_MATCH_TIERS.has(tier) && typeof score === "number")
+            return { ...entry, matchFields: check ?? { match_score: score, match_tier: tier } };
+          // Verdicts on people no search has graded yet are kept; they carry no grade.
+          return check ? { ...entry, matchFields: check } : entry;
         }),
         describe: ({ artifact, observedAt, candidateRows }) => ({
           source: {
@@ -8029,6 +8029,8 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
+              // Where the person is relative to the place the recruiter asked for.
+              ...(typeof saved.location_tag === "string" ? { locationTag: saved.location_tag } : {}),
               ...gradeShown(captured.rows[row.rowIndex]!, graded.has(row.candidateKey)),
               email: (saved._profile as { email?: string | null } | undefined)?.email ?? null,
               _profile: saved._profile,

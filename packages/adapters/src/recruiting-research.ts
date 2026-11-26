@@ -23,7 +23,7 @@ import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
-import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
+import { isPeopleSearchEndpoint, linkedinPersonKey, peopleFromSearch } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
@@ -510,6 +510,62 @@ export async function excludeFoundPeople(
     : args;
 }
 
+/** The full profile text this run's people searches returned, by person. */
+async function profileTexts(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+): Promise<Map<string, string>> {
+  const texts = new Map<string, string>();
+  try {
+    for (const call of await listRunToolResults(prisma, { ...actor } as Actor, actor.runId!))
+      if (isPeopleSearchEndpoint(call.endpoint))
+        for (const person of peopleFromSearch(call.result, call.endpoint)) {
+          const key = linkedinPersonKey(person.linkedin_url);
+          if (key && person._profile_text && !texts.has(key)) texts.set(key, person._profile_text);
+        }
+  } catch {
+    // Without the text the people are graded and checked on what their row holds.
+  }
+  return texts;
+}
+
+/**
+ * People sent for grading carry the profile text our search already returned, so the grade rests
+ * on that text instead of a fresh lookup by name (measured 11-26: with only a name and link half
+ * came back "insufficient public evidence" and one was graded as a namesake).
+ */
+async function withProfileText(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  people: unknown[],
+): Promise<unknown[]> {
+  const texts = await profileTexts(prisma, actor);
+  if (!texts.size) return people;
+  return people.map((person) => {
+    const key = linkedinPersonKey(record(person)?.linkedin_url);
+    const profile = key ? texts.get(key) : undefined;
+    return profile ? { ...record(person), profile } : person;
+  });
+}
+
+/**
+ * Rows a grading run returns hold only the grade, so each keeps the profile text the search
+ * returned for that person: the requirement check then reads the same text the grade came from.
+ */
+export async function keepProfileText(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  entries: Array<{ row: Record<string, unknown> }>,
+): Promise<void> {
+  if (entries.every(({ row }) => row._profile_text)) return;
+  const texts = await profileTexts(prisma, actor);
+  for (const { row } of entries) {
+    const key = linkedinPersonKey(row.linkedin_url);
+    const text = key ? texts.get(key) : undefined;
+    if (text && !row._profile_text) row._profile_text = text;
+  }
+}
+
 /** Most saved people sent as one agent run's exclusion list. */
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
@@ -578,7 +634,10 @@ export async function prepareAgentRun(
     outputSchema: grading ? AGENT_RUN_GRADE_SCHEMA : (args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA),
   };
   // People given to grade are already saved; leaving them out would leave nothing to grade.
-  if (grading) return prepared;
+  if (grading)
+    return actor.runId
+      ? { ...prepared, input: { ...record(args.input), data: await withProfileText(prisma, actor, toGrade) } }
+      : prepared;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
   const saved = await prisma.recruitingCandidate.findMany({

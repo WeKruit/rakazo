@@ -55,15 +55,18 @@ type BriefField = {
   sourceRefIds?: unknown;
 };
 
-/** The brief fields the recruiter stated themselves, as requirements in their words. */
-function statedFields(brief: unknown): Requirement[] {
+/**
+ * The brief fields the recruiter stated themselves, as requirements in their words; with
+ * everyOrigin, the JD's too, which a pasted job states for them.
+ */
+function statedFields(brief: unknown, everyOrigin = false): Requirement[] {
   const fields = (brief as { fields?: unknown } | null)?.fields;
   if (!Array.isArray(fields)) return [];
   return (fields as BriefField[]).flatMap((field) =>
     typeof field?.key === "string" &&
     typeof field.value === "string" &&
     field.state === "known" &&
-    field.origin === "user_instruction"
+    (field.origin === "user_instruction" || (everyOrigin && field.origin === "jd"))
       ? [
           {
             id: `brief:${field.key}`,
@@ -89,6 +92,7 @@ function statedFields(brief: unknown): Requirement[] {
 export async function roundCriteria(
   prisma: PrismaClient,
   input: { roleId: string; spaceId: string },
+  options: { everyOrigin?: boolean } = {},
 ): Promise<RoundCriterion[]> {
   const { roleId } = input;
   const [role, last, turnedDown] = await Promise.all([
@@ -117,7 +121,7 @@ export async function roundCriteria(
     }),
   ]);
   const stated = [
-    ...statedFields(role?.currentRevision.brief),
+    ...statedFields(role?.currentRevision.brief, options.everyOrigin),
     ...hardCriteria(role?.currentRevision.criteria),
   ];
   const cited = [...new Set(stated.flatMap((requirement) => requirement.messages))];

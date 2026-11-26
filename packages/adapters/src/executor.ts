@@ -658,7 +658,7 @@ import {
   withoutShownBefore,
 } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
-import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
+import { keepProfileText, lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_DIRECT_NOTICE,
   trackDirectRecruitingResearch,
@@ -5952,7 +5952,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (criterion) => [criterion.id, criterion.statement],
                 ),
               ),
-              next: "These people are in chat now; the round is not recorded yet. Carry on as the Fill rule says and record the ten with calibration_round, starting with these same people in the same order. Never ask anything or end the turn before calibration_round records the round.",
+              next: "These people are in chat now; the round is not recorded yet. Record the ten with calibration_round now, as the First ten rule says. Never ask anything or end the turn before calibration_round records the round.",
             };
           }
           const candidateOperation =
@@ -9319,22 +9319,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     request,
                     context,
                     applied.effect.id,
-                    async (found) =>
-                      checkPeopleCriteria(
+                    async (found) => {
+                      await keepProfileText(
+                        deps.prisma,
+                        { userId: run.userId, spaceId: run.spaceId, runId },
+                        found,
+                      );
+                      await checkPeopleCriteria(
                         deps.judge,
                         deps.prisma,
-                        {
-                          roleId,
-                          spaceId: run.spaceId,
-                          revision: role.revision,
-                          request:
-                            (await recruiterWords(deps.prisma, thread.id)).reverse().join("\n") ||
-                            (typeof connectorCall.args?.query === "string"
-                              ? connectorCall.args.query
-                              : undefined),
-                        },
+                        { roleId, spaceId: run.spaceId, revision: role.revision },
                         found,
-                      ),
+                      );
+                    },
                   );
                   // Compact rows keep a 25-person search inside one tool result, so the pick
                   // never needs a follow-up read of the clipped output.
