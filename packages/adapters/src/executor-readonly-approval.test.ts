@@ -265,7 +265,12 @@ function fixture({
       async ({
         where,
       }: {
-        where?: { id?: string; runId?: string; status?: string | { in: string[] }; kind?: string };
+        where?: {
+          id?: string;
+          runId?: string;
+          status?: string | { in: string[] };
+          kind?: string | { endsWith: string };
+        };
       } = {}) =>
         effects.filter((effect) => {
           if (
@@ -275,7 +280,13 @@ function fixture({
               : where.status.in.includes(effect.status))
           )
             return false;
-          if (where?.kind && effect.kind !== where.kind) return false;
+          if (
+            where?.kind &&
+            (typeof where.kind === "string"
+              ? effect.kind !== where.kind
+              : !effect.kind.endsWith(where.kind.endsWith))
+          )
+            return false;
           if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
           if (where?.id && effect.id !== where.id) return false;
           return true;
@@ -2158,6 +2169,54 @@ describe.each([
   }
 });
 
+describe.each([false, true])("a reply to a candidate (catalog: %s)", (catalog) => {
+  const replyFixture = () =>
+    fixture({
+      name: "renamed_reply",
+      catalog,
+      readOnly: false,
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "reply_to_email",
+      },
+      inputSchema: { type: "object" },
+    });
+
+  it("shows the questions the recruiter never answered on its card, and still drafts it", async () => {
+    const f = replyFixture();
+    f.setCalls([
+      {
+        args: { ...replyArgs, open_questions: ["Do you offer relocation?"] },
+        executionId: "reply",
+      },
+    ]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            mailReply: expect.objectContaining({ openQuestions: ["Do you offer relocation?"] }),
+          }),
+        ],
+      }),
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it("goes to its card when none is open, and the mail service never sees the field", async () => {
+    const f = replyFixture();
+    f.setCalls([{ args: { ...replyArgs, open_questions: [] }, executionId: "reply" }]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual(replyArgs);
+  });
+});
+
 const sendActions = [
   { id: "allow", label: "Send" },
   { id: "deny", label: "Discard" },
@@ -2771,6 +2830,57 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
         blocks: [],
       }),
     );
+  });
+
+  it("gives the agent a turn to save the recruiter's answers once a reply listing open questions is sent", async () => {
+    const editedBody = "Relocation is up to $10,000.";
+    const f = replyFixture({ structuredContent: { ...sentEmail, body: { text: editedBody } } });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    effect.request = editMailReplyRequest(effect.request, draft, {
+      action: "send",
+      body: editedBody,
+      cc: [],
+    });
+    effect.result = {
+      mailReplyApproval: {
+        ...draft,
+        body: editedBody,
+        openQuestions: ["Do you offer relocation?"],
+        status: "sending",
+      },
+    };
+    effect.status = "approved";
+    f.runtimeRun.mockClear();
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.runtimeRun).toHaveBeenCalledOnce();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain('"Do you offer relocation?"');
+  });
+
+  it("also does when the recruiter discarded the card that listed them and answered in words", async () => {
+    const f = replyFixture({ structuredContent: sentEmail });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    f.effects.unshift({
+      ...effect,
+      id: "discarded-card",
+      kind: "instantly__demo__reply_to_email",
+      runId: "earlier-run",
+      idempotencyKey: "earlier-card",
+      status: "denied",
+      result: { mailReplyApproval: { ...draft, openQuestions: ["Can you transfer my H-1B?"] } },
+    });
+    effect.status = "approved";
+    effect.result = { mailReplyApproval: { ...draft, status: "sending" } };
+    f.runtimeRun.mockClear();
+    await f.run();
+    expect(f.runtimeRun).toHaveBeenCalledOnce();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain('"Can you transfer my H-1B?"');
   });
 
   it.each([

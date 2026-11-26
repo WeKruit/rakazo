@@ -15,6 +15,7 @@ export const RU_MESSAGES: Record<string, string> = {
   "Address change requested": "Запрошено изменение адреса",
   "View email": "Показать письмо",
   "Hide email": "Скрыть письмо",
+  "The candidate asked what you haven't told me. Answer it in the reply:": "Кандидат спросил то, чего вы мне ещё не сказали. Ответьте в письме:",
   "Reply draft": "Черновик ответа",
   "Needs approval": "Требуется подтверждение",
   Discarded: "Отклонено",
