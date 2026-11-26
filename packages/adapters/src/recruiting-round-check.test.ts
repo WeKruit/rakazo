@@ -4,7 +4,6 @@ import {
   listedBeforeRound,
   roundCriteria,
   roundListedNotRecorded,
-  roundPeopleNamed,
   roundRepeats,
   withoutShownBefore,
 } from "./recruiting-round-check.js";
@@ -165,97 +164,6 @@ describe("roundListedNotRecorded", () => {
     findMany.mockResolvedValueOnce([]);
     await expect(
       roundListedNotRecorded(prisma, { roleId: "role-1", after: "2026-11-15T04:48:02Z" }),
-    ).resolves.toBeNull();
-  });
-});
-
-describe("roundPeopleNamed", () => {
-  const prismaFor = (text: string, approvedAt: Date | null = null) =>
-    ({
-      thread: { findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role-1" })) },
-      message: { findUnique: vi.fn(async () => ({ blocks: [{ kind: "text", text }] })) },
-      recruitingCalibrationRound: {
-        findFirst: vi.fn(async () => ({ round: 1, candidateKeys: ["a", "b", "c"], approvedAt })),
-      },
-      recruitingCandidateOccurrence: {
-        findMany: vi.fn(async () => [
-          { candidateKey: "a", name: "Ryan Braley" },
-          { candidateKey: "b", name: "Parthasarathi Samantaray" },
-          { candidateKey: "c", name: "Mohamed Hassan" },
-        ]),
-      },
-    }) as unknown as PrismaClient;
-  const input = { threadId: "thread", messageId: "message" };
-
-  // Staging play, 11-15: this message was recorded as accepting the round.
-  it("finds the people a mixed message turns down, by number or name", async () => {
-    await expect(
-      roundPeopleNamed(
-        prismaFor("#3 is off. parthasarathi is a technical architect. find me more like the rest"),
-        input,
-      ),
-    ).resolves.toEqual({
-      round: 1,
-      named: ["Parthasarathi Samantaray", "Mohamed Hassan"],
-      keys: ["b", "c"],
-    });
-  });
-
-  // Staging edb7834f: the recruiter's words reach the role's lead quoted in a handoff, and "the
-  // amazon ones" names people by their company; the next round left all of them unreviewed.
-  it("reads a handed-in message and finds people by their company", async () => {
-    const prisma = prismaFor("");
-    (prisma.message.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      blocks: [
-        {
-          kind: "bot_message_received",
-          text: 'The recruiter wrote, word for word:\n"kwang is LA based and half of these are amazon again"',
-        },
-      ],
-    });
-    (
-      prisma.recruitingCandidateOccurrence.findMany as ReturnType<typeof vi.fn>
-    ).mockResolvedValueOnce([
-      { candidateKey: "a", name: "Kwang Hyun Jang", company: "Apple" },
-      { candidateKey: "b", name: "Vinay Thanikonda", company: "Amazon" },
-      { candidateKey: "c", name: "Sashank Y.", company: "TikTok" },
-    ]);
-    await expect(roundPeopleNamed(prisma, input)).resolves.toEqual({
-      round: 1,
-      named: ["Kwang Hyun Jang", "Vinay Thanikonda"],
-      keys: ["a", "b"],
-    });
-  });
-
-  it("reads only the recruiter's quoted words, never the person Kruit's note names", async () => {
-    const prisma = prismaFor("");
-    (prisma.message.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      blocks: [
-        {
-          kind: "bot_message_received",
-          text: 'The recruiter wrote, word for word:\n"kwang is LA based"\n\nKruit\'s note, only on who and what this refers to:\nVinay Thanikonda at Amazon',
-        },
-      ],
-    });
-    (
-      prisma.recruitingCandidateOccurrence.findMany as ReturnType<typeof vi.fn>
-    ).mockResolvedValueOnce([
-      { candidateKey: "a", name: "Kwang Hyun Jang", company: "Apple" },
-      { candidateKey: "b", name: "Vinay Thanikonda", company: "Amazon" },
-    ]);
-    await expect(roundPeopleNamed(prisma, input)).resolves.toEqual({
-      round: 1,
-      named: ["Kwang Hyun Jang"],
-      keys: ["a"],
-    });
-  });
-
-  it("finds nobody in a plain request for more, or once the round is approved", async () => {
-    await expect(
-      roundPeopleNamed(prismaFor("these look right, find 20 more"), input),
-    ).resolves.toBeNull();
-    await expect(
-      roundPeopleNamed(prismaFor("ryan is off, find more", new Date()), input),
     ).resolves.toBeNull();
   });
 });

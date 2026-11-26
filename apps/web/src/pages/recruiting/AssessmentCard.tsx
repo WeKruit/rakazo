@@ -203,7 +203,7 @@ export function AssessmentCard({
                   <span
                     className={`min-w-0 flex-1 text-muted-foreground ${expanded ? "" : "truncate"}`}
                   >
-                    {verdict ?? (expanded ? null : row.text || t`No evidence provided.`)}
+                    {verdict ?? (expanded ? null : row.text || (name ? null : t`No evidence provided.`))}
                   </span>
                   {hasDetail ? (
                     <ChevronDown

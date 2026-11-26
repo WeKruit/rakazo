@@ -5,7 +5,6 @@ import {
   listRecruitingGradedCandidateKeys,
   readRecruitingResultsMarks,
 } from "@rakazo/db";
-import { handedInRecruiterWords } from "./global-role-writes.js";
 
 /**
  * What the recruiter asked for on a role, as the agent saved it: the role's requirement memory.
@@ -325,80 +324,4 @@ export async function feedbackBeforeRound(
       },
     ];
   });
-}
-
-const GENERIC_COMPANY_WORD =
-  /^(?:data|tech\w*|people|group|global|systems?|solutions?|software|digital|services?|consult\w*|labs?|health\w*|senior|engineer\w*|cloud|inc|corp\w*|company|international|united|american|national|first|new)$/;
-
-/** What the recruiter said in a message: a handed-in quote is their words, never Kruit's note. */
-function saidText(blocks: unknown): string[] {
-  return (Array.isArray(blocks) ? blocks : []).flatMap((block) => {
-    const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
-    if (typeof text !== "string") return [];
-    if (kind === "text") return [text];
-    return kind === "bot_message_received" ? [handedInRecruiterWords(text) ?? text] : [];
-  });
-}
-
-/**
- * People of the latest unapproved round that the recruiter's message names, by a name of theirs,
- * their number in the round ("#6") or their company ("the amazon ones"). A message that names
- * some of them is usually turning them down, which is feedback for the next round rather than
- * acceptance of this one. A message handed in by a teammate quotes the recruiter's words.
- */
-export async function roundPeopleNamed(
-  prisma: PrismaClient,
-  input: { threadId: string; messageId: string },
-): Promise<{ round: number; named: string[]; keys: string[] } | null> {
-  const [thread, message] = await Promise.all([
-    prisma.thread.findUnique({
-      where: { id: input.threadId },
-      select: { activeRecruitingRoleId: true },
-    }),
-    prisma.message.findUnique({ where: { id: input.messageId }, select: { blocks: true } }),
-  ]);
-  const roleId = thread?.activeRecruitingRoleId;
-  if (!roleId || !message) return null;
-  const text = saidText(message.blocks).join("\n");
-  const round = await prisma.recruitingCalibrationRound.findFirst({
-    where: { roleId },
-    orderBy: { round: "desc" },
-    select: { round: true, candidateKeys: true, approvedAt: true },
-  });
-  if (!text || !round || round.approvedAt) return null;
-  const people = await prisma.recruitingCandidateOccurrence.findMany({
-    where: { roleId, candidateKey: { in: round.candidateKeys }, name: { not: null } },
-    distinct: ["candidateKey"],
-    select: { candidateKey: true, name: true, company: true },
-  });
-  const said = text.toLowerCase();
-  const says = (word: string) =>
-    new RegExp(`(?<![\\p{L}])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`, "u").test(
-      said,
-    );
-  const numbers = new Set(
-    [...said.matchAll(/(?:#|\bno\.?\s*|\bnumber\s+)(\d{1,2})\b/g)].map((match) => Number(match[1])),
-  );
-  const words = (value: string | null | undefined) =>
-    (value ?? "")
-      .toLowerCase()
-      .split(/[\s,.()&/-]+/)
-      .filter((word) => word.length >= 4);
-  const named = round.candidateKeys.flatMap((key, index) => {
-    const person = people.find((row) => row.candidateKey === key);
-    const name = person?.name?.trim();
-    // The company's first word: "Amazon" for "Amazon Web Services (AWS)"; a generic word such as
-    // "People" (People Tech Group) names nobody.
-    const company = words(person?.company).find((word) => !GENERIC_COMPANY_WORD.test(word));
-    return words(name).some(says) || (company && says(company)) || numbers.has(index + 1)
-      ? [{ key, name: name ?? `#${index + 1}` }]
-      : [];
-  });
-  return named.length
-    ? {
-        round: round.round,
-        named: named.map((person) => person.name),
-        keys: named.map((person) => person.key),
-      }
-    : null;
 }
