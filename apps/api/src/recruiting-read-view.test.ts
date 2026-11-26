@@ -7,13 +7,11 @@ const reads = vi.hoisted(() => ({
   workspace: vi.fn(),
   candidates: vi.fn(),
   research: vi.fn(),
-  grading: vi.fn(),
 }));
 vi.mock("./recruiting.js", () => ({
   getRecruitingWorkspace: reads.workspace,
   listRecruitingCandidates: reads.candidates,
   listRecruitingResearch: reads.research,
-  recruitingRoleGrading: reads.grading,
 }));
 const actor = {
   userId: "test-user",
@@ -36,7 +34,6 @@ beforeEach(() => {
   reads.workspace.mockResolvedValue(workspace);
   reads.candidates.mockResolvedValue(page);
   reads.research.mockResolvedValue({ tasks: [], actions: [], observations: [] });
-  reads.grading.mockResolvedValue(false);
 });
 
 it("returns a candidate view only after a fresh scoped post-read binding check", async () => {
@@ -186,11 +183,4 @@ it("refuses a later research page after session revocation", async () => {
     readRecruitingView(deps, actor, { ...researchInput, offset: 200 }, authorized),
   ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   expect(reads.research).toHaveBeenCalledOnce();
-});
-
-it("marks a candidate page while the Reviewer is scoring the role", async () => {
-  reads.grading.mockResolvedValue(true);
-  const result = await readRecruitingView(deps, actor, input);
-  expect(result.data).toEqual({ ...page, grading: true });
-  expect(reads.grading).toHaveBeenCalledWith(deps.prisma, actor, "role");
 });

@@ -93,6 +93,7 @@ import {
   RecruitingShortlistToolInputSchema,
   RecruitingShortlistToolResultSchema,
   RecruitingSourceRefSchema,
+  RecruitingStoredGradesRequestSchema,
   RetainedRecruitingApprovalRequestSchema,
   ReviseRecruitingRoleInput,
   recruitingCandidateRanking,
@@ -7719,14 +7720,15 @@ type CsvImportInput = Extract<RecruitingResearchToolInput, { operation: "import_
  */
 function unassessedPageRequest(
   request: unknown,
-): CsvImportInput | PeopleSearchInput | GradesInput | null {
+): CsvImportInput | PeopleSearchInput | StoredGradesInput | null {
   const parsed = RecruitingResearchToolInputSchema.safeParse(request);
-  return parsed.success &&
-    (parsed.data.operation === "import_csv" ||
-      parsed.data.operation === "save_search" ||
-      parsed.data.operation === "save_grades")
-    ? parsed.data
-    : null;
+  if (parsed.success)
+    return parsed.data.operation === "import_csv" || parsed.data.operation === "save_search"
+      ? parsed.data
+      : null;
+  // A grade page the retired quality check saved is still read like any other stored page.
+  const grades = RecruitingStoredGradesRequestSchema.safeParse(request);
+  return grades.success ? grades.data : null;
 }
 
 /** Artifact nonce of an unassessed page's receipt, by the operation that saved it. */
@@ -8029,6 +8031,8 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
+              // The search's own sentence on why it returned the person.
+              reason: saved.why_recommended ?? null,
               // Where the person is relative to the place the recruiter asked for.
               ...(typeof saved.location_tag === "string" ? { locationTag: saved.location_tag } : {}),
               ...gradeShown(captured.rows[row.rowIndex]!, graded.has(row.candidateKey)),
@@ -8045,180 +8049,7 @@ export async function saveRecruitingCandidatePeopleSearch(
   });
 }
 
-type GradesInput = Extract<RecruitingResearchToolInput, { operation: "save_grades" }>;
-
-/**
- * Uncertain means the profile can't tell; a requirement the profile shows is not met makes the
- * person Partial, as the grading rubric says. Branch fosp 11-21 (c8635512): someone located in
- * Singapore for a Shanghai role was saved Uncertain and filled a round's last place.
- */
-function gradeTier(grade: { match_tier: string; requirements_assessment: { status: string }[] }) {
-  return grade.match_tier === "Uncertain" &&
-    grade.requirements_assessment.some((item) => item.status === "not_met")
-    ? "Partial"
-    : grade.match_tier;
-}
-
-/** The requirements this person's profile says nothing about, so the round can ask about them. */
-function unknownRequirements(grade: {
-  requirements_assessment: { requirement: string; status: string }[];
-}) {
-  return grade.requirements_assessment
-    .filter((item) => item.status === "unknown")
-    .slice(0, 6)
-    .map((item) => item.requirement.trim().slice(0, 120));
-}
-
-/** Canonical receipt bytes for one save_grades call; recomputed here, never trusted from the caller. */
-export function recruitingGradesReceipt(input: GradesInput) {
-  return {
-    version: 1,
-    kind: "reviewer_grades",
-    request: input,
-    rows: input.rows.map((row, rowIndex) => ({ rowIndex, row })),
-  };
-}
-
-/**
- * Save the quality check's own grades as one page on the thread's role. Every graded person must
- * already be saved for the role: grading never adds anyone.
- */
-export async function saveRecruitingCandidateGrades(
-  prisma: PrismaClient,
-  actor: Actor,
-  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
-  raw: GradesInput,
-  captured: { outputArtifact: RecruitingResearchArtifactInput },
-) {
-  const input = RecruitingResearchToolInputSchema.parse(raw);
-  if (
-    input.operation !== "save_grades" ||
-    stableJsonValue(input) !==
-      stableJsonValue(RecruitingResearchToolInputSchema.parse(trusted.effectRequest))
-  )
-    throw new IsolationError();
-  return prisma.$transaction(async (tx) => {
-    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
-    );
-    const saving = await tx.externalEffect.findFirst({
-      where: {
-        id: trusted.effectId,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        kind: "recruiting_research",
-      },
-    });
-    if (
-      saving?.kind !== "recruiting_research" ||
-      saving.runId !== run.id ||
-      stableJsonValue(RecruitingResearchToolInputSchema.parse(saving.request)) !==
-        stableJsonValue(input)
-    )
-      throw new IsolationError();
-    if (saving.status === "completed") return saving.result;
-    requireResearchLease(run, trusted);
-    if (saving.status !== "executing" || !thread.activeRecruitingRoleId) throw new IsolationError();
-    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
-    // A grade is about the person, so it is saved on the current revision even when the lead
-    // updated the role while the Reviewer graded. Staging 11-16: every round's first grade save
-    // was refused this way and saved again unchanged with the new number, half a minute later.
-    if (!role.currentRevisionId || input.expectedRoleRevision > role.revision)
-      throw new RecruitingConflictError();
-    const typed = input.rows.map((grade) => {
-      const row: Record<string, string> = { name: grade.name, linkedin_url: grade.linkedin_url };
-      if (grade.current_title) row.current_title = grade.current_title;
-      if (grade.current_company) row.current_company = grade.current_company;
-      if (grade.location) row.location = grade.location;
-      return {
-        row,
-        matchFields: {
-          match_score: grade.match_score,
-          match_tier: gradeTier(grade),
-          ...(unknownRequirements(grade).length ? { unknown: unknownRequirements(grade) } : {}),
-        },
-        candidateKey: normalizeRecruitingCandidateRow(row, { schemaKnown: true }).candidateKey,
-      };
-    });
-    const saved = new Set(
-      (
-        await tx.recruitingCandidate.findMany({
-          where: {
-            roleId: role.id,
-            candidateKey: {
-              in: typed.flatMap((row) => (row.candidateKey ? [row.candidateKey] : [])),
-            },
-          },
-          select: { candidateKey: true },
-        })
-      ).map((candidate) => candidate.candidateKey),
-    );
-    // A grade whose link was mistyped is matched to the one saved person with that name.
-    // Staging 11-15: one misspelled link refused every grade of the batch, again and again, and
-    // the search's people stayed unscored.
-    const mistyped = typed.filter((row) => !row.candidateKey || !saved.has(row.candidateKey));
-    const named = mistyped.length
-      ? await tx.recruitingCandidateOccurrence.findMany({
-          where: {
-            roleId: role.id,
-            linkedinUrl: { not: null },
-            OR: mistyped.map((row) => ({
-              name: { equals: row.row.name?.trim() ?? "", mode: "insensitive" as const },
-            })),
-          },
-          distinct: ["candidateKey"],
-          select: { candidateKey: true, name: true, linkedinUrl: true },
-        })
-      : [];
-    const unmatched: string[] = [];
-    for (const row of mistyped) {
-      const same = named.filter(
-        (person) => person.name?.trim().toLowerCase() === row.row.name?.trim().toLowerCase(),
-      );
-      const only = same.length === 1 ? same[0] : undefined;
-      if (only?.linkedinUrl) {
-        row.row.linkedin_url = only.linkedinUrl;
-        row.candidateKey = only.candidateKey;
-      } else unmatched.push(`${row.row.name} (${row.row.linkedin_url})`);
-    }
-    if (unmatched.length)
-      throw new RecruitingGradeRowsError(
-        `Grade only people already saved for this role, with their saved LinkedIn profile link. Not saved for this role: ${unmatched.join("; ")}. Copy their link exactly from the list you were given, or leave them out, and save the grades again.`,
-      );
-    // A person graded twice keeps the last grade.
-    const last = new Map(typed.map((row) => [row.candidateKey, row]));
-    const rows = [...last.values()].map((row, rowIndex) => ({ rowIndex, ...row }));
-    const bytes = Buffer.from(stableJsonValue(recruitingGradesReceipt(input)));
-    const file = captured.outputArtifact;
-    if (
-      file.hash !== createHash("sha256").update(bytes).digest("hex") ||
-      file.size !== bytes.length ||
-      file.clientNonce !== `recruiting-grades:${saving.id}`
-    )
-      throw new IsolationError();
-    return saveUnassessedCandidatePage(
-      tx,
-      actor,
-      { run, thread, role, saving, trusted, file },
-      {
-        rows,
-        describe: ({ artifact, observedAt, candidateRows }) => ({
-          source: {
-            kind: "reviewer_grades",
-            gradedBy: { userId: actor.userId, runId: run.id },
-            observedAt: observedAt.toISOString(),
-          },
-          outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-          graded: candidateRows.length,
-        }),
-      },
-    );
-  });
-}
-
-/** A save_grades call named someone who is not saved for the role. */
-export class RecruitingGradeRowsError extends Error {}
+type StoredGradesInput = ReturnType<typeof RecruitingStoredGradesRequestSchema.parse>;
 
 type UnassessedPageContext = {
   run: { id: string; botId: string; threadId: string };
@@ -9081,8 +8912,7 @@ export function candidateIndexQuery(
     ) match ON true
     LEFT JOIN LATERAL (
       -- A person's grade is the newest saved tier, whoever gave it: the search grades the people
-      -- it returns, so a tier needs no separate grading page to count (same rule as
-      -- countRecruitingRoleGrades, which the agent's "N fit" comes from).
+      -- it returns, so a tier needs no separate grading page to count.
       SELECT o."pageId", page."roleRevisionId", CASE
         WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
           THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade,
@@ -12193,25 +12023,13 @@ async function candidateByOtherKeyShape(
   return near.length === 1 ? (near[0] ?? null) : null;
 }
 
-/**
- * A role's people by their newest saved grade. A request for N people counts one thing: people
- * graded Strong or Promising whom a round has shown the recruiter (`fitShown`). Staging 42e30040:
- * with only the fit people in Results counted, Kruit said "reached 60" with 20 shown, then gave
- * 60, 61 and 63 as the count in turn.
- */
-export async function countRecruitingRoleGrades(
+/** The role's people whose newest grade from the search is Strong or Promising. */
+export async function listRecruitingFitCandidateKeys(
   prisma: Pick<PrismaClient, "$queryRaw">,
   roleId: string,
-): Promise<{ fit: number; fitShown: number; checked: number }> {
-  const [row] = await prisma.$queryRaw<{ fit: number; fitShown: number; checked: number }[]>(
-    Prisma.sql`
-    SELECT (count(*) FILTER (WHERE g.grade IN ('Strong', 'Promising')))::int AS fit,
-      (count(*) FILTER (WHERE g.grade IN ('Strong', 'Promising') AND EXISTS (
-        SELECT 1 FROM "recruiting_calibration_rounds" r
-        WHERE r."roleId" = ${roleId} AND r."status" = 'shown'
-          AND g."candidateKey" = ANY(r."candidateKeys"))))::int AS "fitShown",
-      count(*)::int AS checked
-    FROM (
+): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ candidateKey: string }[]>(Prisma.sql`
+    SELECT g."candidateKey" FROM (
       SELECT DISTINCT ON (o."candidateKey") o."candidateKey", CASE
         WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
           THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade
@@ -12220,9 +12038,8 @@ export async function countRecruitingRoleGrades(
       WHERE o."roleId" = ${roleId} AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'
       ORDER BY o."candidateKey", p."observedAt" DESC, p."effectId" DESC
     ) g
-    WHERE g.grade IS NOT NULL`,
-  );
-  return row ?? { fit: 0, fitShown: 0, checked: 0 };
+    WHERE g.grade IN ('Strong', 'Promising')`);
+  return rows.map((row) => row.candidateKey);
 }
 
 export async function listRecruitingCandidateSources(

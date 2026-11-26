@@ -40,7 +40,6 @@ function handlers(): BackgroundJobHandlers {
     "messaging.deliver": vi.fn(async () => undefined),
     "cloud_agent.poll": vi.fn(async () => undefined),
     "recruiting_research.poll": vi.fn(async () => undefined),
-    "recruiting_grade.start": vi.fn(async () => undefined),
     "recruiting_checkin.start": vi.fn(async () => undefined),
     "recruiting_agent_run.wait": vi.fn(async () => undefined),
     "recruiting_profile.project": vi.fn(async () => undefined),
@@ -260,20 +259,20 @@ describe("GraphileJobPublisher.enqueue", () => {
     const runAt = new Date("2030-01-01T00:00:00.000Z");
     const lockedAt = new Date("2029-12-31T23:59:00.000Z");
     const jobs = new Map<string, Job>([
-      ["recruiting_grade.start:thread-1", { attempts: 1, maxAttempts: 25, runAt, lockedAt }],
+      ["recruiting_checkin.start:thread-1", { attempts: 1, maxAttempts: 25, runAt, lockedAt }],
     ]);
     const { publisher, addJob } = publisherOver(jobs);
     const nextAt = new Date("2030-01-01T00:00:30.000Z");
     await publisher.enqueue({
-      name: "recruiting_grade.start",
+      name: "recruiting_checkin.start",
       payload: { threadId: "thread-1" },
-      replaceKey: "recruiting_grade.start:thread-1",
+      replaceKey: "recruiting_checkin.start:thread-1",
       availableAt: nextAt,
       keepExisting: true,
     });
     const options = addJob.mock.calls[0]?.[2] as { jobKeyMode?: string } | undefined;
     expect(options?.jobKeyMode).toBeUndefined();
-    expect(jobs.get("recruiting_grade.start:thread-1")).toEqual({
+    expect(jobs.get("recruiting_checkin.start:thread-1")).toEqual({
       attempts: 0,
       maxAttempts: 25,
       runAt: nextAt,

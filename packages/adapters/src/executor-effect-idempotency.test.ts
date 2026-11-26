@@ -6732,11 +6732,10 @@ describe("native recruiting assessment effect delivery", () => {
     expect([...REVISIONED_RESEARCH_OPERATIONS].sort()).toEqual([
       "calibration_round",
       "import_csv",
-      "save_grades",
       "save_results",
       "save_search",
     ]);
-    for (const operation of ["show_picks", "status", "rows"]) {
+    for (const operation of ["status", "rows"]) {
       expect(REVISIONED_RESEARCH_OPERATIONS.has(operation)).toBe(false);
       const parsed = RecruitingResearchToolInputSchema.safeParse({
         operation,

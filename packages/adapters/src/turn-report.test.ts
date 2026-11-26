@@ -101,12 +101,9 @@ describe("TurnReportLedger", () => {
     expect(ledger.lastWork()).toBe("people_saved");
   });
 
-  it("treats a recorded round and shown picks as their own report", () => {
+  it("treats a recorded round as its own report", () => {
     const ledger = new TurnReportLedger(true);
     ledger.tool("1", "exa__web_search_advanced_exa", { query: "x" });
-    ledger.tool("2", "recruiting_research", { operation: "show_picks" });
-    ledger.settle("2", { ok: true });
-    expect(ledger.owed()).toEqual([]);
     ledger.tool("3", "recruiting_research", { operation: "calibration_round" });
     expect(ledger.owed()).toEqual([]);
     expect(ledger.lastWork()).toBe("round");

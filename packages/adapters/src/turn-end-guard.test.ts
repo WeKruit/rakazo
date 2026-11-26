@@ -8,13 +8,13 @@ import {
 } from "./turn-end-guard.js";
 
 describe("recruitingRoundListText", () => {
-  it("lists the ten with the profile passage each saved search returned", async () => {
+  it("lists the ten with each search's own reason for the person", async () => {
     const keys = Array.from({ length: 10 }, (_, i) => `person-${i}`);
     const searches = vi.fn(async () => [
       {
         result: {
           candidateRows: [
-            { candidateKey: "person-0", name: "Person 0", snippet: "Built warehouse ops" },
+            { candidateKey: "person-0", name: "Person 0", reason: "Built warehouse ops" },
           ],
         },
       },
@@ -47,9 +47,7 @@ describe("recruitingRoundListText", () => {
     expect(text).toContain("10. **Person 9** · Warehouse Manager · Example Co · Atlanta");
   });
 
-  it("shows the check's reason for a person in place of the search's passage", async () => {
-    // Branch fr 11-21: a checked person's line quoted his team's name from the search, not the
-    // Spark and Kafka work the check had read, and the recruiter took him for a backend engineer.
+  it("describes a judged person by the verdicts, never by the profile's opening words", async () => {
     const prisma = {
       externalEffect: {
         findMany: vi.fn(async () => [
@@ -57,36 +55,43 @@ describe("recruitingRoundListText", () => {
             request: { operation: "save_search" },
             result: {
               candidateRows: [
-                { candidateKey: "linkedin:/in/kt", name: "KT", snippet: "Joined the ECS team" },
-                { candidateKey: "linkedin:/in/ana", name: "Ana", snippet: "Built warehouse ops" },
-              ],
-            },
-          },
-          {
-            request: {
-              operation: "save_grades",
-              rows: [
                 {
-                  linkedin_url: "https://www.linkedin.com/in/kt/",
-                  fit_reasons: "Runs Spark streaming pipelines on Kafka topics in production.",
+                  candidateKey: "linkedin:/in/zy",
+                  snippet: "Aug 2021 - Present (4 years and 11 months) in Shanghai",
+                  reason: "Data engineer in Shanghai",
                 },
               ],
             },
-            result: {},
           },
         ]),
       },
-      recruitingCandidateOccurrence: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [
+          {
+            candidateKey: "linkedin:/in/zy",
+            name: "ZY",
+            matchFields: {
+              criteria: [
+                { statement: "5+ years of pipelines", level: "strong" },
+                { statement: "Spark or Flink", level: "medium" },
+                { statement: "Mandarin", level: "silent" },
+                { statement: "too managerial", level: "silent", avoid: true },
+              ],
+            },
+          },
+        ]),
+      },
     } as never;
     const text = await recruitingRoundListText(prisma, {
       threadId: "thread-1",
       spaceId: "space-1",
       roleId: "role-1",
-      candidateKeys: ["linkedin:/in/kt", "linkedin:/in/ana"],
+      candidateKeys: ["linkedin:/in/zy"],
+      unverified: { "linkedin:/in/zy": "Mandarin not confirmed" },
     });
-    expect(text).toContain("> Runs Spark streaming pipelines on Kafka topics in production.");
-    expect(text).not.toContain("ECS team");
-    expect(text).toContain("> Built warehouse ops");
+    expect(text).toContain("> Meets 2 of 3 requirements; not stated: Mandarin");
+    expect(text).not.toContain("4 years and 11 months");
+    expect(text).not.toContain("Not verified");
   });
 
   it("links each name to the LinkedIn profile its key names", async () => {

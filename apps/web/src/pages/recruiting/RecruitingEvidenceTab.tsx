@@ -368,7 +368,6 @@ export function RecruitingEvidenceTab({
               readCacheScope={readCacheScope}
               autumn={{
                 items: candidatePage?.items ?? [],
-                grading: candidatePage?.grading,
                 loading: candidateLoading && !candidatePage,
                 failed: candidateFailed,
                 retry: () => setFeedbackRefresh((value) => value + 1),

@@ -616,11 +616,11 @@ msgstr ""
 
 #. placeholder {0}: workspace.role.title
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review all {count} shortlisted candidates for {0} using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
+msgid "Re-check all {count} shortlisted candidates for {0} against this role's latest requirements. Save the results; do not send outreach or change approvals."
 msgstr ""
 
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review only these {count} selected candidates using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
+msgid "Re-check only these {count} selected candidates against this role's latest requirements. Save the results; do not send outreach or change approvals."
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -4560,10 +4560,6 @@ msgstr ""
 
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Schools"
-msgstr ""
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Scoring…"
 msgstr ""
 
 #: src/pages/recruiting/RoleSetup.tsx

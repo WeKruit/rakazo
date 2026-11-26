@@ -497,8 +497,8 @@ async function main() {
 
   logger.info("boot.phase", { phase: "ready", "boot.elapsed_ms": Math.round(performance.now()) });
   logger.info("worker ready", { degraded: secrets.describe().capabilities.degraded ?? false });
-  // Every account with a recruiting crew gets the current defaults (its Reviewer in every
-  // conversation, the tools it grades with) on each release, not only when the person signs in.
+  // Every account with a recruiting crew gets the current defaults on each release, not only
+  // when the person signs in.
   void backfillRecruitingCrews(
     prisma,
     { sandboxKind: sandboxProvider, firstPartyMcpUrl: trustedMcpEndpoint, signal: shutdown.signal },

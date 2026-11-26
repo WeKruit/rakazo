@@ -328,7 +328,7 @@ export function nextPlaybookStep(
             stage,
             label: "Find the first 10 people",
             next: { step: "find_first_10", count: CALIBRATION_TARGET },
-            prompt: `The role is saved. In this turn, run the calibration quick search with the platform people search now (issue four web_search_advanced_exa people searches in the same step; each result is saved automatically → their grading run → pick ${CALIBRATION_TARGET} graded people → calibration_round), and list them directly without a progress message first. ${ONLY_OWN_LIST}`,
+            prompt: `The role is saved. In this turn, run the calibration quick search with the platform people search now (issue four web_search_advanced_exa people searches in the same step; each result is saved automatically → pick ${CALIBRATION_TARGET} of the returned people → calibration_round), and list them directly without a progress message first. ${ONLY_OWN_LIST}`,
           }
         : {
             stage,
@@ -361,7 +361,7 @@ export function nextPlaybookStep(
         label: "Wider search",
         next: { step: "scale" },
         prompt:
-          "This round is accepted, so widen the search toward the number the recruiter named, as the Short-round rule says. Every query carries every hard requirement. The number is people graded Strong or Promising and shown in rounds, never how many Results hold: each search and round result gives fitShown, the count you tell the recruiter. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
+          "This round is accepted, so widen the search toward the number the recruiter named, as the Short-round rule says. Every query carries every hard requirement. The number is people shown in rounds and not turned down, never how many Results hold: each search and round result gives it as counted. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
       };
     case "enrichment":
       return {

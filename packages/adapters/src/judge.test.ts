@@ -83,8 +83,6 @@ describe("JudgeSettings", () => {
         { statement: "too managerial", level: "strong", avoid: true },
         { statement: "no Kafka", level: "opposite", avoid: true },
       ]),
-    ).toBe(
-      "R1: Met - Location: Shanghai; R2: Unknown - years: 5+, Spark; R3: Gap - no Kafka",
-    );
+    ).toBe("Met - Location: Shanghai\nUnknown - years: 5+; Spark\nGap - no Kafka");
   });
 });

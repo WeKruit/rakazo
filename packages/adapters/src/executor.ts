@@ -279,7 +279,6 @@ import {
   publishMailReplyCard,
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
-  RecruitingGradeRowsError,
   RecruitingIntentQuoteError,
   RecruitingSourceCheckError,
   RecruitingSourceValidationError,
@@ -384,7 +383,6 @@ import {
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
   showDelegatedTeamCard,
-  showRoundPicksWhereAsked,
   showRoundWhereAskedNow,
   teamProgress,
   waitForDelegatedAnswer,
@@ -624,12 +622,6 @@ import {
 } from "./recruiting-feedback.js";
 import { FULL_PROFILE_READS, withRequirementEvidence } from "./recruiting-full-profile.js";
 import {
-  GRADE_TOOL_CALL_STOP,
-  GRADING_REPLY_GUIDANCE,
-  gradingToolRefusal,
-  gradingTools,
-} from "./recruiting-grading.js";
-import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
   linkedinPersonKey,
@@ -638,10 +630,12 @@ import {
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
-import { checkPeopleCriteria } from "./recruiting-criteria-check.js";
+import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import {
   checkRound,
+  withoutGradedBelowFit,
   requestCounts,
+  roundCountLine,
   roundCriteria,
   withoutShownBefore,
 } from "./recruiting-round-check.js";
@@ -674,7 +668,6 @@ import {
   repairedRoleSave,
   resolveRecruitingResearchTool,
   saveNativeRecruitingCandidateResults,
-  saveRecruitingGrades,
   saveRecruitingPeopleSearch,
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
@@ -3806,18 +3799,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const tools =
           run.trigger === "created"
             ? []
-            : run.trigger === "recruiting_grade"
-              ? gradingTools(listedTools, run.clientNonce)
-              : run.trigger === "recruiting_checkin"
-                ? checkinTools(listedTools)
-                : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
-        if (run.trigger === "recruiting_grade")
-          getLogger().info("recruiting.grade.tools", {
-            runId: run.id,
-            directResearch: tools.some((tool) => /^mcp__.+__research$/.test(tool.name)),
-            catalog: tools.some((tool) => tool.name === "connectors_execute_tool"),
-            count: tools.length,
-          });
+            : run.trigger === "recruiting_checkin"
+              ? checkinTools(listedTools)
+              : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
           : undefined;
@@ -4384,7 +4368,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
-        let gradingToolCalls = 0;
         // Messages already told that a round shown after them answers them.
         let roundStream:
           | {
@@ -5134,24 +5117,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             return {};
           };
-          if (run.trigger === "recruiting_grade") {
-            const refusal = gradingToolRefusal(name, rawArgs, run.clientNonce, gradingToolCalls++);
-            if (gradingToolCalls > GRADE_TOOL_CALL_STOP) {
-              getLogger().warn("recruiting.grade.stopped", {
-                runId: run.id,
-                calls: gradingToolCalls,
-              });
-              runAbortController?.abort(new Error("Grading stopped after too many tool calls."));
-            }
-            getLogger().info("recruiting.grade.tool", {
-              runId: run.id,
-              name,
-              ...(name === "connectors_execute_tool" ? { id: String(rawArgs.id ?? "") } : {}),
-              ...(typeof rawArgs.operation === "string" ? { operation: rawArgs.operation } : {}),
-              refused: Boolean(refusal),
-            });
-            if (refusal) return { error: refusal };
-          }
           if (run.trigger === "recruiting_checkin") {
             const refusal = checkinToolRefusal(name);
             if (refusal) return { error: refusal };
@@ -5433,6 +5398,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ]),
               ),
             };
+          let roundLeftOut = 0;
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -5457,7 +5423,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return {
                 error: `Not recorded: all ${fresh.shownBefore} were already shown to the recruiter in an earlier round, so nothing was listed again. Record only people no round has shown, or say that nobody new fits yet.`,
               };
-            args = { ...args, candidateKeys: fresh.keys };
+            // Everyone a round lists counts toward the request, so nobody graded lower is listed.
+            const counted = await withoutGradedBelowFit(
+              deps.prisma,
+              thread.activeRecruitingRoleId,
+              fresh.keys,
+            );
+            if (!counted.keys.length)
+              return {
+                error: `Not recorded: all ${fresh.keys.length} were graded below Promising by the search, and a round lists only people who count toward the request. Record people graded Strong or Promising, or say that nobody new fits yet.`,
+              };
+            roundLeftOut = counted.leftOut;
+            args = { ...args, candidateKeys: counted.keys };
           }
           // One round check for everything the recruiter asked for (brief, criteria and the reasons
           // they turned people down): the agent's verdict on each decides who is in.
@@ -5556,51 +5533,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return {
               error: sanitizeConnectorError(researchInput.error, runSecrets),
             };
-          if (researchInput?.data?.operation === "show_picks") {
-            // Display only: the first good fits go into the round's chat list while more searches
-            // run; calibration_round records the ten and replaces the list.
-            const roleId = thread.activeRecruitingRoleId;
-            if (!roleId) return { error: "This conversation has no active role." };
-            const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
-            const keys = picked;
-            const text = await recruitingRoundListText(deps.prisma, {
-              chinese: turnLanguage === "zh",
-              threadId: run.threadId,
-              spaceId: run.spaceId,
-              roleId,
-              candidateKeys: keys,
-              knownOnly: true,
-            });
-            if (!text)
-              return {
-                error:
-                  "None of these is a saved person of this role. Use the exact candidateKeys from the people rows.",
-              };
-            roundStream ??= {
-              callId: executionId,
-              shown: 0,
-              posting: Promise.resolve(),
-            };
-            const stream = roundStream;
-            stream.shown = Math.max(stream.shown, keys.length);
-            stream.posting = stream.posting.then(() => showRoundList(text));
-            await stream.posting;
-            if (stream.messageId)
-              await showRoundPicksWhereAsked(deps, run, text, stream.messageId).catch((error) =>
-                getLogger().warn("round picks not shown where asked", { error: String(error) }),
-              );
-            return {
-              shown: keys.length,
-              // The requirements calibration_round's checks take a verdict on, so it records the
-              // first time.
-              checksOn: Object.fromEntries(
-                (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).map(
-                  (criterion) => [criterion.id, criterion.statement],
-                ),
-              ),
-              next: "These people are in chat now; the round is not recorded yet. Record the ten with calibration_round now, as the First ten rule says. Never ask anything or end the turn before calibration_round records the round.",
-            };
-          }
           const candidateOperation =
             name === "recruiting_feedback" &&
             args.target === "candidate" &&
@@ -5623,7 +5555,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (researchInput.data.operation === "save_results" ||
                 researchInput.data.operation === "import_csv" ||
                 researchInput.data.operation === "save_search" ||
-                researchInput.data.operation === "save_grades" ||
                 researchInput.data.operation === "calibration_round"));
           const researchActor = {
             actor: {
@@ -8880,8 +8811,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               !applied ||
               !deps.artifacts ||
-              // A grading run's agent run grades people already in Results; it adds no one.
-              run.trigger === "recruiting_grade" ||
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
               // Staging 83c32eba: a plain web search for people found two, held its share of the
@@ -8984,6 +8913,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         deps.prisma,
                         { roleId, spaceId: run.spaceId, revision: role.revision },
                         found,
+                        deps.profileReader,
                       );
                     },
                   );
@@ -9009,7 +8939,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     });
                   // Saved is not fit, and fit is not shown: every search states where the
                   // request stands.
-                  const counts = await requestCounts(deps.prisma, roleId);
+                  const counts = await requestCounts(deps.prisma, {
+                    roleId,
+                    userId: run.userId,
+                    spaceId: run.spaceId,
+                  });
                   // This search's own yield: how many it added, so a wave that adds few is seen.
                   const added = (saved as { newPeople?: unknown }).newPeople;
                   return {
@@ -9763,7 +9697,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (researchInput.data.operation !== "save_results" &&
                 researchInput.data.operation !== "import_csv" &&
                 researchInput.data.operation !== "save_search" &&
-                researchInput.data.operation !== "save_grades" &&
                 researchInput.data.operation !== "calibration_round")
             )
               return finish({
@@ -9814,7 +9747,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       { spaceId: run.spaceId, userId: run.userId },
                       thread.id,
                     ).catch(() => turnLanguage);
-                  const text = await recruitingRoundListText(deps.prisma, {
+                  const list = await recruitingRoundListText(deps.prisma, {
                     chinese: turnLanguage === "zh",
                     threadId: run.threadId,
                     spaceId: run.spaceId,
@@ -9827,6 +9760,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ]),
                     ),
                   });
+                  // The list ends with the count the request is measured by, in the server's words.
+                  const countLine = await requestCounts(deps.prisma, {
+                    roleId: recorded.roleId,
+                    userId: run.userId,
+                    spaceId: run.spaceId,
+                  })
+                    .then((counts) =>
+                      roundCountLine(
+                        counts,
+                        (recorded.candidateKeys as string[]).length,
+                        turnLanguage === "zh",
+                      ),
+                    )
+                    .catch(() => "");
+                  const text = countLine ? `${list}\n\n${countLine}` : list;
                   await roundStream?.posting;
                   await (roundStream?.messageId
                     ? showRoundList(text)
@@ -9848,7 +9796,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     run,
                     text,
                     applied.effect.id,
-                    roundStream?.messageId,
                   ).catch((error) =>
                     getLogger().warn("round not shown where asked", { error: String(error) }),
                   );
@@ -9861,7 +9808,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? {
                       ...round,
                       ...(typeof recorded?.roleId === "string"
-                        ? await requestCounts(deps.prisma, recorded.roleId).catch(() => ({}))
+                        ? await requestCounts(deps.prisma, {
+                            roleId: recorded.roleId,
+                            userId: run.userId,
+                            spaceId: run.spaceId,
+                          }).catch(() => ({}))
+                        : {}),
+                      ...(roundLeftOut
+                        ? {
+                            notListed: `${roundLeftOut} of the people you gave were graded below Promising, so they are not in this round's list and were not shown.`,
+                          }
                         : {}),
                       // Gate 9d632819: the turn began on an English JD, the recruiter went on in
                       // Chinese in the main chat, and the card after the round was English.
@@ -9888,22 +9844,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 );
                 if (!saved || typeof saved !== "object" || Array.isArray(saved)) return saved;
                 return { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP };
-              }
-              if (researchInput.data.operation === "save_grades") {
-                if (!applied || !claimedEffect) throw new IsolationError();
-                // Internal record keeping like save_search: page, rows and effect commit together.
-                return await saveRecruitingGrades(
-                  { prisma: deps.prisma, artifacts: deps.artifacts },
-                  {
-                    ...researchActor,
-                    leaseOwner: workerId,
-                    leaseFence: fence,
-                    effectId: applied.effect.id,
-                    effectRequest: applied.effect.request,
-                  },
-                  researchInput.data,
-                  context,
-                );
               }
               if (researchInput.data.operation === "import_csv") {
                 if (!applied || !claimedEffect) throw new IsolationError();
@@ -9965,7 +9905,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error instanceof RecruitingCandidateOutputError ||
                 error instanceof RecruitingCsvImportError ||
                 error instanceof RecruitingPeopleSearchError ||
-                error instanceof RecruitingGradeRowsError ||
                 error instanceof RecruitingCalibrationRoundError
               )
                 return finish({ error: error.message });
@@ -10107,7 +10046,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : thread.activeRecruitingRoleId
                   : null;
               const counts = listedRoleId
-                ? await requestCounts(deps.prisma, listedRoleId).catch(() => ({}))
+                ? await requestCounts(deps.prisma, {
+                    roleId: listedRoleId,
+                    userId: run.userId,
+                    spaceId: run.spaceId,
+                  }).catch(() => ({}))
                 : {};
               return finish(
                 redactConnectorPayload(
@@ -10245,6 +10188,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Native writes complete their immutable domain receipt in the same transaction.
             if (args.operation === "read" && !(await persistEffectResult(result)))
               return uncertainEffectResult(name);
+            // People saved before these requirements existed are judged on them now, beside the
+            // turn: nothing waits for it.
+            const savedRole = (result as { workspace?: { role?: { id?: unknown } } | null })
+              .workspace?.role?.id;
+            if (args.operation !== "read" && typeof savedRole === "string")
+              void checkUnjudgedPeople(
+                deps.judge,
+                deps.prisma,
+                { roleId: savedRole, spaceId: run.spaceId },
+                deps.profileReader,
+              );
             return deliverRecruitingRoleResult(result, args.operation === "read");
           }
           if (name === "read_memory") {
@@ -12151,15 +12105,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? (result as Record<string, unknown>)
                   : { providerResult: result };
               // Research runs in the background like an agent run: it gets the same countdown.
-              const countdown =
-                run.trigger === "recruiting_grade"
-                  ? null
-                  : await workEstimateForResearch(
-                      deps.prisma,
-                      run,
-                      followed,
-                      connectorCall.args,
-                    ).catch(() => null);
+              const countdown = await workEstimateForResearch(
+                deps.prisma,
+                run,
+                followed,
+                connectorCall.args,
+              ).catch(() => null);
               return finish({
                 ...body,
                 background: RECRUITING_RESEARCH_DIRECT_NOTICE,
@@ -12170,7 +12121,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // A people search still working when its call window closes is collected later by
             // the same agent, even after this turn ends.
             const stillRunning =
-              connectorCall.route?.toolName === "agent_run" && run.trigger !== "recruiting_grade"
+              connectorCall.route?.toolName === "agent_run"
                 ? runningAgentRunId(finished)
                 : undefined;
             if (stillRunning)
@@ -12193,7 +12144,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // The recruiter sees a countdown for a big search (a clock for a small one); the agent
             // hears the estimate once so it can tell them. Bookkeeping never fails the search.
             const countdown =
-              connectorCall.route?.toolName === "agent_run" && run.trigger !== "recruiting_grade"
+              connectorCall.route?.toolName === "agent_run"
                 ? await workEstimateAfterAgentRun(deps.prisma, run, finished, connectorCall.args)
                 : null;
             // The save sits between the search and the model's pick, so its cost is logged apart.
@@ -12320,27 +12271,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : createAsUpdateOfJobRole(call).then((prepared) => applyToolNow(...prepared))
           ).then(
             async (result) => {
-              if (run.trigger === "recruiting_grade") {
-                const error = toolResultError(result);
-                getLogger().info("recruiting.grade.tool_result", {
-                  runId: run.id,
-                  name,
-                  ok: error === undefined,
-                  ...(error === undefined
-                    ? {
-                        keys:
-                          result && typeof result === "object"
-                            ? Object.keys(result).slice(0, 12)
-                            : typeof result,
-                      }
-                    : {
-                        errorText: redactSecrets(
-                          typeof error === "string" ? error : JSON.stringify(error),
-                          runSecrets,
-                        ).slice(0, 300),
-                      }),
-                });
-              }
               const failure = toolResultError(result);
               if (failure === undefined && isSenderRead(name, rawArgs)) {
                 senderRead = true;
@@ -13712,10 +13642,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ...runModel,
             thinkingLevel: effortThinkingLevel(effortMode, runModel.thinkingLevel),
           };
-        // Grading follows the request's rubric while the recruiter waits for the checked round:
-        // staging 11-16, the save step spent 3.1k reasoning tokens (28 s) on ten grades.
-        if (run.trigger === "recruiting_grade" && runModel.thinkingLevel !== "off")
-          runModel = { ...runModel, thinkingLevel: "low" };
         // A handed-in stage's first step only says what it is doing and starts its reads, so it
         // runs at low thinking.
         if (handedIn && runModel.thinkingLevel !== "off")
@@ -16498,7 +16424,6 @@ export const TICKET_SILENT_REPLY_GUIDANCE =
   "Ticket work is reported on the board, not in chat. Put updates and results in ticket_comment and keep the ticket status current with ticket_update. Use the existing ask or approval mechanism when user input is needed. Leave the final reply empty.";
 
 export function runReplyGuidance(trigger: string): string {
-  if (trigger === "recruiting_grade") return GRADING_REPLY_GUIDANCE;
   if (isBackgroundRunTrigger(trigger)) return TICKET_SILENT_REPLY_GUIDANCE;
   return runAllowsSilentEmpty(trigger)
     ? ROUTINE_SILENT_REPLY_GUIDANCE
@@ -16842,7 +16767,7 @@ async function threadLaneBusy(
     ? await threadLaneAncestors(tx, run)
     : [];
   // A teammate's message carries the recruiter's request, like a person's turn: it does not wait
-  // behind background grading (staging 11-13: feedback waited 2 minutes behind a grade run).
+  // behind background work (staging 11-13: feedback waited 2 minutes behind a background run).
   // Neither does a turn resuming on the recruiter's card answer (staging 11-14: 103 s).
   const delegated = run.trigger === "bot_message" || run.leaseFence > 0;
   const blockers = await tx.run.count({
@@ -16852,11 +16777,7 @@ async function threadLaneBusy(
       id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
       ...(delegated
         ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } }
-        : // The Reviewer's grading batches run side by side; their start caps how many (s49 11-24:
-          // two batches of one round were started together and still ran one after the other).
-          run.trigger === "recruiting_grade"
-          ? { trigger: { not: "recruiting_grade" } }
-          : {}),
+        : {}),
       OR: [
         { status: { in: ["leased", "running"] } },
         // A delegated child inherits an active ancestor turn; queued work cannot preempt that turn.

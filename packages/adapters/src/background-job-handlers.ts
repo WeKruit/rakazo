@@ -170,8 +170,6 @@ export function createBackgroundJobHandlers(deps: {
         payload,
       );
     },
-    // People are checked by the lead's own helpers; a start queued before that change does nothing.
-    "recruiting_grade.start": async () => {},
     "recruiting_inbox.project": async (payload) => {
       await projectRecruitingInboxJob({ prisma: deps.prisma, events: deps.events }, payload);
     },

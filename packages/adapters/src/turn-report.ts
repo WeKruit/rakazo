@@ -46,7 +46,6 @@ const READ_OPERATIONS = new Set([
   "unassignedSequences",
   "campaigns",
   "campaignLeads",
-  "show_picks",
 ]);
 
 const RECRUITING_WORK: Record<string, TurnWork> = {
@@ -297,13 +296,7 @@ export class TurnReportLedger {
     const owed: TurnWork[] = [];
     for (const entry of entries) {
       const work = this.workOf(entry);
-      // The first picks shown in chat report the searches behind them, as the round's list does.
-      const shown =
-        entry.kind === "tool" &&
-        entry.name === "recruiting_research" &&
-        entry.args.operation === "show_picks" &&
-        this.settled.get(entry.id)?.ok === true;
-      if (entry.kind === "report" || work === "round" || shown) owed.length = 0;
+      if (entry.kind === "report" || work === "round") owed.length = 0;
       else if (work) owed.push(work);
     }
     return owed;
@@ -315,7 +308,7 @@ export class TurnReportLedger {
       (entry) =>
         entry.kind === "tool" &&
         entry.name === "recruiting_research" &&
-        (entry.args.operation === "calibration_round" || entry.args.operation === "show_picks") &&
+        entry.args.operation === "calibration_round" &&
         this.settled.get(entry.id)?.ok === true,
     );
   }

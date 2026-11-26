@@ -21,9 +21,8 @@ function fixture(
     lead?: boolean;
     linked?: number;
     grants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
-    reviewerGrants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
-    /** Recruiting conversations of this crew that lack its Reviewer. */
-    withoutReviewer?: { id: string; members: number }[];
+    /** The crew's retired Reviewer bots that are not archived yet. */
+    reviewers?: { id: string }[];
     /** Connected Google Calendars and the Scheduling bots of the crew. */
     calendars?: { id: string }[];
     scheduling?: { id: string }[];
@@ -65,38 +64,30 @@ function fixture(
       }),
     },
     bot: {
-      count: vi.fn(async () => (options.withoutReviewer ? 1 : 0)),
+      count: vi.fn(async () => 0),
       findFirst: vi.fn(async () => (options.lead === false ? null : { id: "main-bot" })),
       findMany: vi.fn(async ({ where }: { where: unknown }) =>
-        JSON.stringify(where).includes(":scheduling")
-          ? (options.scheduling ?? [])
-          : options.outreach && JSON.stringify(where).includes(":outreach")
-            ? options.outreach
-            : (missing[current] ?? []).map((id) => ({
-                id,
-                name: id.startsWith("outreach") ? "Outreach" : id,
-                spawnKey: null,
-              })),
+        JSON.stringify(where).includes(":reviewer")
+          ? (options.reviewers ?? [])
+          : JSON.stringify(where).includes(":scheduling")
+            ? (options.scheduling ?? [])
+            : options.outreach && JSON.stringify(where).includes(":outreach")
+              ? options.outreach
+              : (missing[current] ?? []).map((id) => ({
+                  id,
+                  name: id.startsWith("outreach") ? "Outreach" : id,
+                  spawnKey: null,
+                })),
       ),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
-    chatGroup: {
-      findMany: vi.fn(async () =>
-        (options.withoutReviewer ?? []).map((group) => ({
-          id: group.id,
-          _count: { members: group.members },
-        })),
-      ),
-    },
-    chatGroupMember: { createMany: vi.fn(async () => ({ count: 1 })) },
+    routine: { updateMany: vi.fn(async () => ({ count: 0 })) },
     botMcpServer: {
       count: vi.fn(async () => options.linked ?? 0),
-      // The Reviewer's grants answer only the query for its role.
       findMany: vi.fn(async ({ where }: { where: unknown }) =>
-        JSON.stringify(where).includes(":reviewer")
-          ? (options.reviewerGrants ?? [])
-          : options.gmailGrants && JSON.stringify(where).includes("serverId")
-            ? options.gmailGrants
-            : (options.grants ?? []),
+        options.gmailGrants && JSON.stringify(where).includes("serverId")
+          ? options.gmailGrants
+          : (options.grants ?? []),
       ),
       updateMany: vi.fn(async () => ({ count: 1 })),
       createMany: vi.fn(async () => {
@@ -107,33 +98,28 @@ function fixture(
   };
   const prisma = {
     ...tx,
-    $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
+    $transaction: vi.fn(async (work: ((client: typeof tx) => Promise<unknown>) | unknown[]) =>
+      typeof work === "function" ? work(tx) : Promise.all(work),
+    ),
   } as unknown as PrismaClient;
   return { prisma, tx };
 }
 
 describe("ensurePlatformServices", () => {
-  it("adds the Reviewer to every recruiting conversation of the crew that lacks it", async () => {
-    const f = fixture({
-      withoutReviewer: [
-        { id: "copy-1", members: 3 },
-        { id: "full", members: 6 },
-      ],
-    });
+  it("archives the crew's retired Reviewer and leaves an account without one alone", async () => {
+    const f = fixture({ reviewers: [{ id: "reviewer-bot" }] });
     await ensurePlatformServices(f.prisma, actor);
-    // bot.findFirst answers "main-bot" for the Reviewer lookup too.
-    expect(f.tx.chatGroupMember.createMany).toHaveBeenCalledWith({
-      data: [{ groupId: "copy-1", botId: "main-bot" }],
-      skipDuplicates: true,
+    expect(f.tx.bot.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["reviewer-bot"] }, archivedAt: null },
+      data: { archivedAt: expect.any(Date), pinned: false },
     });
-  });
-
-  it("gives the Reviewer the agent run it grades with", async () => {
-    const f = fixture({ reviewerGrants: [{ id: "g", allowAllTools: false, allowedTools: [] }] });
-    await ensurePlatformServices(f.prisma, actor);
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { allowedTools: ["agent_run"] } }),
-    );
+    expect(f.tx.routine.updateMany).toHaveBeenCalledWith({
+      where: { botId: { in: ["reviewer-bot"] } },
+      data: { active: false, nextRunAt: null },
+    });
+    const none = fixture();
+    await ensurePlatformServices(none.prisma, actor);
+    expect(none.tx.bot.updateMany).not.toHaveBeenCalled();
   });
 
   it("leaves every grant to the retired research service with no tools", async () => {

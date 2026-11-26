@@ -38,8 +38,8 @@ CONFIG_SECRET = "wekruit-recruiting-test-config"
 # keys) stays out of the process, and the network allowlist below backs that up.
 MODEL_ENV = ("OPENAI_API_KEY", "PI_DEFAULT_PROVIDER", "PI_DEFAULT_MODEL")
 MODEL_HOSTS = ["api.openai.com"]
-# --search: staging's people-search key and its host, plus the public profile pages the Reviewer
-# reads (contact lookups and email stay out). Without the pages every grade fell back to snippets.
+# --search: staging's people-search key and its host, plus the public profile pages the
+# per-requirement check reads (contact lookups and email stay out).
 SEARCH_ENV = ("EXA_API_KEY", "TYPESAFE_API_KEY")
 SEARCH_HOSTS = ["mcp.exa.ai", "www.linkedin.com", "api.typesafe.ai"]
 # --search also takes the judge's key, from its own Secret, so found people are checked as on staging.
