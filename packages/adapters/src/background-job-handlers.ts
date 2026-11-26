@@ -1,6 +1,7 @@
 import type {
   AgentHomeStore,
   AgentRuntime,
+  ArtifactStore,
   BackgroundJobHandlers,
   ConnectorProvider,
   JobPublisher,
@@ -61,6 +62,8 @@ export function createBackgroundJobHandlers(deps: {
   cloudAgent?: CloudAgentConnection | null;
   /** The native MCP connector; without it research tasks are not polled in the background. */
   connector?: ConnectorProvider;
+  /** Saved files; a reply's attachments read in the background are kept here. */
+  artifacts?: ArtifactStore;
   /**
    * Most worker slots scheduled runs may hold at once in this process, so a burst of routines
    * cannot take every slot from people chatting. Unset means no limit.
@@ -193,7 +196,12 @@ export function createBackgroundJobHandlers(deps: {
     "thread.reply_check": async () => {},
     "recruiting_checkin.start": async (payload) => {
       await startRecruitingCheckin(
-        { prisma: deps.prisma, jobs: deps.jobs, connector: deps.connector },
+        {
+          prisma: deps.prisma,
+          jobs: deps.jobs,
+          connector: deps.connector,
+          artifacts: deps.artifacts,
+        },
         payload,
       );
     },

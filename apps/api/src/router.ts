@@ -4127,6 +4127,7 @@ export function createRouter(deps: RouterDeps) {
             prisma: deps.prisma,
             connectors: deps.connectors,
             jobs: deps.jobs,
+            artifacts: deps.artifacts,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,
           },
