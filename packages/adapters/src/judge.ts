@@ -43,13 +43,8 @@ export interface TextJudge {
     state: Record<string, unknown>,
     requirements: readonly CriterionQuestion[],
     signal?: AbortSignal,
-    /** Also asked in the same request: which of these named grades fits the person overall. */
-    overall?: Readonly<Record<string, string>>,
-  ): Promise<CriteriaVerdicts | undefined>;
+  ): Promise<Map<string, CriterionVerdict> | undefined>;
 }
-
-/** The verdict on each requirement, and the overall grade when one was asked for and answered. */
-export type CriteriaVerdicts = Map<string, CriterionVerdict> & { overall?: string };
 
 /** A requirement to look for in a profile, in the words it was saved in. */
 export type CriterionQuestion = {
@@ -202,7 +197,7 @@ export function typeSafeJudge(
         return undefined;
       }
     },
-    async criteria(state, requirements, signal, overall) {
+    async criteria(state, requirements, signal) {
       try {
         const timeout = AbortSignal.timeout(CRITERIA_TIMEOUT_MS);
         const response = await fetchImpl("https://api.typesafe.ai/v1/systemone", {
@@ -228,15 +223,6 @@ export function typeSafeJudge(
                       },
                 ]),
               ),
-              ...(overall
-                ? {
-                    overall: {
-                      type: "choice",
-                      instructions: `How well does this person's profile fit a role that asks for all of the following? ${requirements.map((requirement) => requirement.statement).join("; ")}`,
-                      criteria: overall,
-                    },
-                  }
-                : {}),
             },
           }),
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
@@ -252,9 +238,7 @@ export function typeSafeJudge(
             }
           >;
         };
-        const verdicts: CriteriaVerdicts = new Map<string, CriterionVerdict>();
-        const grade = body.answers?.overall?.choice;
-        if (overall && typeof grade === "string" && grade in overall) verdicts.overall = grade;
+        const verdicts = new Map<string, CriterionVerdict>();
         for (const [index, requirement] of requirements.entries()) {
           const answer = body.answers?.[`q${index}`];
           if (requirement.place) {

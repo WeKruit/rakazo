@@ -1,12 +1,6 @@
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import type {
-  CriteriaVerdicts,
-  CriterionQuestion,
-  CriterionVerdict,
-  LanguageSignal,
-  TextJudge,
-} from "./judge.js";
+import type { CriterionQuestion, CriterionVerdict, LanguageSignal, TextJudge } from "./judge.js";
 import type { PageReader } from "./keyless-http-web.js";
 import type { RoundCriterion } from "./recruiting-round-check.js";
 import { roundCriteria } from "./recruiting-round-check.js";
@@ -40,17 +34,6 @@ export type CriteriaCheck = {
   match_score?: number;
 };
 
-/**
- * The grades the people search gives (its own definitions, recruiting-research.ts), asked of the
- * judge for a person no search graded: a quick search returns people without one.
- */
-const OVERALL_GRADES = {
-  Strong: "Every requirement is shown on the profile",
-  Promising: "Most requirements are shown and none is contradicted",
-  Uncertain: "The profile does not show enough to tell",
-  Partial: "A requirement is clearly not met",
-};
-
 const ASSESSED = {
   strong: "Met",
   medium: "Partial",
@@ -74,6 +57,26 @@ export function criteriaAssessment(
         `${ASSESSED[item.level as keyof typeof ASSESSED] ?? "Unknown"} - ${item.statement.replace(/\s*\n\s*/g, " ")}${item.place ? ` (${placeWords(item.place)})` : ""}`,
     )
     .join("\n");
+}
+
+/**
+ * The grade of a person no search graded (a quick search returns none), in the search's own grade
+ * words, read off the judge's verdicts so the grade and the lines under the person cannot disagree
+ * (11-26: asked as a question of its own, the judge said Strong for 17 of 26 people it had also
+ * judged partial or not met on a requirement).
+ */
+export function gradeOf(
+  criteria: ReadonlyArray<{ level: string; avoid?: boolean }>,
+): string | undefined {
+  const words = criteria
+    .filter((item) => !item.avoid || item.level === "opposite")
+    .map((item) => ASSESSED[item.level as keyof typeof ASSESSED] ?? "Unknown");
+  if (!words.length) return undefined;
+  if (words.includes("Gap")) return "Partial";
+  if (words.every((word) => word === "Met")) return "Strong";
+  return words.filter((word) => word === "Unknown").length * 2 > words.length
+    ? "Uncertain"
+    : "Promising";
 }
 
 /** A place tag as people read it: "there_before" is "there before". */
@@ -232,15 +235,8 @@ export async function checkPeopleCriteria(
           const profile = profileState(entry.row);
           if (!profile) return;
           const verdicts =
-            (questions.length
-              ? await judge.criteria?.(
-                  profile,
-                  questions,
-                  deadline,
-                  // A person no search graded is graded here, in the same words the search uses.
-                  typeof entry.row.match_tier === "string" ? undefined : OVERALL_GRADES,
-                )
-              : undefined) ?? (new Map<string, CriterionVerdict>() as CriteriaVerdicts);
+            (questions.length ? await judge.criteria?.(profile, questions, deadline) : undefined) ??
+            new Map<string, CriterionVerdict>();
           const index = String(entries.indexOf(entry));
           for (const [id, signals] of speaks) {
             const signal = signals.get(index);
@@ -250,9 +246,8 @@ export async function checkPeopleCriteria(
           if (!verdicts.size) return;
           const answered = requirements.filter((requirement) => verdicts.has(requirement.id));
           const { match_tier: tier, match_score: score } = entry.row;
-          entry.check = {
-            requirementsRevision: role.revision,
-            criteria: answered.map(({ place: _place, language: _language, ...requirement }) => {
+          const criteria = answered.map(
+            ({ place: _place, language: _language, ...requirement }) => {
               const verdict = verdicts.get(requirement.id)!;
               return {
                 ...requirement,
@@ -260,11 +255,16 @@ export async function checkPeopleCriteria(
                 confidence: verdict.confidence,
                 ...(verdict.place ? { place: verdict.place } : {}),
               };
-            }),
+            },
+          );
+          const grade = gradeOf(criteria);
+          entry.check = {
+            requirementsRevision: role.revision,
+            criteria,
             ...(typeof tier === "string" && typeof score === "number"
               ? { match_tier: tier, match_score: score }
-              : verdicts.overall
-                ? { match_tier: verdicts.overall }
+              : grade
+                ? { match_tier: grade }
                 : {}),
           };
           entry.row.requirements_assessment = criteriaAssessment(entry.check.criteria);
