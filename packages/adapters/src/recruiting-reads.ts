@@ -57,7 +57,6 @@ import {
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingCalibrationIdentity,
-  validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
@@ -69,7 +68,6 @@ import {
   IsolationError,
   projectRecruitingInboxMessages,
   RecruitingConflictError,
-  RecruitingSourceValidationError,
   rememberRecruitingSequenceObservation,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -128,8 +126,6 @@ export async function authenticated<T>(operation: () => Promise<T>): Promise<T> 
     if (error instanceof RecruitingConflictError)
       throw new ORPCError("CONFLICT", { message: error.message });
     if (error instanceof RecruitingPlaybookValidationError)
-      throw new ORPCError("BAD_REQUEST", { message: error.message });
-    if (error instanceof RecruitingSourceValidationError)
       throw new ORPCError("BAD_REQUEST", { message: error.message });
     if (error instanceof Error && error.name === "ZodError")
       throw new ORPCError("BAD_REQUEST", { message: "Invalid recruiting input" });
@@ -2740,10 +2736,15 @@ export const readRecruitingSource = (
         : pdf
           ? await extractDocumentText(bytes, row.mimeType)
           : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      const start = text.indexOf(source.quote);
-      const end = start + source.quote.length;
-      validateRecruitingTextSelection(text, start, end, source.quote);
-      return { kind: "text" as const, text, start, end };
+      // The saved quote is the agent's own copy: highlight it where the file has it, else show the file plain.
+      const found = text.indexOf(source.quote);
+      const start = Math.max(found, 0);
+      return {
+        kind: "text" as const,
+        text,
+        start,
+        end: found < 0 ? 0 : start + source.quote.length,
+      };
     } catch {
       throw new IsolationError();
     }

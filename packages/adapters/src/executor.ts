@@ -258,7 +258,6 @@ import {
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
   RecruitingSourceCheckError,
-  RecruitingSourceValidationError,
   readHistory,
   readNativeCrmWriteApproval,
   readNativeReplyEmailProof,
@@ -6936,7 +6935,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };
             if (
-              error instanceof RecruitingSourceValidationError ||
               error instanceof RecruitingPlaybookValidationError ||
               (error instanceof Error && error.name === "ZodError")
             )
