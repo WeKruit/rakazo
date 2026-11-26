@@ -2619,6 +2619,17 @@ describe("MCP connector session cache", () => {
     expect(tools.find((tool) => tool.name === "connectors_search_tools")?.description).not.toMatch(
       /create_booking/,
     );
+    // Kruit itself answers candidates and books from the conversation, so it lists those too.
+    expect(
+      (await discover({ name: "Main", spawnKey: "recruiting:u1:main" })).map((t) => t.name),
+    ).toEqual([
+      "mcp__demo__create_booking",
+      "mcp__demo__get_availability",
+      "mcp__demo__cancel_booking",
+      "connectors_search_tools",
+      "connectors_load_tool",
+      "connectors_execute_tool",
+    ]);
     // Another agent with the same connection keeps its tools in the catalog.
     expect((await discover({ name: "Researcher", spawnKey: null })).map((t) => t.name)).toEqual([
       "connectors_search_tools",

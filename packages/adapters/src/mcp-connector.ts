@@ -717,22 +717,37 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
 /** Tools listed outside the lazy catalog even when an agent has many connected tools. */
 const directTools = new WeakSet<ConnectorTool>();
 
+const OUTREACH_CORE = [
+  "ensure_role_campaign",
+  "add_shortlist_leads",
+  "activate_campaign",
+  "get_campaign",
+  "list_leads",
+  "get_email",
+  "reply_to_email",
+  "find_emails",
+];
 /**
  * Each recruiting agent's own work tools, listed outside the lazy catalog on whichever connection
  * the bot is assigned, so a turn never searches for them. Matched by the tool's own name; the
  * people search is already direct for every bot.
  */
 export const CORE_TOOLS: Readonly<Record<string, readonly string[]>> = {
-  outreach: [
-    "ensure_role_campaign",
-    "add_shortlist_leads",
-    "activate_campaign",
-    "get_campaign",
-    "list_leads",
-    "get_email",
-    "reply_to_email",
-    "find_emails",
+  // Kruit answers candidates and books calls from the conversation itself (a reply wake runs it,
+  // not a specialist), so those tools need no catalog search and load first either.
+  main: [
+    ...OUTREACH_CORE,
+    "get_availability",
+    "create_booking",
+    "reschedule_booking",
+    "cancel_booking",
+    "list_events",
+    "create_event",
+    "update_event",
+    "delete_event",
+    "suggest_time",
   ],
+  outreach: OUTREACH_CORE,
   scheduling: [
     "get_event_types",
     "get_event_type",
