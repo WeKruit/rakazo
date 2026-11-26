@@ -14,8 +14,13 @@ import { roundCriteria } from "./recruiting-round-check.js";
  * asks for it.
  */
 
-/** A requirement counts as missing only when the judge is this sure the profile lacks it. */
-const CLEARLY_ABSENT = 0.8;
+/**
+ * A person is out only when the judge is this sure the profile shows they do not meet a
+ * requirement. A profile that is silent on one keeps the fit and is marked (11-21, 11-25: only
+ * what a profile contradicts excludes; people not showing a must-have are listed last).
+ */
+const CLEARLY_AGAINST = 0.8;
+const SHOWN = { strong: 1, medium: 0.8, weak: 0.6, silent: 0.4, opposite: 0 } as const;
 /** A Worker keeps six outgoing requests open at once, so six people are judged together. */
 const TOGETHER = 6;
 const PROFILE_CHARS = 6_000;
@@ -39,12 +44,12 @@ export function criteriaGrade(
   // never changes the search's grade (find-60 play 11-25: of nine people it took the fit from,
   // seven were good, their passage just did not spell out the language or the exact title).
   if (searched) return { match_tier: searched.tier, match_score: searched.score };
-  const missing = verdicts.some((verdict) => verdict.absent >= CLEARLY_ABSENT);
-  const shown = verdicts.reduce((sum, verdict) => sum + (1 - verdict.absent), 0);
+  const missing = verdicts.some((verdict) => verdict.against >= CLEARLY_AGAINST);
+  const shown = verdicts.reduce((sum, verdict) => sum + SHOWN[verdict.level], 0);
   return {
     match_tier: missing
       ? "Partial"
-      : verdicts.every((verdict) => verdict.level !== "absent")
+      : verdicts.every((verdict) => verdict.level !== "silent" && verdict.level !== "opposite")
         ? "Strong"
         : "Promising",
     match_score: Math.round((100 * shown) / verdicts.length),

@@ -7899,14 +7899,17 @@ function gradeShown(entry: { row: Record<string, unknown>; check?: unknown }, al
     | undefined;
   const tier = check?.match_tier ?? entry.row.match_tier;
   if (typeof tier !== "string" || !SEARCH_MATCH_TIERS.has(tier)) return {};
-  const failed = (check?.criteria ?? []).filter((item) => item.level === "absent");
-  const notShown = failed.filter((item) => !item.avoid).map((item) => item.statement.slice(0, 80));
-  const turnedDownFor = failed
-    .filter((item) => item.avoid)
-    .map((item) => item.statement.slice(0, 80));
+  const said = (level: string, avoid: boolean) =>
+    (check?.criteria ?? [])
+      .filter((item) => item.level === level && !!item.avoid === avoid)
+      .map((item) => item.statement.slice(0, 80));
+  const notShown = said("silent", false);
+  const doesNotMeet = said("opposite", false);
+  const turnedDownFor = said("opposite", true);
   return {
     grade: tier,
     score: check?.match_score ?? entry.row.match_score ?? null,
+    ...(doesNotMeet.length ? { doesNotMeet } : {}),
     ...(notShown.length ? { notShown } : {}),
     ...(turnedDownFor.length ? { sameAsTurnedDown: turnedDownFor } : {}),
   };

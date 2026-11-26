@@ -33,8 +33,8 @@ describe("typeSafeJudge", () => {
   it("judges one person on every requirement in one request", async () => {
     const fetchImpl = answer({
       answers: {
-        q0: { choice: "strong", confidence: 0.9, probabilities: { absent: 0.01 } },
-        q1: { choice: "absent", confidence: 0.93, probabilities: { absent: 0.93 } },
+        q0: { choice: "strong", confidence: 0.9, probabilities: { opposite: 0.01 } },
+        q1: { choice: "opposite", confidence: 0.93, probabilities: { opposite: 0.93 } },
       },
     });
     const verdicts = await typeSafeJudge("key", fetchImpl).criteria?.({ profile: "Spark" }, [
@@ -42,15 +42,15 @@ describe("typeSafeJudge", () => {
       { id: "city", statement: "lives in Shanghai" },
     ]);
     expect(vi.mocked(fetchImpl)).toHaveBeenCalledTimes(1);
-    expect(verdicts?.get("spark")).toEqual({ level: "strong", confidence: 0.9, absent: 0.01 });
+    expect(verdicts?.get("spark")).toEqual({ level: "strong", confidence: 0.9, against: 0.01 });
     const grade = (searched?: { tier: string; score: number }) =>
       criteriaGrade([...verdicts!.values()], searched);
-    // A requirement the profile clearly lacks takes the fit away; the search's own grade stays.
-    expect(grade()).toEqual({ match_tier: "Partial", match_score: 53 });
+    // A requirement the profile clearly contradicts takes the fit away; the search's own grade stays.
+    expect(grade()).toEqual({ match_tier: "Partial", match_score: 50 });
     expect(grade({ tier: "Strong", score: 91 })).toEqual({ match_tier: "Strong", match_score: 91 });
     expect(criteriaGrade([verdicts!.get("spark")!])).toEqual({
       match_tier: "Strong",
-      match_score: 99,
+      match_score: 100,
     });
   });
 });

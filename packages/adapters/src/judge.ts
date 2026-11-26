@@ -52,19 +52,23 @@ export interface TextJudge {
  */
 export type CriterionQuestion = { id: string; statement: string; avoid?: boolean };
 
-export const CRITERION_LEVELS = ["strong", "medium", "weak", "absent"] as const;
-/** How clearly a profile shows one requirement, and how likely it is not shown at all. */
+export const CRITERION_LEVELS = ["strong", "medium", "weak", "silent", "opposite"] as const;
+/**
+ * How clearly a profile shows one requirement, and how likely it shows the person does not meet
+ * it. A profile that says nothing about a requirement is silent, which is not the opposite.
+ */
 export type CriterionVerdict = {
   level: (typeof CRITERION_LEVELS)[number];
   confidence: number;
-  absent: number;
+  against: number;
 };
 
 const CRITERION_CHOICES = {
   strong: "The profile states it clearly, with detail or years",
   medium: "The profile shows it but briefly or partly",
   weak: "Only an indirect hint",
-  absent: "The profile does not show it, or shows the opposite",
+  silent: "The profile says nothing either way about it",
+  opposite: "The profile shows the person does not meet it",
 };
 /** Many questions ride one request, so it gets a little longer than a single yes/no. */
 const CRITERIA_TIMEOUT_MS = 5_000;
@@ -202,7 +206,7 @@ export function typeSafeJudge(
             {
               choice?: unknown;
               confidence?: unknown;
-              probabilities?: { absent?: unknown };
+              probabilities?: { opposite?: unknown };
               noul?: unknown;
             }
           >;
@@ -215,19 +219,19 @@ export function typeSafeJudge(
             const same = answer?.noul;
             if (typeof same === "number")
               verdicts.set(requirement.id, {
-                level: same >= 0.5 ? "absent" : "strong",
+                level: same >= 0.5 ? "opposite" : "strong",
                 confidence: Math.max(same, 1 - same),
-                absent: same,
+                against: same,
               });
             continue;
           }
           const level = CRITERION_LEVELS.find((item) => item === answer?.choice);
           if (!level || typeof answer?.confidence !== "number") continue;
-          const absent = answer.probabilities?.absent;
+          const against = answer.probabilities?.opposite;
           verdicts.set(requirement.id, {
             level,
             confidence: answer.confidence,
-            absent: typeof absent === "number" ? absent : level === "absent" ? 1 : 0,
+            against: typeof against === "number" ? against : level === "opposite" ? 1 : 0,
           });
         }
         return verdicts.size ? verdicts : undefined;
