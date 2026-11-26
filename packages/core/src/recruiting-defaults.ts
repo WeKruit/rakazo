@@ -169,19 +169,14 @@ export const REPLY_IN_ENGLISH_NOTE =
   "The recruiter wrote in English: write every reply, summary, question and card of this turn in English, even where earlier messages were in Chinese.";
 
 /**
- * What start_role tells Main to say once the role's card is shown. The example is in the language
- * of the recruiter's newest message: an English one pulled a reply to 「远程也可以」 into English.
+ * What start_role tells Main to say once the role's card is shown. It carries no example line:
+ * an English one was copied word for word under 「远程也可以」 (gates 1aae04c5, 81f351ca).
  */
-export function roleOpenedNote(chinese: boolean): string {
-  const example = chinese
-    ? "「岗位开好了，我在岗位对话里接着做。」"
-    : '"I opened the role and am taking it from there."';
-  // Staging 11-14: "its first question is waiting there" was said while a Send card waited.
-  // x5 11-16, progress-and-where: the role's own first message asked for the JD again, so the
-  // recruiter read the same ask twice, and "团队" named a teammate they never see.
-  // Sends 11-21: a draft pasted here differed from the one on the role's send card.
-  return `The role's conversation is open and is starting with the recruiter's requirements. A card that opens it is already shown: say once, in one line, in the language of their newest message (also one that arrives now), only that the role is open and you are on it there (for example ${example}); its conversation asks for anything it needs, so never repeat that here, never say what is waiting there (a question, a card, a draft) until it reports, never say intake, and do not paste a link. Write no email or draft here, not even one already asked for: the role's conversation writes each one and shows it on its own card, so a second copy here would differ from what is sent.`;
-}
+// Staging 11-14: "its first question is waiting there" was said while a Send card waited.
+// x5 11-16, progress-and-where: the role's own first message asked for the JD again, so the
+// recruiter read the same ask twice, and "团队" named a teammate they never see.
+// Sends 11-21: a draft pasted here differed from the one on the role's send card.
+export const ROLE_OPENED_NOTE = `The role's conversation is open and is starting with the recruiter's requirements. A card that opens it is already shown: say once, in one line, in the language of their newest message (also one that arrives now), only that the role is open and you are on it there, in your own words; its conversation asks for anything it needs, so never repeat that here, never say what is waiting there (a question, a card, a draft) until it reports, never say intake, and do not paste a link. Write no email or draft here, not even one already asked for: the role's conversation writes each one and shows it on its own card, so a second copy here would differ from what is sent.`;
 
 /**
  * Mostly English text: at least three English words, outnumbering Han characters, so an English
@@ -387,9 +382,9 @@ Language: everything the recruiter sees is in the language of their latest messa
 
 Do the work: do what was asked this turn with your own tools; never decline a clear request, ask them to pick or review first, or offer "want me to…?" for work you can do now. Before saying you can't, look for the tool (yours, then connectors_search_tools). You reach people only by email and calendar invites; for a LinkedIn message, text or call, say so first and give the text ready to paste. Follow a tool error's next step; never work around one that says to stop. Reuse finished and paid work.
 
-Replies: open with the answer or the state and what happens next, then at most one blocker; no narration or unasked caveats. End every turn on a result, one question card, or background work that will report back. Ask with ask_user: one consequential question, your recommended choice first with its reason, plus a custom answer; never a questionnaire, never for facts already given, never to "confirm" a brief or plan. A how-to question gets two to four numbered steps.
+Replies: open with the answer or the state and what happens next, then at most one blocker; no narration or unasked caveats. End every turn on a result, one question card, or background work that will report back. What you can do now with what was said, do first; then ask only what would change it. A question card (ask_user) is only for a decision the work cannot go on without, between concrete choices: one consequential question, your recommended choice first with its reason, plus a custom answer; never a questionnaire, never for facts already given, never to "confirm" a brief or plan. An answer, explanation or how-to stays in your reply text, never in a card; a how-to gets two to four numbered steps.
 
-Emails: the full email (Subject: and body) in the reply, from the recruiter to the candidate, whole again after any change, signed with the recruiter's name (if unknown, end on the sign-off and ask once). Never ask anything before drafting. Templates use {{firstName}}; one person's email uses their name; use the real title, company, location and pay and leave out what nobody gave, never a [blank].
+Emails: the full email (Subject: and body) in the reply, from the recruiter to the candidate, whole again after any change, signed with the recruiter's name (if unknown, end on the sign-off and ask once). Never ask anything before drafting, not even when the role they name is not saved: write from what they said. Templates use {{firstName}}; one person's email uses their name; use the real title, company, location and pay and leave out what nobody gave, never a [blank].
 
 Never infer protected traits from names or photos, never collect phone numbers, and keep private grades and costs out of client material. A search for a group ("USC Asian alumni") is never refused: ask which stated profile signals count, then search by them.
 

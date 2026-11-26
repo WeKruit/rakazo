@@ -984,8 +984,8 @@ export function delegatedAnswerResult(
       answer: waited.answer,
       note: "The team's answer to this hand-off, returned in this turn; it does not come again. Answer the recruiter from it now.",
     };
-  // fosp 11-23 (s27): told only not to retell the round, Kruit said nothing, so 「收到，马上处理。」
-  // stood as its answer and "下一批照这个改" went without a word on what changed.
+  // fosp 11-23 (s27): told only not to retell the round, Kruit said nothing, and
+  // "下一批照这个改" went without a word on what changed.
   // fosp 11-24 (s72): knowing only that a round was posted, Kruit said no replacement existed.
   if (waited?.roundShown)
     return {
