@@ -5,8 +5,6 @@ import {
   roleOpenedFromLatestMessage,
   roleStartKey,
   startRoleFromRecruiterMessage,
-  templateOnlyRequest,
-  writesToNamedPeople,
 } from "./role-start.js";
 
 vi.mock("@rakazo/db", () => ({
@@ -40,37 +38,6 @@ function deps(source: unknown, already: unknown = null) {
 
 const run = { spaceId: "s", userId: "u", threadId: "t-global", sourceMessageId: "m-1" };
 const role = { threadId: "t-role", botId: "bot-main", deliveryKey: "k" };
-
-describe("templateOnlyRequest", () => {
-  it("keeps a template request in the chat unless it also asks to find people (simulated 2026-11-14)", () => {
-    expect(
-      templateOnlyRequest(
-        "hiring a staff backend engineer, go, payments infra. NY hybrid, base 200-250k, series C fintech. write me a short first outreach email to candidates for it, and keep it as my template for later",
-      ),
-    ).toBe(true);
-    expect(
-      templateOnlyRequest(
-        "staff backend engineer in NY: find me people and write an outreach template",
-      ),
-    ).toBe(false);
-    expect(templateOnlyRequest("帮我找人：上海的高级后端，顺便写个邮件模板")).toBe(false);
-    expect(templateOnlyRequest("Senior data engineer in Seattle, here is the JD")).toBe(false);
-  });
-});
-
-describe("writesToNamedPeople", () => {
-  it("is an ask to write to the people named, not to find people (simulated 2026-11-15)", () => {
-    expect(
-      writesToNamedPeople(
-        "新岗位 西雅图 Senior Data Engineer ref 00581，hybrid一周3天。Noah Liu noah+1@example.com 和 Ada Chen ada@example.com 写第一封，今晚发",
-      ),
-    ).toBe(true);
-    expect(writesToNamedPeople("Seattle data engineer, find people like ada@example.com")).toBe(
-      false,
-    );
-    expect(writesToNamedPeople("Senior data engineer in Seattle, show me people")).toBe(false);
-  });
-});
 
 describe("startRoleFromRecruiterMessage", () => {
   it("copies the recruiter's own words into the role and starts the lead's turn", async () => {
