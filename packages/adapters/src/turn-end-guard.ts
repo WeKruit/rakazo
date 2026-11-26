@@ -88,15 +88,15 @@ export function roundVerdictLine(
   if (!asked.length) return undefined;
   const at = (...levels: string[]) =>
     asked.filter((item) => levels.includes(item.level)).map((item) => item.statement);
-  const met = at("strong", "medium").length;
+  const met = at("strong").length;
   const parts = chinese
     ? ([
-        ["部分符合：", at("weak")],
+        ["部分符合：", at("medium", "weak")],
         ["资料未写：", at("silent")],
         ["不符合：", at("opposite")],
       ] as const)
     : ([
-        ["partly: ", at("weak")],
+        ["partly: ", at("medium", "weak")],
         ["not stated: ", at("silent")],
         ["does not meet: ", at("opposite")],
       ] as const);

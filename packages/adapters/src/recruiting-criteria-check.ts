@@ -36,7 +36,7 @@ export type CriteriaCheck = {
 
 const ASSESSED = {
   strong: "Met",
-  medium: "Met",
+  medium: "Partial",
   weak: "Partial",
   silent: "Unknown",
   opposite: "Gap",
