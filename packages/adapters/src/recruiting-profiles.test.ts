@@ -303,6 +303,9 @@ describe("peopleFromSearch", () => {
               location: "New York, NY",
               education: ["State University | BS, Computer Science | 2012 – 2016"],
               evidence: "Built the ledger service in Go.",
+              match_score: 91,
+              match_tier: "Strong",
+              fit_reasons: "Six years on payment ledgers in Go.",
             },
             { name: "No Link", linkedin_url: null, evidence: "n/a" },
           ],
@@ -319,6 +322,10 @@ describe("peopleFromSearch", () => {
         location: "New York, NY",
         snippet: "Built the ledger service in Go.",
         education: "State University | BS, Computer Science | 2012 – 2016",
+        // The run graded her as it found her: the grade and its reason stay on the row.
+        match_score: 91,
+        match_tier: "Strong",
+        why_recommended: "Six years on payment ledgers in Go.",
       },
     ]);
     const running = { id: "agent_run_1", status: "running", outputReady: false };

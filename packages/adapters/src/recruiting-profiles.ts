@@ -321,6 +321,9 @@ export type PeopleSearchRow = {
   snippet?: string;
   /** The search's own sentence on why this person fits what was asked, from the same request. */
   why_recommended?: string;
+  /** The search's own grade of this person for what was asked, when the request returned one. */
+  match_score?: number;
+  match_tier?: string;
   /** Positions newest first, one per line: "Title | Company | | Start – End | Location". */
   experience?: string;
   /** Schools, one per line: "School | Degree | Start – End". */
@@ -434,6 +437,10 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     if (typeof record.snippet === "string") row.snippet = record.snippet;
     if (typeof record.why_recommended === "string" && record.why_recommended)
       row.why_recommended = record.why_recommended;
+    if (typeof record.match_tier === "string" && Number.isFinite(record.match_score)) {
+      row.match_tier = record.match_tier;
+      row.match_score = Number(record.match_score);
+    }
     if (typeof record.experience === "string" && record.experience)
       row.experience = record.experience;
     if (typeof record.education === "string" && record.education) row.education = record.education;
@@ -611,6 +618,7 @@ function peopleFromAgentRun(parsed: unknown): Record_[] {
                     typeof item.current_company === "string" ? item.current_company : null,
                   location: typeof item.location === "string" ? item.location : null,
                   snippet: typeof item.evidence === "string" ? snippetOf(item.evidence) : undefined,
+                  why_recommended: text(item.fit_reasons),
                   ...(Array.isArray(item.education) && item.education.some(isRecord)
                     ? {}
                     : { education: educationText(item.education) }),

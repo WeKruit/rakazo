@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { JudgeSettings, typeSafeJudge } from "./judge.js";
+import { criteriaGrade } from "./recruiting-criteria-check.js";
 
 const answer = (body: unknown, status = 200) =>
   vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -27,6 +28,30 @@ describe("typeSafeJudge", () => {
       throw new Error("offline");
     }) as unknown as typeof fetch;
     await expect(typeSafeJudge("key", broken).yes("q", {})).resolves.toBeUndefined();
+  });
+
+  it("judges one person on every requirement in one request", async () => {
+    const fetchImpl = answer({
+      answers: {
+        q0: { choice: "strong", confidence: 0.9, probabilities: { opposite: 0.01 } },
+        q1: { choice: "opposite", confidence: 0.93, probabilities: { opposite: 0.93 } },
+      },
+    });
+    const verdicts = await typeSafeJudge("key", fetchImpl).criteria?.({ profile: "Spark" }, [
+      { id: "spark", statement: "hands-on Spark" },
+      { id: "city", statement: "lives in Shanghai" },
+    ]);
+    expect(vi.mocked(fetchImpl)).toHaveBeenCalledTimes(1);
+    expect(verdicts?.get("spark")).toEqual({ level: "strong", confidence: 0.9, against: 0.01 });
+    const grade = (searched?: { tier: string; score: number }) =>
+      criteriaGrade([...verdicts!.values()], searched);
+    // A requirement the profile clearly contradicts takes the fit away; the search's own grade stays.
+    expect(grade()).toEqual({ match_tier: "Partial", match_score: 50 });
+    expect(grade({ tier: "Strong", score: 91 })).toEqual({ match_tier: "Strong", match_score: 91 });
+    expect(criteriaGrade([verdicts!.get("spark")!])).toEqual({
+      match_tier: "Strong",
+      match_score: 100,
+    });
   });
 });
 

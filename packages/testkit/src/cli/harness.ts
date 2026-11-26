@@ -229,6 +229,23 @@ async function main() {
       integrationsCatalogUrl: "https://catalog.example.test/",
     });
     journey?.bind(handles.prisma);
+    // A branch backend given the judge's key checks people the way a deployment does.
+    if (serveMode && process.env.TYPESAFE_API_KEY)
+      await handles.judgeSettings
+        .save(
+          { provider: "typesafe", apiKey: process.env.TYPESAFE_API_KEY },
+          {
+            operationId: "harness.judge",
+            traceId: "harness.judge",
+            spaceId: "",
+            userId: "",
+            signal: AbortSignal.timeout(30_000),
+          },
+        )
+        .then(
+          () => console.log("judge saved"),
+          (error) => console.log(`judge not saved: ${String(error)}`),
+        );
     let activeRequests = 0;
     const requestWaiters = new Set<() => void>();
     const server = serve({

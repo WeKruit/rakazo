@@ -1003,6 +1003,8 @@ export async function saveRecruitingPeopleSearch(
   input: Extract<RecruitingResearchToolInput, { operation: "save_search" }>,
   context: AdapterContext,
   onlyEffectId?: string,
+  /** Judges the rows about to be saved, writing each person's check beside their row. */
+  checkRows?: (rows: Array<{ row: Record<string, unknown> }>) => Promise<void>,
 ) {
   if (
     context.runId !== trusted.runId ||
@@ -1120,6 +1122,7 @@ export async function saveRecruitingPeopleSearch(
   );
   for (const [index, row] of normalized.entries())
     rows[index]!.row = row as Record<string, unknown>;
+  await checkRows?.(rows);
   const captured = { sources, rows, truncated };
   const bytes = Buffer.from(
     stableJsonValue(recruitingPeopleSearchReceipt(input, captured)),

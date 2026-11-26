@@ -40,8 +40,10 @@ MODEL_ENV = ("OPENAI_API_KEY", "PI_DEFAULT_PROVIDER", "PI_DEFAULT_MODEL")
 MODEL_HOSTS = ["api.openai.com"]
 # --search: staging's people-search key and its host, plus the public profile pages the Reviewer
 # reads (contact lookups and email stay out). Without the pages every grade fell back to snippets.
-SEARCH_ENV = ("EXA_API_KEY",)
-SEARCH_HOSTS = ["mcp.exa.ai", "www.linkedin.com"]
+SEARCH_ENV = ("EXA_API_KEY", "TYPESAFE_API_KEY")
+SEARCH_HOSTS = ["mcp.exa.ai", "www.linkedin.com", "api.typesafe.ai"]
+# --search also takes the judge's key, from its own Secret, so found people are checked as on staging.
+JUDGE_SECRET = "wekruit-jev-test"
 WEB_PORT = 5180
 WEB_ORIGIN_FILE = "/tmp/web-origin"
 PORT = 3110
@@ -183,6 +185,7 @@ def main(argv):
         "bash", "-c", "service postgresql start >/dev/null && exec python3 /app/infra/modal/branch_backend.py --inside",
         app=app, image=image(web),
         secrets=[modal.Secret.from_name(CONFIG_SECRET, environment_name=ENVIRONMENT),
+                 *([modal.Secret.from_name(JUDGE_SECRET, environment_name=ENVIRONMENT)] if search else []),
                  modal.Secret.from_dict({**extra, "SIGNUP_ALLOWLIST": "@example.com",
                                          "BRANCH_SEARCH": "1" if search else "0", "BRANCH_WEB": "1" if web else "0"})],
         outbound_domain_allowlist=MODEL_HOSTS + (SEARCH_HOSTS if search else []),

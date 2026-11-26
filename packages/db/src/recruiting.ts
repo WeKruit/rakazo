@@ -7879,6 +7879,53 @@ export function recruitingPeopleSearchReceipt(
  * Save the people a people-search connector returned earlier in this run as one unassessed
  * candidate page on the thread's role. Every source must be a completed call of this run.
  */
+/** The grades a search may give a person it found; anything else is not saved as a grade. */
+const SEARCH_MATCH_TIERS: ReadonlySet<string> = new Set([
+  "Strong",
+  "Promising",
+  "Uncertain",
+  "Partial",
+]);
+
+/** The grade a saved search row shows the agent: its tier, score and the requirements not shown. */
+function gradeShown(entry: { row: Record<string, unknown>; check?: unknown }, already: boolean) {
+  if (already) return { alreadyGraded: true };
+  const check = entry.check as
+    | {
+        match_tier?: unknown;
+        match_score?: unknown;
+        criteria?: { statement: string; level: string; avoid?: boolean }[];
+      }
+    | undefined;
+  const tier = check?.match_tier ?? entry.row.match_tier;
+  if (typeof tier !== "string" || !SEARCH_MATCH_TIERS.has(tier)) return {};
+  const said = (level: string, avoid: boolean) =>
+    (check?.criteria ?? [])
+      .filter((item) => item.level === level && !!item.avoid === avoid)
+      .map((item) => item.statement.slice(0, 80));
+  const notShown = said("silent", false);
+  const doesNotMeet = said("opposite", false);
+  const turnedDownFor = said("opposite", true);
+  return {
+    grade: tier,
+    score: check?.match_score ?? entry.row.match_score ?? null,
+    ...(doesNotMeet.length ? { doesNotMeet } : {}),
+    ...(notShown.length ? { notShown } : {}),
+    ...(turnedDownFor.length ? { sameAsTurnedDown: turnedDownFor } : {}),
+  };
+}
+
+/** The people of a role who already have a grade. */
+export async function listRecruitingGradedCandidateKeys(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  roleId: string,
+): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ candidateKey: string }[]>(Prisma.sql`
+    SELECT DISTINCT o."candidateKey" FROM "recruiting_candidate_occurrences" o
+    WHERE o."roleId" = ${roleId} AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'`);
+  return rows.map((row) => row.candidateKey);
+}
+
 export async function saveRecruitingCandidatePeopleSearch(
   prisma: PrismaClient,
   actor: Actor,
@@ -7942,12 +7989,27 @@ export async function saveRecruitingCandidatePeopleSearch(
       file.clientNonce !== `recruiting-people-search:${saving.id}`
     )
       throw new IsolationError();
+    const graded = new Set(await listRecruitingGradedCandidateKeys(tx, role.id));
     const saved = await saveUnassessedCandidatePage(
       tx,
       actor,
       { run, thread, role, saving, trusted, file },
       {
-        rows: captured.rows,
+        // A person's grade for the role is given once: the check that ran on this search, or the
+        // search's own grade. Someone already graded keeps theirs when a later search finds them.
+        rows: captured.rows.map((entry) => {
+          const key = normalizeRecruitingCandidateRow(entry.row, {
+            schemaKnown: true,
+          }).candidateKey;
+          if (key && graded.has(key)) return entry;
+          const check = (entry as { check?: Prisma.InputJsonObject }).check;
+          const { match_tier: tier, match_score: score } = check ?? entry.row;
+          return typeof tier === "string" &&
+            SEARCH_MATCH_TIERS.has(tier) &&
+            typeof score === "number"
+            ? { ...entry, matchFields: check ?? { match_score: score, match_tier: tier } }
+            : entry;
+        }),
         describe: ({ artifact, observedAt, candidateRows }) => ({
           source: {
             kind: "people_search",
@@ -7967,6 +8029,7 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
+              ...gradeShown(captured.rows[row.rowIndex]!, graded.has(row.candidateKey)),
               email: (saved._profile as { email?: string | null } | undefined)?.email ?? null,
               _profile: saved._profile,
               _profileSourceEffectId: captured.rows[row.rowIndex]!.sourceEffectId,

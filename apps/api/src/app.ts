@@ -173,6 +173,7 @@ export interface AppHandles {
   messaging?: MessagingSurface;
   email?: TransactionalEmailProvider;
   executor: ReturnType<typeof createRunExecutor>;
+  judgeSettings: JudgeSettings;
   runtime: AgentRuntime;
   awaitIdle?: () => Promise<void>;
   backgroundFailures?: () => Array<{ name: string; count: number }>;
@@ -547,7 +548,9 @@ export async function createApp(
   // One cache serves models.list, selection validation, and run-time model
   // resolution alike, so a list call warms the run path in this process.
   const codexCatalog = new CodexCatalogCache();
+  const judgeSettings = new JudgeSettings(prisma, secrets);
   const executor = createRunExecutor({
+    judge: judgeSettings,
     contextStrategy,
     prisma,
     runtime,
@@ -672,7 +675,7 @@ export async function createApp(
     secrets,
     oauthLogins,
     integrationSettings,
-    judgeSettings: new JudgeSettings(prisma, secrets),
+    judgeSettings,
     mcpOAuth,
     composio: stack.composio,
     connectors: stack.connector,
@@ -1165,6 +1168,7 @@ export async function createApp(
   return {
     app,
     prisma,
+    judgeSettings,
     jobs,
     sandbox,
     connector,
