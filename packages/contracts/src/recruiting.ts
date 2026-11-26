@@ -2753,10 +2753,18 @@ export const RecruitingCrmRoleCampaignsReadSchema = z.object({
 
 // Owner-scoped follow-up reminders (role and/or candidate), shared by RPC and the agent tool.
 export const RecruitingReminderStatusSchema = z.enum(["open", "done", "dismissed"]);
-// Keys written before the rename, in old conversations and saved links, keep working.
+// Keys written before the rename, in old conversations and saved links, keep working. A key given
+// as lists and Results show it (linkedin:/in/x) names a saved person: the agent was refused for
+// leaving the prefix out and then saved the reminder attached to nobody (branch play, 11-26).
 const ReminderCandidateKey = z
   .string()
-  .transform((value) => value.replace(/^autumn:/, "sourced:"))
+  .transform((value) =>
+    /^(sourced|crm):/.test(value)
+      ? value
+      : /^[a-z]+:\S/.test(value)
+        ? `sourced:${value.replace(/^autumn:/, "")}`
+        : value,
+  )
   .pipe(Text.max(300).regex(/^(sourced|crm):\S+$/, 'Use "sourced:<key>" or "crm:<id>"'));
 /** Actual profile opens, retained in the existing native event history. */
 export const RecruitingProfileActivityInput = z.strictObject({
