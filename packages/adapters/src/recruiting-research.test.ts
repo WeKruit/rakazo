@@ -221,6 +221,15 @@ describe("people-search agent runs", () => {
     await expect(limit({ category: "people", numResults: 5 })).resolves.toMatchObject({
       numResults: 5,
     });
+    // The profiles' full text comes back with the people; one person's lookup keeps its size.
+    await expect(limit({ category: "people" })).resolves.toMatchObject({ textMaxCharacters: 6000 });
+    await expect(
+      limit({
+        category: "people",
+        query: "https://www.linkedin.com/in/someone",
+        textMaxCharacters: 300,
+      }),
+    ).resolves.toMatchObject({ textMaxCharacters: 300 });
     // Other searches and other servers are left as they are.
     const company = { category: "company", numResults: 25 };
     await expect(limit(company)).resolves.toBe(company);

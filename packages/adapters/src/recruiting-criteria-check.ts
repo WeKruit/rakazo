@@ -151,11 +151,41 @@ const ASKED_FOR = [
 ].map(([id, label, statement]) => ({ id: `asked:${id}`, statement: statement!, label: label! }));
 const REQUEST_CHARS = 2_000;
 
+/**
+ * What the judge reads about a person: the profile's full text when the search returned it (dated
+ * jobs with their own descriptions), else the row. The search's own sentence on why the person
+ * fits is never passed: with it, the judge agreed "5+ years" for people whose dated jobs showed
+ * about three (five real profiles, 11-26).
+ */
 function profileState(row: Record<string, unknown>): Record<string, unknown> {
-  const { _profile, profile_image_url, email, match_score, match_tier, ...shown } = row;
+  const {
+    _profile,
+    _profile_text: full,
+    _profile_image_source_url,
+    profile_image_url,
+    email,
+    match_score,
+    match_tier,
+    why_recommended,
+    ...shown
+  } = row;
+  if (typeof full === "string" && full)
+    return { name: shown.name, location: shown.location, profile: full.slice(0, PROFILE_CHARS) };
   const text = JSON.stringify(shown);
   return text.length > PROFILE_CHARS ? { profile: text.slice(0, PROFILE_CHARS) } : shown;
 }
+
+/**
+ * A requirement for years of some work is judged on the time the profile ties to that work, and
+ * an unsure answer is "not stated": asked plainly, a long career or a senior title passed as the
+ * years (same five profiles).
+ */
+const YEARS = /\d\s*\+?\s*(?:years?|yrs?|年)/i;
+const COUNTED_YEARS =
+  "Count only the time the profile ties to that work: the dated jobs whose own description shows it, or a number of years the profile states for it. Total career length and a job title alone do not count.";
+const SURE = 0.5;
+const asksYears = (requirement: CriterionQuestion) =>
+  !requirement.avoid && (requirement.id === "asked:years" || YEARS.test(requirement.statement));
 
 /**
  * Judges the entries' people and writes each one's check beside their row. Any failure, or a
@@ -201,6 +231,9 @@ export async function checkPeopleCriteria(
           : null;
       return !key || !graded.has(key);
     });
+    const questions = requirements.map(({ label, ...requirement }) =>
+      asksYears(requirement) ? { ...requirement, rule: COUNTED_YEARS } : requirement,
+    );
     const deadline = AbortSignal.timeout(12_000);
     for (let at = 0; at < fresh.length && !deadline.aborted; at += TOGETHER)
       await Promise.all(
@@ -209,10 +242,15 @@ export async function checkPeopleCriteria(
             asked
               ? { recruiter_request: asked, profile: profileState(entry.row) }
               : profileState(entry.row),
-            requirements,
+            questions,
             deadline,
           );
           if (!verdicts) return;
+          for (const requirement of requirements) {
+            const verdict = verdicts.get(requirement.id);
+            if (verdict && asksYears(requirement) && verdict.confidence < SURE)
+              verdicts.set(requirement.id, { ...verdict, level: "silent", against: 0 });
+          }
           const answered = requirements.filter((requirement) => verdicts.has(requirement.id));
           const { match_tier: tier, match_score: score } = entry.row;
           entry.check = {

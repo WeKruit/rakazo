@@ -337,6 +337,8 @@ export type PeopleSearchRow = {
   /** Exact normalized facts stay in the immutable receipt without becoming report findings. */
   _profile?: Facts;
   _profile_image_source_url?: string | null;
+  /** The profile's full text as the search returned it, kept for the requirement check. */
+  _profile_text?: string;
 };
 
 type SearchJob = {
@@ -454,6 +456,8 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     row.website_url = retained?.websiteUrl ?? contacts.websiteUrl;
     row.stackoverflow_url = retained?.stackOverflowUrl ?? contacts.stackOverflowUrl;
     if (retained) row._profile = retained;
+    if (typeof record._profile_text === "string" && record._profile_text)
+      row._profile_text = record._profile_text;
     const photo = linkedinPhotoUrl(
       record.profile_image_url ??
         record.profile_picture_url ??
@@ -720,6 +724,7 @@ function peopleFromResults(body: string): Record_[] {
       {
         ...contactFacts({ ...item, ...person }),
         ...(fullProfile ? { _profile: fullProfile } : {}),
+        ...(typeof item.text === "string" && item.text ? { _profile_text: item.text } : {}),
         full_name: name,
         linkedin_url: item.url,
         image: item.image,

@@ -430,6 +430,9 @@ export async function requireRoleForPeopleSearch(
     throw new IsolationError(PEOPLE_SEARCH_NEEDS_SAVED_ROLE);
 }
 
+/** The profile text a people search returns with each person. */
+export const PROFILE_TEXT_CHARS = 6_000;
+
 /** A quick people search asks for at most ten people, however the agent or a plan sized it. */
 export function limitPeopleSearch(
   server: Pick<McpServer, "transport" | "endpoint">,
@@ -449,7 +452,17 @@ export function limitPeopleSearch(
     Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : PEOPLE_SEARCH_MAX_RESULTS,
     PEOPLE_SEARCH_MAX_RESULTS,
   );
-  return plain ? args : { ...args, numResults: wanted };
+  if (plain) return args;
+  // A search for people also returns each profile's full text (dated jobs with their own
+  // descriptions), which the requirement check reads; one person's lookup keeps its own size.
+  const text = Number(args.textMaxCharacters);
+  return {
+    ...args,
+    numResults: wanted,
+    ...(linkedinPersonKey(args.query)
+      ? {}
+      : { textMaxCharacters: Math.max(Number.isFinite(text) ? text : 0, PROFILE_TEXT_CHARS) }),
+  };
 }
 
 /** The search API's excludeText takes at most fifty strings: the newest saved people's names. */

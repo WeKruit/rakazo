@@ -50,7 +50,13 @@ export interface TextJudge {
  * A requirement to look for in a profile, or (avoid) a reason the recruiter turned people down,
  * which fails a person whose profile shows the same problem.
  */
-export type CriterionQuestion = { id: string; statement: string; avoid?: boolean };
+export type CriterionQuestion = {
+  id: string;
+  statement: string;
+  avoid?: boolean;
+  /** How to read the profile for this requirement, given after the question. */
+  rule?: string;
+};
 
 export const CRITERION_LEVELS = ["strong", "medium", "weak", "silent", "opposite"] as const;
 /**
@@ -191,7 +197,7 @@ export function typeSafeJudge(
                     }
                   : {
                       type: "choice",
-                      instructions: `Does this person's profile show: ${requirement.statement}?`,
+                      instructions: `Does this person's profile show: ${requirement.statement}?${requirement.rule ? ` ${requirement.rule}` : ""}`,
                       criteria: CRITERION_CHOICES,
                     },
               ]),
