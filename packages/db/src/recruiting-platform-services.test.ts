@@ -22,7 +22,7 @@ function fixture(
     linked?: number;
     grants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
     /** The crew's retired Reviewer bots that are not archived yet. */
-    reviewers?: { id: string }[];
+    reviewers?: { id: string; archivedAt?: Date }[];
     /** Connected Google Calendars and the Scheduling bots of the crew. */
     calendars?: { id: string }[];
     scheduling?: { id: string }[];
@@ -82,6 +82,7 @@ function fixture(
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
     routine: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    chatGroupMember: { deleteMany: vi.fn(async () => ({ count: 0 })) },
     botMcpServer: {
       count: vi.fn(async () => options.linked ?? 0),
       findMany: vi.fn(async ({ where }: { where: unknown }) =>
@@ -120,6 +121,22 @@ describe("ensurePlatformServices", () => {
     const none = fixture();
     await ensurePlatformServices(none.prisma, actor);
     expect(none.tx.bot.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Staging 37245ee8: the Reviewer was archived but stayed a member of the Kruit conversation,
+  // a new role copies that conversation's members, and opening it failed as "not found".
+  it("takes the retired Reviewer out of every conversation, also one archived by an earlier pass", async () => {
+    const f = fixture({ reviewers: [{ id: "reviewer-bot" }] });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.chatGroupMember.deleteMany).toHaveBeenCalledWith({
+      where: { botId: { in: ["reviewer-bot"] } },
+    });
+    const earlier = fixture({ reviewers: [{ id: "reviewer-bot", archivedAt: new Date() }] });
+    await ensurePlatformServices(earlier.prisma, actor);
+    expect(earlier.tx.chatGroupMember.deleteMany).toHaveBeenCalledWith({
+      where: { botId: { in: ["reviewer-bot"] } },
+    });
+    expect(earlier.tx.bot.updateMany).not.toHaveBeenCalled();
   });
 
   it("leaves every grant to the retired research service with no tools", async () => {

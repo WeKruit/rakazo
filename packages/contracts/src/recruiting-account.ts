@@ -74,7 +74,6 @@ export const RecruitingAccountRoleSchema = z.strictObject({
   threadId: Id,
   groupId: Id.nullable(),
   botId: Id.optional(),
-  stage: z.string(),
 });
 export const RecruitingAccountViewOutputSchema = z.strictObject({
   sequencePendingObservations: z.array(RecruitingSequenceObservationKeySchema).max(50).optional(),

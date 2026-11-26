@@ -33,7 +33,6 @@ const role = (id: string, userId = actor.userId, spaceId = actor.spaceId) => ({
   id,
   title: `Role ${id}`,
   sourceThreadId: `thread-${id}`,
-  playbookStage: "outreach",
   userId,
   spaceId,
   archivedAt: null,

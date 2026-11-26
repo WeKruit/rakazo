@@ -575,8 +575,6 @@ describe("recruiting run context", () => {
         RECRUITING_MISSED_REQUIREMENT,
       ])
         expect(text).toContain(rule);
-      expect(text).not.toContain("research requires G0 on the current brief revision");
-      expect(text).not.toContain("Candidate sourcing requires actual human G0 approval");
       expect(loaded!.text).toContain(text);
       expect(loaded!.manifest.placement).toBe(placement);
       expect(loaded!.workspace).toBe(workspace);

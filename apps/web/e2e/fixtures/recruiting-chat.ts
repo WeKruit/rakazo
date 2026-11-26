@@ -385,8 +385,6 @@ export async function recruitingChatFixture(
         return reply(null);
       case "memory/providerConfig":
         return reply(null);
-      case "recruiting/roleSetup":
-        return reply({});
       case "messaging/status":
         return reply({ enabled: false, providers: [] });
       case "bots/listArchived":

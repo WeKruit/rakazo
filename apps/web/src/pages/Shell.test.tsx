@@ -599,7 +599,6 @@ async function renderFeedbackShell(
         title: group.name,
         threadId: thread.threadId,
         groupId: group.id,
-        stage: "intake",
       },
     ],
     items: [

@@ -8,7 +8,7 @@ import type {
   RecruitingCrmTarget,
   RecruitingResearchAction,
 } from "@rakazo/contracts";
-import { isVendorUrl, recruitingGateLabels } from "@rakazo/core";
+import { isVendorUrl } from "@rakazo/core";
 import { Badge, Checkbox } from "@rakazo/ui-web";
 import { ArrowRight, Bookmark, BriefcaseBusiness, Building2, MapPin, Sparkles } from "lucide-react";
 import type { Ref } from "react";
@@ -151,6 +151,15 @@ export function CandidateProfile({
     </div>
   );
 }
+
+// Plain words for the approval codes that older saved reports still carry in their text.
+const recruitingGateLabels = {
+  G0: "Recruiting brief",
+  G1: "Job description and company materials",
+  G2: "Review of the ten candidates",
+  G3: "Campaign and lead list",
+  G4: "Individual message or scheduling action",
+} as const;
 
 export function recruitingMatchSummaryText(value: string): string {
   // ponytail: ambiguous codes may name companies/products; translate only explicit gate expressions.

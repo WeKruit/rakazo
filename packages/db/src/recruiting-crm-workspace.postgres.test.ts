@@ -87,7 +87,6 @@ suite("verified legacy CRM workspace", () => {
     expect(await prisma.message.count({ where: { threadId: a.threadId } })).toBe(0);
     expect(await prisma.externalEffect.count({ where: { spaceId } })).toBe(0);
     const workspace = await getRecruitingWorkspace(prisma, actor, { threadId: a.threadId });
-    expect(workspace?.role.playbookStage).toBe("intake");
     expect(workspace?.crmTarget?.bindingEffectId).toBeNull();
     expect(await getRecruitingWorkspaceCrmTarget(prisma, actor, { threadId: a.threadId })).toEqual(
       target,

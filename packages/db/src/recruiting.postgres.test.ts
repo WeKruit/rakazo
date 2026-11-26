@@ -7478,10 +7478,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
 
   it("requires an explicit ten-person round before feedback and waits for the recruiter", async () => {
     const { f, prepared } = await mappedResearchFixture();
-    await prisma.recruitingRole.update({
-      where: { id: f.role.role.id },
-      data: { playbookStage: "calibration_10" },
-    });
     const rows = Array.from({ length: 10 }, (_, index) =>
       canonicalCandidateRow(
         `Calibration ${index}`,
@@ -7489,15 +7485,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ),
     );
     await recordCandidatePage(f, prepared, "calibration-first-nine", rows.slice(0, 9));
-    expect(
-      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
-        .playbookStage,
-    ).toBe("calibration_10");
     await recordCandidatePage(f, prepared, "calibration-tenth", rows.slice(9));
-    expect(
-      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
-        .playbookStage,
-    ).toBe("calibration_10");
     const roundRequest = {
       operation: "calibration_round" as const,
       expectedRoleRevision: f.role.role.revision,
@@ -7519,10 +7507,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       { ...f.lease, effectId: roundEffect.id, effectRequest: roundRequest },
       roundRequest,
     );
-    expect(
-      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
-        .playbookStage,
-    ).toBe("feedback");
     const sendUserMessage = vi.fn(async () => ({
       messageId: "wake",
       seq: 1,

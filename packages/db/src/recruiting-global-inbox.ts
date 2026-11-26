@@ -538,7 +538,6 @@ export async function readGlobalRecruitingInbox(
         title: role.title,
         threadId: role.sourceThreadId,
         groupId: role.sourceThread.groupId,
-        stage: role.playbookStage,
       })),
       items: page.map((row, index) => {
         const email = emailSchema.parse(row.display_email ?? row.email);
