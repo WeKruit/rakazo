@@ -45,12 +45,9 @@ describe("typeSafeJudge", () => {
     expect(verdicts?.get("spark")).toEqual({ level: "strong", confidence: 0.9, absent: 0.01 });
     const grade = (searched?: { tier: string; score: number }) =>
       criteriaGrade([...verdicts!.values()], searched);
-    // A requirement the profile clearly lacks takes the fit away; the search's score stays.
+    // A requirement the profile clearly lacks takes the fit away; the search's own grade stays.
     expect(grade()).toEqual({ match_tier: "Partial", match_score: 53 });
-    expect(grade({ tier: "Strong", score: 91 })).toEqual({
-      match_tier: "Partial",
-      match_score: 91,
-    });
+    expect(grade({ tier: "Strong", score: 91 })).toEqual({ match_tier: "Strong", match_score: 91 });
     expect(criteriaGrade([verdicts!.get("spark")!])).toEqual({
       match_tier: "Strong",
       match_score: 99,

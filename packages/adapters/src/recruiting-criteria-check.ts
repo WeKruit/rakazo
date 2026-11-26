@@ -9,9 +9,9 @@ import { roundCriteria } from "./recruiting-round-check.js";
 /**
  * Each person a search returned is checked once against everything the recruiter asked for: one
  * judge request per person answers every requirement. A person nobody graded gets their grade
- * from it; a person the search graded keeps the search's score and loses the fit only when the
- * profile clearly lacks a requirement. People already graded for the role are left alone, so a
- * grade changes only when the recruiter asks for it.
+ * from it; a person the search graded keeps the search's grade, with the verdicts beside it.
+ * People already graded for the role are left alone, so a grade changes only when the recruiter
+ * asks for it.
  */
 
 /** A requirement counts as missing only when the judge is this sure the profile lacks it. */
@@ -35,15 +35,11 @@ export function criteriaGrade(
   verdicts: readonly CriterionVerdict[],
   searched?: { tier: string; score: number },
 ): { match_tier: string; match_score: number } {
+  // The search read the whole profile; this check reads only the passage it was given, so it
+  // never changes the search's grade (find-60 play 11-25: of nine people it took the fit from,
+  // seven were good, their passage just did not spell out the language or the exact title).
+  if (searched) return { match_tier: searched.tier, match_score: searched.score };
   const missing = verdicts.some((verdict) => verdict.absent >= CLEARLY_ABSENT);
-  if (searched)
-    return {
-      match_tier:
-        missing && (searched.tier === "Strong" || searched.tier === "Promising")
-          ? "Partial"
-          : searched.tier,
-      match_score: searched.score,
-    };
   const shown = verdicts.reduce((sum, verdict) => sum + (1 - verdict.absent), 0);
   return {
     match_tier: missing
