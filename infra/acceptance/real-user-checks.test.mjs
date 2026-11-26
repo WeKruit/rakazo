@@ -553,6 +553,8 @@ test("cardAnswer sends a button id, a filled form, or the typed text", () => {
     action: "accept",
     content: { level: "会说", years: 5, note: "会说就行 5年" },
   });
+  // 11-26: "搬迁最高$10k" on a 提供/不提供 card was sent as the first choice.
+  assert.equal(cardAnswer(form, "看情况，最多三年"), null);
 });
 
 test("Chinese with English titles, skills or a quoted email is Chinese", () => {

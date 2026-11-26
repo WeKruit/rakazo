@@ -392,15 +392,20 @@ export function recipientsOf(title, detail) {
 }
 
 /** Turns the recruiter's typed answer into what the card takes: a button's id when the answer is
- * one of its labels, a filled form for a form card, otherwise the typed text as a custom answer. */
+ * one of its labels, a filled form for a form card, otherwise the typed text as a custom answer.
+ * Null when a form's choices hold none of the answer: the recruiter writes it in the chat instead. */
 export function cardAnswer(card, text) {
   const typed = String(text ?? "").trim();
   if (card.schema) {
     const content = {};
     for (const [name, field] of Object.entries(card.schema.properties ?? {})) {
       const choices = field.enum ?? field.oneOf?.map((option) => option.const) ?? null;
-      if (choices)
-        content[name] = choices.find((choice) => typed.includes(String(choice))) ?? choices[0];
+      if (choices) {
+        const chosen = choices.find((choice) => typed.includes(String(choice)));
+        // An answer none of the choices holds is typed under the card, as a recruiter would.
+        if (chosen === undefined) return null;
+        content[name] = chosen;
+      }
       else if (field.type === "boolean") content[name] = /^(是|对|要|yes|y|true)/i.test(typed);
       else if (field.type === "number" || field.type === "integer")
         content[name] = Number(typed.match(/\d+/)?.[0] ?? field.minimum ?? 0);
