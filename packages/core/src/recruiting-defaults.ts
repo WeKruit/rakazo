@@ -382,7 +382,7 @@ export const RECRUITING_DEFAULT_SKILLS = [
   {
     name: "Start a role and show the first ten",
     description:
-      "Use when the recruiter gives a job to fill (a JD, a link, a file, or a title with requirements) and the role has no round of people yet: saving what they asked, the fast first ten, the one card.",
+      "Use in a role's own conversation when its job (a JD, link, file, or title with requirements) has no round of people yet: saving what was asked, the fast first ten, the one card.",
     body: `Search first: the recruiter sees the first ten before any question. Their request is the approval; never ask to proceed or confirm. Ask first only when no title, place or requirement is given. When they name the people to email (names with addresses) there is no search: read the "Send to people" skill instead.
 
 1. Save the role first: one recruiting_role create (or update when the role is saved) with title, the JD source, their words and brief.fields, one field per requirement, its value copied word for word from the JD or the recruiter, never summarized, merged or reworded (key a short English label, origin jd or user_instruction): every requirement on the person, then pay, work mode and exclusions. The role's saved requirements are its memory: every person found is judged on them, and only the recruiter's words change them.
