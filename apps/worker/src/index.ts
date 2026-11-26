@@ -34,7 +34,6 @@ import {
   createSessionAdmissionRuntime,
   createTicketChangeNotifier,
   createWebProvider,
-  DISCOVERY_PREWARM_REFRESH_MS,
   databaseCapacityBackoffMs,
   ExpoPushProvider,
   firstPartyMcpUrl,
@@ -258,12 +257,9 @@ async function main() {
   const connector = stack.destination;
   await connector.start();
   integrationSettings.warmDirectories();
-  const prewarm = () =>
-    void prewarmToolDiscovery(prisma, stack.connector, shutdown.signal).catch((error) =>
-      logger.warn("discovery.prewarm failed", { error: String(error) }),
-    );
-  prewarm();
-  setInterval(prewarm, DISCOVERY_PREWARM_REFRESH_MS).unref();
+  void prewarmToolDiscovery(prisma, stack.connector, shutdown.signal).catch((error) =>
+    logger.warn("discovery.prewarm failed", { error: String(error) }),
+  );
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
   await assertHomeStorageConfiguration(prisma, artifactStorage);
   const home = createAgentHomeStore(dataDir, artifactStorage, prisma);

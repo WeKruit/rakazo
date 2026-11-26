@@ -1,7 +1,7 @@
 import type { ConnectorProvider } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { DISCOVERY_CACHE_TTL_MS, DISCOVERY_REFRESH_OPERATION } from "./mcp-connector.js";
+import { DISCOVERY_REFRESH_OPERATION } from "./mcp-connector.js";
 
 /** Bots that ran in this window get their tool discovery warmed when a worker starts. */
 export const DISCOVERY_PREWARM_WINDOW_MS = 7 * 24 * 60 * 60_000;
@@ -12,14 +12,11 @@ const DISCOVERY_PREWARM_TIMEOUT_MS = 60_000;
  * every refresh, which slowed page reads sharing the database and the container's CPU.
  */
 export const DISCOVERY_PREWARM_CONCURRENCY = 8;
-/** Refreshed before the cached tool lists expire, so a run never lists a server itself. */
-export const DISCOVERY_PREWARM_REFRESH_MS = DISCOVERY_CACHE_TTL_MS - 2 * 60_000;
-
 /**
  * A new worker has no connected tool servers, so the first run of each bot waited about 11 s
- * for discovery, and a cached tool list that expired cost the next run about 2 s. List recently
- * active bots' tools again at boot and every DISCOVERY_PREWARM_REFRESH_MS, as their next run
- * would, so connections and tool lists are ready before it. Reads only; failures stay per server.
+ * for discovery. List recently active bots' tools at boot, as their next run would, so
+ * connections and tool lists are ready before it; after that a run re-lists an old list in the
+ * background itself. Reads only; failures stay per server.
  */
 export async function prewarmToolDiscovery(
   prisma: PrismaClient,

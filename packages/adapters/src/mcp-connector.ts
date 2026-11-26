@@ -914,25 +914,8 @@ export const DISCOVERY_FAILURE_TTL_MS = 30_000;
 export const CONNECTION_REFUSED_TTL_MS = DISCOVERY_CACHE_TTL_MS;
 /** Discovery with this operation id lists every server again, refreshing the cache for runs. */
 export const DISCOVERY_REFRESH_OPERATION = "discovery.prewarm";
-/**
- * How long a run waits for the shared mail account's remote tool list. Its own mail tools call
- * the REST API directly, so a cold connection (about 12 s for a new account) must not hold the
- * first answer; the listing finishes in the background and serves the next run.
- */
-export const SHARED_MAIL_DISCOVERY_BUDGET_MS = 1_000;
-
-/** The promise's value when it settles within ms, else undefined (it keeps running). */
-async function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<undefined>((resolve) => {
-    timer = setTimeout(resolve, ms, undefined);
-  });
-  try {
-    return await Promise.race([promise, late]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
+/** How long a background re-list of an old tool list may take. */
+const RELIST_TIMEOUT_MS = 60_000;
 
 export class McpConnector implements ConnectorProvider {
   private readonly sessions = new Map<string, SessionEntry>();
@@ -958,6 +941,8 @@ export class McpConnector implements ConnectorProvider {
     string,
     { version: string; at: number; listed: Awaited<ReturnType<McpSession["listTools"]>> }
   >();
+  /** Background re-lists in flight, one per list key. */
+  private readonly relisting = new Map<string, Promise<unknown>>();
   private catalogGeneration = 0;
   private readonly unsubscribe: () => void;
   private readonly firstPartyEndpoint?: string;
@@ -1099,17 +1084,7 @@ export class McpConnector implements ConnectorProvider {
           this.discoveryFailures.delete(failureKey);
         }
         try {
-          const listing = this.listServerTools(assignment.server, context);
-          const listed =
-            sharedInstantlyAccount(assignment.server) &&
-            context.operationId !== DISCOVERY_REFRESH_OPERATION
-              ? await withinBudget(listing, SHARED_MAIL_DISCOVERY_BUDGET_MS)
-              : await listing;
-          if (!listed) {
-            listing.catch(() => undefined);
-            getLogger().info("discovery.deferred", { server: assignment.server.slug });
-            return withCore(localInstantlyTools(assignment, []));
-          }
+          const listed = await this.listServerTools(assignment.server, context);
           reportAllowlistDrift(
             assignment,
             // Gmail's send names stay allowed for when Google offers them; send_message is served
@@ -2771,20 +2746,41 @@ export class McpConnector implements ConnectorProvider {
   }
 
   /**
-   * The server's raw tool list, cached per worker for DISCOVERY_CACHE_TTL_MS. Only the list
-   * shape is cached: the assignment, allowlist and enabled state are read on every discovery,
-   * and sessionFor still revalidates the credential first (a rotated or deleted credential
-   * evicts the session and this entry). The version holds every field a server or credential
-   * write changes (revision, secretId), so such a write misses the cache in every worker.
+   * The server's raw tool list, kept per worker the way MCP clients keep a session's tools/list:
+   * a run always gets the last list at once, and a list older than DISCOVERY_CACHE_TTL_MS is
+   * listed again in the background for the next run. Only the list shape is kept: the
+   * assignment, allowlist and enabled state are read on every discovery. A server reached with
+   * the deployment's own key lists the same tools for every account, so its list is shared and
+   * needs no connection of the account's own; any other list is kept per account, after
+   * sessionFor revalidates its credential (a rotated or deleted credential evicts the session
+   * and this entry). The version holds every field a server or credential write changes
+   * (revision, secretId), so such a write misses the cache in every worker.
    */
   private async listServerTools(server: McpServer, context: AdapterContext) {
-    const key = this.sessionKey(server, context);
-    const version = this.discoveryVersion(server);
+    const shared = this.sharedListingKey(server);
+    const key = shared ?? this.sessionKey(server, context);
+    const version = shared ?? this.discoveryVersion(server);
     const startedAt = performance.now();
-    const session = await this.sessionFor(server, context);
-    const cached =
-      context.operationId === DISCOVERY_REFRESH_OPERATION ? undefined : this.toolCatalog.get(key);
-    if (cached?.version === version && Date.now() - cached.at < DISCOVERY_CACHE_TTL_MS) {
+    const refresh = context.operationId === DISCOVERY_REFRESH_OPERATION;
+    if (!shared || refresh) await this.sessionFor(server, context);
+    const cached = refresh ? undefined : this.toolCatalog.get(key);
+    if (cached?.version === version) {
+      if (Date.now() - cached.at >= DISCOVERY_CACHE_TTL_MS && !this.relisting.has(key)) {
+        const relist = this.listFresh(
+          server,
+          { ...context, signal: AbortSignal.timeout(RELIST_TIMEOUT_MS) },
+          key,
+          version,
+        )
+          .catch((error: unknown) =>
+            getLogger().warn("discovery.relist_failed", {
+              server: server.slug,
+              error: sanitizeConnectorError(error),
+            }),
+          )
+          .finally(() => this.relisting.delete(key));
+        this.relisting.set(key, relist);
+      }
       getLogger().info("discovery.cache", {
         hit: true,
         server: server.slug,
@@ -2792,18 +2788,39 @@ export class McpConnector implements ConnectorProvider {
       });
       return cached.listed;
     }
-    const generation = this.catalogGeneration;
-    const listed = await session.listTools({ signal: context.signal });
-    // A credential change during the list call leaves it uncached.
-    if (generation === this.catalogGeneration)
-      this.toolCatalog.set(key, { version, at: Date.now(), listed });
-    this.discoveryFailures.delete(key);
+    const listed = await this.listFresh(server, context, key, version);
     getLogger().info("discovery.cache", {
       hit: false,
       server: server.slug,
       ms: Math.round(performance.now() - startedAt),
     });
     return listed;
+  }
+
+  private async listFresh(
+    server: McpServer,
+    context: AdapterContext,
+    key: string,
+    version: string,
+  ) {
+    const generation = this.catalogGeneration;
+    const session = await this.sessionFor(server, context);
+    const listed = await session.listTools({ signal: context.signal });
+    // A credential change during the list call leaves it uncached.
+    if (generation === this.catalogGeneration)
+      this.toolCatalog.set(key, { version, at: Date.now(), listed });
+    this.discoveryFailures.delete(this.sessionKey(server, context));
+    return listed;
+  }
+
+  /** The one list key every account shares for a server reached with the deployment's key. */
+  private sharedListingKey(server: McpServer): string | undefined {
+    const platform = platformMcpCredential(server);
+    if (!platform?.key && !platform?.keyless) return undefined;
+    if (server.secretId && !platform.replacesSecret) return undefined;
+    if (Object.keys((server.headers as Record<string, unknown> | null) ?? {}).length)
+      return undefined;
+    return `platform ${server.transport} ${server.endpoint}`;
   }
 
   private refusedConnection(server: McpServer, context: AdapterContext): boolean {
