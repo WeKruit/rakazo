@@ -559,6 +559,7 @@ describe("runtime context policy", () => {
       content: summary,
       timestamp: 0,
       rakazoHistory: true,
+      rakazoSummary: true,
     } as Message);
     const prepared = createRuntimeContextPolicy({
       ...request,
@@ -577,6 +578,7 @@ describe("runtime context policy", () => {
       content: summary,
       timestamp: 0,
       rakazoHistory: true,
+      rakazoSummary: true,
     } as Message);
     context.messages.unshift(system);
     context.systemPrompt = undefined;

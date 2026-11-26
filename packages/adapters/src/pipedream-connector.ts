@@ -7,6 +7,7 @@ import type {
   ConnectorTool,
   ManagedConnectorProvider,
 } from "@rakazo/adapter-kit";
+import { ResponseTooLargeError } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { catalogToolPrefix } from "./approval-effect.js";
 import { collectPages, filterCatalog } from "./composio-connector.js";
@@ -547,7 +548,7 @@ async function readPipedreamBody(response: Response, signal: AbortSignal): Promi
     const bytes = await readBodyCapped(response, MAX_PIPEDREAM_RESPONSE_BYTES, signal);
     return new TextDecoder().decode(bytes);
   } catch (error) {
-    if (error instanceof Error && error.message === "Response is too large") {
+    if (error instanceof ResponseTooLargeError) {
       throw new Error("Pipedream response is too large.");
     }
     throw error;

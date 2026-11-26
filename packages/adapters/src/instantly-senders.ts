@@ -197,14 +197,26 @@ export async function requireSendingMailboxReady(
   if (!mine) throw new IsolationError("Confirm this account's sending address before sending.");
   const state = await sendingMailboxState(rest, email);
   if (!state.usable)
-    throw new Error(
+    throw new SendingMailboxError(
+      "sender_not_ready",
       "This sending address is not active yet. The draft is saved; sending must wait.",
     );
   if (!("displayName" in state) || state.displayName !== mine.displayName)
-    throw new Error(
+    throw new SendingMailboxError(
+      "sender_changed",
       "The sending display name changed. Review this account's sender before sending.",
     );
   return state;
+}
+
+/** A confirmed sending mailbox that cannot send as it stands. */
+export class SendingMailboxError extends Error {
+  constructor(
+    readonly code: "sender_not_ready" | "sender_changed",
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 type OrderedAccount = { email: string; domain: string; emailProvider: number; displayName: string };

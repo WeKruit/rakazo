@@ -11,6 +11,12 @@ import { IsolationError, Prisma } from "@rakazo/db";
 export const INTERNAL_ARTIFACT_ERROR =
   "This artifact is an internal recruiting role-context or research-request record and is not readable by tools. Use recruiting_role for the current role context, and recruiting_candidates (sources) for saved candidates and their evidence artifactRef IDs.";
 
+export class InternalArtifactError extends IsolationError {
+  constructor() {
+    super(INTERNAL_ARTIFACT_ERROR);
+  }
+}
+
 /** Actor authorization must precede all storage access, including existence checks. */
 export async function readActorArtifact(
   deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw">; artifacts: ArtifactStore },
@@ -44,7 +50,7 @@ export async function readActorArtifact(
         )
       LIMIT 1
     `);
-    if (internal.length) throw new IsolationError(INTERNAL_ARTIFACT_ERROR);
+    if (internal.length) throw new InternalArtifactError();
   }
   const bytes = await deps.artifacts.get(row.storageKey, {
     operationId: `artifact-get:${row.id}`,
@@ -75,9 +81,7 @@ export async function artifactReadFromTool(
     if (error instanceof IsolationError)
       return {
         error:
-          error.message === INTERNAL_ARTIFACT_ERROR
-            ? INTERNAL_ARTIFACT_ERROR
-            : "Artifact is unavailable.",
+          error instanceof InternalArtifactError ? error.message : "Artifact is unavailable.",
       };
     // Storage errors may contain paths, credentials or provider internals.
     return { error: "Saved artifact could not be read or verified." };

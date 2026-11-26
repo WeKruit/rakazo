@@ -8,6 +8,7 @@ import type {
   MemorySnapshot,
   SemanticMemoryProvider,
 } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type { MessageBlock, RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
 import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
@@ -3874,9 +3875,7 @@ describe("native recruiting feedback effect dispatch", () => {
       documents: [{ path: "MEMORY.md", content: "Earlier line", revision: 3 }],
     } as never);
     vi.mocked(executeRecruitingFeedback)
-      .mockRejectedValueOnce(
-        new Error("Memory changed since it was read. Read the latest version and save again."),
-      )
+      .mockRejectedValueOnce(new MemoryRevisionConflictError())
       .mockResolvedValueOnce({
         status: "saved",
         feedback,

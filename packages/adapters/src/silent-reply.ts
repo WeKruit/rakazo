@@ -114,41 +114,6 @@ function withoutStraySentinelsAtEdges(
   return { assembled: cleanedAssembled, blocks: cleanedBlocks };
 }
 
-// The server's automatic-continuation nudge (turn-end-guard.ts builds it from these phrases).
-export const NEXT_STEP_LEAD = "Continue with the next step:";
-export const UNDONE_PROMISE_LEAD = "Your last message ended with";
-export const AUTOMATIC_CONTINUATION =
-  "This is an automatic continuation, not the recruiter's words.";
-const NUDGE = new RegExp(
-  [NEXT_STEP_LEAD, `^\\s*${UNDONE_PROMISE_LEAD}`, AUTOMATIC_CONTINUATION]
-    .map((phrase) => phrase.replace(/[.?]/g, "\\$&"))
-    .join("|"),
-  "m",
-);
-
-/** The text up to where it echoes the server's continuation nudge, which is never for the recruiter. */
-export function withoutNudge(text: string): string {
-  const at = text.search(NUDGE);
-  return at < 0 ? text : text.slice(0, at).replace(/[\s(（]+$/, "");
-}
-
-/** The reply without a continuation nudge the model echoed into it; other text stays. */
-export function withoutEchoedNudge(
-  assembled: string,
-  blocks: MessageBlock[],
-): { assembled: string; blocks: MessageBlock[] } {
-  const echoes = (text: string) => withoutNudge(text) !== text;
-  if (!echoes(assembled) && !blocks.some((b) => b.kind === "text" && echoes(b.text)))
-    return { assembled, blocks };
-  const kept = blocks.flatMap((block): MessageBlock[] => {
-    if (block.kind !== "text") return [block];
-    const text = withoutNudge(block.text);
-    if (!text.trim()) return [];
-    return [text === block.text ? block : { ...block, text }];
-  });
-  return { assembled: echoes(assembled) ? joinedText(kept) : assembled, blocks: kept };
-}
-
 /** Whether a user row holds the person's own words, not a teammate's relayed brief. */
 export function personWrote(blocks: unknown): boolean {
   return (

@@ -1,4 +1,4 @@
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
 import {
   createToolFixMemory,
@@ -27,7 +27,7 @@ function store(content = "", revision = 0) {
     })),
     commit: vi.fn(async (request: { content: string; expectedRevision: number }) => {
       if (request.expectedRevision !== doc.revision)
-        throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
+        throw new MemoryRevisionConflictError();
       doc.content = request.content;
       doc.revision += 1;
       return { path: "tool-fixes.md", revision: doc.revision };

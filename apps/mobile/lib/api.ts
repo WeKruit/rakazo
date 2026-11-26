@@ -1207,9 +1207,15 @@ export function copyableMobileMessageText(message: MobileMessage): string {
   return selectableMobileMessageText(message).trim();
 }
 
-export function blockText(message: MobileMessage) {
+/** A message as plain text; `attachments: false` leaves out the lines that only name a file. */
+export function blockText(message: MobileMessage, options: { attachments?: boolean } = {}) {
   return message.blocks
     .map((block) => {
+      if (
+        options.attachments === false &&
+        (block.kind === "chart" || block.kind === "image" || block.kind === "file")
+      )
+        return "";
       if (block.kind === "channel_message") {
         return `${messagingProviderLabel(block.provider, block.transport)} · ${block.fromLabel}: ${block.text}`;
       }

@@ -17,7 +17,12 @@ import type {
   ScreenSession,
   TerminalRequest,
 } from "@rakazo/adapter-kit";
-import { boundedSandboxCommandTimeoutMs, resolveSupervisorToken } from "@rakazo/core";
+import { ByteLimitError } from "@rakazo/adapter-kit";
+import {
+  boundedSandboxCommandTimeoutMs,
+  ResponseTooLargeError,
+  resolveSupervisorToken,
+} from "@rakazo/core";
 import { outgoingCorrelationHeaders } from "@rakazo/logging";
 import {
   boundedComputerActions,
@@ -67,7 +72,7 @@ async function readSandboxJson<T>(
   const declared = Number(res.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > maxBytes) {
     cancelResponseBody(res);
-    throw new Error(`sandbox response exceeds ${maxBytes} bytes`);
+    throw new ByteLimitError(`sandbox response exceeds ${maxBytes} bytes`);
   }
   const readSignal = AbortSignal.any([
     signal,
@@ -77,8 +82,8 @@ async function readSandboxJson<T>(
   try {
     bytes = await readBodyCapped(res, maxBytes, readSignal);
   } catch (error) {
-    if (error instanceof Error && error.message === "Response is too large") {
-      throw new Error(`sandbox response exceeds ${maxBytes} bytes`, { cause: error });
+    if (error instanceof ResponseTooLargeError) {
+      throw new ByteLimitError(`sandbox response exceeds ${maxBytes} bytes`, { cause: error });
     }
     throw error;
   }

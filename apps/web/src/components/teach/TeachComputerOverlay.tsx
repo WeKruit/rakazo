@@ -160,7 +160,7 @@ export function TeachComputerOverlayControl({
       const message = errorText(startError, t`Could not start teaching`);
       setError(message);
       // Server already has a session (e.g. remount before the probe finished).
-      if (/already active/i.test(message)) {
+      if ((startError as { data?: { teachingActive?: unknown } } | null)?.data?.teachingActive) {
         setNeedsRefresh(true);
         setRecoveryOpen(true);
         setGoalOpen(false);

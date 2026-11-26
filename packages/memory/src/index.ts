@@ -11,7 +11,7 @@ import type {
   MemoryStore,
   PortableFile,
 } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import {
   appendEventInTransaction,
@@ -102,7 +102,7 @@ export class MarkdownMemoryStore implements MemoryStore {
             },
           });
           const live = existing?.revision ?? 0;
-          if (live !== request.expectedRevision) throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
+          if (live !== request.expectedRevision) throw new MemoryRevisionConflictError();
           const recruiting = await authorizeRecruitingMemoryCommit(tx, request, context, existing);
           const doc = existing
             ? await tx.memoryDocument.update({

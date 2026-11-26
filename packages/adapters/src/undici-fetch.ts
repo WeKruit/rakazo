@@ -1,5 +1,12 @@
 import { fetch as undiciFetch } from "undici";
 
+/** A request the site answered with a failure status. */
+export class HttpStatusError extends Error {
+  constructor(readonly status: number) {
+    super(`Request failed: HTTP ${status}`);
+  }
+}
+
 /** The fetch that must drive any `Agent` built from the `undici` package.
  *
  * Node's built-in fetch bundles its own undici, and the two diverge: undici 8
@@ -64,7 +71,7 @@ function responseForGlobalRealm(input: object): Response {
   // failed request, reported the way a refused fetch is, not a RangeError from this copy.
   if (response.status < 200 || response.status > 599) {
     void response.body?.cancel().catch(() => undefined);
-    throw new Error(`Request failed: HTTP ${response.status}`);
+    throw new HttpStatusError(response.status);
   }
   const init = { status: response.status, statusText: response.statusText, headers };
   if (response.body == null || NULL_BODY_STATUSES.has(response.status)) {
