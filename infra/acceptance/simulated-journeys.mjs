@@ -404,7 +404,7 @@ export const JOURNEYS = [
     maxTurns: 12,
     persona: `${AGENCY_RECRUITER} You emailed two candidates for a client role and now you want to handle their answers through Kruit, from first email to a booked call.`,
     facts: (recipients, tag) =>
-      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. The client's hiring manager is Priya, free for a 30-minute call Tuesday to Thursday 1–5 pm Central. You also know, but do not volunteer until Kruit asks you: the client pays up to $10k relocation, and it cannot sponsor or transfer visas.\nTwo candidates you found yourself:\n${twoInboxes(
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. The client's hiring manager is Priya Shah <priya@client.example.test>, free for a 30-minute call Tuesday to Thursday 1–5 pm Central. You also know, but do not volunteer until Kruit asks you: the client pays up to $10k relocation, and it cannot sponsor or transfer visas.\nTwo candidates you found yourself:\n${twoInboxes(
         recipients,
         tag,
       )
