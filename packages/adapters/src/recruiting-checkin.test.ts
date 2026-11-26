@@ -18,8 +18,12 @@ vi.mock("./recruiting-reads.js", () => ({
   getRecruitingCorrespondence: (...args: unknown[]) => getRecruitingCorrespondence(...args),
 }));
 
-const { RECRUITING_CHECKIN_NONCE_PREFIX, startRecruitingCheckin, sweepRecruitingCheckins } =
-  await import("./recruiting-checkin.js");
+const {
+  RECRUITING_CHECKIN_NONCE_PREFIX,
+  RECRUITING_CHECKIN_RETRY_MS,
+  startRecruitingCheckin,
+  sweepRecruitingCheckins,
+} = await import("./recruiting-checkin.js");
 
 const now = Date.parse("2026-10-30T12:00:00Z");
 const target = {
@@ -45,6 +49,8 @@ function fixture(options: {
   busy?: boolean;
   replies?: RecruitingRoleReply[];
   earlier?: Array<{ createdAt: Date; checkinReplyIds: unknown }>;
+  /** A conversation with no role that emailed people from its own one-off campaigns. */
+  direct?: Array<{ request: unknown; result: unknown }>;
 }) {
   const runCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({
     id: "checkin-run",
@@ -63,9 +69,12 @@ function fixture(options: {
         userId: "user",
         botId: null,
         groupId: "group",
-        activeRecruitingRole: { id: "role", userId: "user", archivedAt: null },
+        activeRecruitingRole: options.direct
+          ? null
+          : { id: "role", userId: "user", archivedAt: null },
       })),
     },
+    externalEffect: { findMany: vi.fn(async () => options.direct ?? []) },
     run: {
       findFirst: vi.fn(async () => (options.busy ? { id: "busy" } : null)),
       findMany: vi.fn(async () => options.earlier ?? []),
@@ -79,7 +88,10 @@ function fixture(options: {
         { botId: "main", bot: { name: "Main", spawnKey: "recruiting:x:main", archivedAt: null } },
       ]),
     },
-    botMcpServer: { findMany: vi.fn(async () => [{ botId: "outreach" }]) },
+    botMcpServer: {
+      findMany: vi.fn(async () => [{ botId: "outreach" }]),
+      findFirst: vi.fn(async () => ({ botId: "outreach", server: { revision: 3 } })),
+    },
     $transaction: vi.fn(async (work: (client: typeof tx) => unknown) => work(tx)),
   } as unknown as PrismaClient;
   const jobs = { enqueue: vi.fn(async () => undefined) } as unknown as JobPublisher & {
@@ -134,7 +146,25 @@ describe("startRecruitingCheckin", () => {
     const [, , context, since] = readRecruitingRoleRepliesSince.mock.calls[0]!;
     expect(context).toMatchObject({ botId: "outreach", spaceId: "space", userId: "user" });
     expect(since).toBe("2026-10-29T12:00:00.000Z");
-    expect(deps.jobs.enqueue).toHaveBeenCalledTimes(1);
+    // The run starts, and the conversation is checked again once that run is done.
+    expect(deps.jobs.enqueue).toHaveBeenCalledTimes(2);
+    expect(deps.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "run.continue", payload: { runId: "checkin-run" } }),
+    );
+  });
+
+  it("checks again right after its own run, so a second reply that lands meanwhile is not left for the next sweep", async () => {
+    // Branch play 11-26 (candidate-conversation #2): Ada replied four seconds after the run
+    // that answered Ethan began; nothing read the mailbox again for five minutes.
+    const deps = fixture({ replies: [reply("ethan", "Interested.")] });
+    await start(deps);
+    expect(deps.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "recruiting_checkin.start",
+        payload: { threadId: "thread" },
+        availableAt: new Date(now + RECRUITING_CHECKIN_RETRY_MS),
+      }),
+    );
   });
 
   it("stays quiet when nothing is new", async () => {
@@ -181,11 +211,79 @@ describe("startRecruitingCheckin", () => {
     expect(readRecruitingRoleRepliesSince.mock.calls[0]![3]).toBe("2026-10-30T05:30:00.000Z");
   });
 
-  it("waits while the conversation is busy and never reads the CRM", async () => {
+  it("waits while the conversation is busy, never reads the CRM, and looks again shortly", async () => {
     const deps = fixture({ busy: true, replies: [reply("a", "Interested!")] });
     await start(deps);
     expect(readRecruitingRoleRepliesSince).not.toHaveBeenCalled();
     expect(deps.runCreate).not.toHaveBeenCalled();
+    expect(deps.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "recruiting_checkin.start",
+        availableAt: new Date(now + RECRUITING_CHECKIN_RETRY_MS),
+      }),
+    );
+  });
+
+  it("wakes the conversation that emailed someone outside a role when they reply", async () => {
+    // Branch play 11-26 (candidate-conversation #3): the first emails were sent from the main
+    // conversation, so no role held them and neither candidate's reply woke anyone.
+    const email = (id: string, ue_type: 1 | 2, from: string) => ({
+      id,
+      timestamp_created: "2026-10-30T11:30:00.000Z",
+      timestamp_email: "2026-10-30T11:30:00.000Z",
+      message_id: `<${id}@mail.test>`,
+      subject: "Re: Data role",
+      from_address_email: from,
+      to_address_email_list: ue_type === 2 ? "me@mail.test" : "ada@example.test",
+      body: { text: ue_type === 2 ? "Not looking, please stop." : "Hi Ada" },
+      organization_id: "00000000-0000-4000-8000-000000000001",
+      campaign_id: "00000000-0000-4000-8000-0000000000c1",
+      lead: "ada@example.test",
+      eaccount: "me@mail.test",
+      ue_type,
+    });
+    const execute = vi.fn(async function* () {
+      yield {
+        type: "result" as const,
+        data: {
+          structuredContent: {
+            result: {
+              items: [
+                email("00000000-0000-4000-8000-0000000000a2", 2, "ada@example.test"),
+                email("00000000-0000-4000-8000-0000000000a1", 1, "me@mail.test"),
+              ],
+            },
+          },
+        },
+      };
+    });
+    const deps = fixture({
+      direct: [
+        {
+          request: { serverId: "mail-server", direct: true },
+          result: { campaignId: "00000000-0000-4000-8000-0000000000c1" },
+        },
+      ],
+    });
+    await startRecruitingCheckin(
+      { prisma: deps.prisma, jobs: deps.jobs, connector: { execute } },
+      { threadId: "thread" },
+      now,
+    );
+    expect(listRecruitingCandidates).not.toHaveBeenCalled();
+    const [call, context] = execute.mock.calls[0] as unknown as [
+      { route: Record<string, unknown>; args: unknown },
+      { botId: string },
+    ];
+    expect(call.route).toMatchObject({ resourceId: "mail-server", toolName: "list_emails" });
+    expect(call.args).toEqual({ campaign_id: "00000000-0000-4000-8000-0000000000c1", limit: 50 });
+    expect(context.botId).toBe("outreach");
+    expect(deps.runCreate).toHaveBeenCalledTimes(1);
+    expect(deps.runCreate.mock.calls[0]![0].data.checkinReplyIds).toEqual([
+      "00000000-0000-4000-8000-0000000000a2",
+    ]);
+    const prompt = String(deps.taskCreate.mock.calls[0]![0].data.prompt);
+    expect(prompt).toContain("ada@example.test");
   });
 
   it("reads a role without a CRM link from its own mailbox, and wakes it once per reply", async () => {
@@ -240,18 +338,27 @@ describe("sweepRecruitingCheckins", () => {
   it("offers each role once, from the conversation it was set up in", async () => {
     const prisma = {
       externalEffect: {
-        findMany: vi.fn(async () => [{ request: { roleId: "sending-role" } }, { request: null }]),
+        findMany: vi.fn(async () => [
+          { request: { roleId: "sending-role" }, run: { threadId: "source" } },
+          { request: null, run: { threadId: "x" } },
+          { request: { serverId: "mail", direct: true }, run: { threadId: "main" } },
+        ]),
       },
       thread: {
         findMany: vi.fn(async () => [
           { id: "source", activeRecruitingRole: { sourceThreadId: "source" } },
           { id: "other", activeRecruitingRole: { sourceThreadId: "source" } },
+          { id: "main", activeRecruitingRole: null },
         ]),
       },
     } as unknown as PrismaClient;
     const jobs = { enqueue: vi.fn(async () => undefined) };
     expect(await sweepRecruitingCheckins({ prisma, jobs, now: new Date(now), batchSize: 10 })).toBe(
-      1,
+      2,
+    );
+    // The conversation that emailed someone outside a role is checked too.
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { threadId: "main" } }),
     );
     expect(jobs.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -261,7 +368,8 @@ describe("sweepRecruitingCheckins", () => {
     );
     // Roles that email people are offered too, not only CRM-linked ones.
     const where = (prisma.thread.findMany as ReturnType<typeof vi.fn>).mock.calls[0]![0].where;
-    expect(where.activeRecruitingRole.OR).toContainEqual({ id: { in: ["sending-role"] } });
+    expect(where.OR[0].activeRecruitingRole.OR).toContainEqual({ id: { in: ["sending-role"] } });
+    expect(where.OR[1]).toEqual({ id: { in: ["main"] }, activeRecruitingRoleId: null });
   });
 });
 
