@@ -557,7 +557,6 @@ export async function createApp(
     runtime,
     codexCatalog,
     replySuggestions: true,
-    quickReplies: true,
     sandbox,
     memory,
     memoryProviders,

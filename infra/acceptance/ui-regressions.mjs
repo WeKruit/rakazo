@@ -155,11 +155,26 @@ if (!signedIn) {
 
 const all = await groups();
 const kruit = all.find((group) => group.name === "Kruit");
-// Other checks leave fresh, empty test roles behind, so the people check reads a named role when
-// RAKAZO_PEOPLE_ROLE is set and otherwise the longest-standing one.
-const fixtureRole =
-  all.find((group) => group.name === process.env.RAKAZO_PEOPLE_ROLE) ??
-  all.findLast((group) => group.name.startsWith(FIXTURE_MARK));
+/** How many people a role chat has saved; 0 when it has no saved role. */
+async function savedPeople(group) {
+  const threadId = (await rpc("groups/get", { groupId: group.id }).catch(() => null))?.threadId;
+  if (!threadId) return 0;
+  return (
+    (await rpc("recruiting/roleCandidates", { groupId: group.id, threadId, limit: 1 }).catch(
+      () => null,
+    ))?.total ?? 0
+  );
+}
+// The checks ask for saved people, so the fixture is the test role with the most of them, never one
+// picked by age (gates 81f351ca–fe03590f picked an old email-test role that was never searched).
+let fixtureRole = all.find((group) => group.name === process.env.RAKAZO_PEOPLE_ROLE);
+if (!fixtureRole) {
+  let most = 0;
+  for (const group of all.filter((item) => item.name.startsWith(FIXTURE_MARK))) {
+    const people = await savedPeople(group);
+    if (people > most) [most, fixtureRole] = [people, group];
+  }
+}
 
 try {
   await check("ids", async (page, failures) => {
