@@ -380,6 +380,8 @@ export function recipientsOf(title, detail) {
   const start = lines.findIndex((line) => /^(?:To|收件人)(?:\s*\(\d+\+?\))?\s*[:：]/i.test(line));
   let found = [];
   if (start >= 0) {
+    // A reply card names its one recipient on the To line itself.
+    found.push(...(lines[start].match(EMAIL) ?? []));
     for (const line of lines.slice(start + 1)) {
       if (/^\S/.test(line) && !line.startsWith("- ")) break;
       if (/^- and \d+ more/.test(line)) return [];

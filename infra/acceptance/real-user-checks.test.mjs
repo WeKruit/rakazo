@@ -520,6 +520,14 @@ test("a send card's recipients are its To list, never the sending mailbox or the
   assert.deepEqual(recipientsOf("Confirm sending email → wei@test.example", ""), [
     "wei@test.example",
   ]);
+  // A reply card names its recipient on the To line; the From mailbox is never a recipient.
+  assert.deepEqual(
+    recipientsOf(
+      "Confirm reply",
+      "To: ethan@test.example\nFrom: me@mail.example\nSubject: Re: Seattle role",
+    ),
+    ["ethan@test.example"],
+  );
 });
 
 test("cardAnswer sends a button id, a filled form, or the typed text", () => {
