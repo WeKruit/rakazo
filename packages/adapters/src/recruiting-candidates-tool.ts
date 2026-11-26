@@ -156,33 +156,23 @@ export type RecruiterListItem = {
 };
 
 /**
- * Who a page of a role's people shows the recruiter: never anyone turned down, shown in a round,
- * already listed in this reply or, for a local role, living beyond commuting distance. `inRounds`
- * and `farAway` count the people left out because a round already showed them or they live too far.
+ * Who a page of a role's people shows the recruiter: never anyone turned down, shown in a round or
+ * already listed in this reply. `inRounds` counts the people left out because a round already
+ * showed them.
  */
 export function peopleToShow<T extends RecruiterListItem>(
   items: readonly T[],
-  input: {
-    size: number;
-    listed: ReadonlySet<string>;
-    beyond?: (location: string) => boolean;
-  },
-): { shown: T[]; inRounds: number; farAway: number } {
+  input: { size: number; listed: ReadonlySet<string> },
+): { shown: T[]; inRounds: number } {
   const page = items.slice(0, input.size);
-  const far = (item: T) => Boolean(item.location && input.beyond?.(item.location));
   const shown = page.filter(
     (item) =>
       item.recruiterVerdict !== "not_fit" &&
       item.decision !== "pass" &&
       item.shownInRound === undefined &&
-      !far(item) &&
       !(typeof item.candidateKey === "string" && input.listed.has(item.candidateKey)),
   );
-  return {
-    shown,
-    inRounds: page.filter((item) => item.shownInRound !== undefined).length,
-    farAway: page.filter((item) => item.shownInRound === undefined && far(item)).length,
-  };
+  return { shown, inRounds: page.filter((item) => item.shownInRound !== undefined).length };
 }
 
 /** About 10k tokens: a whole account read stays one tool result the model can still answer from. */
