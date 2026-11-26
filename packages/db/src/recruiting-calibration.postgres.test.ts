@@ -327,8 +327,10 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       shown: 10,
       goodExample: 2,
       notFit: 2,
-      accepted: true,
+      accepted: false,
     });
+    // Only the round the recruiter accepted in their own words (round 2, above) is accepted.
+    expect(quality.rounds[1]).toMatchObject({ round: 2, accepted: true });
     expect(quality).toMatchObject({ goodExample: 2, notFit: 4 });
 
     // The one record of what the recruiter saw: each person's round and latest verdict.
@@ -336,7 +338,7 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       roleId,
       candidateKeys: ["first-0", "first-2", "second-0", "spare-0"],
     });
-    expect(seen.latestRound).toMatchObject({ round: 2, people: expect.any(Number) });
+    expect(seen.latestRound).toMatchObject({ round: 3, people: expect.any(Number) });
     expect(seen.people.get("first-0")).toMatchObject({ round: 1, verdict: "not_fit" });
     expect(seen.people.get("first-2")).toMatchObject({ round: 1, verdict: "good_example" });
     expect(seen.people.get("second-0")).toMatchObject({ round: 2, verdict: "not_fit" });
