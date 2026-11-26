@@ -36,6 +36,8 @@ async function recruiterMessages(
   prisma: Pick<PrismaClient, "message">,
   threadId: string,
   count: number,
+  /** The newest message to count from; messages written after it are left out. */
+  upToId?: string,
 ): Promise<{ id: string; blocks: MessageBlock[] }[]> {
   const recent = await prisma.message.findMany({
     where: { threadId, role: "user", botId: null },
@@ -50,12 +52,12 @@ async function recruiterMessages(
       externalTranscriptFor: { select: { id: true } },
     },
   });
-  return recent
-    .flatMap((message) => {
-      const blocks = message.externalTranscriptFor ? undefined : recruiterBlocks(message);
-      return blocks ? [{ id: message.id, blocks }] : [];
-    })
-    .slice(0, count);
+  const own = recent.flatMap((message) => {
+    const blocks = message.externalTranscriptFor ? undefined : recruiterBlocks(message);
+    return blocks ? [{ id: message.id, blocks }] : [];
+  });
+  const from = upToId ? own.findIndex((message) => message.id === upToId) : 0;
+  return own.slice(Math.max(0, from)).slice(0, count);
 }
 
 /** The recruiter's latest own message in a conversation. */
@@ -88,9 +90,18 @@ function titleCore(title: string): string {
  */
 export async function roleStartKey(
   prisma: Pick<PrismaClient, "message" | "chatGroup">,
-  input: { spaceId: string; userId: string; threadId: string; title: string; fallback: string },
+  input: {
+    spaceId: string;
+    userId: string;
+    threadId: string;
+    title: string;
+    fallback: string;
+    /** The recruiter's latest message, when the caller already read it. */
+    asked?: { id: string } | null;
+  },
 ): Promise<string> {
-  const asked = await latestRecruiterMessage(prisma, input.threadId);
+  const asked =
+    input.asked === undefined ? await latestRecruiterMessage(prisma, input.threadId) : input.asked;
   if (!asked) return input.fallback;
   const opened = await prisma.chatGroup.findFirst({
     where: { id: roleGroupId(asked.id), spaceId: input.spaceId, userId: input.userId },
@@ -110,7 +121,14 @@ export async function roleStartKey(
  */
 export async function roleAlreadyOpenedHere(
   prisma: Pick<PrismaClient, "message" | "chatGroup">,
-  input: { spaceId: string; userId: string; threadId: string; title: string },
+  input: {
+    spaceId: string;
+    userId: string;
+    threadId: string;
+    title: string;
+    /** The recruiter's latest message, when the caller already read it. */
+    asked?: { id: string } | null;
+  },
 ): Promise<{ groupId: string; title: string } | undefined> {
   const asked = await prisma.message.findMany({
     where: { threadId: input.threadId, role: "user", botId: null },
@@ -118,7 +136,8 @@ export async function roleAlreadyOpenedHere(
     take: 20,
     select: { id: true },
   });
-  const latest = await latestRecruiterMessage(prisma, input.threadId);
+  const latest =
+    input.asked === undefined ? await latestRecruiterMessage(prisma, input.threadId) : input.asked;
   const core = titleCore(input.title);
   const ids = asked
     .filter((message) => message.id !== latest?.id)
@@ -144,6 +163,11 @@ export const roleAlreadyOpenNote = (role: { groupId: string; title: string }) =>
  * space's content lock, so roles asked for in parallel see each other. Staging 11-16: three
  * parallel calls for Java, Android and Data Engineer each found no role yet, all took the
  * message's first-role key, and only "Java" was opened while Kruit said all three were.
+ *
+ * The recruiter's latest message is read once here, and the already-open check, the key and the
+ * words the role starts from all use that one reading. Staging 11-26: a second message arrived
+ * between the check and the key, so a role already open from the JD was opened again under the
+ * new message and started with only 「对了，远程也可以」, no JD.
  */
 export async function openRoleGroup(
   prisma: Pick<PrismaClient, "$transaction">,
@@ -154,18 +178,23 @@ export async function openRoleGroup(
     title: string;
     fallback: string;
     botIds: string[];
+    /** Roles this turn was already told are open; asking again opens a second one. */
+    overruled: ReadonlySet<string>;
   },
 ) {
   return withTransactionRetry(() =>
     prisma.$transaction(async (tx) => {
       await lockSpaceForContentCreation(tx, input);
-      const roleKey = await roleStartKey(tx, input);
+      const asked = (await latestRecruiterMessage(tx, input.threadId)) ?? null;
+      const openHere = await roleAlreadyOpenedHere(tx, { ...input, asked });
+      if (openHere && !input.overruled.has(openHere.groupId)) return { openHere };
+      const roleKey = await roleStartKey(tx, { ...input, asked });
       const group = await createGroupInTransaction(
         tx,
         { spaceId: input.spaceId, userId: input.userId, email: "", isDeploymentOwner: false },
         { id: roleGroupId(roleKey), name: input.title.slice(0, 120), botIds: input.botIds },
       );
-      return { roleKey, group };
+      return { roleKey, group, askedMessageId: asked?.id };
     }),
   );
 }
@@ -210,13 +239,20 @@ export async function startRoleFromRecruiterMessage(
      * Stop the recruiter wrote 「继续吧」 and the role opened with only those words, no JD.
      */
     earlierMessages?: number;
+    /** The recruiter message the role was opened from; later messages are not copied. */
+    askedMessageId?: string;
   },
 ): Promise<boolean> {
   if (!run.sourceMessageId) return false;
   // The recruiter's latest message here: a turn resumed by answering a card keeps the
   // card's original message as its source, but the role was asked for in the answer.
   const blocks = (
-    await recruiterMessages(deps.prisma, run.threadId, 1 + (role.earlierMessages ?? 0))
+    await recruiterMessages(
+      deps.prisma,
+      run.threadId,
+      1 + (role.earlierMessages ?? 0),
+      role.askedMessageId,
+    )
   )
     .reverse()
     .flatMap((message) => message.blocks);

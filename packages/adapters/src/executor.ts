@@ -636,7 +636,6 @@ import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
   openRoleGroup,
   roleOpenedFromLatestMessage,
-  roleAlreadyOpenedHere,
   roleAlreadyOpenNote,
   startRoleFromRecruiterMessage,
 } from "./role-start.js";
@@ -10549,29 +10548,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "start_role works only in the global conversation.",
               });
-            const openHere = await roleAlreadyOpenedHere(deps.prisma, {
-              spaceId: run.spaceId,
-              userId: run.userId,
-              threadId: run.threadId,
-              title,
-            });
-            if (openHere && !roleReferenceOverruled.has(openHere.groupId)) {
-              roleReferenceOverruled.add(openHere.groupId);
-              return finish({ error: roleAlreadyOpenNote(openHere) });
-            }
             const team = await deps.prisma.chatGroupMember.findMany({
               where: { groupId: thread.groupId },
               select: { botId: true },
               orderBy: { createdAt: "asc" },
             });
-            const { roleKey, group } = await openRoleGroup(deps.prisma, {
+            const opened = await openRoleGroup(deps.prisma, {
               spaceId: run.spaceId,
               userId: run.userId,
               threadId: run.threadId,
               title,
               fallback: effectKey,
               botIds: team.map((member) => member.botId),
+              overruled: roleReferenceOverruled,
             });
+            if (opened.openHere) {
+              roleReferenceOverruled.add(opened.openHere.groupId);
+              return finish({ error: roleAlreadyOpenNote(opened.openHere) });
+            }
+            const { roleKey, group, askedMessageId } = opened;
             if (!group.thread)
               return finish({
                 error: "The role conversation could not be opened.",
@@ -10586,6 +10581,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               title,
               earlier: request,
               earlierMessages: Math.min(10, Math.max(0, Math.trunc(Number(args.earlier_messages) || 0))),
+              askedMessageId,
             });
             if (!started) {
               if (!request)
