@@ -1,5 +1,6 @@
 import type { RecruitingCriterion, RecruitingCriterionExpression } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
+import { countRecruitingRoleGrades } from "@rakazo/db";
 import { handedInRecruiterWords } from "./global-role-writes.js";
 
 /**
@@ -244,6 +245,24 @@ export async function withoutShownBefore(
   const shown = new Set(earlier.flatMap((round) => round.candidateKeys));
   const fresh = [...new Set(keys)].filter((key) => !shown.has(key));
   return { keys: fresh, shownBefore: keys.length - fresh.length };
+}
+
+/**
+ * Where a request for N people stands, given with every search, list and round result so the
+ * agent never keeps a tally of its own: `fitShown`, the people graded Strong or Promising a round
+ * has shown the recruiter, is the one count a request is measured by and the one told to them.
+ */
+export async function requestCounts(prisma: PrismaClient, roleId: string) {
+  const [peopleInResults, grades] = await Promise.all([
+    prisma.recruitingCandidate.count({ where: { roleId } }),
+    countRecruitingRoleGrades(prisma, roleId),
+  ]);
+  return {
+    peopleInResults,
+    fitShown: grades.fitShown,
+    fitNotShownYet: grades.fit - grades.fitShown,
+    notGradedYet: peopleInResults - grades.checked,
+  };
 }
 
 /** A role team's round list starts with this heading, in either language. */

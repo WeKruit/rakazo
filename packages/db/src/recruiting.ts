@@ -12191,16 +12191,26 @@ async function candidateByOtherKeyShape(
   return near.length === 1 ? (near[0] ?? null) : null;
 }
 
-/** How many of a role's saved people the latest check graded at all, and as fitting. */
+/**
+ * A role's people by their newest saved grade. A request for N people counts one thing: people
+ * graded Strong or Promising whom a round has shown the recruiter (`fitShown`). Staging 42e30040:
+ * with only the fit people in Results counted, Kruit said "reached 60" with 20 shown, then gave
+ * 60, 61 and 63 as the count in turn.
+ */
 export async function countRecruitingRoleGrades(
   prisma: Pick<PrismaClient, "$queryRaw">,
   roleId: string,
-): Promise<{ fit: number; checked: number }> {
-  const [row] = await prisma.$queryRaw<{ fit: number; checked: number }[]>(Prisma.sql`
+): Promise<{ fit: number; fitShown: number; checked: number }> {
+  const [row] = await prisma.$queryRaw<{ fit: number; fitShown: number; checked: number }[]>(
+    Prisma.sql`
     SELECT (count(*) FILTER (WHERE g.grade IN ('Strong', 'Promising')))::int AS fit,
+      (count(*) FILTER (WHERE g.grade IN ('Strong', 'Promising') AND EXISTS (
+        SELECT 1 FROM "recruiting_calibration_rounds" r
+        WHERE r."roleId" = ${roleId} AND r."status" = 'shown'
+          AND g."candidateKey" = ANY(r."candidateKeys"))))::int AS "fitShown",
       count(*)::int AS checked
     FROM (
-      SELECT DISTINCT ON (o."candidateKey") CASE
+      SELECT DISTINCT ON (o."candidateKey") o."candidateKey", CASE
         WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
           THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade
       FROM "recruiting_candidate_occurrences" o
@@ -12208,8 +12218,9 @@ export async function countRecruitingRoleGrades(
       WHERE o."roleId" = ${roleId} AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'
       ORDER BY o."candidateKey", p."observedAt" DESC, p."effectId" DESC
     ) g
-    WHERE g.grade IS NOT NULL`);
-  return row ?? { fit: 0, checked: 0 };
+    WHERE g.grade IS NOT NULL`,
+  );
+  return row ?? { fit: 0, fitShown: 0, checked: 0 };
 }
 
 export async function listRecruitingCandidateSources(
