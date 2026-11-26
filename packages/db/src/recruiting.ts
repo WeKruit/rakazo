@@ -3349,6 +3349,7 @@ const looseArray = (value: unknown): unknown[] => (Array.isArray(value) ? value 
  * role read here is scoped to the actor, and the save still runs every isolation check.
  * - A file reference takes its fingerprint from the file row and its url and read time from the
  *   native read receipt; a role reference without a selection reads the extracted text.
+ * - A file id that is no file of this person, beside exactly one real file, is that file.
  * - An update or revise acts on the conversation's current role.
  * - A brief that cites a source id the save does not define cites the recruiter's message that
  *   holds that value (else their latest message) for their own words, or the role's only
@@ -3409,6 +3410,7 @@ export async function fillRecruitingRoleArgs(
       : [],
   ]);
   const hashes = new Map(files.map((file) => [file.id, file.hash]));
+  const soleFile = hashes.size === 1 ? [...hashes.keys()][0] : undefined;
   const receipts = new Map<string, { url: string; readAt: string }>();
   for (const event of events) {
     const payload = RecruitingMaterialReadPayloadSchema.safeParse(event.payload);
@@ -3427,15 +3429,20 @@ export async function fillRecruitingRoleArgs(
     const record = Object.fromEntries(
       Object.entries(value).map(([key, item]) => [key, fill(item)]),
     );
-    const id = artifactOf(value);
+    const cited = artifactOf(value);
+    // Staging 11-26: one of two citations of the same PDF had a letter added to its id, and the
+    // whole save was refused. An id that is no file of this person, in a save that cites exactly
+    // one real file, is that file.
+    const id = cited && !hashes.has(cited) && soleFile ? soleFile : cited;
     const hash = id ? hashes.get(id) : undefined;
     if (!id || !hash || !looseRecord(record.anchor)) return record;
+    if (id !== cited) getLogger().warn("recruiting.source.repaired", { reason: "file_id_unknown" });
     const anchor = record.anchor as LooseRecord;
     const filled: LooseRecord = {
       ...record,
       anchor: {
         ...anchor,
-        artifact: { ...(anchor.artifact as LooseRecord), sha256: hash },
+        artifact: { ...(anchor.artifact as LooseRecord), artifactId: id, sha256: hash },
         ...(record.selection === undefined ? { locator: "text" } : {}),
       },
     };

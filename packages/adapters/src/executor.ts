@@ -600,7 +600,6 @@ import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-
 import {
   requestCounts,
   roundCountLine,
-  roundCriteria,
   withoutShownBefore,
 } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
@@ -6911,7 +6910,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error:
                   name === "recruiting_candidates"
                     ? "These saved sources could not be read. Use recruiting_candidates list for the people and continue."
-                    : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
+                    : // Staging 11-26: Kruit created the role in the main conversation three times,
+                      // was told only that a reference was foreign, and opened no role at all.
+                      name === "recruiting_role" &&
+                        args.operation === "create" &&
+                        thread.groupId?.startsWith("recruiting-global-")
+                      ? "A role is not saved in this conversation: open it with start_role, and its team saves it there."
+                      : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
               };
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };
