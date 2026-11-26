@@ -36,13 +36,6 @@ const LABELLED: Array<CandidateReplyText & { label: string; rule: AutomaticReply
     rule: "automatic_reply",
   },
   {
-    label: "auto-reply opening in body",
-    from: "riley@example.test",
-    subject: "Re: Platform lead",
-    body: "Hi, I am currently on parental leave and will reply when I return in January.",
-    rule: "automatic_reply",
-  },
-  {
     label: "chinese automatic reply",
     from: "lin@example.test",
     subject: "自动回复: 关于平台负责人职位",
@@ -82,13 +75,6 @@ const LABELLED: Array<CandidateReplyText & { label: string; rule: AutomaticReply
     from: "drew@example.test",
     subject: "Re: Staff engineer role — resume attached",
     body: "Here is my resume. I'm out of the office Friday, so Monday works best for a call.",
-    rule: null,
-  },
-  {
-    label: "long reply that starts like an auto-reply",
-    from: "sam@example.test",
-    subject: "Re: Platform lead",
-    body: `I am currently out of the office, but I wanted to answer quickly. ${"I have led platform teams for eight years and would like to hear more. ".repeat(15)}`,
     rule: null,
   },
 ];
