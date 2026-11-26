@@ -71,7 +71,6 @@ const STATES_A_LANGUAGE = (statement: string) =>
   `Does this requirement state a language the person must speak or work in, rather than a skill, a place or a programming language? Requirement: "${statement}"`;
 /** A requirement on the person; a language they must speak goes to the deployment's language check. */
 type PersonRequirement = CriterionQuestion & { language?: boolean; shown?: string };
-const FIELD_KEY = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
 
 /**
  * How the language check's answer reads as a requirement's level. Profiles rarely list languages,
@@ -115,9 +114,10 @@ export async function personRequirements(
       return parts.map((part, index) => ({
         id: parts.length > 1 ? `${id}#${index + 1}` : id,
         statement: label ? `${label[1]}: ${part}` : part,
-        // A brief field's own key (target_role, data_warehouse_modeling) is not the recruiter's
-        // words: the judge reads it for context, the recruiter is shown the requirement alone.
-        ...(label && FIELD_KEY.test(label[1]!) ? { shown: part } : {}),
+        // A brief field's own key (experience, target_role) is the agent's name for the field,
+        // not the recruiter's words: the judge reads it for context, the recruiter is shown the
+        // requirement alone.
+        ...(label && id === `brief:${label[1]}` ? { shown: part } : {}),
       }));
     })
     .slice(0, 16);
