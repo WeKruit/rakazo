@@ -172,6 +172,18 @@ export function MailReplyAskContent({
               {reply.subject}
             </Text>
           </View>
+          {editing && reply.openQuestions?.length ? (
+            <View style={styles.field}>
+              <Text style={[styles.label, { color: tokens.mutedForeground }]}>
+                {t("The candidate asked what you haven't told me. Answer it in the reply:")}
+              </Text>
+              {reply.openQuestions.map((question) => (
+                <Text key={question} selectable style={{ color: tokens.foreground }}>
+                  {`• ${question}`}
+                </Text>
+              ))}
+            </View>
+          ) : null}
           <TextInput
             accessibilityLabel={t("Reply message")}
             value={body}

@@ -44,6 +44,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   // 16: a file card's source preview no longer names a local assessment (previews are added on
   // read, never stored).
   16: "cc984f209987fa0fd463736cc20ce7f0acbb57c842c17aacbaac987fc7b3d8b5",
+  // 17: optional openQuestions on a mail reply (the candidate's questions the recruiter never answered).
+  17: "52f3c932e4de5859cbb67a698075966b771b894f05e9dc9fff00fdbec1c053fa",
 };
 
 const OLD_ROWS: unknown[] = [

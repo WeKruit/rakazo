@@ -13,6 +13,7 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Address change requested": "已请求更改地址",
   "View email": "查看邮件",
   "Hide email": "收起邮件",
+  "The candidate asked what you haven't told me. Answer it in the reply:": "候选人问了你还没告诉我的事，请在回复里答上：",
   "Reply draft": "回复草稿",
   "Needs approval": "待批准",
   Discarded: "已丢弃",

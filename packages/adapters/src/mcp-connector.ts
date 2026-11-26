@@ -103,6 +103,7 @@ import {
 import { unresolvedContactEmailError } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
+import { withOpenQuestions } from "./reply-open-questions.js";
 
 const INSTANTLY_MCP = "https://mcp.instantly.ai/mcp";
 const GMAIL_MCP = "https://gmailmcp.googleapis.com/mcp/v1";
@@ -412,7 +413,10 @@ function localInstantlyTools(
     tools.push({
       name: `instantly__${assignment.server.slug}__${local.name}`,
       description: local.description,
-      inputSchema: local.inputSchema,
+      inputSchema:
+        local.toolName === "native_instantly_reply_to_email"
+          ? withOpenQuestions(local.inputSchema)
+          : local.inputSchema,
       readOnly: local.readOnly,
       route: route(local.toolName),
     });
@@ -1114,7 +1118,10 @@ export class McpConnector implements ConnectorProvider {
             .map((tool) => ({
               name: `mcp__${assignment.server.slug}__${tool.name}`,
               description: tool.description ?? tool.name,
-              inputSchema: tool.inputSchema as Record<string, unknown>,
+              inputSchema:
+                tool.name === "reply_to_email" && assignment.server.endpoint === INSTANTLY_MCP
+                  ? withOpenQuestions(tool.inputSchema as Record<string, unknown>)
+                  : (tool.inputSchema as Record<string, unknown>),
               route: {
                 connectorId: "mcp",
                 resourceId: assignment.serverId,

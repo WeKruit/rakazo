@@ -2158,6 +2158,54 @@ describe.each([
   }
 });
 
+describe.each([false, true])("a reply to a candidate (catalog: %s)", (catalog) => {
+  const replyFixture = () =>
+    fixture({
+      name: "renamed_reply",
+      catalog,
+      readOnly: false,
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "reply_to_email",
+      },
+      inputSchema: { type: "object" },
+    });
+
+  it("shows the questions the recruiter never answered on its card, and still drafts it", async () => {
+    const f = replyFixture();
+    f.setCalls([
+      {
+        args: { ...replyArgs, open_questions: ["Do you offer relocation?"] },
+        executionId: "reply",
+      },
+    ]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            mailReply: expect.objectContaining({ openQuestions: ["Do you offer relocation?"] }),
+          }),
+        ],
+      }),
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it("goes to its card when none is open, and the mail service never sees the field", async () => {
+    const f = replyFixture();
+    f.setCalls([{ args: { ...replyArgs, open_questions: [] }, executionId: "reply" }]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual(replyArgs);
+  });
+});
+
 const sendActions = [
   { id: "allow", label: "Send" },
   { id: "deny", label: "Discard" },

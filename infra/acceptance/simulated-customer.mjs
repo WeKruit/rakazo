@@ -247,7 +247,16 @@ async function cardsOpen(rpc) {
         ),
       ]) {
         if (!message.runId || block.input === "secret") continue;
-        const text = [block.text, block.detail].filter(Boolean).join("\n");
+        const text = [
+          block.text,
+          block.detail,
+          // The page lists, above the reply box, what the candidate asked that the recruiter never said.
+          block.mailReply?.openQuestions?.length
+            ? `The candidate asked what you haven't told me. Answer it in the reply:\n${block.mailReply.openQuestions.map((question) => `- ${question}`).join("\n")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
         open.push({
           chat: group.name,
           groupId: group.id,
@@ -462,7 +471,7 @@ async function replyAfter(journey, rpc, since, quick = false) {
 }
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone), but make each message mean what your goal means: if a stranger could read it as a different question, reword it. Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
-{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "wait" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button; for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "people": <how many new people this message asks Kruit to find or show now: "find 10" is 10, "swap these two" is 2, a first search with no number is 10, a later "more like these" with no number is 3; 0 when it asks for none>, "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
+{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "wait" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card; approve_send only presses the card's button, except on a reply draft, where a text is your edited reply as it should go out (the whole email); for deny_send, text is what you want changed and is sent as your message right after the button>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "people": <how many new people this message asks Kruit to find or show now: "find 10" is 10, "swap these two" is 2, a first search with no number is 10, a later "more like these" with no number is 3; 0 when it asks for none>, "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
 Use "wait" only when a goal tells you to wait or step away: you write nothing and come back when Kruit writes to you, or after a few minutes. Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
 // With --ui the recruiter works in the browser and can also open pages and press buttons.
 const UI_RULES = `${SIMULATOR_RULES}
@@ -836,10 +845,13 @@ async function play(journey, label, owner, mailbox, out) {
         log(
           `${label}: recruiter ${answer === "allow" ? "approves" : answer === "deny" ? "denies" : `answers "${answer}" on`} "${card.text.slice(0, 60)}"${turn.guard ? ` (${turn.guard})` : ""}`,
         );
-        // A reply draft's Send carries the draft as shown, as the page's Send button does.
+        // A reply draft's Send carries the draft as shown, or as the recruiter edited it in the
+        // card's text box, as the page's Send button does.
+        const edited = card.mailReply && answer === "allow" && !ui && move.text?.trim();
+        if (edited) log(`${label}: recruiter edits the reply before Send: ${edited.slice(0, 120)}`);
         const value =
           card.mailReply && answer === "allow"
-            ? { action: "send", body: card.mailReply.body, cc: card.mailReply.cc ?? [] }
+            ? { action: "send", body: edited || card.mailReply.body, cc: card.mailReply.cc ?? [] }
             : card.send
               ? answer
               : cardAnswer(card, answer);

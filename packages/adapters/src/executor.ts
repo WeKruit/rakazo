@@ -648,6 +648,7 @@ import {
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
+import { openQuestionsAnsweredNote, takeOpenQuestions } from "./reply-open-questions.js";
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
@@ -5739,6 +5740,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
             }
           }
+          let replyOpenQuestions: string[] = [];
+          if (
+            connectorCall.route?.connectorId === "mcp" &&
+            ["reply_to_email", "native_instantly_reply_to_email"].includes(
+              connectorCall.route.toolName,
+            )
+          ) {
+            const open = takeOpenQuestions(args);
+            replyOpenQuestions = open.open;
+            args = open.args;
+            connectorCall = { ...connectorCall, args: takeOpenQuestions(connectorCall.args).args };
+          }
           if (
             !catalogRemapped &&
             connectorCall.route?.resourceId &&
@@ -7986,6 +7999,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       );
                 if (thread.activeRecruitingRoleId)
                   approvalBlock.mailReply.inReplyTo.roleId = thread.activeRecruitingRoleId;
+                if (replyOpenQuestions.length)
+                  approvalBlock.mailReply.openQuestions = replyOpenQuestions;
                 const proposed = approvalBlock.mailReply;
                 if (
                   replyDiscardActive &&
@@ -12460,6 +12475,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               error: String(error),
             });
           }
+          if (
+            replyDraft.openQuestions?.length &&
+            replyOutcome === mailReplyOutcomeInstruction({ status: "sent" })
+          )
+            replyOutcome = `${replyOutcome}\n${openQuestionsAnsweredNote(replyDraft.openQuestions)}`;
           sentReplyDirectly = true;
         }
         if (sentReplyDirectly) probeFoundNothing = true;
