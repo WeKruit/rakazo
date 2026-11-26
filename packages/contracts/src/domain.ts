@@ -672,7 +672,7 @@ export const AgentSkillCatalogEntrySchema = AgentSkillSchema.pick({
   source: true,
   readOnly: true,
 }).extend({
-  /** A requirement the skill declares that this account is missing, e.g. "needs connection sourced". */
+  /** A requirement the skill declares that this account is missing, e.g. "needs connection gmail". */
   unavailable: z.string().optional(),
 });
 export type AgentSkillCatalogEntry = z.infer<typeof AgentSkillCatalogEntrySchema>;
