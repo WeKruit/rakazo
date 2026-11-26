@@ -1,7 +1,6 @@
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { CriterionQuestion, TextJudge } from "./judge.js";
-import { LANGUAGE_WORDS } from "./recruiting-language.js";
 import { roundCriteria } from "./recruiting-round-check.js";
 
 /**
@@ -68,8 +67,8 @@ const STATES_A_PLACE = (statement: string) =>
 
 /**
  * The requirements a profile can be judged on, one fact each: a field holding several ("Shanghai;
- * hybrid three days") is split, terms of the offer (pay, office days) are left out since no
- * profile shows them, and so is the required language, which has its own check. Each reason the
+ * hybrid three days") is split, and terms of the offer (pay, office days) are left out since no
+ * profile shows them. Each reason the
  * recruiter turned people down is asked the other way round: does this profile show it too.
  */
 async function personRequirements(
@@ -84,9 +83,7 @@ async function personRequirements(
       avoid: true,
     }));
   const facts = criteria
-    .filter(
-      ({ id, statement }) => !id.startsWith("turned-down:") && !LANGUAGE_WORDS.test(statement),
-    )
+    .filter(({ id }) => !id.startsWith("turned-down:"))
     .flatMap(({ id, statement }) => {
       const label = /^([^:：]{1,40})[:：]\s*(.+)$/s.exec(statement);
       const parts = (label?.[2] ?? statement)

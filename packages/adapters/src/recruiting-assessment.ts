@@ -39,7 +39,6 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
 import { readRecruitingAccountView } from "./recruiting-account.js";
-import { savedLanguageLevels } from "./recruiting-language.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import {
   bestLookedUpEmail,
@@ -727,7 +726,6 @@ export async function executeRecruitingCandidatesTool(
       sourceRoleId,
       { fromTool: true },
     );
-    const languages = await savedLanguageLevels(deps.prisma, sourceRoleId, keys);
     const readOne = async (candidateKey: string) => {
       const result = await listRecruitingCandidateSources(deps.prisma, trusted.actor, {
         roleId: sourceRoleId,
@@ -751,18 +749,9 @@ export async function executeRecruitingCandidatesTool(
         }),
       );
       reportReadMs = Math.round(performance.now() - reportsStarted);
-      // The language check's finding on this person, saved with the search that found them,
-      // stands for the required language: whoever grades takes it as given instead of judging it
-      // again.
-      const language = languages.get(candidateKey);
       return {
         ...result,
         items: result.items.map((source, index) => ({ ...source, report: reports[index] })),
-        ...(language
-          ? {
-              requiredLanguage: `${language.requirement}: ${language.level} (the language check's finding)`,
-            }
-          : {}),
       };
     };
     // Five people took a grader five reads of three seconds each; several keys are one read.

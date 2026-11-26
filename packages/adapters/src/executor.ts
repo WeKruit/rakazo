@@ -263,7 +263,6 @@ import {
   IsolationError,
   isNativeHumanMessage,
   isTooManyDatabaseConnections,
-  listRunToolResults,
   loadMessageThinking,
   loadRunHistoryMessages,
   loadRunHumanSources,
@@ -535,7 +534,7 @@ import {
   SENDER_READ_FIRST,
   senderApprovalDisplay,
 } from "./instantly-senders.js";
-import type { LanguageSignal, TextJudge } from "./judge.js";
+import type { TextJudge } from "./judge.js";
 import type { PageReader } from "./keyless-http-web.js";
 import {
   assertConnectorToolArgs,
@@ -631,15 +630,6 @@ import {
   gradingToolRefusal,
   gradingTools,
 } from "./recruiting-grading.js";
-import {
-  languageFilters,
-  requiredLanguage,
-  saveLanguageLevels,
-  roundByLanguage,
-  savedLanguageLevels,
-  statedLanguageRequirement,
-  withRequiredLanguage,
-} from "./recruiting-language.js";
 import { statedMustHaveCriteria } from "./recruiting-must-haves.js";
 import {
   executeRecruitingProfilesTool,
@@ -1026,30 +1016,6 @@ function feedbackInputError(result: unknown): boolean {
  * What the agent is told when a feedback save is refused. A check that says what to change
  * (the exact quote, a source reference) is passed on, so the next call can fix it.
  */
-/** The recruiter's own recent words in a conversation, newest first; empty when unreadable. */
-async function recruiterWords(
-  prisma: Pick<PrismaClient, "message">,
-  threadId: string,
-): Promise<string[]> {
-  try {
-    const messages = await prisma.message.findMany({
-      where: { threadId, role: "user", botId: null },
-      orderBy: { seq: "desc" },
-      take: 20,
-      select: { blocks: true },
-    });
-    return messages.flatMap((message) =>
-      Array.isArray(message.blocks)
-        ? (message.blocks as { kind?: unknown; text?: unknown }[]).flatMap((block) =>
-            block.kind === "text" && typeof block.text === "string" ? [block.text] : [],
-          )
-        : [],
-    );
-  } catch {
-    return [];
-  }
-}
-
 export function feedbackSaveRefused(error: Error): string {
   const named =
     error instanceof RecruitingIntentQuoteError || error instanceof RecruitingSourceCheckError;
@@ -4647,40 +4613,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let briefBump: { from: number; to: number } | undefined;
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
-        // Each person's language level from this turn's searches: the round lists confirmed and
-        // strong people first and labels everyone below them.
-        const languageLevels = new Map<string, LanguageSignal>();
-        let languageRequirement: string | undefined;
-        // Rows carry the level the language check gave them.
-        const learnLanguage = (role: unknown, rows: unknown) => {
-          const levels: Record<string, number> = {};
-          for (const row of (Array.isArray(rows) ? rows : []) as Array<{
-            candidateKey?: unknown;
-            requiredLanguage?: LanguageSignal;
-          }>) {
-            const level = row.requiredLanguage ?? "unjudged";
-            levels[level] = (levels[level] ?? 0) + 1;
-            if (row.requiredLanguage)
-              languageLevels.set(
-                savedCandidateKeyForm(String(row.candidateKey)),
-                row.requiredLanguage,
-              );
-          }
-          if (languageLevels.size)
-            languageRequirement = requiredLanguage(role) ?? languageRequirement;
-          return levels;
-        };
-        const rememberLanguage = (
-          role: unknown,
-          roleId: unknown,
-          rows: unknown,
-          withoutLanguage: number,
-        ) => {
-          const levels = learnLanguage(role, rows);
-          levels["no sign"] = withoutLanguage;
-          getLogger().info("recruiting.language.levels", { roleId, levels });
-        };
-        // Full profile pages the first round's searches may still read for a required language.
+        // Full profile pages the first round's searches may still read.
         const fullProfileReads = { left: FULL_PROFILE_READS };
         const profilePages = new Map<string, string>();
         // The role's total after each people search this run, so a scale-out cannot hand off while
@@ -5797,51 +5730,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const checked = checkRound({
               keys,
               checks,
-              // The language check owns a required language; its criterion takes no verdict here.
-              criteria: (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).filter(
-                (criterion) =>
-                  !languageRequirement || !languageFilters([criterion.statement]).length,
-              ),
+              criteria: await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId }),
             });
             if (Object.keys(checked.unverified).length || checks)
               args = { ...args, unverified: checked.unverified };
-          }
-          // The round labels people whose language the check didn't confirm.
-          if (
-            name === "recruiting_research" &&
-            args.operation === "calibration_round" &&
-            Array.isArray(args.candidateKeys) &&
-            languageRequirement
-          ) {
-            const keys = args.candidateKeys.map(String);
-            const given =
-              args.unverified && typeof args.unverified === "object"
-                ? new Map(
-                    Object.entries(args.unverified as Record<string, unknown>).map(
-                      ([key, note]) => [savedCandidateKeyForm(key), String(note)],
-                    ),
-                  )
-                : new Map<string, string>();
-            const levels = new Map<string, LanguageSignal>();
-            const notes: Record<string, string> = {};
-            // People an earlier turn's search found keep the finding saved with that search.
-            const saved = thread.activeRecruitingRoleId
-              ? await savedLanguageLevels(
-                  deps.prisma,
-                  thread.activeRecruitingRoleId,
-                  keys.map(savedCandidateKeyForm),
-                ).catch(() => undefined)
-              : undefined;
-            for (const key of keys) {
-              const level =
-                languageLevels.get(savedCandidateKeyForm(key)) ??
-                saved?.get(savedCandidateKeyForm(key))?.level;
-              if (level) levels.set(key, level);
-              const note = given.get(savedCandidateKeyForm(key));
-              if (note) notes[key] = note;
-            }
-            const { unverified: _notes, ...rest } = args;
-            args = { ...rest, ...roundByLanguage(keys, notes, levels, languageRequirement) };
           }
           // The server fills what it knows about the thread's role and names a person the recruiter
           // mentioned by their saved key, so feedback saves on the first call.
@@ -9344,51 +9236,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
                       }))
                     : rows;
-                  // A required language is checked on each person's full profile text, which
-                  // the short passage rarely holds; those who show it come first.
-                  const words = await recruiterWords(deps.prisma, thread.id);
-                  const languageRole = {
-                    revision: role.currentRevision,
-                    query: connectorCall.args?.query,
-                    stated: statedLanguageRequirement(words),
-                  };
-                  const checked = Array.isArray(shown)
-                    ? await withRequiredLanguage(
-                        deps.judge,
-                        languageRole,
-                        shown,
-                        returned,
-                        deps.profileReader && firstRoundPending
-                          ? {
-                              read: deps.profileReader,
-                              reads: fullProfileReads,
-                              pages: profilePages,
-                            }
-                          : undefined,
-                      )
-                    : { rows: shown, withoutLanguage: 0 };
-                  if (checked.rows !== shown)
-                    rememberLanguage(languageRole, roleId, checked.rows, checked.withoutLanguage);
-                  await saveLanguageLevels(
-                    deps.prisma,
-                    saving.effect.id,
-                    "levels" in checked ? checked.levels : undefined,
-                  ).catch(
-                    (error) => getLogger().warn("language levels not saved", { error: String(error) }),
-                  );
+                  let people = shown;
                   // Licences, clearances and the like are rarely in the row; before the first
                   // pick, lines of the full profile that speak to the must-haves come with it.
-                  if (deps.profileReader && firstRoundPending && Array.isArray(checked.rows))
-                    checked.rows = await withRequirementEvidence(
-                      role.currentRevision,
-                      checked.rows,
-                      {
-                        read: deps.profileReader,
-                        reads: fullProfileReads,
-                        pages: profilePages,
-                      },
-                    );
-                  const people = checked.rows;
+                  if (deps.profileReader && firstRoundPending && Array.isArray(people))
+                    people = await withRequirementEvidence(role.currentRevision, people, {
+                      read: deps.profileReader,
+                      reads: fullProfileReads,
+                      pages: profilePages,
+                    });
                   // Saved is not fit, and fit is not shown: every search states where the
                   // request stands.
                   const counts = await requestCounts(deps.prisma, roleId);
@@ -9404,13 +9260,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       : {}),
                     ...counts,
                     people,
-                    // People whose profile shows no sign of a required language are in Results
-                    // but never offered for the pick.
-                    ...(checked.withoutLanguage
-                      ? {
-                          leftOutNoLanguage: `${checked.withoutLanguage} more people's profiles show no sign of the required language; they are in Results but not listed here and never make the ten.`,
-                        }
-                      : {}),
                     ...(Array.isArray(rows) && rows.length > AUTOSAVED_PEOPLE_SHOWN
                       ? { notShownHere: rows.length - AUTOSAVED_PEOPLE_SHOWN }
                       : {}),
@@ -10276,55 +10125,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   context,
                 );
                 if (!saved || typeof saved !== "object" || Array.isArray(saved)) return saved;
-                // People saved from the run's searches get the same language check as a
-                // search saved the moment it returns, on the profile text those searches gave.
-                const rows = (saved as { candidateRows?: unknown }).candidateRows;
-                const roleId = (
-                  await deps.prisma.thread.findUnique({
-                    where: { id: thread.id },
-                    select: { activeRecruitingRoleId: true },
-                  })
-                )?.activeRecruitingRoleId;
-                const role =
-                  Array.isArray(rows) && roleId
-                    ? await deps.prisma.recruitingRole.findFirst({
-                        where: {
-                          id: roleId,
-                          spaceId: run.spaceId,
-                          userId: run.userId,
-                          archivedAt: null,
-                        },
-                        select: { currentRevision: { select: { brief: true, criteria: true } } },
-                      })
-                    : null;
-                if (!Array.isArray(rows) || !role)
-                  return { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP };
-                const searches = await listRunToolResults(
-                  deps.prisma,
-                  researchActor.actor,
-                  runId,
-                ).catch(() => []);
-                const languageRole = {
-                  revision: role.currentRevision,
-                  stated: statedLanguageRequirement(await recruiterWords(deps.prisma, thread.id)),
-                };
-                const checked = await withRequiredLanguage(
-                  deps.judge,
-                  languageRole,
-                  rows as Array<Record<string, unknown>>,
-                  searches.map((search) => search.result),
-                );
-                if (checked.withoutLanguage || checked.rows.some((row) => row.requiredLanguage))
-                  rememberLanguage(languageRole, roleId, checked.rows, checked.withoutLanguage);
-                await saveLanguageLevels(deps.prisma, applied.effect.id, checked.levels).catch(
-                  (error) =>
-                    getLogger().warn("language levels not saved", { error: String(error) }),
-                );
-                return {
-                  ...saved,
-                  candidateRows: checked.rows,
-                  next: RECRUITING_SEARCH_SAVED_NEXT_STEP,
-                };
+                return { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP };
               }
               if (researchInput.data.operation === "save_grades") {
                 if (!applied || !claimedEffect) throw new IsolationError();

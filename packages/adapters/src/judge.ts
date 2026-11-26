@@ -4,17 +4,6 @@ import { JudgeProviderConfigSchema } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { credentialDigest } from "./credential-digest.js";
 
-/** Whether a person's profile shows a role's required language. */
-export type LanguageSignal = "confirmed" | "strong" | "possible" | "unknown" | "no sign";
-
-/** One person's row for the language check: their whole profile text and the search's row. */
-export interface LanguageRow {
-  id: string;
-  name?: string;
-  profile: string;
-  candidate?: Record<string, unknown>;
-}
-
 /** A yes/no question about some text, answered as the probability of yes. */
 export interface TextJudge {
   /** Undefined when the judge could not answer in time; callers keep their own rule then. */
@@ -23,12 +12,6 @@ export interface TextJudge {
     state: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<number | undefined>;
-  /** The deployment's own language check, when it has one: a verdict for each row it answered. */
-  language?(
-    requirement: string,
-    rows: readonly LanguageRow[],
-    signal?: AbortSignal,
-  ): Promise<Map<string, LanguageSignal>>;
   /** Several yes/no questions about one text in one request: the probability of yes for each. */
   yesAll?(
     questions: Readonly<Record<string, string>>,
@@ -105,76 +88,9 @@ const CRITERION_CHOICES = {
 const CRITERIA_TIMEOUT_MS = 5_000;
 
 const JUDGE_TIMEOUT_MS = 2_000;
-/** A batch is judged in parallel behind the check, so it gets the judge's time and a little more. */
-const LANGUAGE_TIMEOUT_MS = 5_000;
-/**
- * Rows per call. A Worker keeps at most six outgoing requests open at once and queues the rest,
- * so six rows are judged together and every batch takes one judge call's time.
- */
-const LANGUAGE_BATCH = 6;
-/**
- * The check's verdicts as the server ranks them. "possible" is weaker evidence and counts as
- * unknown; "shown" and "unclear" are the earlier names of strong and unknown.
- */
-const LANGUAGE_VERDICTS: Readonly<Record<string, LanguageSignal>> = {
-  confirmed: "confirmed",
-  strong: "strong",
-  shown: "strong",
-  unknown: "unknown",
-  possible: "possible",
-  unclear: "unknown",
-  "no sign": "no sign",
-};
-
-/**
- * POSTs the rows to the deployment's language check in batches; it answers
- * { verdicts: { [id]: { verdict } } }. The judge key is its Bearer token, so the check can ask the
- * same judge without a secret of its own. A batch that fails answers for nobody in it.
- */
-function languageCheck(url: string, apiKey: string, fetchImpl: typeof fetch) {
-  return async (
-    requirement: string,
-    rows: readonly LanguageRow[],
-    signal?: AbortSignal,
-  ): Promise<Map<string, LanguageSignal>> => {
-    const signals = new Map<string, LanguageSignal>();
-    const batches: LanguageRow[][] = [];
-    for (let at = 0; at < rows.length; at += LANGUAGE_BATCH)
-      batches.push(rows.slice(at, at + LANGUAGE_BATCH));
-    await Promise.all(
-      batches.map(async (batch) => {
-        try {
-          const timeout = AbortSignal.timeout(LANGUAGE_TIMEOUT_MS);
-          const response = await fetchImpl(url, {
-            method: "POST",
-            headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({ requirement, rows: batch }),
-            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-          });
-          if (!response.ok) return;
-          const { verdicts } = (await response.json()) as {
-            verdicts?: Record<string, { verdict?: unknown } | undefined>;
-          };
-          for (const row of batch) {
-            const verdict = verdicts?.[row.id]?.verdict;
-            const signal = typeof verdict === "string" ? LANGUAGE_VERDICTS[verdict] : undefined;
-            if (signal) signals.set(row.id, signal);
-          }
-        } catch {}
-      }),
-    );
-    return signals;
-  };
-}
-
 /** TypeSafe's System One API, asked one yes/no ("noul") question. */
-export function typeSafeJudge(
-  apiKey: string,
-  fetchImpl: typeof fetch = fetch,
-  languageUrl?: string,
-): TextJudge {
+export function typeSafeJudge(apiKey: string, fetchImpl: typeof fetch = fetch): TextJudge {
   return {
-    ...(languageUrl ? { language: languageCheck(languageUrl, apiKey, fetchImpl) } : {}),
     async yesAll(questions, state, signal) {
       try {
         const ids = Object.keys(questions);
@@ -322,7 +238,7 @@ export class JudgeSettings {
     private readonly prisma: Pick<PrismaClient, "integrationProviderConfig">,
     private readonly secrets: SecretStore,
     private readonly create: (config: JudgeProviderConfig) => TextJudge = (config) =>
-      typeSafeJudge(config.apiKey, fetch, config.languageUrl),
+      typeSafeJudge(config.apiKey),
   ) {}
 
   private async savedConfig(): Promise<JudgeProviderConfig | undefined> {
@@ -359,17 +275,10 @@ export class JudgeSettings {
     const apiKey = input.apiKey ?? (await this.savedConfig())?.apiKey;
     if (!apiKey) throw new Error("No key to save");
     const config: JudgeProviderConfig = { ...input, apiKey };
-    // A key or language check that cannot answer a trivial question is not saved over a working one.
+    // A key that cannot answer a trivial question is not saved over a working one.
     const judge = this.create(config);
     const probe = await judge.yes("Is this text a greeting?", { text: "Hello!" });
     if (probe === undefined) throw new Error("Could not verify this key");
-    if (
-      judge.language &&
-      !(
-        await judge.language("Mandarin", [{ id: "probe", profile: "Languages: Mandarin (native)" }])
-      ).size
-    )
-      throw new Error("Could not verify this language check");
     const stored = await this.secrets.put(JSON.stringify(config), context, {
       recordId: RECORD_ID,
     });

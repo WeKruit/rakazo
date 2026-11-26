@@ -629,14 +629,3 @@ describe("a failed save never stops the work", () => {
     expect(step?.prompt).toContain("never wait on it or stop over it");
   });
 });
-
-describe("a missed requirement is searched for again", () => {
-  it("every scale query carries a required language", () => {
-    const step = nextPlaybookStep("scale", {
-      title: "Engineer",
-      hasBrief: true,
-      savedCandidates: 10,
-    });
-    expect(step?.prompt).toContain("a required language included");
-  });
-});

@@ -361,7 +361,7 @@ export function nextPlaybookStep(
         label: "Wider search",
         next: { step: "scale" },
         prompt:
-          "This round is accepted, so widen the search toward the number the recruiter named, as the Short-round rule says. Every query carries every hard requirement, a required language included. The number is people graded Strong or Promising and shown in rounds, never how many Results hold: each search and round result gives fitShown, the count you tell the recruiter. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
+          "This round is accepted, so widen the search toward the number the recruiter named, as the Short-round rule says. Every query carries every hard requirement. The number is people graded Strong or Promising and shown in rounds, never how many Results hold: each search and round result gives fitShown, the count you tell the recruiter. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
       };
     case "enrichment":
       return {
