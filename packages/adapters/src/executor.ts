@@ -10633,6 +10633,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               deliveryKey: roleKey,
               title,
               earlier: request,
+              earlierMessages: Math.min(10, Math.max(0, Math.trunc(Number(args.earlier_messages) || 0))),
             });
             if (!started) {
               if (!request)
