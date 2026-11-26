@@ -2746,8 +2746,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           deps.connector ? deps.connector.discoverTools(context) : Promise.resolve([]),
         );
         const nativeSources = await nativeSourcesPending();
-        // The model and its key are settled first, so the quick first line below does not wait
-        // for history, tools and memory to load.
+        // The model and its key are settled first, beside history, tools and memory.
         const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
         const runtimeFallback = runtimeFallbackModel(deps.runtime);
         const pinError = run.modelPinned
@@ -4069,7 +4068,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           pendingProgress = "";
           lastProgressAt = Date.now();
         };
-        // The run's reply so far (its first line, then the progress that replaced it) is the latest
+        // The run's reply so far (a one-line note, then the progress that replaced it) is the latest
         // reply when only this run's own cards (a role link, its steps, its message to a role team)
         // came after it. Gate b8850911: a role link opened mid-turn left a line and an answer.
         const lineIsLatestReply = async (lineId: string) => {
@@ -4125,9 +4124,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return true;
         };
         /**
-         * A card is the turn's answer, so it takes the place of the first line that stood in for
-         * it (gate 960ca37a: 「先发我职位描述…」, then a card asking the same). A connect card names
-         * only the service, so it never replaces the first line (gate 9fd9c2ff).
+         * A card is the turn's answer, so it takes the place of the run's one-line note before it
+         * (gate 960ca37a: 「先发我职位描述…」, then a card asking the same). A connect card names
+         * only the service, so it never replaces that note (gate 9fd9c2ff).
          */
         const cardTakesLinesPlace = async () => {
           const lineId = quickReplyMessageId;
@@ -4303,7 +4302,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 leaseLost = true;
                 return;
               }
-              // The first line stays: it is the quick reply, and the card only names the service.
+              // A reply written before the card stays above it: the card only names the service.
               await workspaceCheckpoint.flush();
               const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
@@ -14329,7 +14328,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }));
               await workspaceCheckpoint.flush();
               await cardTakesLinesPlace().catch((error) =>
-                getLogger().warn("first line kept beside the card", { error: String(error) }),
+                getLogger().warn("one-line note kept beside the card", { error: String(error) }),
               );
               // The recruiter's likely answer, typed for them in the composer and the card (Tab).
               const cardSuggestion = event.requestedSchema

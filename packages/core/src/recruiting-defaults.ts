@@ -271,8 +271,8 @@ export function textLanguage(text: string, minEnglishWords = 5): ReplyLanguage |
 }
 
 /**
- * The one decision of which language every recruiter-facing line of a turn uses (quick reply,
- * fixed ack, progress notes, final reply, cards), from their messages newest first: the newest
+ * The one decision of which language every recruiter-facing line of a turn uses (progress
+ * notes, final reply, cards), from their messages newest first: the newest
  * one with a clear language, else English.
  */
 export function recruiterLanguage(newestFirst: readonly string[]): ReplyLanguage {
