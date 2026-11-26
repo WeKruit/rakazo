@@ -339,7 +339,7 @@ describe("recruiting run context", () => {
             : [
                 {
                   fieldKey: "salary_range",
-                  question: "What salary range may be stated in outreach?",
+                  question: "Please clarify the unresolved role detail.",
                 },
               ],
         );

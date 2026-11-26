@@ -519,10 +519,6 @@ export async function loadWorkingState(
     const record = records.get(thread.activeRecruitingRoleId);
     if (record?.requirements)
       lines.push(`- This role's requirements on record: ${record.requirements}`);
-    if (record?.place)
-      lines.push(
-        `- This role's location is settled: ${record.place} (the recruiter's words name the city and an on-site or hybrid role; the people search is held to that commute), so location, work mode and commute area are not open questions.`,
-      );
     const saved = emailLine(record);
     if (saved) lines.push(`- This role's ${saved}`);
     const campaign = campaignLine(record);
@@ -635,7 +631,6 @@ export async function loadWorkingState(
       const record = roleId ? records.get(roleId) : undefined;
       // Written from the recruiter's words with their source: never ask for what is here.
       if (record?.requirements) lines.push(`  Requirements on record: ${record.requirements}`);
-      if (record?.place) lines.push(`  Location settled: ${record.place}; never ask about it.`);
       const saved = emailLine(record);
       if (saved) lines.push(`  The ${saved}`);
       const campaign = campaignLine(record);

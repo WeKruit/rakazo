@@ -88,35 +88,17 @@ export function validateRecruitingBrief(
 }
 
 /** No mandatory questionnaire. Reuse sourced answers and ask only about material uncertainty. */
-// The model names the work-location field freely (location, locations, work_location, …).
-const isLocationKey = (key: string) => /location/i.test(key);
-
 export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
   const pending = brief.fields.filter(
-    (field) =>
-      (field.consequential || isLocationKey(field.key)) &&
-      (field.state !== "known" || field.origin === "inferred"),
+    (field) => field.consequential && (field.state !== "known" || field.origin === "inferred"),
   );
-  const questions = pending.map((field) => ({
+  return pending.map((field) => ({
     fieldKey: field.key,
     question:
       brief.questions.find(
         (question) => question.fieldKey === field.key && !question.answeredBySourceRefId,
-      )?.question ??
-      (field.key === "salary_range"
-        ? "What salary range may be stated in outreach?"
-        : isLocationKey(field.key)
-          ? "What location or remote work scope applies?"
-          : field.key === "company_deck"
-            ? "Is a company deck available?"
-            : "Please clarify the unresolved role detail."),
+      )?.question ?? "Please clarify the unresolved role detail.",
   }));
-  if (!brief.fields.some((field) => isLocationKey(field.key)))
-    questions.push({
-      fieldKey: "location",
-      question: "What location or remote work scope applies?",
-    });
-  return questions;
 }
 
 export function requireRecruitingBriefConfirmation(
@@ -379,7 +361,7 @@ export function nextPlaybookStep(
         label: "Wider search",
         next: { step: "scale" },
         prompt:
-          "This round is accepted, so widen the search toward the number the recruiter named, as the Short-round rule says. Every query carries every hard requirement, a required language included. The number is people graded Strong or Promising and shown in rounds, never how many Results hold: each search and round result gives fitShown, the count you tell the recruiter. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
+          "This round is accepted, so widen the search toward the number the recruiter named, as the Short-round rule says. Every query carries every hard requirement. The number is people graded Strong or Promising and shown in rounds, never how many Results hold: each search and round result gives fitShown, the count you tell the recruiter. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
       };
     case "enrichment":
       return {

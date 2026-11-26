@@ -1121,22 +1121,6 @@ describe("native saved candidate reads", () => {
   it("returns verified selected source reports with unchanged references and pagination", async () => {
     const f = sourceFixture();
     f.page.items.push({ ...f.source });
-    // The language check's finding, saved with the search, comes with the person's sources.
-    Object.assign(f.deps.prisma, {
-      recruitingCandidateOccurrence: {
-        findMany: async () => [
-          {
-            page: {
-              effect: {
-                result: {
-                  languageLevels: { requirement: "Mandarin", levels: { "candidate-one": "strong" } },
-                },
-              },
-            },
-          },
-        ],
-      },
-    });
     const result = await executeRecruitingCandidatesTool(
       f.deps,
       trusted,
@@ -1164,9 +1148,6 @@ describe("native saved candidate reads", () => {
           sourceUrls: ["https://example.test/selected"],
         },
       })),
-    });
-    expect(result).toMatchObject({
-      requiredLanguage: "Mandarin: strong (the language check's finding)",
     });
     expect(JSON.stringify(result)).not.toContain("Neighbor Person");
     expect(f.page.items.every((source) => !("report" in source))).toBe(true);

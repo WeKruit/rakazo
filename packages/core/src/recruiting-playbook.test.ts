@@ -126,13 +126,6 @@ describe("sourced recruiting intake", () => {
     draft.rules = brief().rules;
     expect(() => validateRecruitingBrief(draft, role)).not.toThrow();
   });
-  it("requires material location clarification even when the extractor omitted the field", () => {
-    const draft = brief();
-    draft.fields = draft.fields.filter((field) => field.key !== "location");
-    expect(recruitingBriefClarifications(draft).map((question) => question.fieldKey)).toEqual([
-      "location",
-    ]);
-  });
   // 2026-10-26: a known "locations" field kept the brief from ever being confirmable.
   it("accepts a known location field under another location key", () => {
     const draft = brief();
@@ -149,8 +142,8 @@ describe("sourced recruiting intake", () => {
       { ...draft.fields[0]!, key: "private_internal_field", consequential: true },
     );
     expect(recruitingBriefClarifications(draft)).toEqual([
-      { fieldKey: "salary_range", question: "What salary range may be stated in outreach?" },
-      { fieldKey: "company_deck", question: "Is a company deck available?" },
+      { fieldKey: "salary_range", question: "Please clarify the unresolved role detail." },
+      { fieldKey: "company_deck", question: "Please clarify the unresolved role detail." },
       {
         fieldKey: "private_internal_field",
         question: "Please clarify the unresolved role detail.",
@@ -435,12 +428,8 @@ describe("deterministic playbook approval gates", () => {
   });
 });
 
-it("does not let a model mark a location conflict inconsequential or invent inferred provenance", () => {
+it("does not let a model invent inferred provenance", () => {
   const draft = brief();
-  draft.fields[1] = { ...draft.fields[1]!, state: "conflict", consequential: false };
-  expect(recruitingBriefClarifications(draft).map((question) => question.fieldKey)).toEqual([
-    "location",
-  ]);
   draft.rules[0] = {
     ...draft.rules[0]!,
     origin: "inferred",
@@ -638,16 +627,5 @@ describe("a failed save never stops the work", () => {
       savedCandidates: 10,
     });
     expect(step?.prompt).toContain("never wait on it or stop over it");
-  });
-});
-
-describe("a missed requirement is searched for again", () => {
-  it("every scale query carries a required language", () => {
-    const step = nextPlaybookStep("scale", {
-      title: "Engineer",
-      hasBrief: true,
-      savedCandidates: 10,
-    });
-    expect(step?.prompt).toContain("a required language included");
   });
 });
