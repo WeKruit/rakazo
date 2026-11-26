@@ -179,7 +179,7 @@ import {
   renderBotDirectory,
   replyLanguageNote,
   resolveActionApprovalDetail,
-  roleOpenedNote,
+  ROLE_OPENED_NOTE,
   runBudgetExceeded,
   runBudgetStopText,
   sandboxCommandTimeoutMs,
@@ -297,7 +297,6 @@ import {
   seesOperatorSpend,
   skipRateLimitedRun,
   unitVector,
-  unreadSteering,
   votePoll,
   waitingCardBlocks,
   withTransactionRetry,
@@ -597,7 +596,7 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
-import { fixedAck, isFixedAck, oneLineNote, withoutLeadingAck } from "./quick-reply.js";
+import { oneLineNote } from "./reply-line.js";
 import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import type { RecruiterListItem } from "./recruiting-assessment.js";
@@ -1376,9 +1375,6 @@ export const EARLIER_STEERING =
 export const STEERING_ACK =
   'The recruiter wrote this while you are working. Deal with it before any other work: a question is answered now with message_user, after only the reads the answer needs, never with a promise to check; a request for something else is done in this turn like any request, not only acknowledged; a change to the running work gets one line with message_user saying how it changes it. Then continue the work with it, and never say work has stopped while it is still running. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
 
-/** How often a running turn looks for messages it has not read yet, to answer them at once. */
-export const STEERING_PEEK_MS = 2_500;
-/** Model-facing: the short reply already sent for a message that arrived mid-run. */
 /** Whether a bot message shows the person words or a card, not only the run's steps. */
 // A handoff or teammate message shows the recruiter only a marker, never words to them.
 const SAYS_NOTHING = new Set([
@@ -1426,16 +1422,6 @@ export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined
     block.kind === "text" ? block.text.trim().length > 0 : !SAYS_NOTHING.has(block.kind),
   );
 
-/** Model-facing: a short reply to a message that arrived mid-run is being sent for the run. */
-export const STEERING_QUICK_REPLY_SENDING =
-  "A short reply that acknowledges this message is being sent to the recruiter for you. Do not acknowledge it again or open with 收到, 好的 or Got it; say only what it changes.";
-export const steeringQuickReplySent = (line: string) =>
-  `You already sent the recruiter this short reply to it: "${line}". Do not repeat it, acknowledge the message again or open with 收到, 好的 or Got it; say only what it changes.`;
-
-// The first line waits this long for the records card, then goes without it.
-const QUICK_REPLY_RECORDS_WAIT_MS = 1_000;
-// A finished answer waits this long for a first line still being written; a later one is dropped.
-const QUICK_REPLY_FINISH_WAIT_MS = 3_000;
 /** A short message that opens with a role lead-in, such as 「新岗位：仓库经理（Atlanta）。要求：…」. */
 const ROLE_LEAD_IN =
   /^(?:新岗位|岗位|职位|招聘|new role|job title|job|role|position|hiring)\s*[:：]/i;
@@ -1650,8 +1636,6 @@ export interface ExecutorDeps {
   autoReview?: AutoReviewProvider;
   /** Suggest the user's next message after each reply (one extra small model call). */
   replySuggestions?: boolean;
-  /** Post a short first reply on each person's turn while the full answer is worked out. */
-  quickReplies?: boolean;
   /**
    * Live Codex model catalog; when present, a statically excluded Codex model
    * can still run for the OAuth account whose backend lists it.
@@ -2529,22 +2513,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
       }, 60_000);
       heartbeat.unref?.();
-      let steeringWatch: ReturnType<typeof setInterval> | undefined;
-      // The short reply already sent for a message that arrived mid-run, by message id.
-      const steeringQuickReplies = new Map<string, string>();
-      // A fixed line was sent and the run has not spoken since: the next one is not sent, and the
-      // run's next line drops its own opening acknowledgement.
-      let fixedAckOpen = false;
-      let fixedAckSent = false;
-      // Starts the short reply for a message that arrived mid-run, once per message.
-      let replyToSteering:
-        | ((item: {
-            id: string;
-            messageId: string;
-            blocks: MessageBlock[];
-            internal?: true;
-          }) => boolean)
-        | undefined;
       // Stuck detection: a runtime that sends nothing for 20 minutes is stopped, so the run fails
       // with a visible notice (and a role thread's idle sweep picks it up) instead of hanging.
       const silenceWatch = createSilenceWatch({
@@ -2770,8 +2738,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           deps.connector ? deps.connector.discoverTools(context) : Promise.resolve([]),
         );
         const nativeSources = await nativeSourcesPending();
-        // The model and its key are settled first, so the quick first line below does not wait
-        // for history, tools and memory to load.
+        // The model and its key are settled first, beside history, tools and memory.
         const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
         const runtimeFallback = runtimeFallbackModel(deps.runtime);
         const pinError = run.modelPinned
@@ -2804,122 +2771,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             setupMarks.modelKeyOwnMs = Math.round(performance.now() - modelKeyStartedAt);
           }),
         );
-        // A short first reply while the full answer is worked out. It starts beside the rest of
-        // setup and is posted only if the run has not replied yet; the run is told what it said.
-        // A typed card answer resumes the run that asked, so it gets one too.
-        const quickRepliesOn =
-          deps.quickReplies &&
-          !messagingChannelRun &&
-          !deps.runtime.describe().capabilities.scripted;
-        const earlyTurnBlocks =
-          (nativeSources?.currentAnswer?.blocks as MessageBlock[] | undefined) ??
-          (quickRepliesOn && run.trigger === "user"
-            ? ((
-                await deps.prisma.message
-                  .findFirst({
-                    where: run.sourceMessageId
-                      ? { id: run.sourceMessageId }
-                      : { runId, role: "user" },
-                    select: { blocks: true },
-                  })
-                  .catch(() => null)
-              )?.blocks as MessageBlock[] | undefined)
-            : undefined);
-        const quickReplyText = earlyTurnBlocks ? blocksText(earlyTurnBlocks) : "";
         // The one language every recruiter-facing line of this turn uses: the newest clear one of
-        // their messages, refined once history loads and moved by a message steered in.
-        let turnLanguage = recruiterLanguage([quickReplyText]);
-        // A bare number, name or card pick (「02311」) has no language of its own: the first line
-        // keeps the recruiter's (gate 4774895e: it was English in a Chinese conversation).
-        if (quickReplyText.trim() && !textLanguage(quickReplyText))
-          turnLanguage = await recruiterLanguageNow(
-            deps.prisma,
-            { spaceId: run.spaceId, userId: run.userId },
-            thread.id,
-          ).catch(() => turnLanguage);
-        let quickReplySaid: string | undefined;
-        // The first line stands in for the answer until it is ready: the answer then takes its
-        // place in the same message, so the person reads one reply. It is posted only before the
-        // answer is finished, never after it.
-        let quickReplyOpen = true;
+        // their messages, set once history loads and moved by a message steered in.
+        let turnLanguage = recruiterLanguage([]);
+        // The run's newest one-line reply, which its next line or answer replaces so the person
+        // reads one message.
         let quickReplyMessageId: string | undefined;
         // The reply slot is a teammate's line this bot took over: the answer becomes this bot's.
         let lineFromTeammate = false;
-        let quickReplyPosted: Promise<unknown> = Promise.resolve();
-        const turnStartedAt = new Date();
-        if (
-          quickRepliesOn &&
-          !pinError &&
-          runModelProvider &&
-          runModelId &&
-          // Gate 0f20231b: a run paused on a card resumes for each new message, and its first
-          // line for the original request went out again at every resume.
-          ((run.trigger === "user" && !runTiming.resumedAt) || nativeSources?.currentAnswer) &&
-          quickReplyText.trim()
-        )
-          // A card answer gets the fixed line at once; only a new request gets a written one.
-          quickReplyPosted = (
-            nativeSources?.currentAnswer
-              ? Promise.resolve(fixedAckOpen ? undefined : fixedAck(turnLanguage)).then((line) => {
-                  if (line) fixedAckOpen = fixedAckSent = true;
-                  return line;
-                })
-              : // Staging 11-20: a first line written by a model with no tools stated facts it had
-                // not read ("我没有…记录", "我不能从这里发送邮件"). The answer takes the line's place,
-                // so it only acknowledges; facts come from the run's tool results.
-                Promise.resolve(fixedAck(turnLanguage))
-          )
-            .then(async (text) => {
-              if (!text) return;
-              // The card this run asked before the answer is not a reply to it, and a row that
-              // only shows the run's steps says nothing to the person yet.
-              // Another run of this bot may have acknowledged the same message (it was steered
-              // into a run still finishing): one line is enough.
-              const written = await deps.prisma.message.findMany({
-                where: {
-                  threadId: thread.id,
-                  botId: bot.id,
-                  role: "bot",
-                  createdAt: { gte: turnStartedAt },
-                },
-                select: { blocks: true },
-              });
-              if (written.some((message) => saysSomething(message.blocks as MessageBlock[]))) {
-                getLogger().info("run.quick_reply.skipped", {
-                  runId,
-                  reason: "already_replied",
-                });
-                return;
-              }
-              // A run that already failed or stopped has said its last word.
-              const current = await deps.prisma.run.findUnique({
-                where: { id: runId },
-                select: { status: true },
-              });
-              if (
-                !quickReplyOpen ||
-                !(ACTIVE_RUN_STATUSES as readonly string[]).includes(current?.status ?? "")
-              ) {
-                getLogger().info("run.quick_reply.skipped", { runId, reason: "answer_finished" });
-                return;
-              }
-              quickReplySaid = text;
-              quickReplyMessageId = (
-                await publishMessage(deps, run, "bot", [
-                  { kind: "text", text: redactSecrets(text, runSecrets) },
-                ])
-              )?.id;
-              getLogger().info("run.quick_reply", {
-                runId,
-                sinceSetupMs: Math.round(performance.now() - setupStartedAt),
-              });
-            })
-            .catch((error) => {
-              getLogger().warn("quick reply failed", {
-                runId,
-                reason: String(error),
-              });
-            });
         if (
           nativeSources?.answeredAsks.length &&
           (thread.spaceId !== run.spaceId ||
@@ -3120,10 +2979,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           : userTurnMessageForRun(run.trigger, runId, historyMessages, run.sourceMessageId);
         const turnBlocks = currentTurnMessage?.blocks;
-        // Gate edfa2b9e: a run that ended just as the person wrote posted 「收到，马上处理。」 and left
-        // the message to this run. Gate 01e9467c: a run posted its first line and ended, and the
-        // continuation it was given answered; a teammate's result relayed after a status line said
-        // the same twice. That line, still the newest, is this run's own: its answer takes its place.
+        // Gate 01e9467c: a run posted a one-line note and ended, and the continuation it was given
+        // answered; a teammate's result relayed after a status line said the same twice. That
+        // line, still the newest, is this run's own: its answer takes its place.
         if (run.trigger !== "user" && !quickReplyMessageId) {
           try {
             const recent = await deps.prisma.message.findMany({
@@ -3174,25 +3032,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // The line's run handed off: it writes nothing more there.
               quickReplyMessageId = newest.id;
               lineFromTeammate = true;
-              fixedAckSent = true;
             } else if (
               newest?.botId === bot.id &&
               newest.role === "bot" &&
               newest.runId &&
               newest.runId !== runId &&
-              (isFixedAck(line) ||
-                (oneLineNote(line) &&
-                  !/[?？]\s*$/.test(line) &&
-                  Date.now() - new Date(newest.createdAt).getTime() < LINE_TAKEOVER_MS))
+              oneLineNote(line) &&
+              !/[?？]\s*$/.test(line) &&
+              Date.now() - new Date(newest.createdAt).getTime() < LINE_TAKEOVER_MS
             ) {
               const owner = await deps.prisma.run.findUnique({
                 where: { id: newest.runId },
                 select: { status: true },
               });
-              if (owner && !(ACTIVE_RUN_STATUSES as readonly string[]).includes(owner.status)) {
+              if (owner && !(ACTIVE_RUN_STATUSES as readonly string[]).includes(owner.status))
                 quickReplyMessageId = newest.id;
-                fixedAckSent = true;
-              }
             }
           } catch {
             // Without the lookup the answer is posted as its own message.
@@ -3629,88 +3483,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         if (!runModelProvider || !runModelId) {
           await failRunBeforeModel(MISSING_MODEL_MESSAGE);
           return;
-        }
-        // A message sent while the run works waits for the current step to end, which can be a
-        // long search. It gets its own short reply now, whether the run reads it first or the
-        // watch below finds it unread; the run is told not to acknowledge it again.
-        if (quickRepliesOn) {
-          const answeredSince = async (messageId: string) => {
-            const sent = await deps.prisma.message.findUnique({
-              where: { id: messageId },
-              select: { createdAt: true },
-            });
-            if (!sent) return false;
-            const later = await deps.prisma.message.findMany({
-              where: {
-                threadId: thread.id,
-                botId: bot.id,
-                role: "bot",
-                createdAt: { gt: sent.createdAt },
-              },
-              select: { blocks: true },
-              take: 5,
-            });
-            return later.some((message) => saysSomething(message.blocks as MessageBlock[]));
-          };
-          const started = new Set<string>();
-          replyToSteering = (item) => {
-            if (started.has(item.messageId)) return true;
-            // A server continuation is not the person writing: it never gets a reply of its own.
-            if (item.internal) return false;
-            const human =
-              item.blocks.length > 0 &&
-              item.blocks.every((block) => ["text", "file", "image"].includes(block.kind));
-            const text = human ? blocksText(item.blocks) : "";
-            if (!text.trim()) return false;
-            started.add(item.messageId);
-            const line = fixedAck(textLanguage(text) ?? turnLanguage);
-            // One fixed line until the run speaks: a second message right after gets none.
-            if (fixedAckOpen) {
-              steeringQuickReplies.set(item.messageId, line);
-              return true;
-            }
-            fixedAckOpen = fixedAckSent = true;
-            // A run started for the same message may have answered it already (11-14 sim: 「好，这就
-            // 处理。」 then 「收到，马上处理。」 a second later).
-            void answeredSince(item.messageId)
-              .then((answered) =>
-                answered
-                  ? undefined
-                  : publishMessage(deps, run, "bot", [{ kind: "text", text: line }]),
-              )
-              .then((posted) => {
-                // Gate 7503e6bf: 「收到，马上处理。」 and the answer a second later. The answer
-                // takes this line's place.
-                if (posted?.id) quickReplyMessageId = posted.id;
-                steeringQuickReplies.set(item.messageId, line);
-                getLogger().info("run.steering_quick_reply", { runId });
-              })
-              .catch((error) => {
-                getLogger().warn("steering quick reply failed", {
-                  runId,
-                  reason: String(error),
-                });
-              });
-            return true;
-          };
-          let peeking = false;
-          steeringWatch = setInterval(() => {
-            if (peeking) return;
-            peeking = true;
-            void unreadSteering(deps.prisma, {
-              threadId: thread.id,
-              botId: bot.id,
-              runId,
-            })
-              .then((rows) => {
-                for (const row of rows) replyToSteering?.(row);
-              })
-              .catch(() => undefined)
-              .finally(() => {
-                peeking = false;
-              });
-          }, STEERING_PEEK_MS);
-          steeringWatch.unref?.();
         }
         const initialRecruitingContext = await initialRecruitingContextPending();
         currentRecruitingContext = initialRecruitingContext;
@@ -4279,7 +4051,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           pendingProgress = "";
           lastProgressAt = Date.now();
         };
-        // The run's reply so far (its first line, then the progress that replaced it) is the latest
+        // The run's reply so far (a one-line note, then the progress that replaced it) is the latest
         // reply when only this run's own cards (a role link, its steps, its message to a role team)
         // came after it. Gate b8850911: a role link opened mid-turn left a line and an answer.
         const lineIsLatestReply = async (lineId: string) => {
@@ -4335,15 +4107,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return true;
         };
         /**
-         * A card is the turn's answer, so it takes the place of the first line that stood in for
-         * it (gate 960ca37a: 「先发我职位描述…」, then a card asking the same). A connect card names
-         * only the service, so it never replaces the first line (gate 9fd9c2ff).
+         * A card is the turn's answer, so it takes the place of the run's one-line note before it
+         * (gate 960ca37a: 「先发我职位描述…」, then a card asking the same). A connect card names
+         * only the service, so it never replaces that note (gate 9fd9c2ff).
          */
         const cardTakesLinesPlace = async () => {
           const lineId = quickReplyMessageId;
-          // A teammate's fixed line goes too when this bot's card answers it (gates 71a2cac2,
-          // acd31504: 「好，这就处理。」 stood alone, then the handed-in card came under it).
-          if (!hideVendors || !lineId) return;
+          if (!hideVendors || !lineId || lineFromTeammate) return;
           const line = await deps.prisma.message.findUnique({
             where: { id: lineId },
             select: { botId: true, clientNonce: true, blocks: true },
@@ -4352,10 +4122,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const text = blocks.length === 1 && blocks[0]!.kind === "text" ? blocks[0]!.text : "";
           if (
             !line ||
-            (!lineFromTeammate && line.botId !== bot.id) ||
+            line.botId !== bot.id ||
             line.clientNonce ||
             !oneLineNote(text) ||
-            (lineFromTeammate && !isFixedAck(text)) ||
             !(await lineIsLatestReply(lineId))
           )
             return;
@@ -4373,14 +4142,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const publishMidTurnNarration = async () => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
           // The server's continuation nudge echoed back is never for the recruiter.
-          const nudgeless = withoutNudge(visible(redactSecrets(extracted.text, runSecrets))).trim();
-          const written = fixedAckSent ? withoutLeadingAck(nudgeless) : nudgeless;
           // What the model wrote is shown as written (11-16: wording checks cut correct answers).
-          const narration = written;
+          const narration = withoutNudge(visible(redactSecrets(extracted.text, runSecrets))).trim();
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration || (hideVendors && handedOff) || (await teammateAnsweredHandoff())) {
-            if (written) {
+            if (narration) {
               assembled = "";
               hasStreamedText = false;
               pendingProgress = "";
@@ -4403,7 +4170,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             discardedMidTurnNarration = true;
             return;
           }
-          fixedAckOpen = false;
           // Gate 27c0fd0c: a first line, a progress note and the answer said one thing three
           // times. The note takes the line's place, and the answer takes the note's.
           const progressNonce = userProgressClientNonce(run.id, midTurnProgressCount++);
@@ -4519,7 +4285,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 leaseLost = true;
                 return;
               }
-              // The first line stays: it is the quick reply, and the card only names the service.
+              // A reply written before the card stays above it: the card only names the service.
               await workspaceCheckpoint.flush();
               const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
@@ -11579,7 +11345,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({ ok: true, note: HANDED_OFF_NOT_SHOWN });
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
             const unnudged = clampUserProgressMessage(withoutNudge(rawMessage));
-            const text = fixedAckSent ? withoutLeadingAck(unnudged) : unnudged;
+            const text = unnudged;
             if (!rawMessage.trim()) return finish({ error: "message is required" });
             if (!text)
               return finish({
@@ -11595,9 +11361,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const truncated = isProgressMessageTruncated(rawMessage);
             await flushProgress();
             await publishMidTurnNarration();
-            fixedAckOpen = false;
-            // Gate 7503e6bf: a first line, then this update with the real answer. It takes the
-            // line's place like any other progress note.
+            // A progress note takes the place of the one before it.
             const progressNonce = userProgressClientNonce(run.id, midTurnProgressCount++);
             if (!(await replaceLatestReply([{ kind: "text", text }], progressNonce)))
               quickReplyMessageId = (
@@ -11899,7 +11663,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return finish({
               ok: true,
               team: `${title} team`,
-              note: roleOpenedNote(turnLanguage === "zh"),
+              note: ROLE_OPENED_NOTE,
             });
           }
           if (name === "render_view") {
@@ -14060,9 +13824,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   resumeFromCheckpoint: takeoverResume?.checkpoint,
                   script,
-                  // Gate 1625bfd4: the first line already gave the answer, the answer had nothing
-                  // to add, and the recruiter got "No response. Try again." in English.
-                  allowSilentEmpty: allowSilentEmptyRun || quickReplySaid !== undefined,
+                  allowSilentEmpty: allowSilentEmptyRun,
                   emptyResponseText,
                   reportOwed: turnReport.enabled ? () => turnReport.owed().length > 0 : undefined,
                   executeTool: scripted ? undefined : applyTool,
@@ -14302,15 +14064,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                   : item === freshHumanSteering
                                     ? STEERING_ACK
                                     : undefined,
-                                item.earlier
-                                  ? undefined
-                                  : steeringQuickReplies.has(item.messageId)
-                                    ? steeringQuickReplySent(
-                                        steeringQuickReplies.get(item.messageId)!,
-                                      )
-                                    : item === freshHumanSteering && replyToSteering?.(item)
-                                      ? STEERING_QUICK_REPLY_SENDING
-                                      : undefined,
                                 item === freshHumanSteering && !item.internal
                                   ? steeringLanguageNote(item.text)
                                   : item === steering.at(-1)
@@ -14500,7 +14253,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }));
               await workspaceCheckpoint.flush();
               await cardTakesLinesPlace().catch((error) =>
-                getLogger().warn("first line kept beside the card", { error: String(error) }),
+                getLogger().warn("one-line note kept beside the card", { error: String(error) }),
               );
               // The recruiter's likely answer, typed for them in the composer and the card (Tab).
               const cardSuggestion = event.requestedSchema
@@ -14922,7 +14675,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             completionBlocks = completionMessageSegments(completionBlocks, {
               allowSilentEmpty:
                 allowSilentEmptyRun ||
-                quickReplySaid !== undefined ||
                 probeFoundNothing ||
                 publishedMidTurnUserMessage ||
                 recruitingSilent,
@@ -15022,13 +14774,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // durable message first, then checkpoint while the run still holds its lease, and
           // finalize without a second copy. Failures still fail the run as before.
           let finalBlocks = blocks;
-          await Promise.race([
-            quickReplyPosted.catch(() => undefined),
-            new Promise((resolve) => setTimeout(resolve, QUICK_REPLY_FINISH_WAIT_MS)),
-          ]);
-          quickReplyOpen = false;
-          // Simulated 11-14: a first line, then the answer saying the same again. When the line
-          // is still the newest message, the answer takes its place.
+          // Simulated 11-14: a one-line note, then the answer saying the same again. When the
+          // note is still the newest message, the answer takes its place.
           if (
             // Gate b19c9913: an answer that read records first carries its steps row as well.
             // Gate 2a73ed94: one that ends in a question card takes its place too.
@@ -15433,7 +15180,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
       } finally {
         detachShutdown?.();
         clearInterval(heartbeat);
-        clearInterval(steeringWatch);
         silenceWatch.stop();
         if (!retainComputerLease) {
           if (screenRelease) {

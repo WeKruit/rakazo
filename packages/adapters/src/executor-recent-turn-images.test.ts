@@ -6,8 +6,6 @@ import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
 import {
   createRunExecutor,
-  STEERING_PEEK_MS,
-  STEERING_QUICK_REPLY_SENDING,
   saysSomething,
   withoutPolls,
 } from "./executor.js";
@@ -53,8 +51,6 @@ beforeEach(() => {
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 /** The events double of the most recent runWithModel call. */
-/** Run ids the runtime was called with, in the current test. */
-const claimedSteering: { items?: Array<{ text: string }> } = {};
 // The newest run's database mock, for checks while that run still works.
 let lastPrisma: { message: { create: { mock: { calls: unknown[][] } } } } | undefined;
 let lastRuntimeRun: { mock: { calls: Array<[AgentRunRequest]> } } | undefined;
@@ -154,27 +150,18 @@ async function runWithModel(
     /** The model's final reply; defaults to "Done". */
     finalText?: string;
     replySuggestions?: boolean;
-    quickReplies?: boolean;
     /** A compacted thread whose semantic memory recalls this text for the new message. */
     recalledMemory?: string;
     /** The main model call waits for this, as a long step does. */
     holdMain?: Promise<void>;
-    /** The quick first line's call waits for this, as a slow model does. */
-    holdQuick?: Promise<void>;
-    /** The quick first line's own text; defaults to finalText. */
-    quickText?: string;
-    /** Another run of this bot already answered the steered message. */
-    answeredElsewhere?: boolean;
     /** The recruiter's message, and an earlier one, in place of the default history. */
     currentText?: string;
     earlierText?: string;
-    /** The run already started once and is resuming, as a run paused on a card does. */
-    resumed?: boolean;
     /** A teammate already answered the recruiter's latest message with a line. */
     replyAfterTurn?: boolean;
-    /** The thread's newest message is this bot's fixed line, posted by its run that ended. */
+    /** The thread's newest message is this bot's one-line note, posted by its run that ended. */
     ackFromEndedRun?: boolean;
-    /** That line's text, when it is a written line rather than the fixed one. */
+    /** That line's text. */
     endedRunLine?: string;
     /** The server's hidden continuation prompt came after that line. */
     hiddenContinuation?: boolean;
@@ -190,20 +177,8 @@ async function runWithModel(
     toolCalls?: Array<[string, Record<string, unknown>]>;
     /** This bot's last text in the thread, from an earlier run, with no person writing since. */
     ownLastText?: string;
-    /** Messages this run posted after its first line, newest first, such as a role link. */
-    cardsAfterLine?: Array<{ runId: string; blocks: object[] }>;
-    /** A message the run reads mid-turn, before the watch sees it unread. */
-    claimed?: { id: string; messageId: string; text: string };
-    /** Messages sent while the run works that it has not read yet. */
-    unreadSteering?: Array<{
-      id: string;
-      messageId: string;
-      blocks: MessageBlock[];
-      role?: string;
-    }>;
   } = {},
 ) {
-  claimedSteering.items = undefined;
   recruiterTexts.current = options.currentText;
   recruiterTexts.earlier = options.earlierText;
   const run = {
@@ -219,16 +194,12 @@ async function runWithModel(
     sourceMessageId: options.sourceMessage?.id ?? null,
     leaseFence: 0,
     createdAt: new Date(),
-    ...(options.resumed ? { startedAt: new Date(0) } : {}),
   };
   const get = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
   let request: AgentRunRequest | undefined;
   const runtimeRun = vi.fn(async function* (next: AgentRunRequest) {
     request = next;
     if (next.runId === "run-1") await options.holdMain;
-    if (next.runId === "run-1:quick-reply") await options.holdQuick;
-    if (next.runId === "run-1" && options.claimed)
-      claimedSteering.items = await next.claimSteering?.([]);
     if (switchModel) {
       const onModelChange = (
         next as AgentRunRequest & {
@@ -240,20 +211,14 @@ async function runWithModel(
     for (const event of options.events ?? []) yield event;
     for (const [name, args] of options.toolCalls ?? [])
       await next.executeTool?.(name, args, `${name}-call`);
-    yield {
-      type: "done" as const,
-      text:
-        next.runId.endsWith(":quick-reply") && options.quickText !== undefined
-          ? options.quickText
-          : (options.finalText ?? "Done"),
-    };
+    yield { type: "done" as const, text: options.finalText ?? "Done" };
   });
   const endedRunAck = {
     id: "ack-0",
     botId: "bot-1",
     runId: "run-0",
     role: "bot",
-    blocks: [{ kind: "text", text: options.endedRunLine ?? "收到，马上处理。" }],
+    blocks: [{ kind: "text", text: options.endedRunLine ?? "I'm checking that now." }],
     createdAt: new Date(),
   };
   const coordinatorRows = options.briefAfterLine
@@ -314,12 +279,7 @@ async function runWithModel(
       // A fresh row each read, as the database returns.
       findUniqueOrThrow: vi.fn(async () => ({ ...run })),
       count: vi.fn(async () => 0),
-      // The running run, as the unread-message check reads it.
-      findFirst: vi.fn(async () =>
-        options.unreadSteering
-          ? { trigger: run.trigger, clientNonce: null, sourceMessage: null }
-          : null,
-      ),
+      findFirst: vi.fn(async () => null),
       findMany: vi.fn(async () =>
         options.priorRoutineRun
           ? [{ id: options.priorRoutineRun.id, completedAt: options.priorRoutineRun.completedAt }]
@@ -387,11 +347,6 @@ async function runWithModel(
             : args.take === 6 && args.select?.runId && !args.where?.runId && !args.where?.role
               ? // The thread's newest messages: what came after the first line, then the line.
                 [
-                  ...(options.cardsAfterLine ?? []).map((card, index) => ({
-                    id: `card-${index}`,
-                    role: "bot",
-                    ...card,
-                  })),
                   ...(
                     await Promise.all(
                       prisma.message.create.mock.results.map((result) => result.value),
@@ -427,16 +382,10 @@ async function runWithModel(
                         ]
                       : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
                         ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-                        : options.answeredElsewhere &&
-                            args.where?.role === "bot" &&
-                            !args.where.runId
-                          ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
-                          : [],
+                        : [],
       ),
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
-        options.answeredElsewhere && args?.where?.id === "message-9"
-          ? { createdAt: new Date(0) }
-          : options.newerBrief && args?.where?.id === options.sourceMessage?.id
+        options.newerBrief && args?.where?.id === options.sourceMessage?.id
             ? { seq: options.sourceMessage?.seq }
             : options.briefAfterLine && args?.where?.id === "line-main"
               ? coordinatorRows[1]
@@ -458,10 +407,8 @@ async function runWithModel(
               ? { id: "brief-2" }
               : args?.orderBy && !args.where?.role && !args.where?.id
                 ? // The thread's newest message: the last one this run posted.
-                  options.cardsAfterLine?.length
-                  ? { id: "card-0", ...options.cardsAfterLine[0] }
-                  : (prisma.message.create.mock.results.at(-1)?.value ??
-                    (options.ackFromEndedRun ? endedRunAck : null))
+                  (prisma.message.create.mock.results.at(-1)?.value ??
+                  (options.ackFromEndedRun ? endedRunAck : null))
                 : args?.where?.role === "user" || args?.where?.id
                   ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
                       (message: { role: string; id?: string }) =>
@@ -528,14 +475,8 @@ async function runWithModel(
     scratchpadItem: { findMany: vi.fn(async () => options.loadScratchpad?.() ?? []) },
     externalEffect: { findMany: vi.fn(async () => []) },
     steeringMessage: {
-      findMany: vi.fn(async () =>
-        (options.unreadSteering ?? []).map((row) => ({
-          id: row.id,
-          messageId: row.messageId,
-          message: { blocks: row.blocks, role: row.role ?? "user", botId: null },
-        })),
-      ),
-      count: vi.fn(async () => (options.unreadSteering?.length ? 1 : 0)),
+      findMany: vi.fn(async () => []),
+      count: vi.fn(async () => 0),
     },
     artifact: {
       findMany: vi.fn(async () => [
@@ -547,18 +488,7 @@ async function runWithModel(
   lastRuntimeRun = runtimeRun as never;
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
   const events = {
-    claimSteering: vi.fn(async () =>
-      options.claimed
-        ? [
-            {
-              id: options.claimed.id,
-              messageId: options.claimed.messageId,
-              text: options.claimed.text,
-              blocks: [{ kind: "text", text: options.claimed.text }],
-            },
-          ]
-        : [],
-    ),
+    claimSteering: vi.fn(async () => []),
     append: vi.fn(async () => undefined),
     publishTransient: vi.fn(async () => undefined),
     notify: vi.fn(async () => undefined),
@@ -597,7 +527,6 @@ async function runWithModel(
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
     replySuggestions: options.replySuggestions,
-    quickReplies: options.quickReplies,
     ...(options.discoverTools ? { connector: { discoverTools: options.discoverTools } } : {}),
   } as unknown as Parameters<typeof createRunExecutor>[0]);
 
@@ -701,421 +630,16 @@ describe("withoutPolls", () => {
   });
 });
 
-describe("quick reply", () => {
+describe("saysSomething", () => {
   it("counts only words or cards as a reply, not a row of the run's steps", () => {
     expect(saysSomething([{ kind: "steps", steps: [] } as never])).toBe(false);
     expect(saysSomething([{ kind: "text", text: "  " }])).toBe(false);
-    // A handoff to a teammate is a marker, not a reply: the quick first line still goes out.
+    // A handoff to a teammate is a marker, not a reply.
     expect(
       saysSomething([{ kind: "handoff", fromBotId: "a", toBotId: "b", text: "Find people." }]),
     ).toBe(false);
     expect(saysSomething([{ kind: "text", text: "On it." }])).toBe(true);
     expect(saysSomething([{ kind: "ask", question: "Which city?" } as never])).toBe(true);
-  });
-
-  // Staging 11-20: a first line written by a model without tools said "no records" before the
-  // run read anything. The first line only acknowledges; the run's answer takes its place.
-  it("posts a fixed first line beside setup, with no model writing it", async () => {
-    const { runtimeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "On it.",
-      quickReplies: true,
-    });
-    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply")).toBe(false);
-    expect(prisma.message.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ blocks: [{ kind: "text", text: "Got it, on it." }] }),
-      }),
-    );
-  });
-
-  // Gate 0f20231b, one-off-email: a run paused on the Connect card resumed for each new message
-  // and posted its first line for 「发吧」 again every time.
-  it("posts no first line again when a paused run resumes", async () => {
-    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "On it.",
-      quickReplies: true,
-      resumed: true,
-    });
-    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply")).toBe(false);
-  });
-
-  // Simulated 11-14: every turn read as a first line and then an answer repeating it. The
-  // answer takes the first line's place, so the person reads one reply.
-  it("puts the answer in place of the first line", async () => {
-    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "No roles are saved yet.",
-      finalText: "No roles are saved yet. Send me a job description to start.",
-      quickReplies: true,
-    });
-    const answer = [
-      { kind: "text", text: "No roles are saved yet. Send me a job description to start." },
-    ];
-    expect(prisma.message.update).toHaveBeenCalledWith({
-      where: { id: "published-final" },
-      data: { blocks: answer, clientNonce: null },
-    });
-    expect(lastExecutorEvents?.finalizeRun).toHaveBeenCalledWith(
-      expect.objectContaining({ blocks: [] }),
-    );
-  });
-
-  // Gate 1625bfd4: the first line already answered, the answer had nothing to add, and an
-  // empty-reply fallback was posted after it.
-  // Gate b19c9913: an answer that read the records first still came as a second message.
-  it("puts an answer that used tools in place of the first line", async () => {
-    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "No roles are saved yet.",
-      finalText: "No roles are saved yet. Send me a job description to start.",
-      quickReplies: true,
-      events: [{ type: "tool", name: "shell_exec", args: { command: "t1" }, executionId: "t1" }],
-    });
-    expect(prisma.message.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "published-final" } }),
-    );
-    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
-  });
-
-  // Gate 4774895e, send-at-night: the recruiter answered 「02311」 and the first line was English.
-  it("writes the first line for a bare number in the recruiter's language", async () => {
-    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      currentText: "02311",
-      earlierText: "为啥还没发 现在就发",
-      quickText: "",
-      quickReplies: true,
-    });
-    expect(JSON.stringify(prisma.message.create.mock.calls)).toContain("收到，马上处理。");
-  });
-
-  // Gate b8850911: a role link opened mid-turn came between the first line and the answer.
-  it("puts the answer in place of the first line after the run's own role link", async () => {
-    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "Remote works too.",
-      finalText: "Remote works too. The role team has it.",
-      quickReplies: true,
-      // Gate 4774895e, send-at-night: the run messaged the role team too, and its answer came
-      // as a second reply under 「Got it, on it.」.
-      cardsAfterLine: [
-        { runId: "run-1", blocks: [{ kind: "role_link", groupId: "g", title: "R" }] },
-        {
-          runId: "run-1",
-          blocks: [{ kind: "bot_message_sent", toBotId: "bot-2", toBotName: "R", text: "Status" }],
-        },
-      ],
-    });
-    expect(prisma.message.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "published-final" } }),
-    );
-    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
-  });
-
-  it("posts the answer after a message someone else wrote since the first line", async () => {
-    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "Remote works too.",
-      finalText: "Remote works too. The role team has it.",
-      quickReplies: true,
-      cardsAfterLine: [{ runId: "run-2", blocks: [{ kind: "text", text: "Hi" }] }],
-    });
-    expect(finalizeRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        blocks: expect.arrayContaining([expect.objectContaining({ kind: "text" })]),
-      }),
-    );
-  });
-
-  // Gate 27c0fd0c: a first line, a note before a step and the answer said one thing three times.
-  it("keeps the first line, the note before a step and the answer in one message", async () => {
-    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "Gmail is needed to send.",
-      finalText: "No. Connect Gmail first, then each email waits for your OK.",
-      quickReplies: true,
-      events: [
-        { type: "text", text: "Without Gmail I can't send yet; let me check the connection." },
-        { type: "tool", name: "shell_exec", args: { command: "t1" }, executionId: "t1" },
-      ],
-    });
-    const texts = prisma.message.create.mock.calls.filter(([args]) =>
-      JSON.stringify((args as { data: { blocks: unknown } }).data.blocks).includes('"text"'),
-    );
-    expect(texts).toHaveLength(1);
-    expect(prisma.message.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
-          blocks: [{ kind: "text", text: expect.stringContaining("Without Gmail") }],
-          clientNonce: expect.any(String),
-        },
-      }),
-    );
-    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
-  });
-
-  // Gate 960ca37a: 「草稿还在吗」 got 「收到，马上处理。」 and a Connect card: the answer written
-  // before the card was dropped as a progress note, three times over.
-  it("keeps the answer written just before a connect card", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "收到，马上处理。",
-      currentText: "草稿还在吗",
-      finalText: "",
-      quickReplies: true,
-      recruitingRoleId: "role-1",
-      holdMain,
-      events: [
-        { type: "text", text: "还没发出，草稿还在上面；点下面的 Connect Gmail 就行。" },
-        { type: "tool", name: "request_connection", args: {}, executionId: "c1" },
-      ],
-    });
-    await vi.waitFor(
-      () => expect(lastPrisma?.message.create.mock.calls.length).toBeGreaterThan(0),
-      {
-        timeout: 6_000,
-      },
-    );
-    release();
-    const { prisma } = await pending;
-    expect(prisma.message.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [{ kind: "text", text: expect.stringContaining("草稿还在上面") }],
-        }),
-      }),
-    );
-  });
-
-  // Gate 960ca37a: 「先发我职位描述…」 as the first line, then a card asking the same thing.
-  it("lets a question card take the first line's place", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "先发我职位描述，我就能开始帮你找人。",
-      currentText: "那我要先做啥 才能找到人",
-      finalText: "",
-      quickReplies: true,
-      recruitingRoleId: "role-1",
-      holdMain,
-      events: [
-        {
-          type: "ask",
-          text: "先把职位描述发来，还是给我职位名称和地点？",
-          actions: [{ id: "jd", label: "发职位描述" }],
-        } as never,
-      ],
-    });
-    await vi.waitFor(
-      () => expect(lastPrisma?.message.create.mock.calls.length).toBeGreaterThan(0),
-      {
-        timeout: 6_000,
-      },
-    );
-    release();
-    const { prisma } = await pending;
-    expect(prisma.message.delete).toHaveBeenCalledWith({ where: { id: "published-final" } });
-  });
-
-  // Gate 5fed6e53: "你好" got a question as its first line, which is dropped, and nothing
-  // showed for 18 s.
-  it("shows the fixed first line when the written one is unusable", async () => {
-    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      quickText: "Which role are you hiring for?",
-      finalText: "Hi! Send me a job description to start.",
-      quickReplies: true,
-    });
-    expect(prisma.message.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ blocks: [{ kind: "text", text: "Got it, on it." }] }),
-      }),
-    );
-  });
-
-  // A line still being written when the answer is finished is never posted after it.
-  it("never posts a first line after the answer", async () => {
-    let release!: () => void;
-    const holdQuick = new Promise<void>((done) => {
-      release = done;
-    });
-    let finish!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      finish = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "On it.",
-      quickReplies: true,
-      holdQuick,
-      holdMain,
-    });
-    await vi.waitFor(
-      () => expect(lastRuntimeRun?.mock.calls.some(([call]) => call.runId === "run-1")).toBe(true),
-      { timeout: 6_000 },
-    );
-    finish();
-    const { prisma } = await pending;
-    // The first line arrives only after the answer was posted.
-    release();
-    await new Promise((done) => setTimeout(done, 50));
-    const posted = prisma.message.create.mock.calls.filter(
-      ([args]) =>
-        JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) ===
-        JSON.stringify([{ kind: "text", text: "On it." }]),
-    );
-    expect(posted).toHaveLength(0);
-  }, 10_000);
-
-  it("answers a message sent during a long step at once, without waiting for the step", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Got it, remote works too.",
-      quickReplies: true,
-      holdMain,
-      unreadSteering: [
-        {
-          id: "steer-1",
-          messageId: "message-9",
-          blocks: [{ kind: "text", text: "对了，远程也可以" }],
-        },
-      ],
-    });
-    const fixedLine = JSON.stringify([{ kind: "text", text: "收到，马上处理。" }]);
-    const posted = (prisma: { message: { create: { mock: { calls: unknown[][] } } } }) =>
-      prisma.message.create.mock.calls.filter(
-        ([args]) =>
-          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) === fixedLine,
-      ).length;
-    await vi.waitFor(() => expect(lastPrisma && posted(lastPrisma)).toBe(1), {
-      timeout: STEERING_PEEK_MS + 3_000,
-    });
-    release();
-    const { prisma, runtimeRun } = await pending;
-    // The fixed line goes out at once, with no model call of its own.
-    expect(posted(prisma)).toBe(1);
-    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-1")).toBe(
-      false,
-    );
-  });
-
-  // Sim 11-14: a message steered into a finishing run and answered by its own new run got
-  // 「好，这就处理。」 then 「收到，马上处理。」.
-  it("sends no fixed line for a steered message another run already answered", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Done.",
-      quickReplies: true,
-      holdMain,
-      answeredElsewhere: true,
-      unreadSteering: [
-        { id: "steer-1", messageId: "message-9", blocks: [{ kind: "text", text: "草稿还在吗" }] },
-      ],
-    });
-    await new Promise((done) => setTimeout(done, STEERING_PEEK_MS + 1_000));
-    release();
-    const { prisma } = await pending;
-    const fixedLine = JSON.stringify([{ kind: "text", text: "收到，马上处理。" }]);
-    expect(
-      prisma.message.create.mock.calls.some(
-        ([args]) =>
-          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) === fixedLine,
-      ),
-    ).toBe(false);
-  });
-
-  // Staging 11-13: two messages in a row each got a fixed line, one after the other.
-  it("sends one fixed line for messages sent back to back before the run speaks", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Updated.",
-      quickReplies: true,
-      holdMain,
-      unreadSteering: [
-        {
-          id: "steer-a",
-          messageId: "message-a",
-          blocks: [{ kind: "text", text: "Remote is fine" }],
-        },
-        {
-          id: "steer-b",
-          messageId: "message-b",
-          blocks: [{ kind: "text", text: "对了，远程也可以" }],
-        },
-      ],
-    });
-    const acks = (prisma: { message: { create: { mock: { calls: unknown[][] } } } }) =>
-      prisma.message.create.mock.calls.filter(([args]) =>
-        /Got it, on it\.|收到，马上处理。/.test(
-          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks),
-        ),
-      ).length;
-    await vi.waitFor(() => expect(lastPrisma && acks(lastPrisma)).toBe(1), {
-      timeout: STEERING_PEEK_MS + 3_000,
-    });
-    await new Promise((done) => setTimeout(done, 300));
-    release();
-    const { prisma } = await pending;
-    expect(acks(prisma)).toBe(1);
-  });
-
-  // Staging eval 11-11: the server's automatic continuation ("Continue with the next step: …")
-  // got a quick reply of its own, which echoed it to the recruiter.
-  it("never answers the server's own continuation as if the person wrote it", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Done.",
-      quickReplies: true,
-      holdMain,
-      unreadSteering: [
-        {
-          id: "steer-3",
-          messageId: "message-11",
-          role: "system",
-          blocks: [
-            { kind: "text", text: "Continue with the next step: Review the first 10 people." },
-          ],
-        },
-      ],
-    });
-    await new Promise((done) => setTimeout(done, STEERING_PEEK_MS + 500));
-    release();
-    const { runtimeRun } = await pending;
-    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-3")).toBe(
-      false,
-    );
-  });
-
-  it("answers a message the run reads mid-stream, and tells the run not to acknowledge it", async () => {
-    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Got it, remote works too.",
-      quickReplies: true,
-      claimed: { id: "steer-2", messageId: "message-10", text: "对了，远程也可以" },
-    });
-    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-2")).toBe(
-      false,
-    );
-    expect(claimedSteering.items?.[0]?.text).toContain(STEERING_QUICK_REPLY_SENDING);
-  });
-
-  it("skips runs that a person did not start", async () => {
-    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      trigger: "routine",
-      priorRoutineRun: { id: "run-0", completedAt: new Date(), replyText: "x" },
-      quickReplies: true,
-    });
-    expect(runtimeRun.mock.calls.every(([call]) => !call.runId.endsWith(":quick-reply"))).toBe(
-      true,
-    );
   });
 });
 
@@ -1212,24 +736,6 @@ describe("handed-in stage", () => {
     expect(posted).toContain("700,000");
   });
 
-  // Gate edfa2b9e, change-mind-mid-run: the run handling a teammate's report posted 「收到，马上处理。」
-  // for a message sent just then and ended; the run that took the message posted its own line.
-  it("puts the answer in place of the fixed line a run that ended left for it", async () => {
-    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      trigger: "follow_up",
-      ackFromEndedRun: true,
-      finalText: "Base is now 70–90万, with remote Fridays.",
-    });
-    expect(prisma.message.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "ack-0" },
-        data: expect.objectContaining({
-          blocks: [{ kind: "text", text: "Base is now 70–90万, with remote Fridays." }],
-        }),
-      }),
-    );
-  });
-
   // Gate 01e9467c, first-timer-no-gmail: the run posted its first line and ended; the
   // continuation the server gave it answered in a message of its own.
   it("puts a continuation's answer in place of the line its run left", async () => {
@@ -1277,34 +783,6 @@ describe("handed-in stage", () => {
       }),
     );
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
-  });
-
-  // Gate acd31504: after 「发给他」 the coordinator's 「好，这就处理。」 stood above the teammate's
-  // question card. A connect card keeps the line instead (gate 9fd9c2ff, one-off-email: with the
-  // line gone, the first reply came only with the card, 30 s in).
-  it.each([
-    [
-      "connect card",
-      { toolCalls: [["request_connection", { provider: "calendar", reason: "book the call" }]] },
-      false,
-    ],
-    [
-      "question card",
-      { events: [{ type: "ask", text: "Wei Zhang 的邮箱是什么？", actions: [] } as never] },
-      true,
-    ],
-  ] as const)("a handed-in %s and the coordinator's fixed line", async (_, card, replaces) => {
-    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      trigger: "follow_up",
-      sourceMessage: handoff("bot-1"),
-      briefAfterLine: "好，这就处理。",
-      recruitingRoleId: "role-1",
-      finalText: "",
-      ...(card as object),
-    });
-    if (replaces)
-      expect(prisma.message.delete).toHaveBeenCalledWith({ where: { id: "line-main" } });
-    else expect(prisma.message.delete).not.toHaveBeenCalledWith({ where: { id: "line-main" } });
   });
 
   // Gate acd31504, one-off-email: the Gmail card was refused for want of the email, and the

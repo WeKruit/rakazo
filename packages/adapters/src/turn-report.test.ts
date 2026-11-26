@@ -278,7 +278,7 @@ describe("lastOwnUpdate", () => {
     // The same question asked again after a card: its answer matched the last one and was
     // dropped, because the new question was this turn's own message and so was skipped.
     const rows = [
-      { role: "assistant", botId: "main", runId: "run-2", blocks: text("收到，马上处理。") },
+      { role: "assistant", botId: "main", runId: "run-2", blocks: text("我先查一下。") },
       { role: "user", botId: null, runId: "run-2", blocks: text("列出 3 个候选人") },
       { role: "assistant", botId: "main", runId: "run-1", blocks: text("Alex, Liang, Mia") },
     ];

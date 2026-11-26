@@ -561,7 +561,7 @@ describe("loadWorkingState", () => {
     expect(state.text).toContain("groupId role-abc, no saved role yet");
   });
 
-  // Gate ecebc59b, one-off-email: 「直接发吧」 got 「好，这就处理。」 and the Connect Gmail card
+  // Gate ecebc59b, one-off-email: 「直接发吧」 got a going-ahead line and the Connect Gmail card
   // only 22 s later, so the first line read as if the email were going out.
   it("says the recruiter's own Gmail is not connected on an account that sends from it", async () => {
     const card = (gmail: Row | null, creditLimit: number | null) =>
