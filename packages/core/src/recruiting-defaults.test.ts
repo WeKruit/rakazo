@@ -19,7 +19,6 @@ import {
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
   replyLanguageNote,
-  roleOpenedNote,
   screenLanguage,
   signedAsTeam,
   textLanguage,
@@ -126,7 +125,7 @@ describe("isChineseText", () => {
     expect(isChineseText("仓库运营经理职位的中文要求应如何设定？")).toBe(true);
     expect(isChineseText("以后都用中文回复我")).toBe(true);
     expect(isChineseText("帮我找应届生，USC 的，CS 专业，会做 AI agent")).toBe(true);
-    // Staging 11-13: this brief got "Got it, on it." and English status lines.
+    // Staging 11-13: this brief got English status lines.
     const brief =
       "新role Senior Data Engineer，Seattle，ref 1801，hybrid每周3天，6年+，Spark Kafka生产经验，base 180-220k。两个人：Noah Liu noah-scheduling+noah1801@mail.grokbot.com，Ada Chen noah-scheduling+ada1801@mail.grokbot.com";
     expect(isChineseText(brief)).toBe(true);
@@ -215,14 +214,6 @@ describe("namesPeopleToEmail", () => {
       namesPeopleToEmail(["回复 noah@example.com 那封邮件（同一个线程），正文只写：Test note."]),
     ).toBe(false);
     expect(namesPeopleToEmail(["Reply to alex@example.com's email: thanks"])).toBe(false);
-  });
-});
-
-describe("roleOpenedNote", () => {
-  it("gives its example in the language of the recruiter's newest message", () => {
-    expect(roleOpenedNote(true)).toContain("「岗位开好了");
-    expect(roleOpenedNote(true)).not.toContain("I opened the role");
-    expect(roleOpenedNote(false)).toContain("I opened the role");
   });
 });
 

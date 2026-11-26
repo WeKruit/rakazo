@@ -172,7 +172,6 @@ import {
   RecruitingRoleCandidatesOutputSchema,
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
-  RecruitingRoleSetupSchema,
   ReviseRecruitingRoleInput,
   SetRecruitingCandidateShortlistInput,
   SetRecruitingCandidateShortlistOutput,
@@ -914,7 +913,6 @@ export const appContract = {
         ),
       )
       .output(RecruitingRoleCampaignSchema),
-    roleSetup: oc.input(threadTarget).output(RecruitingRoleSetupSchema),
     /** The latest calibration review round of the thread's role (the ten people it showed). */
     calibrationRound: oc.input(threadTarget).output(RecruitingCalibrationRoundOutput),
     /** The recruiter accepts that round; the role moves on to finding more people. */

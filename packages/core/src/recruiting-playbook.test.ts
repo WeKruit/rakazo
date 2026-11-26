@@ -6,18 +6,9 @@ import {
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
-  classifyTurnEnd,
-  laterPlaybookStage,
-  nextPlaybookStep,
   recruitingBriefClarifications,
   recruitingCalibrationIdentity,
-  recruitingDiscoveryAnswer,
-  recruitingOutboundDisposition,
   requireRecruitingBriefConfirmation,
-  requireRecruitingPlaybookGate,
-  turnEndPromise,
-  turnEndStarted,
-  turnEndStuck,
   validateRecruitingBrief,
 } from "./recruiting-playbook.js";
 
@@ -316,14 +307,7 @@ describe("sourced recruiting intake", () => {
     ).toBe(false);
   });
 });
-const hash = "a".repeat(64);
-const gates = ["G0", "G1", "G2", "G3", "G4"] as const;
-const profiles = Array.from({ length: 10 }, (_, i) => ({
-  candidateKey: `profile-${i}`,
-  linkedinUrl: `https://www.linkedin.com/in/example-${i}`,
-  evidenceUrl: `https://example.test/evidence/${i}`,
-}));
-describe("deterministic playbook approval gates", () => {
+describe("LinkedIn identity", () => {
   it("requires a concrete LinkedIn profile and canonicalizes identity across URL variants", () => {
     expect(recruitingCalibrationIdentity("https://linkedin.com/in/Example/?trk=test")).toBe(
       "/in/example",
@@ -337,94 +321,6 @@ describe("deterministic playbook approval gates", () => {
       "https://example.com/in/example",
     ])
       expect(recruitingCalibrationIdentity(url)).toBeNull();
-  });
-  it.each(gates)("requires an exact current receipt for %s", (gate) => {
-    const input = {
-      actor: { userId: "human", spaceId: "space" },
-      gate,
-      roleRevisionId: "revision-2",
-      payloadHash: hash,
-      prerequisiteHashes: { G0: hash, G1: hash, G2: hash },
-      calibration: profiles,
-      receipts: gates.map((gate) => ({
-        gate,
-        roleRevisionId: "revision-2",
-        payloadHash: hash,
-        spaceId: "space",
-        approvedByUserId: "human",
-        approvedAt: "2026-10-16T18:00:00-07:00",
-      })),
-    };
-    expect(() => requireRecruitingPlaybookGate(input)).not.toThrow();
-    for (const receipts of [
-      [],
-      input.receipts.map((receipt) => ({ ...receipt, roleRevisionId: "old" })),
-      input.receipts.filter((receipt) => receipt.gate !== gate),
-      input.receipts.map((receipt) => ({ ...receipt, spaceId: "foreign" })),
-      input.receipts.map((receipt) => ({ ...receipt, approvedByUserId: "foreign" })),
-      input.receipts.map((receipt) => ({ ...receipt, payloadHash: "b".repeat(64) })),
-    ]) {
-      expect(() => requireRecruitingPlaybookGate({ ...input, receipts })).toThrow(/approval/);
-      expect(() => requireRecruitingPlaybookGate({ ...input, receipts })).not.toThrow(/\bG[0-4]\b/);
-    }
-  });
-  it("rejects none, eleven, duplicated or unevidenced calibration profiles", () => {
-    const receipts = gates.map((gate) => ({
-      gate,
-      roleRevisionId: "revision",
-      payloadHash: hash,
-      spaceId: "space",
-      approvedByUserId: "human",
-      approvedAt: "2026-10-16T18:00:00Z",
-    }));
-    for (const calibration of [
-      [],
-      [...profiles, profiles[0]!],
-      profiles.map(() => profiles[0]!),
-      profiles.map((profile) => ({
-        ...profile,
-        linkedinUrl: `${profiles[0]!.linkedinUrl}?trk=${profile.candidateKey}`,
-      })),
-      profiles.map((profile) => ({ ...profile, evidenceUrl: "" })),
-    ])
-      expect(() =>
-        requireRecruitingPlaybookGate({
-          actor: { userId: "human", spaceId: "space" },
-          gate: "G2",
-          roleRevisionId: "revision",
-          payloadHash: hash,
-          prerequisiteHashes: { G0: hash, G1: hash },
-          receipts,
-          calibration,
-        }),
-      ).toThrow("Candidate review requires up to ten distinct profiles with supporting evidence.");
-  });
-  it("blocks suppression, hold/pass and duplicates before the CRM-note exception", () => {
-    const base = {
-      suppressed: false,
-      hold: false,
-      pass: false,
-      duplicate: false,
-      checksComplete: true,
-      scheduling: false,
-      exactApproval: true,
-      crmNote: true,
-      approvedPolicy: true,
-      allTopicsApproved: true,
-      approvedFactsOnly: true,
-    };
-    for (const flag of ["suppressed", "hold", "pass", "duplicate"] as const)
-      expect(recruitingOutboundDisposition({ ...base, [flag]: true })).toMatch(/^blocked_/);
-    expect(recruitingOutboundDisposition({ ...base, exactApproval: false, scheduling: true })).toBe(
-      "draft",
-    );
-    expect(recruitingOutboundDisposition({ ...base, checksComplete: false })).toBe("draft");
-  });
-  it("never fabricates LinkedIn provenance for an actual different or unknown source", () => {
-    expect(
-      recruitingDiscoveryAnswer({ label: "a public research paper", verified: true }),
-    ).not.toContain("LinkedIn");
-    expect(recruitingDiscoveryAnswer(null)).toBeNull();
   });
 });
 
@@ -442,148 +338,6 @@ it("does not let a model invent inferred provenance", () => {
       criteria: [{ ...criteria[0]!, priority: "preferred" }],
     }),
   ).toThrow(/source/);
-});
-
-describe("playbook stage machine", () => {
-  it("never regresses a stage", () => {
-    expect(laterPlaybookStage("feedback", "calibration_10")).toBe("feedback");
-    expect(laterPlaybookStage("intake", "calibration_10")).toBe("calibration_10");
-  });
-
-  it("pushes open clarifications before anything else", () => {
-    const step = nextPlaybookStep("intake", {
-      title: "后端",
-      hasBrief: true,
-      openClarifications: 2,
-      savedCandidates: 0,
-    });
-    expect(step?.label).toBe("2 open questions to confirm");
-    expect(step?.openClarifications).toBe(2);
-  });
-
-  it("starts calibration once title and brief exist", () => {
-    expect(
-      nextPlaybookStep("intake", { title: "后端", hasBrief: true, savedCandidates: 0 })?.label,
-    ).toBe("Find the first 10 people");
-    expect(
-      nextPlaybookStep("intake", { title: "后端", hasBrief: false, savedCandidates: 0 })?.label,
-    ).toBe("Complete the role details");
-  });
-
-  it("counts remaining calibration profiles and stops at human-owned stages", () => {
-    expect(
-      nextPlaybookStep("calibration_10", { title: "x", hasBrief: true, savedCandidates: 4 })?.label,
-    ).toBe("Finding 6 more of the first 10");
-    const present = nextPlaybookStep("calibration_10", {
-      title: "x",
-      hasBrief: true,
-      savedCandidates: 10,
-    })?.prompt;
-    expect(present).toContain("calibration_round");
-    expect(present).toContain("do not require a rating for every person");
-    expect(present).toContain("Results calibration panel");
-    expect(present).toContain("offer the next step");
-    // Ten saved people outside the role's area are not ten fits: one more search, not a relax ask.
-    expect(present).toContain("Search again only when fewer than ten saved people fit");
-    expect(nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt).toContain(
-      "pick 10 new people",
-    );
-    const feedback = nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt;
-    expect(feedback).toContain('"find 100"');
-    expect(feedback).toContain("operation approve");
-    expect(feedback).toContain("offer the next step");
-    expect(nextPlaybookStep("closed", { hasBrief: true, savedCandidates: 50 })).toBeNull();
-    expect(nextPlaybookStep("screening", { hasBrief: true, savedCandidates: 50 })).toBeNull();
-  });
-});
-
-describe("classifyTurnEnd", () => {
-  it("requires saved evidence during calibration even when progress is a list", () => {
-    expect(
-      classifyTurnEnd(
-        { blocks: [{ kind: "text", text: "- Read role\n- Checked sources\n- Saved candidates" }] },
-        { savedRows: 9, deliverableRows: 10 },
-      ),
-    ).toBe("none");
-    expect(
-      classifyTurnEnd({ blocks: [{ kind: "candidate" }] }, { savedRows: 1, deliverableRows: 10 }),
-    ).toBe("none");
-    expect(
-      classifyTurnEnd({ blocks: [{ kind: "ask", text: "Location", status: "answered" }] }),
-    ).toBe("none");
-  });
-  const text = (t: string) => ({ blocks: [{ kind: "text", text: t }] });
-  it("treats a saved-and-stopped status note as none", () => {
-    expect(classifyTurnEnd(text("已将公司暂用名保存为 X。尚未启动搜寻。"))).toBe("none");
-    expect(classifyTurnEnd({ blocks: [] })).toBe("none");
-  });
-  it("detects questions, cards, handoffs and deliverables", () => {
-    expect(classifyTurnEnd(text("薪资范围是多少？"))).toBe("question");
-    expect(classifyTurnEnd({ blocks: [{ kind: "ask", text: "x" }] })).toBe("question");
-    expect(classifyTurnEnd({ blocks: [{ kind: "approval", text: "x" }] })).toBe("card");
-    expect(classifyTurnEnd(text("ok"), { pendingApproval: true })).toBe("card");
-    expect(classifyTurnEnd(text("ok"), { handedOff: true })).toBe("handoff");
-    expect(classifyTurnEnd(text("saved"), { savedRows: 10 })).toBe("deliverable");
-    expect(classifyTurnEnd(text("saved"), { savedRows: 3, deliverableRows: 10 })).toBe("none");
-    expect(classifyTurnEnd({ blocks: [{ kind: "candidate" }] })).toBe("deliverable");
-    expect(classifyTurnEnd(text("名单：\n1. 张三\n2. 李四\n3. 王五"))).toBe("deliverable");
-  });
-});
-
-// Endings seen in live role threads on 2026-10-25/26, where the turn stopped after promising.
-describe("turnEndStarted and turnEndStuck", () => {
-  // 2026-10-27 16:38, LA role: "lets find 50" ended on a claim with no question.
-  it("finds a claim of started work anywhere in a turn that asks nothing", () => {
-    const text =
-      "已开始扩展搜索，目标是新增 50 位，不重复首轮人选。后续结果会保留可点击的 LinkedIn 链接和来源；学历、语言仍会标为待核实。";
-    expect(turnEndStarted(text)).toContain("已开始扩展搜索");
-    expect(turnEndStarted("已保存 10 位候选人。")).toBeUndefined();
-    expect(turnEndStarted("已开始搜索。你希望先看哪一类？")).toBeUndefined();
-  });
-  // 2026-10-27 16:30, LA role: the turn ended on an apology with no question and no role.
-  it("finds a failure report that ends a turn without a question", () => {
-    expect(turnEndStuck("岗位尚未成功建立。抱歉，当前流程卡在岗位记录这一步。")).toBeTruthy();
-    expect(turnEndStuck("I couldn't save the role.")).toBeTruthy();
-    expect(turnEndStuck("岗位已保存，开始找人。")).toBeUndefined();
-    expect(turnEndStuck("保存失败了，要换个方式吗？")).toBeUndefined();
-  });
-});
-
-describe("turnEndPromise", () => {
-  it.each([
-    "岗位保存恢复后，我会把这项语言要求和 JD 一起纳入岗位简报，再继续搜索。",
-    "恢复后我会先提交完整简报供确认，再立即搜索并列出10位候选人。",
-    "我会在修复保存问题后继续。",
-    "预计 10 月 25 日 2:00 AM PT 前展示名单，或说明入口的实际阻碍。",
-    "已取消本轮地区偏好。预计本批结果或阻碍汇报：ETA 2:35 AM PT。",
-    "Saved the brief. I'll start the search next.",
-    "I'll wait for the search to finish and then share the list.",
-  ])("finds the promise in %s", (ending) => {
-    expect(turnEndPromise(ending)).toBeTruthy();
-  });
-
-  it.each([
-    "已保存 10 位候选人。",
-    "接下来你希望怎么做？",
-    "你确认后我会发送第一封邮件。",
-    "Handoff ETA after confirmation: 12:10 PM PT.",
-    "我会把薪资作为偏好，而非硬性淘汰条件。",
-    // How a file's embedded instruction was handled, said after the file was read.
-    "PDF 末尾有一段面向 AI 助手的指令文字，我将其视为文件中的无关内容，不会执行。",
-    "我会继续搜索，稍后补进结果。\n\n已保存 60 人，累计 114 人。",
-    // The recruiter asked to stop; acknowledging it owes nothing.
-    "Understood. I'll stop here.",
-    "Got it, I'll wait for your next message.",
-    "好的，我先停在这里，等你消息。",
-  ])("leaves %s alone", (ending) => {
-    expect(turnEndPromise(ending)).toBeUndefined();
-  });
-
-  it("does not count saved rows as delivered when the turn ends on a promise", () => {
-    const promised = { blocks: [{ kind: "text", text: "已保存 12 人。我马上整理名单。" }] };
-    expect(classifyTurnEnd(promised, { savedRows: 12 })).toBe("none");
-    expect(classifyTurnEnd(promised, { savedRows: 12, handedOff: true })).toBe("handoff");
-  });
 });
 
 describe("clarifications before the search", () => {
@@ -604,28 +358,5 @@ describe("clarifications before the search", () => {
       rules: [],
     };
     expect(recruitingBriefClarifications(brief)).toEqual([]);
-  });
-});
-
-describe("a failed save never stops the work", () => {
-  const stopsWork =
-    /because (a|this) save failed|save it first|fix it once from the error and save again; do not search/i;
-  it.each(["intake", "calibration_10", "feedback", "scale"] as const)(
-    "the %s step never makes the next search wait on a save",
-    (stage) => {
-      for (const hasBrief of [true, false]) {
-        const step = nextPlaybookStep(stage, { title: "Engineer", hasBrief, savedCandidates: 10 });
-        expect(step?.prompt ?? "").not.toMatch(stopsWork);
-      }
-    },
-  );
-
-  it("feedback is recorded without waiting on the save", () => {
-    const step = nextPlaybookStep("feedback", {
-      title: "Engineer",
-      hasBrief: true,
-      savedCandidates: 10,
-    });
-    expect(step?.prompt).toContain("never wait on it or stop over it");
   });
 });

@@ -78,16 +78,8 @@ describe("run budget guardrails", () => {
   });
 });
 
-it("summarizes saved recruiting results and the persisted next step at the budget limit", () => {
-  const text = runBudgetStopText(
-    "cost",
-    { costUsd: 5.5, elapsedMs: 0, toolCalls: 3 },
-    {
-      savedCandidates: 10,
-      nextStep: "收集校准反馈",
-    },
-  );
-  expect(text).toContain("10 saved candidate profiles");
-  expect(text).toContain("Next step: 收集校准反馈");
-  expect(text).not.toContain("Everything completed so far is above");
+it("gives no head count or next step of its own at the budget limit", () => {
+  const text = runBudgetStopText("cost", { costUsd: 5.5, elapsedMs: 0, toolCalls: 3 });
+  expect(text).toContain("Everything completed so far is above");
+  expect(text).not.toMatch(/saved candidate|Next step/);
 });

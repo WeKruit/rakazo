@@ -76,7 +76,7 @@ export function client() {
     throw new InfraError("sign-in still refused after about 15 minutes");
   };
   const rpc = async (route, json) => {
-    const read = /\/(get|head|messages|list|page|roleSetup|backgroundTasks)$/.test(route);
+    const read = /\/(get|head|messages|list|page|backgroundTasks)$/.test(route);
     let response;
     let attempts = 0;
     const startedAt = Date.now();

@@ -216,9 +216,6 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await expect(
       recordRound([...keys("first").slice(0, 9), "linkedin:/in/jp azevedo"]),
     ).rejects.toThrow(/Saved people not yet in this round.*Jp Azevedo( \([^)]*\))? = jp-1/);
-    expect(
-      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } })).playbookStage,
-    ).toBe("feedback");
 
     await savePage([...keys("second").slice(0, 8)]);
     await savePage(keys("second").slice(8));
@@ -252,8 +249,6 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       expectedRoleRevision: 1,
     });
     expect(approved).toMatchObject({ round: 2, already: false });
-    const role = await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } });
-    expect(role.playbookStage).toBe("scale");
     const round = await prisma.recruitingCalibrationRound.findFirstOrThrow({
       where: { roleId, round: 2 },
     });

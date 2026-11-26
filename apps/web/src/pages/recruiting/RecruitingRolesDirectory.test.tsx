@@ -26,7 +26,6 @@ const role = (index: number) => ({
   title: `Role ${String(index).padStart(3, "0")}`,
   groupId: `group-${index}`,
   threadId: `thread-${index}`,
-  stage: "intake",
 });
 const roles = Array.from({ length: 101 }, (_, index) => role(index));
 const output = {

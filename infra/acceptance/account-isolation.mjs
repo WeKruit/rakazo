@@ -390,7 +390,6 @@ async function crossReads(viewer, owner, ownerIds, r) {
     await probe(viewer, owner, ownerIds, "threads/get", target, "role chat");
     await probe(viewer, owner, ownerIds, "threads/messages", target, "role chat messages");
     await probe(viewer, owner, ownerIds, "threads/backgroundTasks", target, "background tasks");
-    await probe(viewer, owner, ownerIds, "recruiting/roleSetup", target, "role setup");
     await probe(viewer, owner, ownerIds, "recruiting/calibrationRound", target, "first ten");
     for (const view of ["inbox", "interview", "contacts"])
       await probe(

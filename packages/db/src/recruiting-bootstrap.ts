@@ -1134,15 +1134,16 @@ async function retireResearchTools(prisma: PrismaClient, actor: Actor): Promise<
 
 /**
  * The quality check is retired for every account: the search grades people. A crew's Reviewer is
- * archived, so no roster offers it and nothing hands it work; its messages and the grades it
- * saved stay. A Reviewer with a turn in flight is left for the next pass.
+ * archived and taken out of every conversation, so no roster offers it, nothing hands it work
+ * and a new role, which takes its team from the Kruit conversation, never gets it as a member.
+ * Its messages and the grades it saved stay. A Reviewer with a turn in flight is left for the
+ * next pass.
  */
 async function retireReviewer(prisma: PrismaClient, actor: Actor): Promise<void> {
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
   const reviewers = await prisma.bot.findMany({
     where: {
       ...scope,
-      archivedAt: null,
       OR: [
         { spawnKey: `recruiting:${actor.userId}:reviewer` },
         // Crews older than spawn keys got theirs by name and title.
@@ -1150,19 +1151,25 @@ async function retireReviewer(prisma: PrismaClient, actor: Actor): Promise<void>
       ],
       runs: { none: { status: { in: [...TURN_IN_FLIGHT_STATUSES] } } },
     },
-    select: { id: true },
+    select: { id: true, archivedAt: true },
   });
   if (!reviewers.length) return;
   const ids = reviewers.map((bot) => bot.id);
+  const active = reviewers.filter((bot) => !bot.archivedAt).map((bot) => bot.id);
   await prisma.$transaction([
-    prisma.routine.updateMany({
-      where: { botId: { in: ids } },
-      data: { active: false, nextRunAt: null },
-    }),
-    prisma.bot.updateMany({
-      where: { id: { in: ids }, archivedAt: null },
-      data: { archivedAt: new Date(), pinned: false },
-    }),
+    prisma.chatGroupMember.deleteMany({ where: { botId: { in: ids } } }),
+    ...(active.length
+      ? [
+          prisma.routine.updateMany({
+            where: { botId: { in: active } },
+            data: { active: false, nextRunAt: null },
+          }),
+          prisma.bot.updateMany({
+            where: { id: { in: active }, archivedAt: null },
+            data: { archivedAt: new Date(), pinned: false },
+          }),
+        ]
+      : []),
   ]);
 }
 

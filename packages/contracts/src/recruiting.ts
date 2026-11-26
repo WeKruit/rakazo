@@ -326,8 +326,6 @@ export const RecruitingRoleSchema = z.strictObject({
   title: Text,
   revision: Revision,
   currentRevisionId: RecruitingId,
-  /** Playbook stage (intake | calibration_10 | feedback | scale | enrichment | outreach | replies | screening | submission | interview | closed). */
-  playbookStage: z.string().optional(),
 });
 export type RecruitingRole = z.infer<typeof RecruitingRoleSchema>;
 
@@ -1902,47 +1900,6 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
   notSendingBecause: z.string().max(300).optional(),
 });
 export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema>;
-
-/** What comes next in a role's playbook; screens word it in their own language. */
-export const RecruitingPlaybookNextSchema = z.strictObject({
-  step: z.enum([
-    "questions",
-    "brief",
-    "find_first_10",
-    "show_first_10",
-    "review_first_10",
-    "scale",
-    "enrichment",
-    "outreach",
-    "replies",
-  ]),
-  /** Open questions for `questions`; people still to find for `find_first_10`. */
-  count: z.number().int().nonnegative().optional(),
-});
-export type RecruitingPlaybookNext = z.infer<typeof RecruitingPlaybookNextSchema>;
-
-/** Where a role is in the recruiting playbook and what comes next. */
-export const RecruitingRoleSetupSchema = z.strictObject({
-  playbookStage: z
-    .strictObject({
-      stage: z.enum([
-        "intake",
-        "calibration_10",
-        "feedback",
-        "scale",
-        "enrichment",
-        "outreach",
-        "replies",
-        "screening",
-        "submission",
-        "interview",
-        "closed",
-      ]),
-      next: RecruitingPlaybookNextSchema.nullable(),
-    })
-    .optional(),
-});
-export type RecruitingRoleSetup = z.infer<typeof RecruitingRoleSetupSchema>;
 
 export const RecruitingCandidateHistorySchema = z.strictObject({
   id: Id,

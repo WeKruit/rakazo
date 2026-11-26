@@ -898,10 +898,6 @@ msgstr "Candidate lists"
 msgid "Candidate reference"
 msgstr "Candidate reference"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Candidate replies"
-msgstr "Candidate replies"
-
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Candidate sort"
 msgstr "Candidate sort"
@@ -1087,10 +1083,6 @@ msgstr "Close panel"
 msgid "Close preview"
 msgstr "Close preview"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Closed"
-msgstr "Closed"
-
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Cloud"
 msgstr "Cloud"
@@ -1147,10 +1139,6 @@ msgstr "Company deck"
 #: src/pages/shell/Composer.tsx
 msgid "Company: {0}"
 msgstr "Company: {0}"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Complete the role details"
-msgstr "Complete the role details"
 
 #: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
@@ -2215,14 +2203,6 @@ msgstr "Filter by saved contact…"
 msgid "Find candidates with Kruit"
 msgstr "Find candidates with Kruit"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Find contact details"
-msgstr "Find contact details"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Find more people"
-msgstr "Find more people"
-
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Find people similar to these {0} selected candidates for this role."
@@ -2232,25 +2212,13 @@ msgstr "Find people similar to these {0} selected candidates for this role."
 msgid "Find similar"
 msgstr "Find similar"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Find the first 10 people"
-msgstr "Find the first 10 people"
-
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Finding {count} more of the first 10"
-msgstr "Finding {count} more of the first 10"
-
 #: src/components/BackgroundTasks.tsx
 msgid "Finding candidates"
 msgstr "Finding candidates"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Finding emails"
-msgstr "Finding emails"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Finish subscription sign-in, then test again."
@@ -2276,10 +2244,6 @@ msgstr "Finished."
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Fired"
 msgstr "Fired"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "First 10 people"
-msgstr "First 10 people"
 
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "First page"
@@ -2380,10 +2344,6 @@ msgstr "Group by"
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Grouped by"
 msgstr "Grouped by"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Handle candidate replies"
-msgstr "Handle candidate replies"
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Handoffs"
@@ -2572,7 +2532,6 @@ msgstr "Internal verdict: unmet"
 msgid "Interrupted, resuming…"
 msgstr "Interrupted, resuming…"
 
-#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Interview"
 msgstr "Interview"
@@ -3099,10 +3058,6 @@ msgstr "Next"
 msgid "Next page"
 msgstr "Next page"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Next: {next}"
-msgstr "Next: {next}"
-
 #: src/pages/recruiting/AllContacts.tsx
 msgid "No"
 msgstr "No"
@@ -3588,7 +3543,6 @@ msgid "Output"
 msgstr "Output"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RoleSetup.tsx
 msgid "Outreach"
 msgstr "Outreach"
 
@@ -3751,10 +3705,6 @@ msgstr "Prepare a shortlist PDF I can send to the client for these {0} selected 
 msgid "Prepare adding exactly {0} selected people to the saved sequence {1} in role {2}. Verify this exact saved sequence, sender and current enrollment before changing anything. Sender: {3}. Requested start: {schedule}. Use saved email addresses only; resolve missing addresses with me before enrollment. Show the final recipients, content and schedule in the existing approval flow before any sending."
 msgstr "Prepare adding exactly {0} selected people to the saved sequence {1} in role {2}. Verify this exact saved sequence, sender and current enrollment before changing anything. Sender: {3}. Requested start: {schedule}. Use saved email addresses only; resolve missing addresses with me before enrollment. Show the final recipients, content and schedule in the existing approval flow before any sending."
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Prepare outreach"
-msgstr "Prepare outreach"
-
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Present"
 msgstr "Present"
@@ -3822,10 +3772,6 @@ msgstr "Pull request"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Qualifying work"
 msgstr "Qualifying work"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Questions to confirm: {count}"
-msgstr "Questions to confirm: {count}"
 
 #: src/pages/Legal.tsx
 msgid "Questions: <0>{email}</0>"
@@ -4344,14 +4290,6 @@ msgstr "Role for new sequence"
 msgid "Role pages"
 msgstr "Role pages"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Role setup"
-msgstr "Role setup"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Role stage"
-msgstr "Role stage"
-
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Role unavailable"
 msgstr "Role unavailable"
@@ -4561,10 +4499,6 @@ msgstr "School"
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Schools"
 msgstr "Schools"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Screening"
-msgstr "Screening"
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
@@ -4981,10 +4915,6 @@ msgstr "Show password"
 msgid "Show settings"
 msgstr "Show settings"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Show the first 10 people"
-msgstr "Show the first 10 people"
-
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
 msgstr "Show transcript"
@@ -5245,10 +5175,6 @@ msgstr "Subject unavailable."
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Subject: {0}"
 msgstr "Subject: {0}"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Submission"
-msgstr "Submission"
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Subsequently replied"
@@ -5886,10 +5812,6 @@ msgstr "What to return"
 msgid "When to use"
 msgstr "When to use"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Wider search"
-msgstr "Wider search"
-
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Won"
 msgstr "Won"
@@ -5974,10 +5896,6 @@ msgstr "Your credits are used up. Email {email} to add more."
 #: src/pages/Auth.tsx
 msgid "Your email address"
 msgstr "Your email address"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Your feedback"
-msgstr "Your feedback"
 
 #: src/pages/Auth.tsx
 msgid "Your name"

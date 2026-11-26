@@ -430,7 +430,7 @@ describe("recruiting reply draft translation", () => {
 });
 
 describe("fresh CRM and Instantly reply preflight", () => {
-  it("does current fixed reads and exposes limited coverage rather than full G4", async () => {
+  it("does current fixed reads and exposes limited coverage rather than full coverage", async () => {
     const f = fixture();
     const result = await f.run();
     expect(result).toMatchObject({
