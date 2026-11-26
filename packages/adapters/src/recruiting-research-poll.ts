@@ -10,10 +10,6 @@ import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { STOPPED_TURN } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import {
-  NOT_GRADING_TASK,
-  RECRUITING_GRADE_NONCE_PREFIX,
-} from "./recruiting-grading.js";
 import { classifyRecruitingResearchResult, mcpObject } from "./recruiting-research.js";
 import { finishWorkEstimate, SHORTFALL_RULE, wakeForResearchCountdown } from "./work-estimate.js";
 
@@ -110,8 +106,7 @@ export async function recruitingResearchInFlight(
       roleId,
       state: "active",
       providerTaskId: { not: null },
-      // Grading people already in Results is not a search anyone waits on.
-      AND: [NOT_GRADING_TASK, ...(startedBy ? [{ createdByRun: startedBy }] : [])],
+      ...(startedBy ? { createdByRun: startedBy } : {}),
     },
     select: {
       id: true,
@@ -282,7 +277,6 @@ export async function pollRecruitingResearch(
     );
     return;
   }
-  const grading = Boolean(task.createdByRun.clientNonce?.startsWith(RECRUITING_GRADE_NONCE_PREFIX));
   const { role, createdByRun: run } = task;
   // The task's role and creating run must agree on one owner; otherwise it is nobody's to wake.
   if (role.spaceId !== run.spaceId || role.userId !== run.userId) return;
@@ -337,7 +331,7 @@ export async function pollRecruitingResearch(
   if (observation?.deliveryState === "accepted")
     await recordDirectResearchCredits(deps.prisma, task, observation.usage);
   const terminal = observation?.deliveryState === "accepted" && observation.done === true;
-  if (!terminal && !grading && observation?.deliveryState === "accepted") {
+  if (!terminal && observation?.deliveryState === "accepted") {
     const rows = progressRows(result);
     if (rows !== null) await wakeForPartialRows(deps, task, run, nonce, rows);
     await wakeForResearchCountdown(deps, task, { ...run, userId: role.userId }).catch((error) =>
@@ -386,11 +380,9 @@ export async function pollRecruitingResearch(
     if (!bot || existing || !live) return null;
     // Provider text is untrusted. Wake with local identity and status only.
     const direct = !(await tx.recruitingResearchAction.count({ where: { taskId: task.id } }));
-    const summary = grading
-      ? `The research service's grades for people already in Results on recruiting role ${task.roleId} are ${state}. Read them with the research provider's get_rows on the same research (task ${providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results. Do not start new research and do not ask anything. Then end the turn.`
-      : direct
-        ? `Research for recruiting role ${task.roleId} is ${state}. Read the people not saved yet with the research provider's get_rows on the same research (task ${providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results, so all returned people are kept, including unassessed people. Do not start new research. Then report how many new people were added in total and the highlights, and offer the next step in one question card. ${SHORTFALL_RULE}`
-        : `Research task ${task.id} for recruiting role ${task.roleId} is ${state}. Use recruiting_research status, then read and save every rows page with save_results, following each returned cursor, so all returned people are kept, including unassessed people. Do not start new research. Then continue the playbook in this same turn: during calibration, record the ten new people as the round and present them for feedback. ${SHORTFALL_RULE}`;
+    const summary = direct
+      ? `Research for recruiting role ${task.roleId} is ${state}. Read the people not saved yet with the research provider's get_rows on the same research (task ${providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results, so all returned people are kept, including unassessed people. Do not start new research. Then report how many new people were added in total and the highlights, and offer the next step in one question card. ${SHORTFALL_RULE}`
+      : `Research task ${task.id} for recruiting role ${task.roleId} is ${state}. Use recruiting_research status, then read and save every rows page with save_results, following each returned cursor, so all returned people are kept, including unassessed people. Do not start new research. Then continue the playbook in this same turn: during calibration, record the ten new people as the round and present them for feedback. ${SHORTFALL_RULE}`;
     const wakeTask = await tx.task.create({
       data: {
         spaceId: run.spaceId,
@@ -409,8 +401,7 @@ export async function pollRecruitingResearch(
         userId: run.userId,
         taskId: wakeTask.id,
         status: "queued",
-        // Grades are saved quietly, like the request that asked for them.
-        trigger: (grading ? "recruiting_grade" : "recruiting_research") satisfies RunTrigger,
+        trigger: "recruiting_research" satisfies RunTrigger,
         clientNonce: nonce,
       },
     });

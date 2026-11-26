@@ -21,7 +21,7 @@ function client(label, failRole = false) {
           ? { groupId: `${label}-home` }
           : route === "groups/get"
             ? (state.get(input.groupId) ?? {
-                members: ["Main", "Sourcer", "Outreach", "Reviewer"].map((name) => ({ name })),
+                members: ["Main", "Sourcer", "Outreach"].map((name) => ({ name })),
               })
             : route === "groups/duplicate"
               ? { id: `${label}-copy`, threadId: `${label}-thread` }
@@ -34,7 +34,7 @@ function client(label, failRole = false) {
         state.set(input.groupId, {
           name: input.name,
           archivedAt: null,
-          members: ["Main", "Sourcer", "Outreach", "Reviewer"].map((name) => ({ name })),
+          members: ["Main", "Sourcer", "Outreach"].map((name) => ({ name })),
         });
       return { status: route === "recruiting/createRole" && failRole ? 500 : 200, data };
     },

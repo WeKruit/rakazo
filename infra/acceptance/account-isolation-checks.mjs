@@ -22,10 +22,10 @@ export async function withIsolationTestCopies(clients, run) {
       );
       const group = success(await owner.rpc("groups/get", { groupId: home.groupId }), "groups/get");
       const names = new Set(group.members.map((member) => member.name.toLowerCase()));
-      for (const name of ["main", "sourcer", "outreach", "reviewer"])
+      for (const name of ["main", "sourcer", "outreach"])
         assert.ok(
           names.has(name),
-          "the native recruiting crew must include all four required roles",
+          "the native recruiting crew must include all three required roles",
         );
       const copy = success(
         await owner.rpc("groups/duplicate", { groupId: home.groupId }),
@@ -51,7 +51,7 @@ export async function withIsolationTestCopies(clients, run) {
       );
       const duplicated = success(await owner.rpc("groups/get", { groupId: copy.id }), "groups/get");
       const copiedNames = new Set(duplicated.members.map((member) => member.name.toLowerCase()));
-      for (const name of ["main", "sourcer", "outreach", "reviewer"])
+      for (const name of ["main", "sourcer", "outreach"])
         assert.ok(
           copiedNames.has(name),
           "the duplicated conversation must keep the full native crew",

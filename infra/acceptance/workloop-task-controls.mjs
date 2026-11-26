@@ -6,7 +6,7 @@ export async function assertTestCopy(rpc, groupId) {
   const { name: groupName, members } = await rpc("groups/get", { groupId });
   assert.match(groupName, /测试副本/, "work controls must run only in a test copy");
   const names = new Set(members.map((member) => member.name));
-  for (const name of ["Main", "Sourcer", "Outreach", "Reviewer"])
+  for (const name of ["Main", "Sourcer", "Outreach"])
     assert(names.has(name), `test copy is missing ${name}`);
 }
 

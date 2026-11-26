@@ -1133,10 +1133,6 @@ msgid "Checking candidate replies"
 msgstr "查看候选人回复"
 
 #: src/components/LiveWork.tsx
-msgid "Checking candidates"
-msgstr "核查候选人"
-
-#: src/components/LiveWork.tsx
 msgid "Checking connections"
 msgstr "正在检查连接"
 

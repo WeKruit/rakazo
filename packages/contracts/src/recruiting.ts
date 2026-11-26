@@ -1074,8 +1074,6 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
 export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSchema>;
 
 const ResearchText = z.string().regex(/\S/, "Text must not be blank");
-/** People one save_grades call may grade. */
-export const RECRUITING_GRADE_PAGE_LIMIT = 20;
 const GradeText = (max: number) => ResearchText.max(max);
 /**
  * One degree as "School | Degree | dates". A degree given as an object is joined into that text:
@@ -1095,8 +1093,8 @@ const GradeEducation = z
           .slice(0, 500),
   )
   .pipe(GradeText(500));
-/** One person's grade from the quality check: the same columns a search's grading returns. */
-export const RecruitingGradeRowSchema = z.object({
+/** One person's grade as the retired quality check saved it; kept to read those stored pages. */
+const RecruitingGradeRowSchema = z.object({
   name: GradeText(300),
   linkedin_url: GradeText(500),
   current_title: GradeText(300).nullish(),
@@ -1118,7 +1116,15 @@ export const RecruitingGradeRowSchema = z.object({
     .min(1)
     .max(20),
 });
-export type RecruitingGradeRow = z.infer<typeof RecruitingGradeRowSchema>;
+/**
+ * The request stored with a grade page the retired quality check saved. Nothing writes one any
+ * more; roles that hold such pages still read them.
+ */
+export const RecruitingStoredGradesRequestSchema = z.strictObject({
+  operation: z.literal("save_grades"),
+  expectedRoleRevision: z.number().int().positive(),
+  rows: z.array(RecruitingGradeRowSchema).min(1).max(20),
+});
 export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
   // Marks the exact ten saved people this calibration round shows the recruiter.
   z.strictObject({
@@ -1177,13 +1183,6 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
   z.strictObject({
     operation: z.literal("save_search"),
     expectedRoleRevision: Revision,
-  }),
-  // The quality check's own grades for people already saved in the role, judged from their
-  // full public profiles; saved as one page on the role like a search's grades.
-  z.strictObject({
-    operation: z.literal("save_grades"),
-    expectedRoleRevision: Revision,
-    rows: z.array(RecruitingGradeRowSchema).min(1).max(RECRUITING_GRADE_PAGE_LIMIT),
   }),
   // Recruiter-supplied text/csv artifact saved as one unassessed candidate page; values are column names.
   z.strictObject({
@@ -1493,8 +1492,6 @@ export const ListRecruitingCandidatesOutput = z.strictObject({
     assessed: z.number().int().nonnegative(),
     shortlisted: z.number().int().nonnegative(),
   }),
-  /** The Reviewer is scoring this role's people right now; people without a score get one soon. */
-  grading: z.boolean().optional(),
 });
 export type ListRecruitingCandidatesOutput = z.infer<typeof ListRecruitingCandidatesOutput>;
 /** One merged person per row: Autumn search result and/or the role's CRM contact. */

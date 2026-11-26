@@ -1,6 +1,5 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { linkedinPersonKey } from "./recruiting-profiles.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
 
@@ -74,10 +73,7 @@ export async function recruitingRoundPeople(
         run: { threadId: input.threadId },
         kind: "recruiting_research",
         status: "completed",
-        OR: [
-          { request: { path: ["operation"], equals: "save_search" } },
-          { request: { path: ["operation"], equals: "save_grades" } },
-        ],
+        request: { path: ["operation"], equals: "save_search" },
       },
       select: { request: true, result: true },
       orderBy: { createdAt: "asc" },
@@ -91,32 +87,12 @@ export async function recruitingRoundPeople(
   const people = new Map<string, RoundPerson>();
   for (const row of occurrences)
     if (!people.has(row.candidateKey)) people.set(row.candidateKey, row);
-  // The check's own reason, read from the full profile, says more than the search's passage:
-  // branch fr 11-21, a line quoting a team name made a Kafka engineer read as a backend one.
-  const reasons = new Map<string, string>();
   for (const search of searches) {
-    const grades = (search.request as { operation?: unknown; rows?: unknown } | null) ?? {};
-    if (grades.operation === "save_grades") {
-      if (Array.isArray(grades.rows))
-        for (const grade of grades.rows as Array<{
-          linkedin_url?: unknown;
-          fit_reasons?: unknown;
-        }>) {
-          const key = linkedinPersonKey(grade.linkedin_url);
-          if (key && typeof grade.fit_reasons === "string" && grade.fit_reasons.trim())
-            reasons.set(key, grade.fit_reasons);
-        }
-      continue;
-    }
     const rows = (search.result as { candidateRows?: unknown } | null)?.candidateRows;
     if (!Array.isArray(rows)) continue;
     for (const row of rows as Array<RoundPerson & { candidateKey?: unknown }>)
       if (typeof row.candidateKey === "string" && row.snippet)
         people.set(row.candidateKey, { ...people.get(row.candidateKey), ...row });
-  }
-  for (const [key, snippet] of reasons) {
-    const person = people.get(key);
-    if (person) people.set(key, { ...person, snippet });
   }
   return people;
 }

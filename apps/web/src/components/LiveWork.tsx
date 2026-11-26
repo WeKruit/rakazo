@@ -120,7 +120,6 @@ function useWorkStageLabels(): Record<WorkStageKind, string> {
   const { t } = useLingui();
   return {
     sourcing: t`Finding candidates`,
-    quality: t`Checking candidates`,
     outreach: t`Preparing outreach`,
     scheduling: t`Scheduling interviews`,
     other: t`Delegated task`,
