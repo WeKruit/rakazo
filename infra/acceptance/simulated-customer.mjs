@@ -225,8 +225,13 @@ async function askJson(system, prompt, name) {
 function parse(text) {
   const start = text.indexOf("{");
   for (let end = text.lastIndexOf("}"); end > start; end = text.lastIndexOf("}", end - 1)) {
+    const candidate = text.slice(start, end + 1);
     try {
-      return JSON.parse(text.slice(start, end + 1));
+      return JSON.parse(candidate);
+    } catch {}
+    // A model sometimes writes a multi-line email inside a JSON string without escaping its lines.
+    try {
+      return JSON.parse(candidate.replace(/\r?\n/g, "\\n"));
     } catch {}
   }
   throw new Error(`no JSON in the model's reply: ${text.slice(0, 200)}`);
@@ -865,7 +870,10 @@ async function play(journey, label, owner, mailbox, out) {
         // A reply draft's Send carries the draft as shown, or as the recruiter edited it in the
         // card's text box, as the page's Send button does.
         const edited = card.mailReply && answer === "allow" && !ui && move.text?.trim();
-        if (edited) log(`${label}: recruiter edits the reply before Send: ${edited.slice(0, 120)}`);
+        if (edited) {
+          turn.editedReply = true;
+          log(`${label}: recruiter edits the reply before Send: ${edited.slice(0, 120)}`);
+        }
         const value =
           card.mailReply && answer === "allow"
             ? { action: "send", body: edited || card.mailReply.body, cc: card.mailReply.cc ?? [] }
@@ -1119,7 +1127,7 @@ async function judge(journey, result, requests = []) {
   const moves = result.turns
     .map(
       (turn) =>
-        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.candidateMail?.length ? `\n  candidates replied after this move: ${turn.candidateMail.map((m) => `${m.name} at ${m.at.slice(11, 19)}: "${m.text}"`).join(" | ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}${turn.screen.fields?.length ? `\n    text boxes: ${turn.screen.fields.join(" | ")}` : ""}` : ""}`,
+        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.editedReply ? " (the recruiter rewrote the reply draft to this text and sent it: every fact in it is the recruiter's own)" : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.candidateMail?.length ? `\n  candidates replied after this move: ${turn.candidateMail.map((m) => `${m.name} at ${m.at.slice(11, 19)}: "${m.text}"`).join(" | ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}${turn.screen.fields?.length ? `\n    text boxes: ${turn.screen.fields.join(" | ")}` : ""}` : ""}`,
     )
     .join("\n");
   const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? `This account is a test fixture that earlier plays used too: on a page, roles, campaigns, totals and messages from those plays (older or same-named entries) are the test's leftovers, not Kruit's fault.${result.accountName ? ` The account's own name is "${result.accountName}": an email signed with it, or with the sending mailbox's name, is signed by the sender, not a placeholder.` : ""}\n\n` : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}${result.mail ? `\n\nEvery email between the role's mailbox and the candidates (the mail service's own record; ue_type 1 = sent to the candidate, 2 = the candidate's reply, 3 = the recruiter's reply to the candidate):\n${result.mail.map((email) => `${String(email.timestamp_created).slice(11, 19)} ${email.ue_type === 2 ? `from ${email.lead}` : `to ${email.lead}`}: "${email.subject}" ${String(email.body?.text ?? "").slice(0, 600)}`).join("\n")}\nThe candidates' replies are real mail the recruiter's inbox received: Kruit saying nobody replied after a reply arrived, or misquoting one, is a false claim.` : ""}`;
