@@ -251,12 +251,17 @@ export async function checkPeopleCriteria(
  * before the brief is saved (play 11-26: all first ten stayed without a verdict). So each save of
  * the role judges its people who have no verdicts yet and writes them on their newest saved row.
  */
+const judgingRoles = new Set<string>();
+
 export async function checkUnjudgedPeople(
   judgeSettings: { resolve(): Promise<TextJudge | undefined> } | undefined,
   prisma: PrismaClient,
   role: { roleId: string; spaceId: string },
   readProfile?: PageReader,
 ): Promise<void> {
+  // Several saves of one role land together (four within a second, 11-26): one pass serves them.
+  if (judgingRoles.has(role.roleId)) return;
+  judgingRoles.add(role.roleId);
   try {
     const [saved, occurrences] = await Promise.all([
       prisma.recruitingRole.findUnique({ where: { id: role.roleId }, select: { revision: true } }),
@@ -328,5 +333,7 @@ export async function checkUnjudgedPeople(
     );
   } catch (error) {
     getLogger().warn("recruiting.criteria.unjudged failed", { error: String(error) });
+  } finally {
+    judgingRoles.delete(role.roleId);
   }
 }
