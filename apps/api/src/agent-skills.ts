@@ -9,6 +9,7 @@ import type {
 import {
   buildSkillMd,
   findSkillByName,
+  isRecruitingSkillName,
   isSkillReadOnly,
   mergeBuiltinSkills,
   missingSkillRequirement,
@@ -273,7 +274,8 @@ export function createAgentSkillsService(prisma: PrismaClient) {
       });
       if (
         clash ||
-        builtinCatalog().some((s) => s.name.toLowerCase() === resolved.name.toLowerCase())
+        builtinCatalog().some((s) => s.name.toLowerCase() === resolved.name.toLowerCase()) ||
+        isRecruitingSkillName(resolved.name)
       ) {
         throw new ORPCError("CONFLICT", { message: "A skill with that name already exists." });
       }
@@ -327,7 +329,8 @@ export function createAgentSkillsService(prisma: PrismaClient) {
         });
         if (
           clash ||
-          builtinCatalog().some((s) => s.name.toLowerCase() === resolved.name.toLowerCase())
+          builtinCatalog().some((s) => s.name.toLowerCase() === resolved.name.toLowerCase()) ||
+          isRecruitingSkillName(resolved.name)
         ) {
           throw new ORPCError("CONFLICT", { message: "A skill with that name already exists." });
         }

@@ -341,6 +341,16 @@ describe("skill tools", () => {
     expect(records.some((row) => row.name === "Review recruiting draft")).toBe(false);
   });
 
+  it("refuses a new skill named like a recruiting skill, which the catalog would hide", async () => {
+    const created = await skillCreateFromTool(prisma as never, owner, {
+      name: "Coordinate interview",
+      description: "Old copy",
+      body: "Steps",
+    });
+    expect(created).toMatchObject({ error: expect.stringContaining("built-in recruiting skill") });
+    expect(prisma._store).toHaveLength(0);
+  });
+
   it("rejects oversized skill content", async () => {
     const body = "x".repeat(100_001);
     const created = await skillCreateFromTool(prisma as never, owner, {

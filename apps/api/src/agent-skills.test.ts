@@ -139,8 +139,6 @@ describe("built-in skill precedence in the API", () => {
 });
 
 it.each([
-  { directory: "scheduling", name: "Coordinate interview" },
-  { directory: "email-outreach", name: "Review recruiting draft" },
   { directory: "interview-materials", name: "Interview materials" },
   { directory: "post-interview", name: "Interview follow-through" },
 ])(

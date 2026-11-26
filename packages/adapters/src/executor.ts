@@ -161,7 +161,6 @@ import {
   recruiterLanguage,
   recruiterLanguageText,
   recruitingBotKey,
-  recruitingBriefConfirmedNextStep,
   redactSecrets,
   renderBotDirectory,
   replyLanguageNote,
@@ -6002,7 +6001,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     confirmed: true,
                     roleId: saved.role.id,
                     expectedRoleRevision: saved.role.revision,
-                    next: recruitingBriefConfirmedNextStep(saved.role.revision),
                   };
                 } catch (error) {
                   // After the ten are shown the brief stays saved unconfirmed: an open question
@@ -6019,7 +6017,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   )
                     return {
                       confirmed: false,
-                      next: "The brief stays saved as it is; the ten are already shown. Ask nothing about the brief: end the turn with the next-step card (ask_user).",
+                      note: "The brief stays saved unconfirmed; the first ten are already shown.",
                     };
                   return { error: sanitizeConnectorError(error, runSecrets) };
                 }
@@ -9310,10 +9308,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 select: { revision: true },
               });
               return revision
-                ? {
-                    ...approved,
-                    next: recruitingBriefConfirmedNextStep(revision.revision),
-                  }
+                ? { ...approved, expectedRoleRevision: revision.revision }
                 : approved;
             } catch (error) {
               return finish(roleError(error));

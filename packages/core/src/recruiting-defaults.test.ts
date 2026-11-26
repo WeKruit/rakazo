@@ -11,18 +11,11 @@ import {
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   recruiterLanguage,
   recruiterLanguageText,
-  recruitingBriefConfirmedNextStep,
   replyLanguageNote,
   screenLanguage,
   textLanguage,
   unfilledPlaceholder,
 } from "./recruiting-defaults.js";
-
-describe("calibration fast path", () => {
-  it("hands the new revision on with the confirmed brief", () => {
-    expect(recruitingBriefConfirmedNextStep(5)).toContain("expectedRoleRevision 5");
-  });
-});
 
 describe("maintained recruiting defaults", () => {
   // Same budget Workloop uses: a longer prompt dilutes every rule in it. Shorten before adding.

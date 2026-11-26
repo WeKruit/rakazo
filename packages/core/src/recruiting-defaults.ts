@@ -41,11 +41,6 @@ export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
   "render_view",
 ] as const;
 
-/** Returned when the recruiter confirms the brief, so the first round starts without a role read. */
-export function recruitingBriefConfirmedNextStep(revision: number) {
-  return `The brief is confirmed and the role is now revision ${revision}; use expectedRoleRevision ${revision}. When a round is already shown, carry on with what the recruiter asked. Otherwise start the first calibration round now: when this run's people searches already returned people rows, pick the ten from them and record them with calibration_round; otherwise issue the quick people searches together in your next step.`;
-}
-
 /**
  * Typical credits per step, from 14 days of the usage ledger (200 credits = $1 of cost; p50 to
  * p90). Only accounts with a credit balance are told, so the agent can say what a step costs.
@@ -386,7 +381,7 @@ export const RECRUITING_DEFAULT_SKILLS = [
     body: `Search first: the recruiter sees the first ten before any question. Their request is the approval; never ask to proceed or confirm. Ask first only when no title, place or requirement is given. When they name the people to email (names with addresses) there is no search: read the "Send to people" skill instead.
 
 1. Save the role first: one recruiting_role create (or update when the role is saved) with title, the JD source, their words and brief.fields, one field per requirement, its value copied word for word from the JD or the recruiter, never summarized, merged or reworded (key a short English label, origin jd or user_instruction): every requirement on the person, then pay, work mode and exclusions. The role's saved requirements are its memory: every person found is judged on them, and only the recruiter's words change them.
-2. The next step, with no text, is the quick people searches: four differently worded people searches as parallel calls, each web_search_advanced_exa with category "people", numResults 10, enableHighlights true, highlightsMaxCharacters 900, highlightsQuery "concrete evidence of: " plus the core duties, enableSummary true and summaryQuery "In one sentence, why this person fits: " plus the must-haves: one by title variant, two describing the core work as a profile would, one by peer companies or a nearby city, each with the priority location and the must-haves. Search what is stated and leave the rest open. Each search saves itself to Results.
+2. The next step, with no text, is the quick people searches: a few people searches as parallel calls (web_search_advanced_exa, category "people"), each carrying the role's requirements in the recruiter's words and the place they gave. Search what is stated and leave the rest open. Each search saves itself to Results.
    If a search errors, run one more differently worded set silently. Never mention quotas, channels or limits, and never search connectors first or refetch a JD already saved.
 3. The next step, with no text, is calibration_round with ten of the returned people. They are the sample the recruiter reads to sharpen what they want: shown before any grade, and counted toward the number asked. The first round is never empty: fewer than ten is said in one line with what is missing.
 4. The step after that round, with no text, starts deep searches for the people still needed (agent_run with no outputSchema; it finds and grades in one go and skips everyone in Results). How many runs, how each is worded and its effort are yours to choose from what the recruiter asked and what earlier searches returned. A run takes about as long to return two people as fifteen, and not everyone it returns is worth showing, so never ask a run for only the number still missing: ask each for a full run's worth and show the best of what returns. Each run names the location scope, every requirement on the person and all feedback, never the job's pay or office days, which no profile shows.
@@ -519,11 +514,16 @@ export const RECRUITING_RETIRED_SKILL_NAMES = [
  * recruiting skill's name is left out of the catalog, so it never shadows the maintained one.
  */
 export function withoutRecruitingSkillCopies<T extends { name: string }>(rows: readonly T[]): T[] {
-  const maintained = new Set(
-    [
-      ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name),
-      ...RECRUITING_RETIRED_SKILL_NAMES,
-    ].map((name) => name.trim().toLowerCase()),
-  );
-  return rows.filter((row) => !maintained.has(row.name.trim().toLowerCase()));
+  return rows.filter((row) => !isRecruitingSkillName(row.name));
+}
+
+const MAINTAINED_RECRUITING_SKILL_NAMES = new Set(
+  [...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name), ...RECRUITING_RETIRED_SKILL_NAMES].map(
+    (name) => name.trim().toLowerCase(),
+  ),
+);
+
+/** A maintained or retired recruiting skill's name, which a person's own skill cannot take. */
+export function isRecruitingSkillName(name: string): boolean {
+  return MAINTAINED_RECRUITING_SKILL_NAMES.has(name.trim().toLowerCase());
 }
