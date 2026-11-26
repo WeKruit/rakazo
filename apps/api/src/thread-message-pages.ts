@@ -22,6 +22,7 @@ import {
   isBackgroundRunTrigger,
   isPeerReceiptBlocks,
   isRecruitingSpawnKey,
+  isThreadSnapshotEvent,
   mergeMessagesById,
 } from "@rakazo/core";
 import { messageReplyPreview } from "@rakazo/core/message-quote";
@@ -504,11 +505,16 @@ export async function isBackgroundRun(
   return backgroundRun;
 }
 
-/** Peer-run SSE events that must still reach an open thread (terminals, waits, receipts, asks, text). */
+/**
+ * Peer-run SSE events that must still reach an open thread (terminals, waits, receipts, asks,
+ * text), plus every event that never touches the transcript, such as saved people, which the
+ * open Results page refreshes on.
+ */
 export function shouldForwardPeerThreadEvent(event: {
   type: string;
   payload: { blocks?: unknown };
 }): boolean {
+  if (!isThreadSnapshotEvent(event)) return true;
   if (
     event.type === "run.completed" ||
     event.type === "run.failed" ||
@@ -541,12 +547,14 @@ export function shouldForwardPeerThreadEvent(event: {
  * A background run's chatter stays off the transcript: no starts, progress, steps,
  * or final text. An open thread still receives the state it needs to answer without
  * a reload — waiting input, computer takeover, and terminal run events — plus the
- * existing user-input cards.
+ * existing user-input cards, and every event that never touches the transcript, such as
+ * saved people, which the open Results page refreshes on.
  */
 export function shouldForwardBackgroundThreadEvent(event: {
   type: string;
   payload: { blocks?: unknown };
 }): boolean {
+  if (!isThreadSnapshotEvent(event)) return true;
   if (
     event.type === "run.completed" ||
     event.type === "run.failed" ||
