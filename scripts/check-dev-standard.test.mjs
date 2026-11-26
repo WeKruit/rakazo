@@ -82,6 +82,30 @@ describe("development standard", () => {
     ).toEqual([]);
   });
 
+  it("refuses new product code that looks for words in text", () => {
+    const withLines = (path, ...addedLines) => ({ ...modified(path, 400, 3, 0), addedLines });
+    const file = (line) => withLines("packages/adapters/src/role-start.ts", line);
+    expect(rules({ files: [file("const FIND = /\\b(?:find|search|source)\\b|找人/i;")] })).toEqual([
+      "human-text-regex",
+    ]);
+    expect(rules({ files: [file("if (/发吧|发送/.test(text)) send();")] })).toEqual([
+      "human-text-regex",
+    ]);
+    expect(rules({ files: [file('const SEND = new RegExp("send it|go ahead", "i");')] })).toEqual([
+      "human-text-regex",
+    ]);
+    // Structure, not words: ids, whitespace, a single token, a comment, a test file.
+    expect(rules({ files: [file("const ID = /^role-[0-9a-f]{24}$/;")] })).toEqual([]);
+    expect(rules({ files: [file("text.replace(/\\s+/g, ' ').split(/[,;]/);")] })).toEqual([]);
+    expect(rules({ files: [file("// was /find|search/ before")] })).toEqual([]);
+    expect(
+      rules({
+        files: [withLines("packages/adapters/src/role-start.test.ts", "expect(/find|search/)")],
+      }),
+    ).toEqual([]);
+    expect(rules({ files: [withLines("scripts/x.mjs", "const A = /find|search/;")] })).toEqual([]);
+  });
+
   it("lets a PR skip one named rule with a reason, and only that rule", () => {
     const files = [
       modified("apps/api/src/app.ts", 20314, 400, 0),
