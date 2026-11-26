@@ -2802,22 +2802,30 @@ async function sendCampaign(
       sendingToday: campaign.sendingToday,
     };
   }
-  // Inside sending hours a confirmed send is queued, not sent: say until when.
-  // A mailbox the mail service does not count holds every send; say so instead of a time.
-  const blocked = await mailboxBlocked(rest, campaignId);
-  const paced = (count: number) => ({
-    next: blocked
-      ? `Nobody is emailed and nobody will be yet: the mail service says "${blocked.message}" for this campaign's sending mailbox (${(Array.isArray(campaign.email_list) ? campaign.email_list : []).join(", ")}). Tell the recruiter the email has not gone out because that sending mailbox cannot send right now, and give no time; it needs the mailbox fixed before anything leaves.`
-      : `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter their email is on its way and that time, in plain words (never "queue"), never that it was sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still on its way, not failed, so never take that answer back.`,
-    ...(blocked ? { mailServiceSays: blocked } : {}),
-  });
+  // Inside sending hours a confirmed send is queued, not sent: say until when. What the mail
+  // service says is read after the send started: before it, a draft reports only that it is a
+  // draft, which hid a mailbox that cannot send (audit 11-26). Any hold it reports is the state.
+  const paced = async (count: number) => {
+    const held = await sendingHeld(rest, campaignId);
+    const mailbox = (Array.isArray(campaign.email_list) ? campaign.email_list : []).join(", ");
+    return held
+      ? {
+          delivery: "held" as const,
+          mailServiceSays: held,
+          next: `Nobody is emailed and nobody will be yet: the mail service says "${held.message}" for this campaign${mailbox ? ` (it sends from ${mailbox})` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}. Tell the recruiter the email has not gone out and why in plain words${MAILBOX_BLOCKED.has(held.status) ? ": that sending mailbox cannot send right now, and it needs the mailbox fixed before anything leaves" : ""}; never say it is on its way, and give no time it has not given.`,
+        }
+      : {
+          delivery: "on_its_way" as const,
+          next: `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter their email is on its way and that time, in plain words (never "queue"), never that it was sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still on its way, not failed, so never take that answer back.`,
+        };
+  };
   if (plan.send === "now") {
     if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
     return {
       sendingNow: true,
       campaignId,
       recipients: plan.recipients.map((person) => person.email),
-      ...paced(plan.recipients.length),
+      ...(await paced(plan.recipients.length)),
     };
   }
   const sendingMailbox = Array.isArray(campaign.email_list) ? campaign.email_list : [];
@@ -2826,6 +2834,7 @@ async function sendCampaign(
   const when =
     later && !later.now
       ? {
+          delivery: "scheduled" as const,
           firstEmailAt: later.at,
           next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are waiting and their first email goes out ${later.local}. Tell the recruiter that time and that activate_campaign send_now can send them now; it is not a failure.`,
         }
@@ -2876,7 +2885,7 @@ async function sendCampaign(
       campaignId,
       sendingMailbox,
       recipients: sent,
-      ...(later && !later.now ? when : paced(sent.length)),
+      ...(later && !later.now ? when : await paced(sent.length)),
       notCreatedByProvider: plan.recipients
         .filter((person) => !sent.includes(person.email))
         .map((person) => person.email),
@@ -2918,7 +2927,7 @@ async function sendCampaign(
     campaignId,
     sendingMailbox: Array.isArray(activated.email_list) ? activated.email_list : sendingMailbox,
     recipients: plan.recipients.map((person) => person.email),
-    ...(later && !later.now ? when : paced(plan.recipients.length)),
+    ...(later && !later.now ? when : await paced(plan.recipients.length)),
   };
 }
 
@@ -3018,10 +3027,6 @@ const MAILBOX_BLOCKED = new Set([
   "campaign_accounts_unhealthy",
   "campaign_account_suspended",
 ]);
-async function mailboxBlocked(rest: InstantlyRest, campaignId: string) {
-  const held = await sendingHeld(rest, campaignId);
-  return held && MAILBOX_BLOCKED.has(held.status) ? held : null;
-}
 
 /**
  * A draft whose people another of this account's campaigns is sending: the send went out from
