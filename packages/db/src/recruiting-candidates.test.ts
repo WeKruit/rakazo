@@ -1017,6 +1017,7 @@ describe("candidate listing and shortlist boundaries", () => {
     f.tx.$queryRaw
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           name: "Synthetic Avery",
@@ -1066,6 +1067,14 @@ describe("candidate listing and shortlist boundaries", () => {
       type: "recruiting.changed",
       payload: { roleId: "role" },
     });
+    // The conversation is locked before the role, the order event appends take (staging 11-26
+    // deadlocks between role writes and live runs).
+    const locks = f.tx.$queryRaw.mock.calls.map(([query]) => (query as { sql: string }).sql);
+    const roleLock = locks.findIndex((sql) =>
+      /^SELECT "id" FROM "recruiting_roles".*FOR UPDATE$/s.test(sql),
+    );
+    expect(roleLock).toBeGreaterThan(0);
+    expect(locks[roleLock - 1]).toMatch(/^SELECT "id" FROM "threads".*FOR NO KEY UPDATE$/s);
     const profileQuery = f.tx.$queryRaw.mock.lastCall![0] as { values: unknown[] };
     expect(profileQuery.values.slice(-2)).toEqual(["role", f.candidate.candidateKey]);
   });
@@ -1073,6 +1082,7 @@ describe("candidate listing and shortlist boundaries", () => {
     const f = fixture();
     Object.assign(f.candidate, { shortlisted: true, revision: 1 });
     f.tx.$queryRaw
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
