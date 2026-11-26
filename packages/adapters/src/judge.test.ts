@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { JudgeSettings, typeSafeJudge } from "./judge.js";
-import { criteriaGrade } from "./recruiting-criteria-check.js";
+import { criteriaAssessment, criteriaGrade } from "./recruiting-criteria-check.js";
 
 const answer = (body: unknown, status = 200) =>
   vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -173,5 +173,18 @@ describe("JudgeSettings", () => {
       apiKey: "good",
       languageUrl: "https://check.example/",
     });
+  });
+
+  it("writes the verdicts as the assessment lines Results reads", () => {
+    expect(
+      criteriaAssessment([
+        { statement: "Location: Shanghai", level: "strong" },
+        { statement: "years: 5+; Spark", level: "silent" },
+        { statement: "too managerial", level: "strong", avoid: true },
+        { statement: "no Kafka", level: "opposite", avoid: true },
+      ]),
+    ).toBe(
+      "R1: Met - Location: Shanghai; R2: Unknown - years: 5+, Spark; R3: Gap - no Kafka",
+    );
   });
 });

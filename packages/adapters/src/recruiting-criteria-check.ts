@@ -56,6 +56,30 @@ export function criteriaGrade(
   };
 }
 
+const ASSESSED = {
+  strong: "Met",
+  medium: "Met",
+  weak: "Partial",
+  silent: "Unknown",
+  opposite: "Gap",
+};
+
+/**
+ * The verdicts as the person's "Requirements assessment" in Results, one numbered line each in
+ * the form that page already reads. A turned-down reason is listed only when the profile shows it.
+ */
+export function criteriaAssessment(
+  criteria: ReadonlyArray<{ statement: string; level: string; avoid?: boolean }>,
+): string {
+  return criteria
+    .filter((item) => !item.avoid || item.level === "opposite")
+    .map(
+      (item, index) =>
+        `R${index + 1}: ${ASSESSED[item.level as keyof typeof ASSESSED] ?? "Unknown"} - ${item.statement.replace(/[;；]\s*/g, ", ")}`,
+    )
+    .join("; ");
+}
+
 const ABOUT_THE_PERSON = (statement: string) =>
   `Could a person's public professional profile (titles, employers, years, skills, schools, certificates, location, languages) show whether the person meets this requirement? Answer no when it is a term of the job offer (pay, benefits, office days, work mode, start date, visa, head count) rather than something about the person. Requirement: "${statement}"`;
 
@@ -109,17 +133,22 @@ async function personRequirements(
  * judge reads those words beside the profile and answers one question per kind of requirement. A
  * kind the recruiter did not state comes back silent, which excludes nobody.
  */
-const ASKED_FOR: readonly CriterionQuestion[] = [
+const ASKED_FOR = [
   [
     "place",
+    "Location",
     // A past job in the city reads as "shows the place" unless the question says now.
     "that the person's current location is the place the recruiter_request states (a past job there does not count), if it states one",
   ],
-  ["years", "the years of experience the recruiter_request states, if it states any"],
-  ["title", "the job title and level the recruiter_request states"],
-  ["skills", "the skills and technologies the recruiter_request requires"],
-  ["work", "the kind of work or industry experience the recruiter_request requires"],
-].map(([id, statement]) => ({ id: `asked:${id}`, statement: statement! }));
+  ["years", "Years", "the years of experience the recruiter_request states, if it states any"],
+  ["title", "Title and level", "the job title and level the recruiter_request states"],
+  ["skills", "Skills", "the skills and technologies the recruiter_request requires"],
+  [
+    "work",
+    "Kind of work",
+    "the kind of work or industry experience the recruiter_request requires",
+  ],
+].map(([id, label, statement]) => ({ id: `asked:${id}`, statement: statement!, label: label! }));
 const REQUEST_CHARS = 2_000;
 
 function profileState(row: Record<string, unknown>): Record<string, unknown> {
@@ -155,7 +184,11 @@ export async function checkPeopleCriteria(
     }
     const stated = await personRequirements(judge, await roundCriteria(prisma, role));
     const asked = stated.length ? "" : (role.request?.trim().slice(0, REQUEST_CHARS) ?? "");
-    const requirements = stated.length ? stated : asked ? ASKED_FOR : [];
+    const requirements: Array<CriterionQuestion & { label?: string }> = stated.length
+      ? stated
+      : asked
+        ? ASKED_FOR
+        : [];
     if (!requirements.length) {
       getLogger().info("recruiting.criteria.check skipped", { requirements: 0 });
       return;
@@ -184,8 +217,10 @@ export async function checkPeopleCriteria(
           const { match_tier: tier, match_score: score } = entry.row;
           entry.check = {
             requirementsRevision: role.revision,
-            criteria: answered.map((requirement) => ({
+            // People read the short name; the statement is the judge's wording.
+            criteria: answered.map(({ label, ...requirement }) => ({
               ...requirement,
+              statement: label ?? requirement.statement,
               level: verdicts.get(requirement.id)!.level,
               confidence: verdicts.get(requirement.id)!.confidence,
             })),
@@ -194,6 +229,7 @@ export async function checkPeopleCriteria(
               typeof tier === "string" && typeof score === "number" ? { tier, score } : undefined,
             ),
           };
+          entry.row.requirements_assessment = criteriaAssessment(entry.check.criteria);
         }),
       );
     getLogger().info("recruiting.criteria.check", {
