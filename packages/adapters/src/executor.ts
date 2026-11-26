@@ -200,6 +200,7 @@ import type {
   PauseRunForInput,
   PrismaClient,
   RecruitingRoleToolResult,
+  RunStopKind,
   RunTiming,
   TextEmbedder,
   ThreadEvents,
@@ -10238,7 +10239,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "update_bot") {
-            const parsed = parseUpdateBotPatch(args, bot.name);
+            const parsed = parseUpdateBotPatch(args);
             if ("error" in parsed) return finish(parsed);
             const patch = parsed.patch;
             const wantsImage = args.artifact_id !== undefined || args.use_attached_image === true;
@@ -11256,7 +11257,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   return retried;
                 },
                 failed: (result) => toolResultError(result) !== undefined,
-                inputError: (result) => !transientSaveError(toolResultError(result)),
+                inputError: (result) => !transientSaveError(result, toolResultError(result)),
                 onGiveUp: (result) =>
                   getLogger().warn("recruiting.role.not_saved", {
                     runId,
@@ -12702,7 +12703,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
           // Finish the run as completed with one explanatory reply instead of opening
           // another model call (loop guard, budget guardrails).
-          const stopRunEarly = async (text: string) => {
+          const stopRunEarly = async (text: string, stopKind: RunStopKind) => {
             approvedEffectReplays.assertDrained();
             flushPendingTools();
             if (!(await renewRunLease(deps, runId, workerId, fence))) return;
@@ -12727,6 +12728,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               leaseFence: fence,
               outcome: "completed",
               blocks: isBackgroundRunTrigger(run.trigger) ? [] : [{ kind: "text", text }],
+              stopKind,
             });
             if (!stopped) return;
             if (stopped.continuationRunId) {
@@ -13059,6 +13061,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     startedAt: toolStartedAt,
                     category: toolActivity,
                     ...toolDetail,
+                    ...(typeof event.args.roleId === "string" ? { roleId: event.args.roleId } : {}),
                     argsSummary: toolArgsSummary(event.args, runSecrets),
                   },
                 });
@@ -13083,7 +13086,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
               const budgetLimit = runBudgetExceeded(spent);
               if (budgetLimit) {
-                await stopRunEarly(runBudgetStopText(budgetLimit, spent));
+                await stopRunEarly(runBudgetStopText(budgetLimit, spent), budgetLimit);
                 return;
               }
               runToolCalls += 1;
@@ -13092,6 +13095,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (loopGuard.stuck) {
                 await stopRunEarly(
                   loopGuardStopText(humanizeToolName(event.name), toolCallStreak.count),
+                  "loop_guard",
                 );
                 return;
               }
@@ -13635,7 +13639,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (runSendsFinishNotification(run.trigger) && !failed.continuationRunId) {
             await notifyRun(deps, run, {
               kind: "failure",
-              ...(await failureNotice(deps.prisma, thread.id, bot.name, message)),
+              ...(await failureNotice(
+                deps.prisma,
+                thread.id,
+                bot.name,
+                message,
+                silenceWatch.fired ? "time" : undefined,
+              )),
               botId: bot.id,
               threadId: thread.id,
             });
@@ -13821,7 +13831,6 @@ function hasUpdateBotAvatarArgs(args: Record<string, unknown>): boolean {
 
 export function parseUpdateBotPatch(
   args: Record<string, unknown>,
-  currentName: string,
 ): { error: string } | { patch: UpdateBotPatch } {
   const patch: UpdateBotPatch = {};
   if (args.name !== undefined) patch.name = String(args.name);
@@ -13867,11 +13876,6 @@ export function parseUpdateBotPatch(
       };
     }
     patch.description = nextDescription;
-  }
-  // Placeholder names stay invisible in the header if only title changes;
-  // promote the title into name so chat chrome matches the profile update.
-  if (patch.name === undefined && patch.title && /^(New Bot|Bot|Untitled)$/i.test(currentName)) {
-    patch.name = patch.title.slice(0, BOT_NAME_MAX_LENGTH);
   }
   return { patch };
 }
@@ -14822,16 +14826,18 @@ export function runIdentityInstruction(
   ].join("\n");
 }
 
-/** What stopped, in the recruiter's terms, and the one thing to do next; never raw error text. */
-export function failureNotificationBody(error: string, chinese = false): string {
+/**
+ * What stopped, in the recruiter's terms, and the one thing to do next; never raw error text.
+ * A stop of our own names its kind; only a provider's error text is matched.
+ */
+export function failureNotificationBody(error: string, chinese = false, stop?: "time"): string {
   const kind =
-    /rate.?limit|too many requests|overload|capacity|unavailable|timed? out|timeout/i.test(error)
+    stop ??
+    (/rate.?limit|too many requests|overload|capacity|unavailable|timed? out|timeout/i.test(error)
       ? "busy"
       : /budget|spend|\$\d/i.test(error)
         ? "budget"
-        : /\bminutes?\b|time limit/i.test(error)
-          ? "time"
-          : "error";
+        : "error");
   if (chinese) return `${FAILURE_REASON_ZH[kind]}在对话里发一条消息，就从停下的地方接着做。`;
   return `${FAILURE_REASON[kind]} Send a message in the chat to pick up where it stopped.`;
 }
@@ -14859,12 +14865,13 @@ export async function failureNotice(
   threadId: string,
   botName: string,
   error: string,
+  stop?: "time",
 ): Promise<{ title: string; body: string }> {
   const { chinese, roleName } = await recruiterThreadVoice(prisma, threadId);
   const name = roleName || botName;
   return {
     title: chinese ? `${name} 失败` : `${name} failed`,
-    body: failureNotificationBody(error, chinese),
+    body: failureNotificationBody(error, chinese, stop),
   };
 }
 

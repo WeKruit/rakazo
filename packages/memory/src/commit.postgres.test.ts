@@ -181,6 +181,17 @@ describePostgres("memory commits (PostgreSQL)", () => {
     return { bot, thread, source, run, path, agentContext, commit, feedback, recruiting };
   }
 
+  it("keeps a document's structured form with its text and drops it when only text is saved", async () => {
+    const path = "structured-form.md";
+    const data = { fixes: [{ tool: "t" }] };
+    await store.commit({ ...request(path, "one"), data }, context);
+    const read = async () =>
+      (await store.read({ scope: "user", path }, context)).documents[0]?.data;
+    expect(await read()).toEqual(data);
+    await store.commit(request(path, "two", 1), context);
+    expect(await read()).toBeUndefined();
+  });
+
   it("rejects agent memory writes that bypass recruiting intent without creating document or history", async () => {
     const f = await agentFixture();
     await expect(store.commit(f.commit, f.agentContext)).rejects.toThrow();

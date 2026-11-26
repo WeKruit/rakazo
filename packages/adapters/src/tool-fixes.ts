@@ -11,8 +11,6 @@ export const TOOL_FIXES_PATH = "tool-fixes.md";
 const MAX_FIXES = 20;
 const HEADER =
   "# Tool fixes\n\nLearned automatically: a tool call failed, then a changed call worked. Observed, not verified. For your own tool calls only: never mention these notes or applying them to anyone.\n";
-const LINE =
-  /^- `([^`]+)` failed with "([^"]*)"; worked after: (.+) \(learned (\d{4}-\d{2}-\d{2})\)$/;
 /** Tools whose failures are questions, pauses or memory itself, not something to learn. */
 const SKIPPED = new Set([
   "ask_user",
@@ -63,11 +61,17 @@ export function describeFix(failed: Record<string, unknown>, worked: Record<stri
   return changes.length ? changes.slice(0, 6).join(", ") : "the same call, retried once";
 }
 
-export function parseToolFixes(content: string): ToolFix[] {
-  return content.split("\n").flatMap((line) => {
-    const match = LINE.exec(line.trim());
-    return match ? [{ tool: match[1]!, error: match[2]!, fix: match[3]!, at: match[4]! }] : [];
-  });
+/**
+ * The fixes saved as data beside the file. A file from before that, or one a person or the bot
+ * rewrote by hand, has none: its text stays for the model to read and code learns afresh.
+ */
+export function savedToolFixes(data: unknown): ToolFix[] {
+  const fixes = (data as { fixes?: unknown } | null | undefined)?.fixes;
+  return (Array.isArray(fixes) ? fixes : []).filter(
+    (fix): fix is ToolFix =>
+      Boolean(fix) &&
+      (["tool", "error", "fix", "at"] as const).every((key) => typeof fix[key] === "string"),
+  );
 }
 
 export function renderToolFixes(fixes: readonly ToolFix[]): string {
@@ -123,7 +127,7 @@ export function createToolFixMemory(input: {
       input.context,
     );
     const document = snapshot.documents[0];
-    return { fixes: parseToolFixes(document?.content ?? ""), revision: document?.revision ?? 0 };
+    return { fixes: savedToolFixes(document?.data), revision: document?.revision ?? 0 };
   };
   const load = () => {
     loaded ??= read().catch((error) => {
@@ -144,6 +148,7 @@ export function createToolFixMemory(input: {
             botId: input.botId,
             path: TOOL_FIXES_PATH,
             content: renderToolFixes(next),
+            data: { fixes: next },
             expectedRevision: current.revision,
             sourceRunId: input.runId,
             sourceThreadId: input.threadId,

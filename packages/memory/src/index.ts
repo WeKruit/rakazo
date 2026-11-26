@@ -52,6 +52,7 @@ export class MarkdownMemoryStore implements MemoryStore {
         id: doc.id,
         path: doc.path,
         content: doc.content,
+        ...(doc.data === null ? {} : { data: doc.data }),
         revision: doc.revision,
         updatedAt: doc.updatedAt.toISOString(),
       })),
@@ -107,7 +108,11 @@ export class MarkdownMemoryStore implements MemoryStore {
           const doc = existing
             ? await tx.memoryDocument.update({
                 where: { id: existing.id },
-                data: { content: request.content, revision: existing.revision + 1 },
+                data: {
+                  content: request.content,
+                  data: (request.data ?? Prisma.DbNull) as Prisma.InputJsonValue,
+                  revision: existing.revision + 1,
+                },
               })
             : await tx.memoryDocument.create({
                 data: {
@@ -117,6 +122,9 @@ export class MarkdownMemoryStore implements MemoryStore {
                   scope,
                   path: request.path,
                   content: request.content,
+                  ...(request.data === undefined
+                    ? {}
+                    : { data: request.data as Prisma.InputJsonValue }),
                 },
               });
           await tx.memoryRevision.create({

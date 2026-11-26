@@ -767,6 +767,10 @@ model Run {
   botOutcomeReturnedAt DateTime?
   messagingMirroredAt  DateTime?
   teamChatMirroredAt   DateTime?
+  /// Why a completed run ended before its work was done: "loop_guard", "cost" or "time".
+  stopKind             String?
+  /// The candidate reply ids a reply check-in run reported, so a later check-in skips them.
+  checkinReplyIds      Json?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
   attempts             Attempt[]
@@ -1052,6 +1056,8 @@ model MemoryDocument {
   scope     String
   path      String
   content   String
+  /// Structured form of a document the server writes and reads back; null for every other document.
+  data      Json?
   revision  Int              @default(1)
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt

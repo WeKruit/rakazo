@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@rakazo/db";
+import { campaignSendReceipt } from "@rakazo/db";
 
 /**
  * What a role holds on record, for the working-state card: the requirements saved on its current
@@ -178,7 +179,7 @@ async function addCampaigns(
     campaignRole.set(binding.campaignId, roleId);
   }
   if (!campaignRole.size) return;
-  // The same receipts campaign-send-record reads: a completed, error-free activate_campaign.
+  // The same receipts campaign-send-record reads: a completed activate_campaign that sent.
   const sends = await prisma.externalEffect.findMany({
     where: {
       spaceId: scope.spaceId,
@@ -190,13 +191,8 @@ async function addCampaigns(
     select: { result: true, updatedAt: true },
   });
   for (const send of sends) {
-    const text = JSON.stringify(send.result ?? null);
-    if (text.includes('"error"') || text.includes("already_waiting")) continue;
-    // The result may be the tool's wrapped text, so match the campaign id anywhere in it.
-    for (const [campaignId, roleId] of campaignRole) {
-      const campaign = records.get(roleId)?.campaign;
-      if (campaign && !campaign.confirmedAt && text.includes(campaignId))
-        campaign.confirmedAt = send.updatedAt;
-    }
+    const roleId = campaignRole.get(campaignSendReceipt(send.result)?.campaignId ?? "");
+    const campaign = roleId ? records.get(roleId)?.campaign : undefined;
+    if (campaign && !campaign.confirmedAt) campaign.confirmedAt = send.updatedAt;
   }
 }
