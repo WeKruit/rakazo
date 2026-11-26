@@ -1009,15 +1009,16 @@ describe("emulated outreach mail service", () => {
     const campaign = await rest("POST", "/campaigns", {
       name: "Role",
       email_list: ["me@mail.test"],
-      sequences: [{ steps: [{ variants: [{ subject: "Data role", body: "Hello" }] }] }],
+      sequences: [{ steps: [{ variants: [{ subject: "Data role", body: "Hi {{firstName}}" }] }] }],
     });
     await rest("POST", "/leads/add", {
       campaign_id: campaign.id,
-      leads: [{ email: "ada@x.test" }],
+      leads: [{ email: "ada@x.test", first_name: "Ada" }],
     });
     await rest("POST", `/campaigns/${campaign.id}/activate`);
     now = new Date("2026-11-20T15:03:00Z");
     const [sent] = mail.outbox();
+    expect(sent?.body).toEqual({ text: "Hi Ada" });
     now = new Date("2026-11-20T15:10:00Z");
     const reply = mail.receive({ replyTo: String(sent!.id), text: "Interested, what is the pay?" });
     const page = readInstantlyEmailPage(

@@ -520,9 +520,15 @@ function firstStep(campaign: Campaign) {
   return { subject: String(variants[0]?.subject ?? ""), body: String(variants[0]?.body ?? "") };
 }
 
-/** Lead variables as the service fills them: {{first_name}} and the lead's own variables. */
+/** Lead variables as the service fills them: {{firstName}} (from first_name) and the lead's own variables. */
 function fill(text: string, lead: Lead) {
-  const values: Row = { ...lead, ...(lead.payload as Row) };
+  const values: Row = {
+    ...lead,
+    firstName: lead.first_name,
+    lastName: lead.last_name,
+    companyName: lead.company_name,
+    ...(lead.payload as Row),
+  };
   return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, name: string) =>
     values[name] == null ? "" : String(values[name]),
   );
