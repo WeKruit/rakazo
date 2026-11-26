@@ -236,22 +236,15 @@ export const RecruitingBriefDraftSchema = z.strictObject({
     ),
 });
 export type RecruitingBriefDraft = z.infer<typeof RecruitingBriefDraftSchema>;
-export const RecruitingBriefSchema = RecruitingBriefDraftSchema.extend({
-  confirmation: z
-    .strictObject({
-      revision: Revision,
-      userId: RecruitingId,
-      messageId: RecruitingId,
-      confirmedAt: IsoDate,
-    })
-    .nullable(),
-});
-export type RecruitingBrief = z.infer<typeof RecruitingBriefSchema>;
-export const ConfirmRecruitingBriefInput = z.strictObject({
-  threadId: RecruitingId,
-  roleId: RecruitingId,
-  expectedRevision: Revision,
-});
+/**
+ * A saved brief. Briefs saved while a confirmation step existed carry a `confirmation` field;
+ * it is dropped on read so those roles still load.
+ */
+const SavedRecruitingBriefSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const { confirmation: _, ...brief } = value as Record<string, unknown>;
+  return brief;
+}, RecruitingBriefDraftSchema);
 
 export const EditRecruitingCriteriaInput = z
   .strictObject({
@@ -328,7 +321,7 @@ export const RecruitingRoleRevisionSchema = z
     roleId: RecruitingId,
     revision: Revision,
     ...RoleDefinition,
-    brief: RecruitingBriefSchema.nullable().optional(),
+    brief: SavedRecruitingBriefSchema.nullable().optional(),
     createdAt: IsoDate,
   })
   .readonly();
@@ -337,10 +330,6 @@ export type RecruitingRoleRevision = z.infer<typeof RecruitingRoleRevisionSchema
 export const RecruitingResearchPurposeSchema = z.enum(["calibration", "scale"]);
 export type RecruitingResearchPurpose = z.infer<typeof RecruitingResearchPurposeSchema>;
 
-const RecruitingApprovalScope = {
-  roleId: RecruitingId,
-  expectedRoleRevision: Revision,
-};
 const RecruitingCandidateEvidenceReference = {
   providerTaskId: RecruitingId,
   roleRevisionId: RecruitingId,
@@ -348,81 +337,8 @@ const RecruitingCandidateEvidenceReference = {
   rowIndex: z.number().int().nonnegative(),
   artifactRef: RecruitingArtifactRefSchema,
 };
-const RecruitingApprovalProfile = {
-  candidateKey: RecruitingId,
-  linkedinUrl: z.httpUrl().refine((url) => new URL(url).protocol === "https:"),
-  evidenceUrl: z.httpUrl(),
-};
-const RecruitingDocumentsApprovalInputSchema = z.strictObject({
-  ...RecruitingApprovalScope,
-  stage: z.literal("documents"),
-  documents: z.strictObject({
-    jdText: RecruitingArtifactRefSchema,
-    namedPdf: RecruitingArtifactRefSchema,
-    anonymousPdf: RecruitingArtifactRefSchema.nullable(),
-    deck: RecruitingArtifactRefSchema.nullable(),
-  }),
-});
-const RecruitingCalibrationApproval = {
-  ...RecruitingApprovalScope,
-  stage: z.literal("calibration"),
-  documentsApprovalEffectId: RecruitingId,
-  ruleChanges: z.array(Text).readonly(),
-};
 /** A calibration round shows ten people, or every fitting person the searches found when fewer fit. */
 export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
-export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
-  z.strictObject({ ...RecruitingApprovalScope, stage: z.literal("brief") }),
-  RecruitingDocumentsApprovalInputSchema,
-  z.strictObject({
-    ...RecruitingCalibrationApproval,
-    profiles: z
-      .array(
-        z.strictObject({
-          ...RecruitingApprovalProfile,
-          source: z.strictObject(RecruitingCandidateEvidenceReference),
-        }),
-      )
-      .min(1)
-      .max(RECRUITING_CALIBRATION_ROUND_SIZE),
-  }),
-]);
-export type RecruitingApprovalToolInput = z.infer<typeof RecruitingApprovalToolInputSchema>;
-/**
- * What the agent sends. A calibration request may omit the documents approval, the profiles and
- * the rule changes: the server fills in this revision's approved documents and the recorded
- * calibration round before the request is saved, so the stored request always matches
- * RecruitingApprovalToolInputSchema.
- */
-export const RecruitingApprovalToolCallSchema = z.discriminatedUnion("stage", [
-  RecruitingApprovalToolInputSchema.options[0],
-  RecruitingApprovalToolInputSchema.options[1],
-  RecruitingApprovalToolInputSchema.options[2].extend({
-    documentsApprovalEffectId: RecruitingId.optional(),
-    profiles: RecruitingApprovalToolInputSchema.options[2].shape.profiles.optional(),
-    ruleChanges: RecruitingCalibrationApproval.ruleChanges.default([]),
-  }),
-]);
-
-/** Decode exact retained requests only; historical assessments are never new native evidence. */
-export const RetainedRecruitingApprovalRequestSchema = z.union([
-  RecruitingApprovalToolInputSchema,
-  z.strictObject({
-    ...RecruitingCalibrationApproval,
-    profiles: z
-      .array(
-        z.strictObject({
-          ...RecruitingApprovalProfile,
-          assessmentVersion: Revision,
-        }),
-      )
-      .min(1)
-      .max(RECRUITING_CALIBRATION_ROUND_SIZE),
-  }),
-]);
-export type RetainedRecruitingApprovalRequest = z.infer<
-  typeof RetainedRecruitingApprovalRequestSchema
->;
 
 export const RecruitingResearchTaskSchema = z.strictObject({
   id: RecruitingId,

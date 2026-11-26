@@ -10,10 +10,7 @@ import type {
 } from "@rakazo/contracts";
 import {
   MessageBlock as MessageBlockSchema,
-  RecruitingCriterionSchema,
   RecruitingCrmBindingInputSchema,
-  RecruitingSourceRefSchema,
-  RetainedRecruitingApprovalRequestSchema,
 } from "@rakazo/contracts";
 import {
   answerableAskMessageIds,
@@ -126,12 +123,9 @@ export async function projectRecruitingApprovalFiles<
       id: { in: ids },
       ...(mailIds.length
         ? {
-            OR: [
-              { kind: { in: ["recruiting_request_approval", "recruiting_crm_target"] } },
-              { id: { in: mailIds } },
-            ],
+            OR: [{ kind: "recruiting_crm_target" }, { id: { in: mailIds } }],
           }
-        : { kind: { in: ["recruiting_request_approval", "recruiting_crm_target"] } }),
+        : { kind: "recruiting_crm_target" }),
     },
     select,
   });
@@ -239,142 +233,7 @@ export async function projectRecruitingApprovalFiles<
       };
     });
   }
-  const approvals = effects.flatMap((effect) => {
-    const parsed = RetainedRecruitingApprovalRequestSchema.safeParse(effect.request);
-    return parsed.success ? [{ effect, input: parsed.data }] : [];
-  });
-  const inheritedIds = [
-    ...new Set(
-      approvals.flatMap(({ input }) =>
-        input.stage === "calibration" ? [input.documentsApprovalEffectId] : [],
-      ),
-    ),
-  ];
-  const inherited = inheritedIds.length
-    ? await prisma.externalEffect.findMany({
-        where: {
-          ...where,
-          kind: "recruiting_request_approval",
-          id: { in: inheritedIds },
-          status: "completed",
-        },
-        select,
-      })
-    : [];
-  const documents = approvals.flatMap(({ effect, input }) => {
-    if (input.stage === "documents") return [{ effect, input }];
-    if (input.stage !== "calibration") return [];
-    const parent = inherited.find(
-      (row) => row.id === input.documentsApprovalEffectId && row.status === "completed",
-    );
-    const parsed = RetainedRecruitingApprovalRequestSchema.safeParse(parent?.request);
-    return parsed.success &&
-      parsed.data.stage === "documents" &&
-      parsed.data.roleId === input.roleId &&
-      parsed.data.expectedRoleRevision === input.expectedRoleRevision
-      ? [{ effect, input: parsed.data }]
-      : [];
-  });
-  if (!documents.length) return projectMailReplyCards(prisma, actor, clean, effects);
-  const artifactIds = [...new Set(documents.map(({ input }) => input.documents.jdText.artifactId))];
-  const [artifacts, thread] = await Promise.all([
-    prisma.artifact.findMany({
-      where: { ...scope, id: { in: artifactIds } },
-      select: { id: true, hash: true, name: true, mimeType: true, size: true },
-    }),
-    prisma.thread.findFirst({
-      where: { id: threadId, ...scope, activeRecruitingRole: { ...scope, sourceThread: scope } },
-      select: {
-        activeRecruitingRole: {
-          select: {
-            id: true,
-            revision: true,
-            currentRevisionId: true,
-            currentRevision: {
-              select: { id: true, roleId: true, revision: true, sourceRefs: true, criteria: true },
-            },
-          },
-        },
-      },
-    }),
-  ]);
-  const role = thread?.activeRecruitingRole;
-  const revision = role?.currentRevision;
-  const sources = RecruitingSourceRefSchema.array().safeParse(revision?.sourceRefs);
-  const criteria = RecruitingCriterionSchema.array().safeParse(revision?.criteria);
-  const refs =
-    sources.success && criteria.success
-      ? [...sources.data, ...criteria.data.flatMap((criterion) => criterion.sourceRefs)]
-      : [];
-  return projectMailReplyCards(
-    prisma,
-    actor,
-    clean.map((message) => {
-      if (!candidates.includes(message)) return message;
-      const matches = documents.filter(
-        ({ effect }) =>
-          effect.runId === message.runId &&
-          effect.run.botId === message.botId &&
-          message.blocks.some(
-            (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
-          ),
-      );
-      return {
-        ...message,
-        blocks: message.blocks.map((block) => {
-          if (block.kind !== "file") return block;
-          const match = matches.find(
-            ({ input }) => input.documents.jdText.artifactId === block.artifactId,
-          );
-          if (!match) return block;
-          const ref = match.input.documents.jdText;
-          const artifact = artifacts.find((row) => row.id === ref.artifactId);
-          if (
-            !artifact ||
-            artifact.hash !== ref.sha256 ||
-            artifact.name !== block.name ||
-            artifact.size !== block.size ||
-            artifact.mimeType !== block.mimeType
-          )
-            return block;
-          const source =
-            role?.id === match.input.roleId &&
-            role.revision === match.input.expectedRoleRevision &&
-            revision?.id === role.currentRevisionId &&
-            revision.roleId === role.id &&
-            revision.revision === role.revision
-              ? refs.find(
-                  (source) =>
-                    source.readState === "read" &&
-                    source.quote &&
-                    source.anchor.kind === "artifact" &&
-                    source.anchor.locator === "text" &&
-                    source.anchor.artifact.artifactId === ref.artifactId &&
-                    source.anchor.artifact.sha256 === ref.sha256 &&
-                    refs.every(
-                      (other) => other.id !== source.id || isDeepStrictEqual(other, source),
-                    ),
-                )
-              : undefined;
-          // Without a readable saved source the plain file card (name, size, download) is more useful.
-          if (!source || !revision) return block;
-          return {
-            ...block,
-            preview: {
-              label: "Job description",
-              source: {
-                kind: "role" as const,
-                threadId,
-                roleRevisionId: revision.id,
-                sourceRefId: source.id,
-              },
-            },
-          };
-        }),
-      };
-    }),
-    effects,
-  );
+  return projectMailReplyCards(prisma, actor, clean, effects);
 }
 
 export async function projectRecruitingApprovalEvent(

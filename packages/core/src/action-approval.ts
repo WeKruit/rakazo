@@ -38,7 +38,12 @@ const APPROVAL_REQUIRED_BUILTIN_TOOLS = new Set([
   "cloud_agent_reply",
   "cloud_agent_cancel",
 ]);
-const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set(["create_space", "recruiting_request_approval"]);
+const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set(["create_space"]);
+/**
+ * Tools that no longer exist. Older conversations still hold their approval cards: one still
+ * waiting can only be declined, and one already approved is closed instead of replayed.
+ */
+export const RETIRED_APPROVAL_KINDS: ReadonlySet<string> = new Set(["recruiting_request_approval"]);
 // Lead enrollment may start an already-active campaign; it needs the same
 // one-time human decision as a direct reply or campaign activation.
 const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([

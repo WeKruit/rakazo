@@ -841,14 +841,6 @@ msgstr "有独立电脑和浏览器的助手"
 msgid "Bounced"
 msgstr "退信"
 
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Brief changed or could not be confirmed. Refresh and review it."
-msgstr "需求已变更或无法确认。请刷新后重新查看。"
-
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Brief confirmed"
-msgstr "需求已确认"
-
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Browse all candidates"
 msgstr "浏览全部候选人"
@@ -1406,10 +1398,6 @@ msgstr "确认将候选人加入邮件活动"
 #: src/components/AskCard.tsx
 msgid "Confirm and send"
 msgstr "确认发送"
-
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Confirm brief"
-msgstr "确认需求"
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx

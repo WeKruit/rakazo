@@ -1,7 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Button, NativeSelect, NativeSelectOption, TabsContent, Textarea } from "@rakazo/ui-web";
 import { X } from "lucide-react";
-import { rpc } from "../../lib/rpc";
 import { CandidateCounts } from "../recruiting/CandidatePresentation";
 import {
   CriteriaExpression,
@@ -18,13 +17,8 @@ export function RecruitingRoleTab({ model }: { model: ReturnType<typeof useRecru
   const {
     threadId,
     showDiagnostics,
-    setRefresh,
     loading,
     failed,
-    confirming,
-    setConfirming,
-    confirmationFailed,
-    setConfirmationFailed,
     candidatePage,
     criteriaEdit,
     setCriteriaEdit,
@@ -33,7 +27,6 @@ export function RecruitingRoleTab({ model }: { model: ReturnType<typeof useRecru
     setCriteriaFailed,
     workspace,
     criteria,
-    briefClarifications,
     briefFieldLabels,
     roleQuestions,
     roleSources,
@@ -155,53 +148,11 @@ export function RecruitingRoleTab({ model }: { model: ReturnType<typeof useRecru
                   </dl>
                 </details>
               ) : null}
-              {workspace.revision.brief.confirmation?.revision !== workspace.revision.revision &&
-                roleQuestions.map((question) => (
-                  <p key={question} className="text-sm text-muted-foreground">
-                    {question}
-                  </p>
-                ))}
-              {workspace.revision.brief.confirmation?.revision === workspace.revision.revision ? (
-                <p>
-                  <Trans>Brief confirmed</Trans>
+              {roleQuestions.map((question) => (
+                <p key={question} className="text-sm text-muted-foreground">
+                  {question}
                 </p>
-              ) : (
-                <Button
-                  disabled={
-                    loading ||
-                    failed ||
-                    confirming ||
-                    briefClarifications.length > 0 ||
-                    workspace.revision.criteria.some(
-                      (criterion) =>
-                        criterion.priority === "hard" && criterion.definitionQuestions.length > 0,
-                    )
-                  }
-                  onClick={async () => {
-                    setConfirming(true);
-                    setConfirmationFailed(false);
-                    try {
-                      await rpc.recruiting.confirmBrief({
-                        threadId,
-                        roleId: workspace.role.id,
-                        expectedRevision: workspace.revision.revision,
-                      });
-                      setRefresh((value) => value + 1);
-                    } catch {
-                      setConfirmationFailed(true);
-                    } finally {
-                      setConfirming(false);
-                    }
-                  }}
-                >
-                  <Trans>Confirm brief</Trans>
-                </Button>
-              )}
-              {confirmationFailed ? (
-                <p role="alert">
-                  <Trans>Brief changed or could not be confirmed. Refresh and review it.</Trans>
-                </p>
-              ) : null}
+              ))}
             </div>
           ) : null}
           {workspace.revision.brief ? (
