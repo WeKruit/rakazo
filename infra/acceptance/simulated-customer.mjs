@@ -260,6 +260,7 @@ async function cardsOpen(rpc) {
           actions: block.actions ?? [],
           schema: block.requestedSchema,
           recipients: recipientsOf(block.text, block.detail ?? ""),
+          mailReply: block.mailReply,
         });
       }
   return open;
@@ -820,7 +821,13 @@ async function play(journey, label, owner, mailbox, out) {
         log(
           `${label}: recruiter ${answer === "allow" ? "approves" : answer === "deny" ? "denies" : `answers "${answer}" on`} "${card.text.slice(0, 60)}"${turn.guard ? ` (${turn.guard})` : ""}`,
         );
-        const value = card.send ? answer : cardAnswer(card, answer);
+        // A reply draft's Send carries the draft as shown, as the page's Send button does.
+        const value =
+          card.mailReply && answer === "allow"
+            ? { action: "send", body: card.mailReply.body, cc: card.mailReply.cc ?? [] }
+            : card.send
+              ? answer
+              : cardAnswer(card, answer);
         if (value === null) {
           log(`${label}: recruiter writes under the card: ${answer}`);
           if (ui) await ui.openChat(card.groupId);
@@ -830,7 +837,7 @@ async function play(journey, label, owner, mailbox, out) {
         let pressed = value === null;
         if (ui && !pressed) {
           await ui.openChat(card.groupId);
-          const action = card.actions.find((item) => item.id === value);
+          const action = card.actions.find((item) => item.id === (card.mailReply ? answer : value));
           pressed = action
             ? await ui.clickLabel(action.label)
             : // A form card takes the typed text in its field; the API gets the parsed content.
