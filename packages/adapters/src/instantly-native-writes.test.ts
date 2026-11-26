@@ -696,13 +696,51 @@ describe("reply sender checks before card creation", () => {
           kind: "instantly_role_campaign",
           AND: [
             { request: { path: ["serverId"], equals: "source-proof" } },
-            { request: { path: ["roleId"], equals: "role-proof" } },
             { result: { path: ["campaignId"], equals: "campaign-proof" } },
+            { request: { path: ["roleId"], equals: "role-proof" } },
           ],
         }),
       }),
     );
     expect(rest.mock.calls).toEqual([["GET", "/accounts/team%40example.test"]]);
+  });
+  it("replies from a one-off campaign's mailbox outside any role", async () => {
+    // Audit 11-26: replying in the main chat to a one-off campaign's email failed
+    // sender_unavailable, since only role campaign records were taken as proof.
+    const original = { ...ORIGINAL, campaign_id: "one-off" };
+    const findUnique = vi.fn(async ({ where }: any) =>
+      where.idempotencyKey === "instantly-direct-campaign:source-proof:one-off" &&
+      where.AND?.[1]?.result?.equals === "one-off"
+        ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "one-off" } }
+        : null,
+    );
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { findUnique },
+    };
+    const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        original,
+        ORIGINAL.eaccount,
+      ),
+    ).resolves.toMatchObject({ usable: true });
+    // Another campaign's email in the same mailbox is still refused.
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        { ...original, campaign_id: "foreign" },
+        ORIGINAL.eaccount,
+      ),
+    ).rejects.toThrow("sender_unavailable");
   });
   it("returns a blocked sender check from the read-only email tool", async () => {
     const prisma = { externalEffect: { findMany: vi.fn(async () => []) } };
@@ -735,7 +773,7 @@ it.each([false, true])(
         findMany: vi.fn(async () => []),
         findUnique: vi.fn(async (input: any) =>
           input.where.kind === "instantly_role_campaign" &&
-          input.where.AND[2].result.equals === "campaign-proof"
+          input.where.AND[1].result.equals === "campaign-proof"
             ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" } }
             : null,
         ),

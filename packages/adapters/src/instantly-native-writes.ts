@@ -1731,21 +1731,31 @@ export async function requireReplySendingMailboxReady(
   }
   const roleId = await activeRoleId(prisma, context);
   if (
-    !roleId ||
     typeof original.campaign_id !== "string" ||
     !original.campaign_id.trim() ||
     typeof original.thread_id !== "string" ||
     !original.thread_id.trim()
   )
     throw new MailReplySendingError("sender_unavailable");
-  const key = bindingKey(serverId, roleId);
+  const campaignId = original.campaign_id;
+  const key = roleId ? bindingKey(serverId, roleId) : null;
+  // A one-off campaign made outside a role (create_campaign) is recorded under its own key with
+  // no role, so a reply to its email is proven by that record wherever the recruiter asks.
+  const proofs = [
+    ...(key && roleId
+      ? [key, historyKey(serverId, roleId), `${key}:campaign:${campaignId}`].map((k) => ({
+          idempotencyKey: k,
+          scope: { request: { path: ["roleId"], equals: roleId } },
+        }))
+      : []),
+    {
+      idempotencyKey: `instantly-direct-campaign:${serverId}:${campaignId}`,
+      scope: { request: { path: ["direct"], equals: true } },
+    },
+  ];
   let owned: Partial<RoleBinding> | null = null;
   // Existing native associations have unique keys; never scan unrelated effect history for proof.
-  for (const idempotencyKey of [
-    key,
-    historyKey(serverId, roleId),
-    `${key}:campaign:${original.campaign_id}`,
-  ]) {
+  for (const { idempotencyKey, scope } of proofs) {
     const binding = await prisma.externalEffect.findUnique({
       where: {
         idempotencyKey,
@@ -1755,8 +1765,8 @@ export async function requireReplySendingMailboxReady(
         status: "completed",
         AND: [
           { request: { path: ["serverId"], equals: serverId } },
-          { request: { path: ["roleId"], equals: roleId } },
-          { result: { path: ["campaignId"], equals: original.campaign_id } },
+          { result: { path: ["campaignId"], equals: campaignId } },
+          scope,
         ],
       },
       select: { result: true },
