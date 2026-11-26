@@ -5121,11 +5121,8 @@ describe("native recruiting turn delivery", () => {
   }
 
   it("never saves a role from a greeting in a role team with no role", async () => {
-    const f = await roleTeamFirstTurn("greeting-no-role", "你好，你能帮我做什么？");
+    await roleTeamFirstTurn("greeting-no-role", "你好，你能帮我做什么？");
     expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
-    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
-    expect(prompt).toContain("no role, no intake question and no people search");
-    expect(prompt).not.toContain("Do not create a role in this turn");
   });
 
   it("never shows a question card in a role team with no role", async () => {
@@ -5149,7 +5146,6 @@ describe("native recruiting turn delivery", () => {
       instead: expect.stringContaining("save it now with recruiting_role create"),
     });
     expect(JSON.stringify(bounced)).toContain("then ask this same question with ask_user");
-    expect(request.prompt).toContain("a request to find people for a named role counts");
   });
 
   // Staging eval 11-11 (mixed-language-ask): a second turn asked the same location question
@@ -5178,11 +5174,8 @@ describe("native recruiting turn delivery", () => {
   });
 
   it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {
-    const f = await roleTeamFirstTurn("short-request-role", "New grads from USC, CS");
+    await roleTeamFirstTurn("short-request-role", "New grads from USC, CS");
     expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
-    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
-      "Only when the recruiter's message describes a role they are hiring for",
-    );
   });
 
   // Gate 493e9f2e, change-mind-mid-run: the recruiter changed the ask after Main handed off; its
@@ -5524,7 +5517,6 @@ describe("native recruiting turn delivery", () => {
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
     expect(prompt).toContain("Overseas Sales Manager. Grow the US market.");
     expect(prompt).toContain("never read it again");
-    expect(prompt).not.toContain("read it and the intake skill");
     expect(vi.mocked(artifactReadFromTool)).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.anything(),

@@ -9,11 +9,7 @@ import type {
   RecruitingSourceRef,
 } from "@rakazo/contracts";
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
-import {
-  applyRecruitingPreferenceEdit,
-  RECRUITING_SCALE_START,
-  tidyPreferenceDocument,
-} from "@rakazo/core";
+import { applyRecruitingPreferenceEdit, tidyPreferenceDocument } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
   approveRecruitingCalibrationRoundFromMessage,
@@ -244,7 +240,6 @@ async function recordRecruitingFeedback(
       ...result,
       status: approved.already ? "already_recorded" : "recorded",
       round: approved.round,
-      next: RECRUITING_SCALE_START,
     };
   }
   if (feedback.target === "round") {

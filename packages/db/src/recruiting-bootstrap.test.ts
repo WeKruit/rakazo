@@ -121,6 +121,7 @@ function fixture() {
     },
     space: { findFirst: vi.fn(async () => ({ id: actor.spaceId })) },
     run: { count: vi.fn(async () => (busy ? 1 : 0)) },
+    agentSkill: { deleteMany: vi.fn(async () => ({ count: 0 })) },
     bot: {
       findMany: vi.fn(async () => [...bots]),
       count: vi.fn(async () => bots.length),
@@ -614,6 +615,13 @@ describe("managed recruiting default upgrades", () => {
     expect(f.bots[0]!.instructions).not.toBe("Earlier maintained instructions");
     expect(f.bots[0]!.name).toBe("My recruiting partner");
     expect(f.bots[0]!.modelId).toBe("my-personal-model");
+    // A managed account's copy of a recruiting skill goes too, so the released one is what it runs.
+    expect(f.tx.agentSkill.deleteMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        source: "user",
+        name: expect.objectContaining({ in: expect.arrayContaining(["Coordinate interview"]) }),
+      }),
+    });
     f.tx.bot.updateMany.mockClear();
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
     expect(f.tx.bot.updateMany).not.toHaveBeenCalled();
