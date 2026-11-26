@@ -48,12 +48,12 @@ describe("group catch-up", () => {
 
 describe("failure notification", () => {
   it.each([
-    ["429 rate limit from provider-x", "The model service was busy."],
-    ["Run exceeded its $5 budget", "It reached this task's spending limit."],
-    ["Run exceeded 120 minutes", "It reached this task's time limit."],
-    ["TypeError: cannot read properties of undefined", "It stopped on an error."],
-  ])("%s", (error, reason) => {
-    const body = failureNotificationBody(error);
+    ["429 rate limit from provider-x", undefined, "The model service was busy."],
+    ["Run exceeded its $5 budget", undefined, "It reached this task's spending limit."],
+    ["Stopped after 20 minutes without progress.", "time", "It reached this task's time limit."],
+    ["TypeError: cannot read properties of undefined", undefined, "It stopped on an error."],
+  ] as const)("%s", (error, stop, reason) => {
+    const body = failureNotificationBody(error, false, stop);
     expect(body).toBe(`${reason} Send a message in the chat to pick up where it stopped.`);
     expect(body).not.toContain("provider");
   });

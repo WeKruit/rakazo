@@ -4,8 +4,8 @@ import {
   createToolFixMemory,
   describeFix,
   errorSignature,
-  parseToolFixes,
   renderToolFixes,
+  savedToolFixes,
   upsertToolFix,
   withKnownFix,
 } from "./tool-fixes.js";
@@ -19,19 +19,21 @@ const context = {
 };
 
 function store(content = "", revision = 0) {
-  const doc = { content, revision };
+  const doc: { content: string; data?: unknown; revision: number } = { content, revision };
   return {
     doc,
     read: vi.fn(async () => ({
       documents: doc.revision ? [{ id: "d", path: "tool-fixes.md", ...doc }] : [],
     })),
-    commit: vi.fn(async (request: { content: string; expectedRevision: number }) => {
-      if (request.expectedRevision !== doc.revision)
-        throw new MemoryRevisionConflictError();
-      doc.content = request.content;
-      doc.revision += 1;
-      return { path: "tool-fixes.md", revision: doc.revision };
-    }),
+    commit: vi.fn(
+      async (request: { content: string; data?: unknown; expectedRevision: number }) => {
+        if (request.expectedRevision !== doc.revision) throw new MemoryRevisionConflictError();
+        doc.content = request.content;
+        doc.data = request.data;
+        doc.revision += 1;
+        return { path: "tool-fixes.md", revision: doc.revision };
+      },
+    ),
   };
 }
 
@@ -65,11 +67,13 @@ describe("tool fixes", () => {
     expect(describeFix({ q: "a" }, { q: "a" })).toBe("the same call, retried once");
   });
 
-  it("round-trips the memory document and keeps one line per error, newest first", () => {
+  it("reads fixes from the saved data and keeps one per error, newest first", () => {
     const a = { tool: "t", error: "e one", fix: "removed `x`", at: "2026-10-29" };
     const b = { tool: "t", error: "e two", fix: "added `y`", at: "2026-10-29" };
-    const text = renderToolFixes([a, b]);
-    expect(parseToolFixes(text)).toEqual([a, b]);
+    expect(savedToolFixes({ fixes: [a, b, { tool: "t" }, "x"] })).toEqual([a, b]);
+    // A file saved before fixes were kept as data, or rewritten by hand, has none.
+    expect(savedToolFixes(undefined)).toEqual([]);
+    expect(savedToolFixes(null)).toEqual([]);
     expect(upsertToolFix([a, b], a)).toBeUndefined();
     expect(upsertToolFix([a, b], { ...b, fix: "removed `z`", at: "2026-10-30" })).toEqual([
       { ...b, fix: "removed `z`", at: "2026-10-30" },
@@ -116,12 +120,13 @@ describe("tool fixes", () => {
     const memory = store();
     const run = memoryFor(memory);
     await run.failed("t", { a: 1 }, "boom");
-    memory.doc.content = renderToolFixes([
-      { tool: "u", error: "other", fix: "x", at: "2026-10-29" },
-    ]);
+    const other = [{ tool: "u", error: "other", fix: "x", at: "2026-10-29" }];
+    memory.doc.content = renderToolFixes(other);
+    memory.doc.data = { fixes: other };
     memory.doc.revision = 3;
     await run.succeeded("t", {});
-    expect(parseToolFixes(memory.doc.content).map((fix) => fix.tool)).toEqual(["t", "u"]);
+    expect(savedToolFixes(memory.doc.data).map((fix) => fix.tool)).toEqual(["t", "u"]);
+    expect(memory.doc.content).toContain("`u` failed with");
   });
 
   it("reports its own save, so the run is not told its memory changed", async () => {

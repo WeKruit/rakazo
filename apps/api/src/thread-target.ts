@@ -880,6 +880,7 @@ export async function sendThreadMessage(
     addressing?: "coordinator" | "mentions";
     queueMode?: "steer" | "follow_up";
     mentions?: MentionTargetInput[];
+    connectorNames?: string[];
     replyToMessageId?: string;
     replyQuote?: string;
     clientNonce?: string;
@@ -1129,7 +1130,7 @@ export async function sendThreadMessage(
               prompt: buildSendPrompt(
                 input.text,
                 artifacts,
-                connectorNames,
+                [...connectorNames, ...(input.connectorNames ?? [])],
                 input.correspondenceReference,
                 input.recruitingContext,
               ),
@@ -1344,7 +1345,7 @@ export async function sendThreadMessage(
               prompt: buildSendPrompt(
                 input.text,
                 artifacts,
-                connectorNames,
+                [...connectorNames, ...(input.connectorNames ?? [])],
                 input.correspondenceReference,
                 input.recruitingContext,
               ),

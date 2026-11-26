@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  appendConnectorIntent,
   buildComposerMentionOptions,
   connectorIntentLine,
   mentionChipKey,
@@ -260,17 +259,21 @@ describe("strip and connector intent", () => {
     expect(connectorIntentLine(["Gmail", "Stripe"])).toBe(
       "Use these connectors if relevant: Gmail, Stripe.",
     );
-    expect(appendConnectorIntent("check inbox", ["Gmail"])).toBe(
-      "check inbox\n\nUse these connectors if relevant: Gmail.",
-    );
-    expect(appendConnectorIntent("", ["Gmail"])).toBe("Use these connectors if relevant: Gmail.");
     const raw = " \n  keep indentation\n  ";
     expect(stripMentionToken(raw, "Not present")).toBe(raw);
     expect(stripMentionKinds(raw, [], ["group"])).toBe(raw);
-    expect(appendConnectorIntent(raw, [])).toBe(raw);
-    expect(appendConnectorIntent(raw, ["Gmail"])).toBe(
-      `${raw}\n\nUse these connectors if relevant: Gmail.`,
-    );
+  });
+
+  it("names a not-yet-connected connector beside the text, never inside it", () => {
+    expect(
+      resolveComposerSendPlan({
+        text: "@Stripe check refunds",
+        mentions: [
+          { kind: "connector", id: "catalog:stripe", name: "Stripe", authStatus: "needs_auth" },
+        ],
+        hasAttachments: false,
+      }),
+    ).toMatchObject({ trimmed: "check refunds", connectorNames: ["Stripe"], mentionPayload: [] });
   });
 
   it("formats routine subtitles", () => {

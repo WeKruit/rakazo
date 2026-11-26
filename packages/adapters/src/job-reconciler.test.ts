@@ -638,6 +638,7 @@ describe("createJobReconciler", () => {
       sourceMessageId: "message-1",
       status: "completed",
       error: null,
+      stopKind: "loop_guard",
       bot: { name: "Researcher" },
     };
     const stuckText = loopGuardStopText("search", 8);

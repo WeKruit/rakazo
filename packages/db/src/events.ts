@@ -194,6 +194,8 @@ interface FinalizeRunBase {
   leaseFence: number;
 }
 
+export type RunStopKind = "loop_guard" | "cost" | "time";
+
 export type FinalizeRunInput = FinalizeRunBase &
   (
     | {
@@ -204,6 +206,8 @@ export type FinalizeRunInput = FinalizeRunBase &
         timing?: RunTiming;
         /** Model calls this attempt retried after a stalled stream, kept on run.completed. */
         modelRetries?: number;
+        /** Set when a guard ended the run before its work was done. */
+        stopKind?: RunStopKind;
       }
     | { outcome: "failed"; error: string }
   );
@@ -2081,6 +2085,7 @@ async function finalizeRunOnce(
       data: {
         status: input.outcome,
         error: input.outcome === "failed" ? input.error : null,
+        ...(input.outcome === "completed" && input.stopKind ? { stopKind: input.stopKind } : {}),
         completedAt: now,
         leaseOwner: null,
         leaseExpiresAt: null,

@@ -48,6 +48,7 @@ import {
   archiveBot,
   assertSafeRemoteUrl,
   bindImportedCampaigns,
+  BotSecretInputError,
   blockNewConnections,
   buildMcpCredentialBlob,
   buildModelConnectPlaintext,
@@ -794,21 +795,10 @@ function mapSpaceLifecycleError(error: unknown): unknown {
   return error;
 }
 
-const BOT_SECRET_INPUT_ERRORS = [
-  "Invalid credential destination",
-  "Invalid credential length",
-  "Credential cannot be used with this authentication method",
-  "Remove the existing credential before changing its destination",
-  "Credential limit reached",
-];
-
 /** Map credential validation failures to a bad request without echoing the submitted value. */
 function mapBotSecretStoreError(error: unknown): unknown {
   if (error instanceof ORPCError) return error;
-  if (
-    error instanceof Error &&
-    BOT_SECRET_INPUT_ERRORS.some((prefix) => error.message.startsWith(prefix))
-  ) {
+  if (error instanceof BotSecretInputError) {
     return new ORPCError("BAD_REQUEST", { message: error.message });
   }
   // Login decoding failures: a JSON parse message can quote the submitted value, so never forward it.

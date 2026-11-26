@@ -415,6 +415,22 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
       (await earlierConfirmedSends(prisma, identity.spaceId, "campaign-a", ["noah@example.test"]))
         .size,
     ).toBe(0);
+    // A send the mail service refused left no receipt, though its result names the people.
+    await prisma.externalEffect.update({
+      where: { id: earlier.effect.id },
+      data: {
+        result: {
+          error: "refused",
+          structuredContent: {
+            result: { campaignId: "campaign-a", recipients: ["noah@example.test"] },
+          },
+        },
+      },
+    });
+    expect(
+      (await earlierConfirmedSends(prisma, identity.spaceId, "campaign-b", ["noah@example.test"]))
+        .size,
+    ).toBe(0);
   });
 
   it("shows one card per campaign send: a second agent sending the same people finds the first", async () => {

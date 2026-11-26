@@ -21,7 +21,6 @@ import { watchOpenStages } from "./group-handoff.js";
 import { rearmRecruitingAgentRunWaits } from "./recruiting-agent-run-wait.js";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
 import { reconcileStuckWork } from "./stuck-work.js";
-import { isLoopGuardStopText } from "./tool-loop.js";
 import { isUserProgressClientNonce } from "./user-progress.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
@@ -399,6 +398,7 @@ export function createJobReconciler(
             sourceMessageId: true,
             status: true,
             error: true,
+            stopKind: true,
             bot: { select: { name: true } },
           },
         });
@@ -415,9 +415,7 @@ export function createJobReconciler(
                 ? `Could not complete the delegated request: ${run.error ?? "unknown error"}`
                 : transcript.text ||
                   "The delegated bot completed its turn without a written summary.";
-            // Loop-guard stops complete without an error; their persisted final text
-            // is the only marker available when the executor's outcome delivery fails.
-            const loopGuardStop = isLoopGuardStopText(transcript.text);
+            const loopGuardStop = run.stopKind === "loop_guard";
             // Same stable delivery key as the executor path (auto-outcome:<runId>), so a
             // concurrent or earlier return is replayed instead of double-posted. Progress-only
             // transcripts (all mid-turn user-progress messages) return as status.
