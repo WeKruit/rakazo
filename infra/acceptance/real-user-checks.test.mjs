@@ -272,7 +272,7 @@ test("a blocker that says what to send next is not a dead end", () => {
 test("a second round of people may repeat the round header and next-step card, and S3 in evidence is AWS", () => {
   const round = (name) =>
     bot(
-      `10 people this round:\n1. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Data Engineer\n   > Built Glue ETL pipelines on S3 Parquet tables.`,
+      `1 person this round:\n1. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Data Engineer\n   > Built Glue ETL pipelines on S3 Parquet tables.`,
     );
   const card = bot(
     "What's next? I'd find 150 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
@@ -459,7 +459,7 @@ test("the same unverified label under several people in a Chinese round is not a
   assert.deepEqual(
     conversationChecks([
       user("对了，远程也可以，不一定要在西雅图"),
-      bot(`本轮 10 人：\n\n${person(1, "Ann")}\n${person(2, "Bob")}\n${person(3, "Cy")}`),
+      bot(`本轮 3 人：\n\n${person(1, "Ann")}\n${person(2, "Bob")}\n${person(3, "Cy")}`),
     ]),
     [],
   );
@@ -607,4 +607,33 @@ test("a card answer or the brief confirmation does not set the recruiter's langu
   ];
   assert(!conversationChecks(chat).some((f) => f.startsWith("language")));
   assert(!conversationChecks(chat, { recruiter: chat.filter((m) => m.role === "user") }).some((f) => f.startsWith("language")));
+});
+
+test("the number Kruit says is the number of people listed", () => {
+  const row = (n) => `${n}. **[P${n}](https://www.linkedin.com/in/p${n})** · Engineer`;
+  const round = (said, from, to) =>
+    bot(
+      `本轮 ${said} 人：\n\n${Array.from({ length: to - from + 1 }, (_, i) => row(from + i)).join("\n")}`,
+    );
+  const count = (failures) => failures.filter((f) => f.startsWith("count"));
+  assert.deepEqual(
+    count(
+      conversationChecks([
+        user("找20个后端"),
+        round(10, 1, 10),
+        bot(`${round(10, 11, 20).text}\n\n累计展示 20 人，你淘汰了 2 人，计入 18 人。`),
+      ]),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    count(
+      conversationChecks([
+        user("找20个后端"),
+        round(10, 1, 12),
+        bot(`${round(10, 13, 22).text}\n\n累计展示 20 人。`),
+      ]),
+    ),
+    ["count: round says 10 people and lists 12", "count: says 20 shown, this chat has listed 22"],
+  );
 });

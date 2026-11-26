@@ -9186,6 +9186,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         deps.prisma,
                         { roleId, spaceId: run.spaceId, revision: role.revision },
                         found,
+                        deps.profileReader,
                       );
                     },
                   );
