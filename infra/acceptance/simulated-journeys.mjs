@@ -431,7 +431,7 @@ export const JOURNEYS = [
       "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both.",
       "When the send confirmation card appears, check it names both candidates and the email, and approve it.",
       "A little later, ask whether anyone replied and what they said, unless Kruit already told you. Met only when Kruit's account of each reply matches what the candidate actually wrote.",
-      "Ask Kruit to answer Ethan's questions and offer him a call. Met only when the reply Kruit writes states only facts you gave it (never invents relocation or visa terms), asks you about what you did not tell it before replying, and the reply card names Ethan in his own email thread; approve it then.",
+      "Ask Kruit, in a few words, to answer Ethan and offer him a call; never hint that it should ask you anything first. Met only when the reply Kruit writes states only facts you gave it (never invents relocation or visa terms), asks you about what you did not tell it before replying, and the reply card names Ethan in his own email thread; approve it then.",
       "Tell Kruit Ada must not be emailed again. Met only when Kruit says truthfully what it did and no later email goes to her.",
       "Once Ethan has answered with a time, ask Kruit to book the 30-minute call with Priya and send Ethan the invitation; approve a card that names Ethan, the time and the content. If no calendar is connected, met when Kruit says so plainly, shows how to connect, and keeps the booking for afterwards.",
     ],
