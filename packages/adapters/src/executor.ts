@@ -385,7 +385,6 @@ import {
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
   showDelegatedTeamCard,
-  showRoundPicksWhereAsked,
   showRoundWhereAskedNow,
   teamProgress,
   waitForDelegatedAnswer,
@@ -642,8 +641,9 @@ import type { RoundVerdict } from "./recruiting-round-check.js";
 import { checkPeopleCriteria } from "./recruiting-criteria-check.js";
 import {
   checkRound,
-  onlyPeopleWhoCount,
+  withoutGradedBelowFit,
   requestCounts,
+  roundCountLine,
   roundCriteria,
   withoutShownBefore,
 } from "./recruiting-round-check.js";
@@ -5693,15 +5693,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return {
                 error: `Not recorded: all ${fresh.shownBefore} were already shown to the recruiter in an earlier round, so nothing was listed again. Record only people no round has shown, or say that nobody new fits yet.`,
               };
-            // A round lists only people who count, so the list and the number told are the same.
-            const counted = await onlyPeopleWhoCount(
+            // Everyone a round lists counts toward the request, so nobody graded lower is listed.
+            const counted = await withoutGradedBelowFit(
               deps.prisma,
               thread.activeRecruitingRoleId,
               fresh.keys,
             );
             if (!counted.keys.length)
               return {
-                error: `Not recorded: none of these ${fresh.keys.length} has a Strong or Promising grade from the search yet, and a round lists only people who count toward the request. People from a quick search get their grade from the grading run of the First ten rule; record the round once it is back.`,
+                error: `Not recorded: all ${fresh.keys.length} were graded below Promising by the search, and a round lists only people who count toward the request. Record people graded Strong or Promising, or say that nobody new fits yet.`,
               };
             roundLeftOut = counted.leftOut;
             args = { ...args, candidateKeys: counted.keys };
@@ -5803,51 +5803,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return {
               error: sanitizeConnectorError(researchInput.error, runSecrets),
             };
-          if (researchInput?.data?.operation === "show_picks") {
-            // Display only: the first good fits go into the round's chat list while more searches
-            // run; calibration_round records the ten and replaces the list.
-            const roleId = thread.activeRecruitingRoleId;
-            if (!roleId) return { error: "This conversation has no active role." };
-            const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
-            const keys = picked;
-            const text = await recruitingRoundListText(deps.prisma, {
-              chinese: turnLanguage === "zh",
-              threadId: run.threadId,
-              spaceId: run.spaceId,
-              roleId,
-              candidateKeys: keys,
-              knownOnly: true,
-            });
-            if (!text)
-              return {
-                error:
-                  "None of these is a saved person of this role. Use the exact candidateKeys from the people rows.",
-              };
-            roundStream ??= {
-              callId: executionId,
-              shown: 0,
-              posting: Promise.resolve(),
-            };
-            const stream = roundStream;
-            stream.shown = Math.max(stream.shown, keys.length);
-            stream.posting = stream.posting.then(() => showRoundList(text));
-            await stream.posting;
-            if (stream.messageId)
-              await showRoundPicksWhereAsked(deps, run, text, stream.messageId).catch((error) =>
-                getLogger().warn("round picks not shown where asked", { error: String(error) }),
-              );
-            return {
-              shown: keys.length,
-              // The requirements calibration_round's checks take a verdict on, so it records the
-              // first time.
-              checksOn: Object.fromEntries(
-                (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).map(
-                  (criterion) => [criterion.id, criterion.statement],
-                ),
-              ),
-              next: "These people are in chat now; the round is not recorded yet. Record the ten with calibration_round now, as the First ten rule says. Never ask anything or end the turn before calibration_round records the round.",
-            };
-          }
           const candidateOperation =
             name === "recruiting_feedback" &&
             args.target === "candidate" &&
@@ -9256,7 +9211,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     });
                   // Saved is not fit, and fit is not shown: every search states where the
                   // request stands.
-                  const counts = await requestCounts(deps.prisma, roleId);
+                  const counts = await requestCounts(deps.prisma, {
+                    roleId,
+                    userId: run.userId,
+                    spaceId: run.spaceId,
+                  });
                   // This search's own yield: how many it added, so a wave that adds few is seen.
                   const added = (saved as { newPeople?: unknown }).newPeople;
                   return {
@@ -10061,7 +10020,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       { spaceId: run.spaceId, userId: run.userId },
                       thread.id,
                     ).catch(() => turnLanguage);
-                  const text = await recruitingRoundListText(deps.prisma, {
+                  const list = await recruitingRoundListText(deps.prisma, {
                     chinese: turnLanguage === "zh",
                     threadId: run.threadId,
                     spaceId: run.spaceId,
@@ -10074,6 +10033,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ]),
                     ),
                   });
+                  // The list ends with the count the request is measured by, in the server's words.
+                  const countLine = await requestCounts(deps.prisma, {
+                    roleId: recorded.roleId,
+                    userId: run.userId,
+                    spaceId: run.spaceId,
+                  })
+                    .then((counts) =>
+                      roundCountLine(
+                        counts,
+                        (recorded.candidateKeys as string[]).length,
+                        turnLanguage === "zh",
+                      ),
+                    )
+                    .catch(() => "");
+                  const text = countLine ? `${list}\n\n${countLine}` : list;
                   await roundStream?.posting;
                   await (roundStream?.messageId
                     ? showRoundList(text)
@@ -10095,7 +10069,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     run,
                     text,
                     applied.effect.id,
-                    roundStream?.messageId,
                   ).catch((error) =>
                     getLogger().warn("round not shown where asked", { error: String(error) }),
                   );
@@ -10108,11 +10081,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? {
                       ...round,
                       ...(typeof recorded?.roleId === "string"
-                        ? await requestCounts(deps.prisma, recorded.roleId).catch(() => ({}))
+                        ? await requestCounts(deps.prisma, {
+                            roleId: recorded.roleId,
+                            userId: run.userId,
+                            spaceId: run.spaceId,
+                          }).catch(() => ({}))
                         : {}),
                       ...(roundLeftOut
                         ? {
-                            notListed: `${roundLeftOut} of the people you gave have no Strong or Promising grade, so they are not in this round's list and were not shown.`,
+                            notListed: `${roundLeftOut} of the people you gave were graded below Promising, so they are not in this round's list and were not shown.`,
                           }
                         : {}),
                       // Gate 9d632819: the turn began on an English JD, the recruiter went on in
@@ -10359,7 +10336,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : thread.activeRecruitingRoleId
                   : null;
               const counts = listedRoleId
-                ? await requestCounts(deps.prisma, listedRoleId).catch(() => ({}))
+                ? await requestCounts(deps.prisma, {
+                    roleId: listedRoleId,
+                    userId: run.userId,
+                    spaceId: run.spaceId,
+                  }).catch(() => ({}))
                 : {};
               return finish(
                 redactConnectorPayload(

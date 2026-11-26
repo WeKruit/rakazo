@@ -6736,7 +6736,7 @@ describe("native recruiting assessment effect delivery", () => {
       "save_results",
       "save_search",
     ]);
-    for (const operation of ["show_picks", "status", "rows"]) {
+    for (const operation of ["status", "rows"]) {
       expect(REVISIONED_RESEARCH_OPERATIONS.has(operation)).toBe(false);
       const parsed = RecruitingResearchToolInputSchema.safeParse({
         operation,

@@ -1,6 +1,10 @@
 import type { RecruitingCriterion, RecruitingCriterionExpression } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { countRecruitingRoleGrades, listRecruitingFitCandidateKeys } from "@rakazo/db";
+import {
+  listRecruitingFitCandidateKeys,
+  listRecruitingGradedCandidateKeys,
+  readRecruitingResultsMarks,
+} from "@rakazo/db";
 import { handedInRecruiterWords } from "./global-role-writes.js";
 
 /**
@@ -252,36 +256,83 @@ export async function withoutShownBefore(
 }
 
 /**
- * A round lists only people who count toward the request: those the search graded Strong or
- * Promising. What the recruiter reads in a list and the number they are told are then the same
- * people (staging 11-26: "20 shown" beside rounds listing 21 to 30, the extra ones shown before
- * any grade or graded lower).
+ * A round never lists someone the search graded below Promising: every person in a list counts
+ * toward the request, so what the recruiter reads and the number they are told are the same
+ * people (staging 11-26: "20 shown" beside rounds listing 21 to 30). People not graded yet may be
+ * listed: a role's first ten are shown before their grades.
  */
-export async function onlyPeopleWhoCount(
+export async function withoutGradedBelowFit(
   prisma: Pick<PrismaClient, "$queryRaw">,
   roleId: string,
   keys: readonly string[],
 ): Promise<{ keys: string[]; leftOut: number }> {
-  const fit = new Set(await listRecruitingFitCandidateKeys(prisma, roleId));
-  const counted = keys.filter((key) => fit.has(key));
-  return { keys: counted, leftOut: keys.length - counted.length };
+  const [graded, fit] = await Promise.all([
+    listRecruitingGradedCandidateKeys(prisma, roleId),
+    listRecruitingFitCandidateKeys(prisma, roleId),
+  ]);
+  const below = new Set(graded);
+  for (const key of fit) below.delete(key);
+  const kept = keys.filter((key) => !below.has(key));
+  return { keys: kept, leftOut: keys.length - kept.length };
 }
 
 /**
  * Where a request for N people stands, given with every search, list and round result so the
- * agent never keeps a tally of its own: `fitShown`, the people graded Strong or Promising a round
- * has shown the recruiter, is the one count a request is measured by and the one told to them.
+ * agent never keeps a tally of its own. `counted` is the one count a request is measured by and
+ * the one told to the recruiter: the people rounds have listed for them, without those they
+ * turned down (`turnedDown`, as Results marks them).
  */
-export async function requestCounts(prisma: PrismaClient, roleId: string) {
-  const [peopleInResults, grades] = await Promise.all([
+export async function requestCounts(
+  prisma: PrismaClient,
+  role: { roleId: string; userId: string; spaceId: string },
+) {
+  const { roleId } = role;
+  const [people, graded, fit, rounds, marks] = await Promise.all([
     prisma.recruitingCandidate.count({ where: { roleId } }),
-    countRecruitingRoleGrades(prisma, roleId),
+    listRecruitingGradedCandidateKeys(prisma, roleId),
+    listRecruitingFitCandidateKeys(prisma, roleId),
+    prisma.recruitingCalibrationRound.findMany({
+      where: { roleId, status: "shown" },
+      select: { candidateKeys: true },
+    }),
+    readRecruitingResultsMarks(
+      prisma,
+      { userId: role.userId, spaceId: role.spaceId, email: "", isDeploymentOwner: false },
+      { roleId },
+    ),
   ]);
+  const shown = new Set(rounds.flatMap((round) => round.candidateKeys));
+  const notAFit = new Set(
+    marks.filter((mark) => mark.mark === "not a fit").map((mark) => mark.candidateKey),
+  );
+  const turnedDown = [...shown].filter((key) => notAFit.has(key)).length;
   return {
-    fitShown: grades.fitShown,
-    fitNotShownYet: grades.fit - grades.fitShown,
-    notGradedYet: peopleInResults - grades.checked,
+    counted: shown.size - turnedDown,
+    turnedDown,
+    fitNotShownYet: fit.filter((key) => !shown.has(key) && !notAFit.has(key)).length,
+    notGradedYet: people - graded.length,
   };
+}
+
+/**
+ * The running count under a round's list, in the server's own words, so the number the recruiter
+ * reads is the one the request is measured by and nobody retypes it. A role's first list needs no
+ * such line: its heading is the count.
+ */
+export function roundCountLine(
+  counts: { counted: number; turnedDown: number },
+  listed: number,
+  chinese: boolean,
+): string {
+  const shown = counts.counted + counts.turnedDown;
+  if (shown <= listed && !counts.turnedDown) return "";
+  if (chinese)
+    return counts.turnedDown
+      ? `累计展示 ${shown} 人，你淘汰了 ${counts.turnedDown} 人，计入 ${counts.counted} 人。`
+      : `累计展示 ${shown} 人。`;
+  return counts.turnedDown
+    ? `${shown} shown so far, ${counts.turnedDown} turned down by you, ${counts.counted} counted.`
+    : `${shown} shown so far.`;
 }
 
 /** A role team's round list starts with this heading, in either language. */

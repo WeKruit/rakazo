@@ -1157,15 +1157,6 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
         "candidateKey → the must-haves this person's row does not show, in English (for example 'startup experience, former Metrology Engineer'). Shown under that person in chat.",
       ),
   }),
-  // Shows the round's first good fits in chat while more searches run; records nothing.
-  z.strictObject({
-    operation: z.literal("show_picks"),
-    candidateKeys: z
-      .array(RecruitingId)
-      .min(1)
-      .max(RECRUITING_CALIBRATION_ROUND_SIZE - 1)
-      .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
-  }),
   z.strictObject({
     operation: z.literal("save_results"),
     expectedRoleRevision: Revision,
