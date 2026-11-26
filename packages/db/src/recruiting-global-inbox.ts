@@ -38,11 +38,14 @@ const record = (value: unknown) =>
 export const inboxMessageDedupeKey = inboxMessageKey;
 
 async function requireRole(tx: Tx, actor: Actor, roleId: string) {
+  // The conversation first, in its own statement: role writers and event appends lock it before
+  // the role, so one statement locking the role first could deadlock with them.
+  await tx.$queryRaw`SELECT t.id FROM threads t WHERE t.id=(SELECT "sourceThreadId" FROM recruiting_roles WHERE id=${roleId} AND "userId"=${actor.userId} AND "spaceId"=${actor.spaceId}) AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId} FOR SHARE`;
   const rows = await tx.$queryRaw<
     { id: string }[]
   >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId"
     WHERE r.id=${roleId} AND r."userId"=${actor.userId} AND r."spaceId"=${actor.spaceId} AND r."archivedAt" IS NULL
-    AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,t`;
+    AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r`;
   if (!rows.length) throw new IsolationError();
 }
 

@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { providerRefusesConnection, redactConnectorPayload } from "./connector-safety.js";
+import {
+  DATABASE_CONFLICT_TEXT,
+  providerRefusesConnection,
+  redactConnectorPayload,
+  sanitizeConnectorError,
+} from "./connector-safety.js";
+
+describe("sanitizeConnectorError", () => {
+  it("turns a database deadlock into plain words, never its code or SQL", () => {
+    const raw = new Error(
+      "Invalid `prisma.$queryRaw()` invocation: Raw query failed. Code: `40P01`. Message: `deadlock detected`",
+    );
+    expect(sanitizeConnectorError(raw)).toBe(DATABASE_CONFLICT_TEXT);
+    expect(sanitizeConnectorError(new Error("HTTP 500 from provider"))).toBe(
+      "HTTP 500 from provider",
+    );
+  });
+});
 
 describe("redactConnectorPayload", () => {
   it("redacts secrets that JSON escapes in property names and values", () => {
