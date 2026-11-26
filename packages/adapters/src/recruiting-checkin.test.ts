@@ -217,7 +217,12 @@ describe("startRecruitingCheckin", () => {
     expect(prompt).not.toContain("sent-1");
     // The same reply on the next sweep wakes nobody.
     const again = fixture({
-      earlier: [{ createdAt: new Date(now - 5 * 60_000), task: { prompt } }],
+      earlier: [
+        {
+          createdAt: new Date(now - 5 * 60_000),
+          checkinReplyIds: deps.runCreate.mock.calls[0]![0].data.checkinReplyIds,
+        },
+      ],
     });
     await start(again);
     expect(again.runCreate).not.toHaveBeenCalled();
