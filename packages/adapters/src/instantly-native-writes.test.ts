@@ -15,7 +15,7 @@ import {
   requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
-import { readInstantlyEmailPage } from "./instantly-reply.js";
+import { classifyInstantlyReplyReceipt, readInstantlyEmailPage } from "./instantly-reply.js";
 import { mailReplyFromAnchor } from "./mail-reply.js";
 
 const ORIGINAL = {
@@ -1035,5 +1035,18 @@ describe("emulated outreach mail service", () => {
     });
     const leads = await rest("POST", "/leads/list", { campaign: campaign.id });
     expect(leads.items).toMatchObject([{ email_reply_count: 1 }]);
+    const request = {
+      reply_to_uuid: String(reply.id),
+      eaccount: "me@mail.test",
+      to: "ada@x.test",
+      subject: "Re: Data role",
+      body_text: "About $200k.",
+      skip_validation: false as const,
+    };
+    const answered = await rest("POST", "/emails/reply", {
+      ...request,
+      body: { text: request.body_text },
+    });
+    expect(classifyInstantlyReplyReceipt(request, reply, answered).status).toBe("sent_recorded");
   });
 });

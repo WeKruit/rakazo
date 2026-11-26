@@ -316,6 +316,9 @@ export class InstantlyEmulator {
             "",
         ),
         original.thread_id as string,
+        undefined,
+        // A reply sent through the API is a manually sent email (3), not a campaign step (1).
+        3,
       );
       return reply;
     }
@@ -336,7 +339,8 @@ export class InstantlyEmulator {
    */
   receive(input: { replyTo: string; text: string; campaignId?: string }) {
     const original = this.emails.find((email) => email.id === input.replyTo);
-    if (!original || original.ue_type !== 1) throw new Refused(404, "Email not found");
+    if (!original || ![1, 3].includes(Number(original.ue_type)))
+      throw new Refused(404, "Email not found");
     const id = randomUUID();
     const at = this.now().toISOString();
     const subject = String(original.subject ?? "");
@@ -403,6 +407,7 @@ export class InstantlyEmulator {
     text: string,
     thread?: string,
     at = this.now().toISOString(),
+    ueType = 1,
   ) {
     const id = randomUUID();
     const email = {
@@ -417,7 +422,7 @@ export class InstantlyEmulator {
       campaign_id: campaign,
       lead,
       eaccount,
-      ue_type: 1,
+      ue_type: ueType,
       organization_id: ORGANIZATION,
       is_unread: 0,
       thread_id: thread ?? `thread-${id}`,
