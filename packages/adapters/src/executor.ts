@@ -5385,6 +5385,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ),
             };
           let roundLeftOut = 0;
+          // The list as the recruiter reads it, returned with the round: the agent's closing words
+          // rest on it. Without it, people listed as "not stated: 5 years" were called a clear match.
+          let roundShown: string | undefined;
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -9621,6 +9624,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     )
                     .catch(() => "");
                   const text = countLine ? `${list}\n\n${countLine}` : list;
+                  roundShown = text;
                   await roundStream?.posting;
                   await (roundStream?.messageId
                     ? showRoundList(text)
@@ -9660,6 +9664,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             spaceId: run.spaceId,
                           }).catch(() => ({}))
                         : {}),
+                      ...(roundShown ? { shownToRecruiter: roundShown } : {}),
                       ...(roundLeftOut
                         ? {
                             notListed: `${roundLeftOut} of the people you gave were graded below Promising, so they are not in this round's list and were not shown.`,
