@@ -11,6 +11,7 @@ import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import {
+  confirmedSendRecipients,
   IsolationError,
   listRecruitingSchedulingPlans,
   otherCampaignsThatEmailed,
@@ -301,6 +302,39 @@ export async function refreshRecruitingCorrespondence(
     await fence();
     return result;
   };
+  /** Only a page's verified rows are durable input; publishing never holds the role read. */
+  const store = (
+    source: Source,
+    campaignId: string,
+    checked: { observedAt: string; botId: string; operationId: string } | undefined,
+    observed: RecruitingCorrespondence["emails"],
+  ) => {
+    if (!deps.jobs || !checked) return;
+    for (let offset = 0; offset < observed.length; offset += 100)
+      void deps.jobs
+        .enqueue({
+          name: "recruiting_inbox.project",
+          payload: {
+            observation: {
+              threadId: scope.threadId,
+              roleId: scope.roleId,
+              sourceId: source.id,
+              sourceRevision: source.revision,
+              botId: checked.botId,
+              campaignId,
+              observedAt: checked.observedAt,
+              emails: observed.slice(offset, offset + 100),
+            },
+          },
+          replaceKey: `recruiting_inbox.project:${checked.operationId}:${offset}`,
+          keepExisting: true,
+        })
+        .catch((error) =>
+          getLogger().warn("recruiting.inbox_observation_enqueue_failed", {
+            error: error instanceof Error ? error.name : "Unknown error",
+          }),
+        );
+  };
   const emails = new Map(output.emails.map((email) => [email.id, email]));
   const events = new Map(output.events.map((event) => [event.id, event]));
   const contactEmails = new Set(
@@ -494,34 +528,7 @@ export async function refreshRecruitingCorrespondence(
               emails.set(row.id, row);
               observed.push(row);
             }
-            const checked = read.value;
-            if (deps.jobs && checked && observed.length) {
-              // Only this page's verified rows are durable input; publishing never holds the role read.
-              for (let offset = 0; offset < observed.length; offset += 100)
-                void deps.jobs
-                  .enqueue({
-                    name: "recruiting_inbox.project",
-                    payload: {
-                      observation: {
-                        threadId: scope.threadId,
-                        roleId: scope.roleId,
-                        sourceId: source.id,
-                        sourceRevision: source.revision,
-                        botId: checked.botId,
-                        campaignId,
-                        observedAt: checked.observedAt,
-                        emails: observed.slice(offset, offset + 100),
-                      },
-                    },
-                    replaceKey: `recruiting_inbox.project:${checked.operationId}:${offset}`,
-                    keepExisting: true,
-                  })
-                  .catch((error) =>
-                    getLogger().warn("recruiting.inbox_observation_enqueue_failed", {
-                      error: error instanceof Error ? error.name : "Unknown error",
-                    }),
-                  );
-            }
+            store(source, campaignId, read.value, observed);
             cursor =
               !scope.message && typeof body?.next_starting_after === "string"
                 ? body.next_starting_after
@@ -555,11 +562,20 @@ export async function refreshRecruitingCorrespondence(
           );
           output.partial ||= others.length > OTHER_CAMPAIGNS;
           for (const campaignId of others.slice(0, OTHER_CAMPAIGNS)) {
+            const read: { value?: { observedAt: string; botId: string; operationId: string } } = {};
             const body = record(
-              await execute(source, tool, { campaign_id: campaignId, limit: 100 }),
+              await execute(
+                source,
+                tool,
+                { campaign_id: campaignId, limit: 100 },
+                (observedAt, botId, operationId) => {
+                  read.value = { observedAt, botId, operationId };
+                },
+              ),
             );
             if (!Array.isArray(body?.items)) throw new Error("Invalid mail page");
             output.partial ||= typeof body.next_starting_after === "string";
+            const found: RecruitingCorrespondence["emails"] = [];
             for (const value of body.items) {
               const email = readInstantlyEmail(value);
               const from = (email?.lead ?? email?.from_address_email)?.trim().toLowerCase();
@@ -567,7 +583,22 @@ export async function refreshRecruitingCorrespondence(
               if (!emailed.has(from)) continue;
               const row = await mailRow(source, email, campaignId);
               emails.set(row.id, row);
+              found.push(row);
             }
+            // Stored for the account Inbox when the role's own confirmed send emailed the sender,
+            // the fact the storage job checks again.
+            const sent = await confirmedSendRecipients(
+              deps.prisma,
+              actor,
+              [...readCampaigns],
+              found.flatMap((row) => (row.sender ? [row.sender] : [])),
+            );
+            store(
+              source,
+              campaignId,
+              read.value,
+              found.filter((row) => row.sender && sent.has(row.sender.trim().toLowerCase())),
+            );
           }
         }
         // Instantly was checked: a role without a campaign has no replies, not an unknown count.

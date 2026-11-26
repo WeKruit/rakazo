@@ -12,11 +12,13 @@ import type { PrismaClient } from "@rakazo/db";
 import { listRecruitingCandidates } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
+  conversationCalls,
   directCampaigns,
   directRepliesSince,
   gmailRepliesSince,
   gmailSends,
   recentGmailSenders,
+  seenEmailIds,
 } from "./recruiting-checkin-mail.js";
 import type { RecruitingThreadTarget } from "./recruiting-reads.js";
 import { getRecruitingCorrespondence } from "./recruiting-reads.js";
@@ -299,7 +301,8 @@ export async function startRecruitingCheckin(
   // Outside a role, the conversation's own one-off campaigns are where its candidates answer;
   // an email sent from the recruiter's own Gmail is answered in its Gmail thread.
   const direct = role ? [] : await directCampaigns(deps.prisma, thread);
-  const gmail = await gmailSends(deps.prisma, thread, new Date(now - ACTIVE_WITHIN_MS));
+  const calls = await conversationCalls(deps.prisma, thread, new Date(now - ACTIVE_WITHIN_MS));
+  const gmail = await gmailSends(deps.prisma, thread, calls);
   if (!role && !direct.length && !gmail.length) return skipped("nothing sent");
   const offerAgain = () =>
     deps.jobs
@@ -392,7 +395,11 @@ export async function startRecruitingCheckin(
     // The next sweep tries again; a check-in never reports a failed read as "no replies".
     return skipped("read failed", { error: String(error) });
   }
-  const reported = reportedReplyIds(earlier.map((run) => run.checkinReplyIds));
+  // Reported means the conversation has it: an earlier check-in named it, or its agent read it.
+  const reported = new Set([
+    ...reportedReplyIds(earlier.map((run) => run.checkinReplyIds)),
+    ...seenEmailIds(calls),
+  ]);
   const fresh = read.replies.filter((reply) => !reported.has(reply.id));
   if (!fresh.length) return skipped("nothing new");
   const automatic = fresh.filter((reply) => automaticReplyVerdict(reply));
