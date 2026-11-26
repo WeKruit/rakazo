@@ -771,7 +771,7 @@ describe("workSessionStages", () => {
 
   it("names stages by what they are for, never by member", () => {
     expect(workStageKind({ spawnKey: "recruiting:u1:sourcer", name: "Ana" })).toBe("sourcing");
-    expect(workStageKind({ name: "Reviewer" })).toBe("quality");
+    expect(workStageKind({ name: "Outreach" })).toBe("outreach");
     expect(workStageKind({ name: "Helper" })).toBe("other");
     expect(workStageKind(undefined)).toBe("other");
     expect(workStageLabel("sourcing")).toBe("Finding candidates");

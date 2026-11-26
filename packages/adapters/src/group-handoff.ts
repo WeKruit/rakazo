@@ -722,20 +722,20 @@ export async function loadGroupContext(
   return renderGroupMembersContext(
     group.name,
     group.members.map(({ bot: { mcpServers, spawnKey: _spawnKey, ...bot } }) => ({
-        ...bot,
-        // Read from the bot's real service assignments, so the roster never drifts from them.
-        capabilities: mcpServers.map(({ server, allowAllTools, allowedTools }) => {
-          const tools =
-            !allowAllTools && Array.isArray(allowedTools)
-              ? allowedTools.filter((tool): tool is string => typeof tool === "string")
-              : [];
-          const about = server.description
-            .trim()
-            .split(/(?<=\.)\s/)[0]
-            ?.slice(0, 120);
-          return `${server.name}${about ? ` (${about})` : ""}${tools.length ? `: ${tools.join(", ")}` : ""}`;
-        }),
-      })),
+      ...bot,
+      // Read from the bot's real service assignments, so the roster never drifts from them.
+      capabilities: mcpServers.map(({ server, allowAllTools, allowedTools }) => {
+        const tools =
+          !allowAllTools && Array.isArray(allowedTools)
+            ? allowedTools.filter((tool): tool is string => typeof tool === "string")
+            : [];
+        const about = server.description
+          .trim()
+          .split(/(?<=\.)\s/)[0]
+          ?.slice(0, 120);
+        return `${server.name}${about ? ` (${about})` : ""}${tools.length ? `: ${tools.join(", ")}` : ""}`;
+      }),
+    })),
     self,
   );
 }

@@ -13,12 +13,7 @@ import {
 } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
-import {
-  IsolationError,
-  listRecruitingResearch,
-  listRunToolResults,
-  Prisma,
-} from "@rakazo/db";
+import { IsolationError, listRecruitingResearch, listRunToolResults, Prisma } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
@@ -393,7 +388,7 @@ export const PEOPLE_SEARCH_NEEDS_SAVED_ROLE =
   "Not searched: this role is not saved yet, so the people found would have nowhere to go. Save it first with recruiting_role create (title and the JD's requirements), then search again.";
 
 /**
- * People searches run only inside a saved role: its cap, autosave, Reviewer check and feedback
+ * People searches run only inside a saved role: its cap, autosave, per-requirement check and feedback
  * all read the conversation's role. Staging a986fe51, feedback-round: the main chat searched
  * itself, nothing was saved or checked, and a snippet's employer was stated as fact; 14d33ed1: a
  * role chat searched before its role was saved and save_search was refused.
@@ -1088,7 +1083,7 @@ export function createRecruitingCandidateReportReader(
             snapshot.kind === "reviewer_grades") &&
           Array.isArray(snapshot.rows)
         ) {
-          // A people search, CSV import or quality-check grading page keeps its rows in its own
+          // A people search, CSV import or stored grade page keeps its rows in its own
           // receipt; there is no research task behind it.
           observation = {
             deliveryState: "accepted",

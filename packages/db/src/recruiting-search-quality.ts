@@ -86,8 +86,8 @@ const FACET_LIMIT = 5;
 /**
  * What the people the recruiter praised and turned down have in common: their current company
  * and title, schools and majors, from saved profiles (or the search row when no profile is
- * saved). Per role and across all of this recruiter's open roles. Counts only; the search and
- * the reviewer still do the matching.
+ * saved). Per role and across all of this recruiter's open roles. Counts only; the search still
+ * does the matching.
  */
 export async function readRecruitingVerdictPatterns(
   prisma: Pick<PrismaClient, "$queryRaw">,

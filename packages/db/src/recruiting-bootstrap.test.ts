@@ -345,12 +345,6 @@ describe("ensureRecruitingWorkspace", () => {
             allowedTools: [],
           }),
         ),
-        // The retired research service keeps its connection with no tools.
-        expect.objectContaining({
-          botId: f.bots[4]!.id,
-          allowAllTools: false,
-          allowedTools: [],
-        }),
       ],
       skipDuplicates: true,
     });
@@ -454,7 +448,7 @@ describe("ensureRecruitingWorkspace", () => {
       expect.objectContaining({ id: recruiting.recruitingGlobalGroupId(actor), name: "Kruit" }),
     );
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
   });
 
   it("does not revive an archived product workspace", async () => {
@@ -559,7 +553,7 @@ describe("recruiting bootstrap idempotency and per-user identity", () => {
       counts,
     );
     expect(snapshot(f)).toBe(before);
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
     expect(native.group).toHaveBeenCalledTimes(2);
   });
 
@@ -779,7 +773,7 @@ describe("managed recruiting computer policy", () => {
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
     expect(f.tx.bot.updateMany).not.toHaveBeenCalled();
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
     expect(native.group).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(f.assignments)).toBe(assignments);
   });
@@ -1181,20 +1175,7 @@ describe("crews set up before the recruiting preset", () => {
     const f = legacy();
     const result = await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     expect(result).toEqual({ botId: "old-main", groupId: "old-role" });
-    // Only the role added after these crews were set up joins, with its research tools.
-    expect(native.bot.mock.calls.map(([, , input]) => input.name)).toEqual(["Reviewer"]);
-    const reviewer = f.bots.find((bot) => bot.name === "Reviewer")!;
-    expect(f.roleGroup.members).toContainEqual({ botId: reviewer.id });
-    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
-      data: [
-        expect.objectContaining({
-          botId: reviewer.id,
-          serverId: "old-autumn",
-          allowedTools: [],
-        }),
-      ],
-      skipDuplicates: true,
-    });
+    expect(native.bot).not.toHaveBeenCalled();
     const main = f.bots.find((bot) => bot.id === "old-main")!;
     expect(main.instructions).toBe(
       RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!.instructions,
@@ -1204,18 +1185,8 @@ describe("crews set up before the recruiting preset", () => {
     expect(f.skills.map((skill) => skill.name)).toEqual(["My own notes"]);
     expect(f.presets[0]).toMatchObject({
       version: "legacy",
-      config: { legacy: true, added: ["reviewer"] },
+      config: { legacy: true },
     });
-  });
-
-  it("adds a new role once and never brings a deleted one back", async () => {
-    const f = legacy();
-    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
-    const reviewer = f.bots.find((bot) => bot.name === "Reviewer")!;
-    reviewer.archivedAt = new Date();
-    f.presets[0]!.digest = "older catalog";
-    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(native.bot).toHaveBeenCalledTimes(1);
   });
 
   it("is idempotent and applies later default changes", async () => {
@@ -1267,7 +1238,7 @@ describe("crews set up before the recruiting preset", () => {
     for (const bot of original)
       expect(f.bots.find((current) => current.id === bot.id)).toEqual(bot);
     expect(f.bots.find((bot) => bot.id === "old-main")!.instructions).toBe("Old Main instructions");
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
     const global = native.group.mock.calls.find(
       ([, , input]) => input.id === recruiting.recruitingGlobalGroupId(actor),
     )?.[2];
@@ -1282,12 +1253,11 @@ describe("crews set up before the recruiting preset", () => {
       "old-sourcer",
       "old-outreach",
       "old-scheduling",
-      f.bots.find((bot) => bot.name === "Reviewer")!.id,
     ]);
     f.routines.splice(1, 1);
     f.presets[0]!.digest = "older catalog";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(f.routines).toHaveLength(4);
+    expect(f.routines).toHaveLength(3);
     expect(f.presets[0]!.config).toMatchObject({
       legacy: true,
       routines: { sourcer: "routine-1" },
@@ -1300,7 +1270,7 @@ describe("nightly memory tidy defaults", () => {
   it("gives each new bot one active nightly tidy in its own scope; only Main tidies shared memory", async () => {
     const f = fixture();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
-    expect(f.routines).toHaveLength(5);
+    expect(f.routines).toHaveLength(4);
     expect(f.routines.map((row) => row.botId)).toEqual(f.bots.map((bot) => bot.id));
     for (const row of f.routines) {
       expect(row).toMatchObject({
@@ -1326,7 +1296,6 @@ describe("nightly memory tidy defaults", () => {
       sourcer: "routine-1",
       outreach: "routine-2",
       scheduling: "routine-3",
-      reviewer: "routine-4",
     });
   });
 
@@ -1337,15 +1306,15 @@ describe("nightly memory tidy defaults", () => {
     delete (f.presets[0]!.config as { routines?: unknown }).routines;
     f.presets[0]!.digest = "earlier-release";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(f.routines).toHaveLength(5);
+    expect(f.routines).toHaveLength(4);
     f.routines.splice(2, 1);
     for (let login = 0; login < 3; login++) {
       await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
       f.presets[0]!.digest = "earlier-release";
       await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
     }
-    expect(f.routines).toHaveLength(4);
-    expect(f.tx.routine.create).toHaveBeenCalledTimes(10);
+    expect(f.routines).toHaveLength(3);
+    expect(f.tx.routine.create).toHaveBeenCalledTimes(8);
   });
 
   it("adopts a same-named routine instead of adding a second one", async () => {
@@ -1354,8 +1323,8 @@ describe("nightly memory tidy defaults", () => {
     delete (f.presets[0]!.config as { routines?: unknown }).routines;
     f.presets[0]!.digest = "earlier-release";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(f.routines).toHaveLength(5);
-    expect(f.tx.routine.create).toHaveBeenCalledTimes(5);
+    expect(f.routines).toHaveLength(4);
+    expect(f.tx.routine.create).toHaveBeenCalledTimes(4);
   });
 
   it("spreads accounts over the hour without depending on anything but the account", () => {
@@ -1434,7 +1403,13 @@ describe("startup recruiting account backfill", () => {
       user: { findMany: vi.fn(async () => [{ id: actor.userId, email: actor.email }]) },
       chatGroup: f.tx.chatGroup,
       mcpServer: f.tx.mcpServer,
-      bot: { ...f.tx.bot, findFirst: vi.fn(async () => null), count: vi.fn(async () => 0) },
+      bot: {
+        ...f.tx.bot,
+        findFirst: vi.fn(async () => null),
+        // No Reviewer left to retire.
+        findMany: vi.fn(async () => []),
+        count: vi.fn(async () => 0),
+      },
       botMcpServer: { ...f.tx.botMcpServer, findMany: vi.fn(async () => []) },
     });
     return f;
@@ -1446,13 +1421,13 @@ describe("startup recruiting account backfill", () => {
       await recruiting.backfillRecruitingCrews(f.prisma, { sandboxKind: "fake" }, errors),
     ).toBe(1);
     expect(errors).not.toHaveBeenCalled();
-    expect(f.bots).toHaveLength(5);
+    expect(f.bots).toHaveLength(4);
     expect(f.globalGroups.has(recruiting.recruitingGlobalGroupId(actor))).toBe(true);
     expect(
       await recruiting.backfillRecruitingCrews(f.prisma, { sandboxKind: "fake" }, errors),
     ).toBe(1);
     expect(errors).not.toHaveBeenCalled();
-    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.bot).toHaveBeenCalledTimes(4);
     expect(f.globalGroups).toHaveLength(1);
   });
   it("excludes shared Spaces and ownership mismatches from the startup population", async () => {

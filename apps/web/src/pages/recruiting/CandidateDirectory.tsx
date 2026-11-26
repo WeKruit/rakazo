@@ -12,7 +12,6 @@ import type { VirtualItem } from "@tanstack/react-virtual";
 import { LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Shimmer } from "../../components/ai/primitives";
 import { preloadCandidateDetail } from "../shell/preload-detail";
 import { CandidateWindow } from "./CandidateWindow";
 import { CompanyLogo } from "./CompanyLogo";

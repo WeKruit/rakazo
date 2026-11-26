@@ -114,7 +114,7 @@ export function recruitingBriefConfirmedNextStep(revision: number) {
 /**
  * How any teammate takes material the recruiter steers the search with: a profile, file, saved
  * person, company or changed requirement. One rule for every kind, saved to the brief that the
- * searches and the quality check both read. Delivered through the role context.
+ * searches read. Delivered through the role context.
  */
 export const RECRUITING_REFERENCE_MATERIAL = `Material that steers the search (a profile or resume of someone to find more of, a person in Results, companies to target or avoid, a job post, a changed requirement) is feedback on the same role, at any stage. Read it first (web_fetch for links, LinkedIn included; artifact_read for files; recruiting_candidates resolve for saved people), then save its concrete signals with one recruiting_role update citing their message: a person to find more of goes in the brief field "Reference people" with link and fit details; someone or a company to avoid becomes an exclude filter or wrong-fit profile; a stated change replaces that requirement. What a reference shows stays a preference unless they call it required. Say in one or two lines what you took and what changed, then continue. A reference person is never a result and never contacted. If a link can't be read, say so and ask for the text; never guess a profile.`;
 

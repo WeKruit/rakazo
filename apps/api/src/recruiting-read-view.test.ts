@@ -184,4 +184,3 @@ it("refuses a later research page after session revocation", async () => {
   ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   expect(reads.research).toHaveBeenCalledOnce();
 });
-

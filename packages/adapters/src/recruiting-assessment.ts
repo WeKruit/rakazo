@@ -467,8 +467,8 @@ export async function executeRecruitingCandidatesTool(
         roleId: listRoleId,
         ...query,
       });
-      // The review is each person's ranking (the Reviewer's grade). The local-assessment fields
-      // stay empty for Reviewer-graded people, so staging aefd141e (what-happened x5) read
+      // The review is each person's ranking (their saved grade). The local-assessment fields
+      // stay empty for graded people, so staging aefd141e (what-happened x5) read
       // "7 unassessed" beside a 52/Partial grade as a conflicting status in 5 of 5 runs.
       const { assessed: _assessed, unassessed: _unassessed, ...counts } = listed.counts ?? {};
       const result = {
