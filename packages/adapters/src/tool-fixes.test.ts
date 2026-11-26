@@ -123,4 +123,22 @@ describe("tool fixes", () => {
     await run.succeeded("t", {});
     expect(parseToolFixes(memory.doc.content).map((fix) => fix.tool)).toEqual(["t", "u"]);
   });
+
+  it("reports its own save, so the run is not told its memory changed", async () => {
+    // A play 11-26: the unacknowledged save came back as "Memory changed: tool-fixes.md" and
+    // Kruit told the recruiter it had read that file.
+    const memory = store();
+    const saved: string[] = [];
+    const run = createToolFixMemory({
+      memory: memory as never,
+      context,
+      botId: "bot",
+      runId: "run",
+      threadId: "thread",
+      onSaved: (path) => saved.push(path),
+    });
+    await run.failed("t", { a: 1 }, "boom");
+    await run.succeeded("t", {});
+    expect(saved).toEqual(["tool-fixes.md"]);
+  });
 });
