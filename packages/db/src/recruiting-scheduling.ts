@@ -1020,7 +1020,7 @@ export async function bindRecruitingSchedulingOperation(
         value.candidate.email.toLowerCase(),
         value.calendar.sourceId,
         value.calendar.sourceRevision,
-        value.calendar.eventTypeId,
+        value.calendar.eventTypeId ?? null,
         Date.parse(value.calendar.start),
         Date.parse(value.calendar.end),
       ]);
