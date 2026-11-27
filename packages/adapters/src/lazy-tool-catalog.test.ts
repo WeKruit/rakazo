@@ -175,14 +175,12 @@ describe("lazy tool catalog", () => {
 
   // team-stuck-tell-me 11-16: asked to book an interview with no calendar connected, the
   // scheduler searched, found nothing and asked the recruiter for times instead of offering it.
-  it("points a search that finds nothing at connecting the service that would do it", () => {
+  // Like Claude Code's and Pi's tool search: no match is an empty answer, with no instruction.
+  it("answers a search that finds nothing with no tools and nothing else", () => {
     const result = searchCatalog(catalogEntries(multiGroupTools()), {
       query: "get_availability create_calendar_event",
     });
-    expect(result).toMatchObject({
-      tools: [],
-      hint: expect.stringContaining("request_connection"),
-    });
+    expect(result).toEqual({ tools: [] });
   });
 
   it("lists grouped names for an empty query without dumping schemas", () => {
