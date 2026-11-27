@@ -1552,6 +1552,12 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "stop_work",
+    description:
+      "When the person asks you to stop, stop the work running for them: every other turn in this conversation and the people searches still running for it, with their follow-ups. In the account-wide conversation it also stops the work you handed to role teams. Call it before you answer, then say in one line that it stopped. Reminders they set stay.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "start_role",
     description:
       "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's latest message and attached files exactly as they wrote them, and shows the recruiter a card that opens it. Use it when the recruiter names a role that has no team yet, with its JD, link, file or job title; a question about how to start or how to get candidates opens nothing and is answered in words. When they say the role is new, call it directly, and check recruiting_candidates operation roles first only when they may mean a role that already exists. Pass a short title. The role's team cannot see this conversation and receives only what this call hands over: the recruiter's latest message, plus as many of their messages before it as earlier_messages says, copied as written (never retype a JD). When the JD or requirements came in an earlier message and the latest one only says to go on, count back to that message. Use message only for what those copied messages do not hold, such as an email template they approved. The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",

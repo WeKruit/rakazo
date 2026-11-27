@@ -731,6 +731,7 @@ import {
 import { createToolFixMemory, withKnownFix } from "./tool-fixes.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
+import { stopConversationWork } from "./stop-work.js";
 import { recruitingRoundListText } from "./turn-end-guard.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
@@ -10543,6 +10544,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : { ok: true },
             );
           }
+          if (name === "stop_work") {
+            const stopped = await stopConversationWork(deps, run);
+            return finish({
+              ok: true,
+              ...stopped,
+              note: "Stopped. Searches already sent finish at the provider, but nothing more is collected or shown from them.",
+            });
+          }
           if (name === "delegate_to_role") {
             // A saved role by roleId, or a role conversation not saved yet by its groupId.
             const role = args.role_id
@@ -14313,6 +14322,7 @@ export function selectBuiltinToolsForRun(options: {
           "message_bot",
           "delegate_to_role",
           "start_role",
+          "stop_work",
           "handoff_to_bot",
           "message_agent",
           "create_poll",
