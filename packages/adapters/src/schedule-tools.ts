@@ -41,7 +41,8 @@ export function filterBuiltinToolsForRun<T extends { name: string }>(
  * role (finding people, feedback on them, mail, bookings, reminders, notes) runs in that role's
  * conversation, so it is not listed here at all: an option the code would refuse is never shown
  * (Anthropic, "Writing effective tools for agents"; Claude Code subagents get only their own tool
- * list). Branch play s158 11-27: offered here, Kruit spent the turn on feedback and a search that
+ * list). Staging bee1b309 11-27: offered a Connect card here, Kruit asked to connect the calendar
+ * instead of handing the booking over. Branch play s158 11-27: offered here, Kruit spent the turn on feedback and a search that
  * were refused before it handed the work to the role.
  */
 const ACCOUNT_WIDE_TOOLS: ReadonlySet<string> = new Set([
@@ -67,7 +68,6 @@ const ACCOUNT_WIDE_TOOLS: ReadonlySet<string> = new Set([
   "skill_read",
   "web_search",
   "web_fetch",
-  "request_connection",
   "wait_for_work",
   "scratchpad_list",
   "scratchpad_add",
