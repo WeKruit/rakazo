@@ -106,6 +106,7 @@ export function assertSchedulingCall(
         "Booking arguments do not match the exact reviewed candidate, interval and participant scope",
       );
   } else if (
+    !plan.originalEmail ||
     route.resourceId !== plan.mailSourceId ||
     route.resourceRevision !== plan.mailSourceRevision ||
     route.toolName !== "native_instantly_reply_to_email" ||
@@ -143,8 +144,12 @@ export function schedulingPlanReview(
     `Candidate time: ${local(plan.candidate.timeZone, plan.calendar.start)} – ${local(plan.candidate.timeZone, plan.calendar.end)} (${plan.candidate.timeZone})`,
     `Interviewer time: ${local(plan.interviewer.timeZone, plan.calendar.start)} – ${local(plan.interviewer.timeZone, plan.calendar.end)} (${plan.interviewer.timeZone})`,
     `UTC interval: ${plan.calendar.start} – ${plan.calendar.end}; ${plan.calendar.lengthInMinutes} minutes`,
-    `Original conversation: ${plan.originalEmail.subject}`,
-    `Sending mailbox: ${plan.originalEmail.eaccount}`,
+    ...(plan.originalEmail
+      ? [
+          `Original conversation: ${plan.originalEmail.subject}`,
+          `Sending mailbox: ${plan.originalEmail.eaccount}`,
+        ]
+      : []),
     ...(plan.requests?.guests.length
       ? [
           plan.calendar.provider === "google_calendar"
