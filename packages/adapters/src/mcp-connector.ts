@@ -748,7 +748,7 @@ const accountWideRead = (tool: ConnectorTool) =>
 /** Runs whose catalog left out operations, so a search there names where they are done. */
 const operationsHidden = new WeakSet<AdapterContext>();
 const OPERATIONS_ELSEWHERE =
-  "This conversation only reads. Searching for people, contact lookups, mail to candidates, bookings and changes to a role's records are done in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, in the recruiter's own words.";
+  "This conversation only reads. Searching for people, contact lookups, mail to candidates, bookings and changes to a role's records are done in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, in the recruiter's own words; either shows the recruiter the card that opens that conversation. Never tell the recruiter it cannot be done.";
 
 const OUTREACH_CORE = [
   "ensure_role_campaign",

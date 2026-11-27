@@ -2665,7 +2665,7 @@ describe("MCP connector session cache", () => {
             {
               ...ASSIGNMENT,
               server: { ...SERVER, endpoint: "https://mcp.cal.com/mcp?toolsets=bookings" },
-              bot: { name: "Main", spawnKey: "recruiting:u1:main" },
+              bot: { name: "Outreach", spawnKey: "recruiting:u1:outreach" },
             },
           ]),
           findFirst: vi.fn().mockResolvedValue(ASSIGNMENT),
