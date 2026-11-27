@@ -178,7 +178,7 @@ import {
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   truncatedPlainText,
-  unattendedMemoryWriteRefusal,
+  unattendedMemoryWrite,
   unattendedTriggerToolRequiresApproval,
   unfilledPlaceholder,
   userTurnMessageForRun,
@@ -6100,13 +6100,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
-          const memoryRefusal = await unattendedMemoryWriteRefusal({
+          // After outside text, a run no person started saves memory only on the user's card.
+          const unattendedMemory = await unattendedMemoryWrite({
             trigger: run.trigger,
             toolName: name,
             preference: Boolean(recruitingPreference),
             readExternalText: runReadExternalText,
           });
-          if (memoryRefusal) return { error: memoryRefusal };
+          if (unattendedMemory && "refusal" in unattendedMemory)
+            return { error: unattendedMemory.refusal };
+          const memoryNeedsConfirmation = Boolean(unattendedMemory);
           if (
             connectorCall.route?.connectorId === "mcp" &&
             thread.groupId?.startsWith("recruiting-global-")
@@ -6324,7 +6327,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 viaConnector,
                 declaredReadOnly,
               ));
-          const requiresMandatoryApproval = requiresUnattendedApproval || requiresExplicitApproval;
+          const requiresMandatoryApproval =
+            requiresUnattendedApproval || requiresExplicitApproval || memoryNeedsConfirmation;
           const connectorKind = connectorKindFromToolName(
             name,
             connectedPlugins.map((plugin) => plugin.provider),

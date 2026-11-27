@@ -359,32 +359,35 @@ const DURABLE_MEMORY_TOOLS = new Set([
 ]);
 
 export const UNATTENDED_MEMORY_WRITE_REFUSAL =
-  "Nothing was saved. No one started this run, and it has read external text (an email, webhook or web page), so it cannot change memory, preferences or skills. Tell the user what you would save so they can confirm it in a conversation.";
+  "Nothing was saved. This run was started by an outside message or webhook, so it cannot change memory, preferences or skills. Tell the user what you would save so they can confirm it in a conversation.";
 
 export function toolReadsExternalText(toolName: string, viaConnector: boolean): boolean {
   return viaConnector || EXTERNAL_TEXT_BUILTIN_TOOLS.has(toolName);
 }
 
 /**
- * A run no person started (routine, webhook, tickets, research wake, peer message or external
- * message) must not save memory, preferences or skills once it has read external text: that text
- * could otherwise instruct every later run. Business records stay autonomous. `readExternalText`
- * is only consulted for an unattended durable-memory write.
+ * A run no person started (routine, webhook, tickets, research wake, reply check-in, peer message
+ * or external message) must not save memory, preferences or skills on its own once it has read
+ * external text: that text could otherwise instruct every later run. After such a read the save
+ * waits for the user's own confirmation on its card (the user's choice, 11-27); a run whose very
+ * prompt is outside text (webhook, messaging) is refused. Business records stay autonomous.
+ * `readExternalText` is only consulted for an unattended durable-memory write.
  */
-export async function unattendedMemoryWriteRefusal(input: {
+export async function unattendedMemoryWrite(input: {
   trigger: string;
   toolName: string;
   preference: boolean;
   readExternalText: () => boolean | Promise<boolean>;
-}): Promise<string | undefined> {
+}): Promise<{ refusal: string } | { confirm: true } | undefined> {
   if (!isAutomationRunTrigger(input.trigger) && !EXTERNAL_TEXT_TRIGGERS.has(input.trigger))
     return undefined;
   // A teammate handoff carries a person's request on (e.g. Sourcer saving the recruiter's
   // stated preference after reading results), so it keeps the attended run's memory rights.
   if (input.trigger === "bot_message") return undefined;
   if (!input.preference && !DURABLE_MEMORY_TOOLS.has(input.toolName)) return undefined;
-  if (EXTERNAL_PROMPT_TRIGGERS.has(input.trigger) || (await input.readExternalText()))
-    return UNATTENDED_MEMORY_WRITE_REFUSAL;
+  if (EXTERNAL_PROMPT_TRIGGERS.has(input.trigger))
+    return { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL };
+  if (await input.readExternalText()) return { confirm: true };
   return undefined;
 }
 

@@ -22,7 +22,7 @@ import {
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   UNATTENDED_MEMORY_WRITE_REFUSAL,
-  unattendedMemoryWriteRefusal,
+  unattendedMemoryWrite,
   unattendedTriggerToolRequiresApproval,
   withoutHiddenTools,
 } from "./action-approval.js";
@@ -503,14 +503,14 @@ describe("externalTextTriggerToolRefusal", () => {
   });
 });
 
-describe("unattendedMemoryWriteRefusal", () => {
+describe("unattendedMemoryWrite", () => {
   const refusal = (
     trigger: string,
     toolName: string,
     readExternalText: boolean,
     preference = false,
   ) =>
-    unattendedMemoryWriteRefusal({
+    unattendedMemoryWrite({
       trigger,
       toolName,
       preference,
@@ -522,8 +522,8 @@ describe("unattendedMemoryWriteRefusal", () => {
     expect(await refusal("bot_message", "recruiting_feedback", true, true)).toBeUndefined();
   });
 
-  it.each(["routine", "tickets", "recruiting_research", "cloud_agent"])(
-    "holds memory, preference and skill writes in a %s run after external text",
+  it.each(["routine", "tickets", "recruiting_research", "recruiting_checkin", "cloud_agent"])(
+    "asks the user to confirm memory, preference and skill writes in a %s run after external text",
     async (trigger) => {
       for (const name of [
         "remember",
@@ -533,16 +533,16 @@ describe("unattendedMemoryWriteRefusal", () => {
         "skill_update",
         "skill_delete",
       ])
-        expect(await refusal(trigger, name, true)).toBe(UNATTENDED_MEMORY_WRITE_REFUSAL);
-      expect(await refusal(trigger, "recruiting_feedback", true, true)).toBe(
-        UNATTENDED_MEMORY_WRITE_REFUSAL,
-      );
+        expect(await refusal(trigger, name, true)).toEqual({ confirm: true });
+      expect(await refusal(trigger, "recruiting_feedback", true, true)).toEqual({ confirm: true });
       expect(await refusal(trigger, "remember", false)).toBeUndefined();
     },
   );
 
-  it.each(["webhook", "messaging"])("treats a %s prompt as external text", async (trigger) => {
-    expect(await refusal(trigger, "remember", false)).toBe(UNATTENDED_MEMORY_WRITE_REFUSAL);
+  it.each(["webhook", "messaging"])("refuses a %s prompt's memory write", async (trigger) => {
+    expect(await refusal(trigger, "remember", false)).toEqual({
+      refusal: UNATTENDED_MEMORY_WRITE_REFUSAL,
+    });
   });
 
   it("keeps business records autonomous and attended runs unchanged", async () => {
