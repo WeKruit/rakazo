@@ -690,23 +690,6 @@ async function roleCampaignLeadEmails(prisma: PrismaClient, actor: Actor, roleId
 }
 
 /** Resolve a named person through the role's CRM-bound contacts and saved candidate pool. */
-/**
- * The plain fact a lone match with no saved email leads with (team-has-no-email 11-20: main chat
- * resolved Bhargav with no email, then drafted and asked to connect Gmail before saying nothing
- * could reach him).
- */
-function noSavedEmail(
-  result: { status: string; matches: { name: string | null; email: string | null }[] },
-  nameOrEmail: string,
-): { next?: string } {
-  const only = result.status === "resolved" ? result.matches[0] : undefined;
-  return only && !only.email
-    ? {
-        next: `${only.name ?? nameOrEmail} has no saved email, so nothing can be sent to them yet, and connecting a mailbox does not change that. Open your reply with that in one plain line (nothing was sent), then offer to look up their email; any draft asked for comes after that line.`,
-      }
-    : {};
-}
-
 export async function resolveRecruitingContact(
   deps: {
     prisma: PrismaClient;
@@ -759,9 +742,8 @@ export async function resolveRecruitingContact(
         bestLookedUpEmail(found, match.linkedinUrl, match.candidateKey)?.address ??
         null;
   if (context.runId) rememberResolvedContactEmails(context.runId, result.matches);
-  const noEmail = noSavedEmail(result, input.nameOrEmail);
   const contacts = result.matches.filter((match) => match.crmCandidateId);
-  if (!target || crm !== "read" || !contacts.length) return { ...result, crm, ...noEmail };
+  if (!target || crm !== "read" || !contacts.length) return { ...result, crm };
   // The Inbox's source: the role's stored correspondence is the primary "latest mail" answer.
   let messages: ReturnType<typeof RecruitingCrmRoleMailReadSchema.parse>["messages"] = [];
   let correspondence: "read" | "unavailable" = "read";
@@ -784,7 +766,6 @@ export async function resolveRecruitingContact(
   return {
     ...result,
     crm,
-    ...noEmail,
     matches: result.matches.map((match) => {
       if (!match.crmCandidateId) return match;
       const mine = messages
@@ -1063,7 +1044,6 @@ export async function resolveRecruitingContactAcrossRoles(
       status,
       matches,
       crm,
-      ...noSavedEmail({ status, matches }, nameOrEmail),
     };
   const sends = await productEmailSends(deps.prisma, actor);
   return {
