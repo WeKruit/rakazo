@@ -712,6 +712,7 @@ async function mailReached(journey, tag, limitMs) {
 // Real sign-ups carry the recruiter's own name, so a template Kruit signs can use it.
 const ACCOUNT_NAME = "Alex Morgan";
 
+let playsStarted = 0;
 async function play(journey, label, owner, mailbox, out) {
   const user = client();
   let credentials = mailbox;
@@ -757,7 +758,9 @@ async function play(journey, label, owner, mailbox, out) {
   const groupsBefore = new Set((await groupsOf(rpc)).map((group) => group.id));
   // A per-play tag, so a journey on a reused account names a role and recipients of its own. Plays
   // of one journey start in the same minute, so the play number is part of it.
-  const tag = `${new Date(startedAt).toISOString().slice(11, 16).replace(":", "")}${label.split("#")[1] ?? ""}`;
+  // Each play in this run gets its own number: two journeys started in the same minute share
+  // a sample number, and with it their candidates' addresses and each other's mail.
+  const tag = `${new Date(startedAt).toISOString().slice(11, 16).replace(":", "")}${++playsStarted}`;
   // Plays of one journey started together still talk differently.
   const seed = [...label].reduce((sum, char) => sum + char.charCodeAt(0), Number(tag));
   journey = { ...journey, variation: variationFor(seed) };
