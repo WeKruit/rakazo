@@ -17,11 +17,12 @@ import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
-import { changedPaths } from "./campaign-send-card.js";
+import { changedPaths, sendCard } from "./campaign-send-card.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 import type * as RecruitingCandidatesToolModule from "./recruiting-candidates-tool.js";
+import { withOpenQuestions } from "./reply-open-questions.js";
 import type * as ScheduleToolsModule from "./schedule-tools.js";
 import { RoutineUpdateError } from "./schedule-tools.js";
 
@@ -247,6 +248,13 @@ function fixture({
     createdAt: new Date(),
   };
   const externalEffect = {
+    deleteMany: vi.fn(async ({ where }: { where: { id: string; status: string } }) => {
+      const index = effects.findIndex(
+        (effect) => effect.id === where.id && effect.status === where.status,
+      );
+      if (index >= 0) effects.splice(index, 1);
+      return { count: index >= 0 ? 1 : 0 };
+    }),
     findFirst: vi.fn(
       async ({ where }: { where: { id?: string; status?: string; kind?: unknown } }) =>
         effects.find(
@@ -1756,6 +1764,41 @@ describe("native Instantly activation card", () => {
     expect(changedPaths(undefined, shown)).toEqual(["card not recorded"]);
   });
 
+  it("catches a follow-up changed after its send card was shown", () => {
+    // Audit 11-26: only the first email was compared, so later steps could change after approval.
+    const followUp = { after: "3 days after the email before", subject: "", body: "<p>Bump</p>" };
+    const display = {
+      campaignName: "Founding Engineer",
+      status: "Draft",
+      mailbox: "me@x.test",
+      recipients: [{ name: "Ada", email: "a@x.test" }],
+      recipientCount: 1,
+      stopOnReply: true,
+      schedule: "now",
+      firstEmail: { subject: "Hi", body: "<p>Hello</p>" },
+      followUps: [followUp],
+    };
+    expect(
+      changedPaths(
+        sendCard(display, false),
+        sendCard({ ...display, followUps: [{ ...followUp, body: "<p>Changed</p>" }] }, false),
+      ),
+    ).toEqual(["followUps[0].body"]);
+    expect(
+      changedPaths(
+        sendCard(display, false),
+        sendCard(
+          {
+            ...display,
+            followUps: undefined,
+            recipients: [{ name: "Ada", email: "a@x.test", followUps: [followUp] }],
+          },
+          false,
+        ),
+      ),
+    ).toEqual(["recipients[0].followUps", "followUps"]);
+  });
+
   it("sends the card confirmed on a second identical call, not the first call's refusal", async () => {
     // Gate 44c1ad44: the first activate_campaign was refused, the same call again made the card,
     // and the confirmed replay found the first call's stored refusal, so nothing was sent.
@@ -2065,7 +2108,8 @@ describe.each([false, true])("a reply to a candidate (catalog: %s)", (catalog) =
         resourceRevision: 1,
         toolName: "reply_to_email",
       },
-      inputSchema: { type: "object" },
+      // The schema the connector lists for a reply: the open questions are required.
+      inputSchema: withOpenQuestions({ type: "object" }),
     });
 
   it("shows the questions the recruiter never answered on its card, and still drafts it", async () => {
@@ -2098,6 +2142,32 @@ describe.each([false, true])("a reply to a candidate (catalog: %s)", (catalog) =
     await f.run();
     expect(f.execute).toHaveBeenCalledOnce();
     expect(f.execute.mock.calls[0]?.[0].args).toEqual(replyArgs);
+  });
+
+  it("shows one card at a time when a step asks for two confirmations together", async () => {
+    // Play fix-all/play-2: a reply and a calendar invite in one step; the second failed with
+    // "Could not pause this run for approval" and was lost.
+    const f = replyFixture();
+    const call = (body: string) => {
+      const args = { ...replyArgs, body_text: body, open_questions: [] };
+      return catalog ? { id: catalogEntries([f.providerTools[0]!])[0]?.id, arguments: args } : args;
+    };
+    f.runtimeRun.mockImplementationOnce(async function* (request: AgentRunRequest) {
+      const tool = catalog ? catalogExecuteToolName("mcp") : "renamed_reply";
+      f.results.push(
+        ...(await Promise.all([
+          request.executeTool!(tool, call("First draft."), "first"),
+          request.executeTool!(tool, call("Second draft."), "second"),
+        ])),
+      );
+      if (!f.results.some((result) => isApprovalPausedResult(result)))
+        yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.results.filter((result) => isApprovalPausedResult(result))).toHaveLength(1);
+    expect(JSON.stringify(f.results)).toContain("Not run yet");
+    expect(f.effects).toHaveLength(1);
   });
 });
 

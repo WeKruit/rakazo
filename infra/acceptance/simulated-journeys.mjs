@@ -398,11 +398,13 @@ export const JOURNEYS = [
       "11-26 user: test the whole communication end to end (outreach, replies landing, Kruit's follow-up, booking); no test had a candidate who answers",
     account: "mailbox",
     sends: true,
+    // On a branch backend the account's own Google Calendar is connected, so the call can be booked.
+    calendar: true,
     chinese: true,
     maxTurns: 12,
     persona: `${AGENCY_RECRUITER} You emailed two candidates for a client role and now you want to handle their answers through Kruit, from first email to a booked call.`,
     facts: (recipients, tag) =>
-      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. The client's hiring manager is Priya, free for a 30-minute call Tuesday to Thursday 1–5 pm Central. You also know, but do not volunteer until Kruit asks you: the client pays up to $10k relocation, and it cannot sponsor or transfer visas.\nTwo candidates you found yourself:\n${twoInboxes(
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. The client's hiring manager is Priya Shah <${recipients[0].replace("@", `+priya${tag}@`)}>, free for a 30-minute call Tuesday to Thursday 1–5 pm Central. You also know, but do not volunteer until Kruit asks you: the client pays up to $10k relocation, and it cannot sponsor or transfer visas.\nTwo candidates you found yourself:\n${twoInboxes(
         recipients,
         tag,
       )
@@ -417,7 +419,7 @@ export const JOURNEYS = [
           name: "Ethan Park",
           address: ethan,
           persona:
-            "Ethan Park, a senior data engineer in Portland with 8 years of Spark and Kafka, on an H-1B visa, open to a move if the pay is right. In your first answer you ask the base pay, whether they help with relocation to Seattle, and whether they can transfer your H-1B. You can talk Tuesday or Wednesday 2–4 pm Central. If an answer dodges one of your questions, ask it again. Once a time is proposed that fits, you accept it.",
+            "Ethan Park, a senior data engineer in Portland with 8 years of Spark and Kafka, on an H-1B visa, open to a move if the pay is right. In your first answer you ask the base pay, whether they help with relocation to Seattle, and whether they can transfer your H-1B. You can talk Tuesday or Wednesday 2–4 pm Central. If an answer dodges one of your questions, ask it again. Your green card is weeks away, so a 'no' on the visa does not end it for you: you still want the call. Once a time is proposed that fits, you accept it.",
         },
         {
           name: "Ada Lin",
@@ -433,7 +435,7 @@ export const JOURNEYS = [
       "Then step away (wait) once, without asking anything, to see whether Kruit tells you about replies on its own; when you are back, ask whether anyone replied and what they said, unless Kruit already told you. Met only when Kruit's account of each reply matches what the candidate actually wrote.",
       "Ask Kruit, in a few words, to answer Ethan and offer him a call; never hint that it should ask you anything first. Met only when the reply Kruit writes states only facts you gave it (never invents relocation or visa terms), puts what you did not tell it in front of you before anything is sent (it asks you, or its reply card lists Ethan's unanswered questions), and the reply card names Ethan in his own email thread. Answer them as you would (on the card, edit the reply so it carries your answers, then Send), then later ask Kruit what it now knows about relocation and visa for this role: met only when it answers from what you said, without asking you again.",
       "Tell Kruit Ada must not be emailed again. Met only when Kruit says truthfully what it did and no later email goes to her.",
-      "Once Ethan has answered with a time, ask Kruit to book the 30-minute call with Priya and send Ethan the invitation; approve a card that names Ethan, the time and the content. If no calendar is connected, met when Kruit says so plainly, shows how to connect, and keeps the booking for afterwards.",
+      "Once Ethan has answered with a time, ask Kruit to book the 30-minute call with Priya and send Ethan the invitation; approve a card that names Ethan, Priya, the time and the content. Met only when the booking is on the calendar at a time Ethan offered and the role's interview page shows it. If no calendar is connected, met when Kruit says so plainly, shows how to connect, and keeps the booking for afterwards.",
     ],
   },
   {

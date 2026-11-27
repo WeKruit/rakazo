@@ -547,6 +547,117 @@ const RECEIPT_SQL = Prisma.sql`COALESCE(result #> '{structuredContent,result}', 
 export const CAMPAIGN_SEND_RECEIPT_ID_SQL = Prisma.sql`(CASE WHEN result -> 'error' IS NULL AND ${RECEIPT_SQL} -> 'error' IS NULL THEN ${RECEIPT_SQL} ->> 'campaignId' END)`;
 
 /**
+ * This user's other campaigns that emailed any of these people on a confirmed send, newest
+ * first: the mail service files a person's reply under their newest campaign, so a role's reply
+ * can sit in one of these. At most `limit + 1` ids, so a caller can tell there were more.
+ */
+export async function otherCampaignsThatEmailed(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  owner: { spaceId: string; userId: string },
+  campaignIds: readonly string[],
+  emails: readonly string[],
+  limit: number,
+): Promise<string[]> {
+  const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+  if (!wanted.length) return [];
+  const rows = await prisma.$queryRaw<{ campaign_id: string }[]>`
+    SELECT ${CAMPAIGN_SEND_RECEIPT_ID_SQL} AS campaign_id FROM external_effects e
+    WHERE e."spaceId" = ${owner.spaceId} AND e.status = 'completed'
+      AND EXISTS (SELECT 1 FROM runs r WHERE r.id = e."runId"
+        AND r."userId" = ${owner.userId} AND r."spaceId" = ${owner.spaceId})
+      AND e.kind LIKE '%activate_campaign'
+      AND ${CAMPAIGN_SEND_RECEIPT_ID_SQL} IS NOT NULL
+      AND NOT (${CAMPAIGN_SEND_RECEIPT_ID_SQL} = ANY(${[...campaignIds]}::text[]))
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(
+          CASE WHEN jsonb_typeof(${RECEIPT_SQL} -> 'recipients') = 'array'
+            THEN ${RECEIPT_SQL} -> 'recipients' ELSE '[]'::jsonb END
+        ) AS recipient(email)
+        WHERE lower(btrim(recipient.email)) = ANY(${wanted}::text[]))
+    GROUP BY 1 ORDER BY max(e."updatedAt") DESC LIMIT ${limit + 1}`;
+  return rows.map((row) => row.campaign_id);
+}
+
+/** Which of these people a confirmed send of this user from one of these campaigns emailed. */
+export async function confirmedSendRecipients(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  owner: { spaceId: string; userId: string },
+  campaignIds: readonly string[],
+  emails: readonly string[],
+): Promise<Set<string>> {
+  const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+  if (!wanted.length || !campaignIds.length) return new Set();
+  const rows = await prisma.$queryRaw<{ email: string }[]>`
+    SELECT DISTINCT lower(btrim(recipient.email)) AS email FROM external_effects e
+    CROSS JOIN LATERAL jsonb_array_elements_text(
+      CASE WHEN jsonb_typeof(${RECEIPT_SQL} -> 'recipients') = 'array'
+        THEN ${RECEIPT_SQL} -> 'recipients' ELSE '[]'::jsonb END
+    ) AS recipient(email)
+    WHERE e."spaceId" = ${owner.spaceId} AND e.status = 'completed'
+      AND EXISTS (SELECT 1 FROM runs r WHERE r.id = e."runId"
+        AND r."userId" = ${owner.userId} AND r."spaceId" = ${owner.spaceId})
+      AND e.kind LIKE '%activate_campaign'
+      AND ${CAMPAIGN_SEND_RECEIPT_ID_SQL} = ANY(${[...campaignIds]}::text[])
+      AND lower(btrim(recipient.email)) = ANY(${wanted}::text[])`;
+  return new Set(rows.map((row) => row.email));
+}
+
+/**
+ * The mailbox of another campaign of this user whose received emails are a role's: a run of this
+ * user created the campaign, and a confirmed send from one of the role's own campaigns (created
+ * in the role's conversation) emailed every sender. Null when either is not so.
+ */
+export async function roleRepliesCampaignMailbox(
+  prisma: Pick<PrismaClient, "$queryRaw" | "externalEffect">,
+  owner: { spaceId: string; userId: string },
+  input: {
+    serverId: string;
+    roleId: string;
+    threadId: string;
+    campaignId: string;
+    senders: readonly string[];
+  },
+): Promise<string | null> {
+  const created = {
+    spaceId: owner.spaceId,
+    kind: "instantly_role_campaign",
+    status: "completed",
+  } as const;
+  const campaign = await prisma.externalEffect.findFirst({
+    where: {
+      ...created,
+      run: { userId: owner.userId, spaceId: owner.spaceId },
+      AND: [
+        { request: { path: ["serverId"], equals: input.serverId } },
+        { result: { path: ["campaignId"], equals: input.campaignId } },
+      ],
+    },
+    select: { result: true },
+  });
+  const result = campaign?.result as { eaccount?: unknown } | null | undefined;
+  if (typeof result?.eaccount !== "string" || !input.senders.length) return null;
+  const roleCampaigns = await prisma.externalEffect.findMany({
+    where: {
+      ...created,
+      run: { userId: owner.userId, spaceId: owner.spaceId, threadId: input.threadId },
+      AND: [
+        { request: { path: ["serverId"], equals: input.serverId } },
+        { request: { path: ["roleId"], equals: input.roleId } },
+      ],
+    },
+    select: { result: true },
+  });
+  const ids = roleCampaigns.flatMap((effect) => {
+    const id = (effect.result as { campaignId?: unknown } | null)?.campaignId;
+    return typeof id === "string" && id !== input.campaignId ? [id] : [];
+  });
+  const sent = await confirmedSendRecipients(prisma, owner, ids, input.senders);
+  return input.senders.every((sender) => sent.has(sender.trim().toLowerCase()))
+    ? result.eaccount.trim().toLowerCase()
+    : null;
+}
+
+/**
  * The people of a planned send whom this account already sent a confirmed first email to from
  * another campaign (a second role for the same job, an earlier send), with when. Same person, two
  * campaigns, two first emails is the duplicate a card must not hide.

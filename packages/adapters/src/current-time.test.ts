@@ -8,6 +8,13 @@ describe("formatCurrentTimeInstruction", () => {
     expect(line).not.toContain(".123");
   });
 
+  it("gives the dates of the coming week, so an offered weekday is never one already gone", () => {
+    const line = formatCurrentTimeInstruction(new Date("2026-11-26T15:49:00Z"));
+    expect(line).toContain(
+      "Friday 2026-11-27, Saturday 2026-11-28, Sunday 2026-11-29, Monday 2026-11-30, Tuesday 2026-12-01, Wednesday 2026-12-02, Thursday 2026-12-03",
+    );
+  });
+
   it("tells the model not to guess the date from training data or quoted timestamps", () => {
     const line = formatCurrentTimeInstruction(new Date("2026-01-01T00:00:00Z"));
     expect(line).toContain("Never infer today's date from your training data");

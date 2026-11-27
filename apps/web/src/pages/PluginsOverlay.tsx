@@ -120,8 +120,6 @@ const PERSONAL_ENDPOINTS = [
   "https://mcp.cal.com/mcp",
 ];
 
-const CALENDAR_ENDPOINTS = [GOOGLE_CALENDAR_ENDPOINT, "https://mcp.cal.com/mcp"];
-
 function personalService(server: McpServer) {
   return PERSONAL_ENDPOINTS.includes(serviceEndpoint(server));
 }
@@ -427,11 +425,10 @@ export function PluginsOverlay({
     const recipients = new Map<string, string[] | undefined>();
     if (endpoint === GMAIL_MCP_ENDPOINT) {
       recipients.set(coordinatorBotId, GMAIL_READ_TOOLS);
-      if (recruitingBotIds?.scheduling)
-        recipients.set(recruitingBotIds.scheduling, GMAIL_DRAFT_TOOLS);
-      // Outreach sends from the recruiter's own Gmail; every send waits for its own card.
-      if (recruitingBotIds?.outreach)
-        recipients.set(recruitingBotIds.outreach, [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS]);
+      // Outreach sends from the recruiter's own Gmail and Scheduling proposes times from it;
+      // every send waits for its own card.
+      for (const botId of [recruitingBotIds?.scheduling, recruitingBotIds?.outreach])
+        if (botId) recipients.set(botId, [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS]);
     } else if (endpoint === GOOGLE_CALENDAR_ENDPOINT) {
       recipients.set(coordinatorBotId, GOOGLE_CALENDAR_READ_TOOLS);
       if (recruitingBotIds?.scheduling)
@@ -470,17 +467,6 @@ export function PluginsOverlay({
       if (!assignment.allowAllTools && !assignment.allowedTools.length)
         throw new Error(t`Could not connect`);
     }
-    // A recruiter books on one calendar: connecting it disconnects the other.
-    if (CALENDAR_ENDPOINTS.includes(endpoint))
-      for (const other of all)
-        if (
-          other.id !== serverId &&
-          other.hasSecret &&
-          CALENDAR_ENDPOINTS.includes(serviceEndpoint(other))
-        ) {
-          if (!current()) return;
-          await rpc.mcp.oauth.disconnect({ serverId: other.id });
-        }
     if (current()) await refresh();
   }
 

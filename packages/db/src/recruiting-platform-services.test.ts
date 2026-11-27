@@ -73,7 +73,10 @@ function fixture(
         JSON.stringify(where).includes(":reviewer")
           ? (options.reviewers ?? [])
           : JSON.stringify(where).includes(":scheduling")
-            ? (options.scheduling ?? [])
+            ? [
+                ...(options.scheduling ?? []),
+                ...(JSON.stringify(where).includes(":outreach") ? (options.outreach ?? []) : []),
+              ]
             : options.outreach && JSON.stringify(where).includes(":outreach")
               ? options.outreach
               : (missing[current] ?? []).map((id) => ({
@@ -90,7 +93,9 @@ function fixture(
       count: vi.fn(async () => options.linked ?? 0),
       findMany: vi.fn(async ({ where }: { where: unknown }) =>
         options.gmailGrants && JSON.stringify(where).includes("serverId")
-          ? options.gmailGrants
+          ? options.gmailGrants.filter((grant) =>
+              JSON.stringify(where).includes(`"${grant.botId}"`),
+            )
           : (options.grants ?? []),
       ),
       updateMany: vi.fn(async () => ({ count: 1 })),
@@ -351,7 +356,7 @@ describe("ensurePlatformServices", () => {
     );
   });
 
-  it("lets Outreach send from a connected Gmail, adding only the send tools to its grant", async () => {
+  it("lets Outreach and Scheduling send from a connected Gmail, adding only the send tools", async () => {
     const drafts = [
       "get_message",
       "get_thread",
@@ -363,15 +368,18 @@ describe("ensurePlatformServices", () => {
     const f = fixture({
       gmail: [{ id: "gmail" }],
       outreach: [{ id: "outreach-bot" }],
+      scheduling: [{ id: "scheduling-bot" }],
       gmailGrants: [
         { botId: "outreach-bot", serverId: "gmail", allowAllTools: false, allowedTools: drafts },
+        { botId: "scheduling-bot", serverId: "gmail", allowAllTools: false, allowedTools: drafts },
       ],
     });
     await ensurePlatformServices(f.prisma, actor);
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({ botId: "outreach-bot", serverId: "gmail" }),
-      data: { allowedTools: [...drafts, "send_message", "reply", "forward"] },
-    });
+    for (const botId of ["outreach-bot", "scheduling-bot"])
+      expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ botId, serverId: "gmail" }),
+        data: { allowedTools: [...drafts, "send_message", "reply", "forward"] },
+      });
   });
 
   it("connects every crew to the product's outreach mail, with no key from the user", async () => {

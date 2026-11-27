@@ -280,6 +280,22 @@ async function main() {
             return Response.json({ message: String(error) }, { status: 404 });
           }
         }
+        // A served backend's calendar: a play allows access on the emulated consent screen (POST
+        // {authorizationUrl} → the redirect back with its code) and reads what was booked (GET).
+        if (serveMode && new URL(request.url).pathname === "/__e2e/calendar") {
+          if (request.method !== "POST")
+            return Response.json(thirdParties.googleCalendar.events(), {
+              headers: { "cache-control": "no-store" },
+            });
+          const body = (await request.json()) as { authorizationUrl?: string };
+          try {
+            return Response.json({
+              redirect: thirdParties.googleCalendar.consent(String(body.authorizationUrl ?? "")),
+            });
+          } catch (error) {
+            return Response.json({ message: String(error) }, { status: 400 });
+          }
+        }
         activeRequests += 1;
         try {
           return await handles.app.fetch(request);

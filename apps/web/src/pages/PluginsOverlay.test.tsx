@@ -589,7 +589,17 @@ it("gives a personal Gmail connection narrow native access to the current coordi
     ["legacy-main", ["get_message", "get_thread", "search_threads"]],
     [
       "managed-scheduling",
-      ["get_message", "get_thread", "search_threads", "list_drafts", "get_draft", "create_draft"],
+      [
+        "get_message",
+        "get_thread",
+        "search_threads",
+        "list_drafts",
+        "get_draft",
+        "create_draft",
+        "send_message",
+        "reply",
+        "forward",
+      ],
     ],
     [
       "managed-outreach",
@@ -632,7 +642,7 @@ it.each([
   expect(scheduling).not.toContain("call_api_operation");
 });
 
-it("gives Scheduling its calendar access on reconnect and keeps only one calendar connected", async () => {
+it("gives Scheduling its calendar access on reconnect and leaves another calendar connected", async () => {
   const endpoint = "https://calendarmcp.googleapis.com/mcp/v1";
   const booking = server("Booking", {
     endpoint: "https://mcp.cal.com/mcp",
@@ -663,7 +673,7 @@ it("gives Scheduling its calendar access on reconnect and keeps only one calenda
   await act(async () => button(host, "Connect").click());
   expect(api.approve.mock.calls.map(([input]) => input.botId)).toEqual(["main", "scheduling"]);
   expect(api.approve.mock.calls[1]![0].allowedTools).toContain("create_event");
-  expect(api.disconnect.mock.calls).toEqual([[{ serverId: "Booking" }]]);
+  expect(api.disconnect).not.toHaveBeenCalled();
 });
 
 it("shows a Gmail sign-in that went through even when giving the assistants access fails", async () => {

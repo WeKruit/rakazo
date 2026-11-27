@@ -115,6 +115,7 @@ import {
   formatSkillsCatalogInstruction,
   GMAIL_MCP_ENDPOINT,
   GMAIL_SEND_TOOLS,
+  GOOGLE_CALENDAR_ENDPOINT,
   hideVendorBlocks,
   hideVendorNames,
   humanizeToolName,
@@ -393,6 +394,11 @@ import {
   readCalBookingSnapshot,
 } from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
+import {
+  GOOGLE_CALENDAR_EVENT_WRITES,
+  googleCalendarApprovalFacts,
+} from "./google-calendar-approval.js";
+import { schedulingNextStep } from "./scheduling-next-step.js";
 import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
@@ -544,6 +550,8 @@ import {
   modelAcceptsImageInput,
   modelIdSupportsImages,
 } from "./model-vision.js";
+import { outreachStopRefusal, outreachStops } from "./outreach-stops.js";
+import { ownMailboxSendRefusal } from "./own-mailbox-sends.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
@@ -628,6 +636,7 @@ import {
   openQuestionsAnsweredNote,
   openQuestionsForEmail,
   takeOpenQuestions,
+  withoutOpenQuestions,
 } from "./reply-open-questions.js";
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
@@ -1223,8 +1232,6 @@ export { shortQuestion };
  * A handed-in stage used to stay silent for 20-200 s while the specialist read context and ran
  * slow tools. Its first step runs at low thinking and opens with one line the recruiter sees.
  */
-const SCHEDULING_PREPARE_NEXT_STEP =
-  "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
 /** How recent a finished run's one-line reply must be for the next run's answer to take its place. */
 const LINE_TAKEOVER_MS = 120_000;
 const HANDOFF_STAGE_NOTE =
@@ -3816,6 +3823,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let unchangedVisualStreak: UnchangedVisualStreak = { count: 0 };
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
+        // Set once this run shows an approval card; a second card in the same step waits for it.
+        let approvalCardShown = false;
         let handedOff = false;
         let handedOffAt: Date | undefined;
         // Gate b2005684, one-off-email: the coordinator saved the address after handing the send on,
@@ -5247,10 +5256,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: sanitizeConnectorError(error, runSecrets),
                 code: "SCHEDULING_PLAN_UNAVAILABLE",
                 dispatched: false,
-                // A failed draft or plan read left agents stuck on "not found"; prepare is the path.
+                // A failed draft or plan read left agents stuck on "not found"; the next step is
+                // the booking path of the calendar this bot actually holds.
                 ...(operation === "book" || operation === "confirm"
                   ? {}
-                  : { next: SCHEDULING_PREPARE_NEXT_STEP }),
+                  : {
+                      next: await schedulingNextStep(deps.prisma, {
+                        spaceId: run.spaceId,
+                        userId: run.userId,
+                        botId: bot.id,
+                      }),
+                    }),
               };
             }
           }
@@ -5875,7 +5891,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const liveSchema = (resolvedTool ?? connectorTools.get(name))?.inputSchema;
               if (liveSchema) {
                 try {
-                  assertConnectorToolArgs(liveSchema, args);
+                  assertConnectorToolArgs(withoutOpenQuestions(liveSchema), args);
                 } catch (error) {
                   return { error: sanitizeConnectorError(error) };
                 }
@@ -6140,6 +6156,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return {
               error: `This account already sent ${OWN_MAILBOX_DAILY_SENDS} emails from the recruiter's own mailbox in the last 24 hours, the daily limit that protects it from being flagged as spam. Tell the recruiter the rest can go out tomorrow; never try another way to send them.`,
             };
+          // The checks a campaign send makes, before a card is shown for someone it must not reach.
+          if (
+            connectorCall.route?.connectorId === "mcp" &&
+            nativeMcpWriteServer?.endpoint?.replace(/\/$/, "") === GMAIL_MCP_ENDPOINT &&
+            connectorCall.route.toolName === "send_message" &&
+            Array.isArray(args.to) &&
+            typeof args.to[0] === "string"
+          ) {
+            const refusal = await ownMailboxSendRefusal(deps.prisma, context, {
+              to: args.to[0],
+              replyThreadId: typeof args.replyThreadId === "string" ? args.replyThreadId : undefined,
+              resend: args.resend === true,
+            });
+            if (refusal) return { error: refusal };
+          }
           // Every email send shows its card: the card is the recruiter's confirmation.
           const sendOperation =
             connectorCall.route?.connectorId === "mcp"
@@ -6194,6 +6225,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             nativeMcpUrl &&
             `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
               "https://mcp.cal.com/mcp";
+          const googleCalendarWrite =
+            connectorCall.route?.connectorId === "mcp" &&
+            GOOGLE_CALENDAR_EVENT_WRITES.includes(connectorCall.route.toolName) &&
+            nativeMcpUrl &&
+            `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
+              GOOGLE_CALENDAR_ENDPOINT;
           const authorizeCalendar = async (route: NonNullable<typeof connectorCall.route>) => {
             const { server } = await requireMcpToolAssignment(
               deps.prisma,
@@ -7373,6 +7410,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
 
+            // A Google Calendar card shows the event a change targets and what the calendar
+            // already holds then; the request it approves stays exactly as the agent made it.
+            if (googleCalendarWrite && deps.connector && connectorCall.route)
+              approvalArgs = {
+                ...args,
+                ...(await googleCalendarApprovalFacts({
+                  connector: deps.connector,
+                  context,
+                  route: connectorCall.route,
+                  args,
+                  authorize: async (route) => {
+                    const { server } = await requireMcpToolAssignment(
+                      deps.prisma,
+                      context,
+                      route,
+                      route.toolName,
+                    );
+                    const url = server.endpoint ? URL.parse(server.endpoint) : null;
+                    if (
+                      !url ||
+                      `${url.origin}${url.pathname.replace(/\/$/, "")}` !== GOOGLE_CALENDAR_ENDPOINT
+                    )
+                      throw new IsolationError();
+                  },
+                })),
+              };
+
             let crmOperation:
               | "crm_bind_candidate_role"
               | "crm_update_candidate_stage"
@@ -7484,8 +7548,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const at = repeats.get(r.email.toLowerCase());
                   return at ? { ...r, alreadyEmailedAt: at } : r;
                 });
+              // Nobody stopped, on hold or passed gets a card, the same check the send makes.
+              const stops =
+                approvalRoute.toolName === "native_instantly_activate_campaign" &&
+                instantlyActivation?.recipients.length
+                  ? await outreachStops(
+                      deps.prisma,
+                      context,
+                      thread.activeRecruitingRoleId ?? null,
+                      instantlyActivation.recipients.map((r) => r.email),
+                    )
+                  : new Map();
               // A send card is only for something that would send: an email and its recipients.
               const unsendable =
+                (stops.size ? outreachStopRefusal(stops) : null) ??
                 (repeats.size && args.resend !== true ? repeatedSendRefusal(repeats) : null) ??
                 (approvalRoute.toolName === "native_instantly_activate_campaign" && !campaignId
                   ? NO_CAMPAIGN_TO_ACTIVATE
@@ -7493,10 +7569,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 instantlyActivation?.refusal ??
                 (instantlyActivation?.firstEmail === null
                   ? "This campaign has no email yet; save it with ensure_role_campaign steps, then activate again."
-                  : instantlyActivation?.firstEmail &&
-                      unfilledPlaceholder(
-                        `${instantlyActivation.firstEmail.subject}\n${instantlyActivation.firstEmail.body}`,
-                      )
+                  : instantlyActivation &&
+                      [
+                        instantlyActivation.firstEmail,
+                        ...(instantlyActivation.followUps ?? []),
+                        ...instantlyActivation.recipients.flatMap((r) => [
+                          r.firstEmail,
+                          ...(r.followUps ?? []),
+                        ]),
+                      ].some((email) => email && unfilledPlaceholder(`${email.subject}\n${email.body}`))
                     ? `${PLACEHOLDER_NOTE} Save the corrected email with ensure_role_campaign steps, then activate again.`
                     : instantlyActivation?.recipientCount === 0
                       ? "This campaign has no recipients yet. Add the people the recruiter named (recruiting_candidates) with add_shortlist_leads, then activate again."
@@ -7792,6 +7873,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 };
               approvalBlock.approvalEvidenceHash = calendarApprovalHash;
             }
+            // Two confirmations asked in one step (a reply card and a calendar card, called
+            // together): the run shows the first card and waits; the second shows none, records
+            // nothing and is not run, so the same call made after the answer shows its own card.
+            if (approvalCardShown) {
+              await deps.prisma.externalEffect.deleteMany({
+                where: { id: applied!.effect.id, runId, status: "intended" },
+              });
+              return {
+                error:
+                  "Not run yet: another card from this same step is already waiting for the recruiter, and only one card is shown at a time. Call this again after they answer that card; do not describe it as done or failed.",
+                dispatched: false,
+              };
+            }
+            approvalCardShown = true;
             const paused = await pauseRunForInput({
               spaceId: run.spaceId,
               threadId: run.threadId,

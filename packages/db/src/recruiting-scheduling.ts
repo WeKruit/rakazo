@@ -489,7 +489,44 @@ function projection(row: {
     confirmationEffectId: links?.confirmationEffectId ?? null,
   });
 }
+/** Whether a confirmed cancellation of this exact booking completed after it was made. */
+async function cancelled(
+  tx: Tx,
+  actor: Actor,
+  plan: RecruitingSchedulingPlan,
+  after: Date,
+  uid: string,
+) {
+  const rows = await tx.externalEffect.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      status: "completed",
+      createdAt: { gte: after },
+      kind: { endsWith: "cancel_booking" },
+      run: { spaceId: actor.spaceId, userId: actor.userId, threadId: plan.threadId },
+    },
+    include: { run: true },
+    take: LIMIT,
+  });
+  for (const row of rows) {
+    try {
+      const native = call(row.request);
+      if (
+        native.route.toolName === "cancel_booking" &&
+        native.route.resourceId === plan.calendar.sourceId &&
+        native.args.bookingUid === uid
+      ) {
+        successful(row);
+        return true;
+      }
+    } catch (error) {
+      if (!(error instanceof IsolationError)) throw error;
+    }
+  }
+  return false;
+}
 async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan, links: unknown) {
+  let booked: { uid: string; at: Date } | undefined;
   const status = async (id: string | null) => {
     if (!id) return null;
     const row = await effect(tx, actor, plan.threadId, id);
@@ -506,13 +543,16 @@ async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan, lin
       const body = successful(row);
       if (id === plan.bookingEffectId) {
         const booking = obj(body.data);
-        return body.status === "success" &&
-          typeof booking?.uid === "string" &&
-          booking.status === "accepted" &&
-          Date.parse(String(booking.start)) === Date.parse(plan.calendar.start) &&
-          Date.parse(String(booking.end)) === Date.parse(plan.calendar.end)
-          ? ("completed" as const)
-          : ("uncertain" as const);
+        if (
+          body.status !== "success" ||
+          typeof booking?.uid !== "string" ||
+          booking.status !== "accepted" ||
+          Date.parse(String(booking.start)) !== Date.parse(plan.calendar.start) ||
+          Date.parse(String(booking.end)) !== Date.parse(plan.calendar.end)
+        )
+          return "uncertain" as const;
+        booked = { uid: booking.uid, at: row.updatedAt };
+        return "completed" as const;
       }
       const args = call(row.request).args;
       const content = obj(args.body);
@@ -580,9 +620,13 @@ async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan, lin
       return "failed" as const;
     }
   };
+  const booking = await status(plan.bookingEffectId);
   return {
     ...plan,
-    bookingStatus: await status(plan.bookingEffectId),
+    bookingStatus:
+      booked && (await cancelled(tx, actor, plan, booked.at, booked.uid))
+        ? ("cancelled" as const)
+        : booking,
     confirmationStatus: await status(plan.confirmationEffectId),
   };
 }
