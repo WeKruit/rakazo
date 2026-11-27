@@ -43,7 +43,9 @@ export function filterBuiltinToolsForRun<T extends { name: string }>(
  * (Anthropic, "Writing effective tools for agents"; Claude Code subagents get only their own tool
  * list). Staging bee1b309 11-27: offered a Connect card here, Kruit asked to connect the calendar
  * instead of handing the booking over. Branch play s158 11-27: offered here, Kruit spent the turn on feedback and a search that
- * were refused before it handed the work to the role.
+ * were refused before it handed the work to the role. Branch play handoff8 11-27: offered here, a
+ * question card asked the recruiter for the interview slot before the booking was handed over; a
+ * role the recruiter means is chosen from its cards (recruiting_candidates roles with show).
  */
 const ACCOUNT_WIDE_TOOLS: ReadonlySet<string> = new Set([
   "recruiting_candidates",
@@ -51,7 +53,6 @@ const ACCOUNT_WIDE_TOOLS: ReadonlySet<string> = new Set([
   "start_role",
   "delegate_to_role",
   "stop_work",
-  "ask_user",
   "message_user",
   "artifact_read",
   "attach_file",
@@ -98,7 +99,7 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
 }
 
 const PREFERENCES_ONLY_LEAD =
-  "Save the recruiter's explicit reusable recruiting preferences, which hold across all their roles. Feedback on a role's people or rounds, and its requirements, are given in that role's conversation (delegate_to_role). Use direct human wording; inferred or ambiguous intent needs ask_user. ";
+  "Save the recruiter's explicit reusable recruiting preferences, which hold across all their roles. Feedback on a role's people or rounds, and its requirements, are given in that role's conversation (delegate_to_role). Use direct human wording; for inferred or ambiguous intent, ask in your reply first. ";
 
 /** The main chat's recruiting_feedback: a preference across roles, never a role's feedback. */
 function preferencesOnly<T extends { name: string }>(tool: T): T {

@@ -228,6 +228,25 @@ export function profileLookupArgs(
     : args;
 }
 
+/**
+ * Model-facing: a finished search that returned no one. Plays 11-27: after "must be Senior" and
+ * "the evidence must be clear" the agent asked eight searches in a row to return only fully
+ * verified people, each returned nobody, and the recruiter waited up to twelve minutes for an
+ * empty answer. The recruiter chose (2026-11-27) to see the closest people with their gaps.
+ */
+export const SEARCH_RETURNED_NOBODY =
+  "This search returned no one, so nothing was saved. A search grades every person it returns and each person's requirement check shows what their profile does not state: ask the next search for the people closest to the role's requirements, a full run's worth, never only for people who meet or prove every requirement. Then show the closest of them, each with the requirement their profile leaves open.";
+
+/** A completed people search with nobody in it, as the agent reads it; null for any other. */
+export function searchThatFoundNobody(
+  returned: unknown,
+  endpoint: string,
+): Record<string, unknown> | null {
+  if (mcpObject(returned)?.status !== "completed" || peopleFromSearch(returned, endpoint).length)
+    return null;
+  return { ...record(returned), people: [], note: SEARCH_RETURNED_NOBODY };
+}
+
 /** Most earlier turns of the conversation read for the profile text their searches returned. */
 const PROFILE_TEXT_RUNS = 12;
 

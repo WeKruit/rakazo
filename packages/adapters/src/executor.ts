@@ -612,7 +612,12 @@ import {
   withoutShownBefore,
 } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
-import { keepProfileText, lookedUpContacts, mcpObject } from "./recruiting-research.js";
+import {
+  keepProfileText,
+  lookedUpContacts,
+  mcpObject,
+  searchThatFoundNobody,
+} from "./recruiting-research.js";
 import {
   assertSchedulingCall,
   SchedulingApprovalEvidenceSchema,
@@ -8132,6 +8137,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 !roleId
               )
                 return null;
+              const nobody = searchThatFoundNobody(returned, server.endpoint);
+              if (nobody) return nobody;
               // The step's own brief save lands first, so these people are judged on the
               // requirements it holds rather than on the role as it was a moment earlier.
               if (roleSavesInFlight.size)
