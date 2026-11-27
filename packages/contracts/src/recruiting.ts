@@ -1458,6 +1458,9 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     operation: z.literal("roles"),
     /** In Kruit's conversation: the roles your answer is about, each shown as its card that opens it. */
     show: z.array(RecruitingId).min(1).max(10).optional(),
+    // Every active role comes back with its title, so a query is ignored like resolve's limit
+    // (staging 11-27: a read for one role by its number was refused for carrying one).
+    query: Text.max(240).optional(),
   }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("shortlist") }),

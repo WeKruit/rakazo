@@ -393,19 +393,27 @@ describe("resolveScheduleTiming", () => {
 });
 
 describe("filterBuiltinToolsForThread", () => {
-  it("lists no role create in the account-wide conversation, where start_role opens a role", () => {
+  it("lists no role create or select in the account-wide conversation, in options or text", () => {
     const role = {
       name: "recruiting_role",
-      description: "Read or create a role.",
+      description: "Read, create or select a role.",
       inputSchema: {
         oneOf: [
           { properties: { operation: { const: "read" } } },
           { properties: { operation: { const: "create" } } },
+          { properties: { operation: { const: "update" } } },
+          { properties: { operation: { const: "bind" } } },
         ],
       },
     };
     const [global] = filterBuiltinToolsForThread([role], "recruiting-global-abc");
-    expect(global!.inputSchema.oneOf.map((v) => v.properties.operation.const)).toEqual(["read"]);
+    expect(global!.inputSchema.oneOf.map((v) => v.properties.operation.const)).toEqual([
+      "read",
+      "update",
+    ]);
+    expect(global!.description).not.toContain('operation:"create"');
+    expect(global!.description).not.toContain('operation:"bind"');
+    expect(global!.description).toContain('operation:"update"');
     const [inRole] = filterBuiltinToolsForThread([role], "role-group");
     expect(inRole).toBe(role);
   });
