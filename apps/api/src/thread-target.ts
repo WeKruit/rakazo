@@ -31,7 +31,6 @@ import {
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
   isActive,
-  ONCE_ROUTINE_CRON,
   projectMessages,
   resolveGroupTargetBotIds,
   runFailureError,
@@ -49,6 +48,7 @@ import {
   createGroupRepos,
   createRepos,
   createThreadMessageInTransaction,
+  endThreadWorkInTransaction,
   expireComputerExecutionLeases,
   IsolationError,
   listThreadBackgroundWork,
@@ -1637,45 +1637,12 @@ export async function stopThreadRuns(
     });
     await cancelRunsInTransaction(tx, cancelled, new Date());
     const ids = cancelled.map((run) => run.id);
-    if (runId === undefined && scope === "all") {
-      // Clear delivery intent, never the original human messages in the transcript.
-      await tx.steeringMessage.deleteMany({
-        where: { userId: actor.userId, message: { threadId: target.threadId } },
+    if (runId === undefined && scope === "all")
+      await endThreadWorkInTransaction(tx, {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        threadId: target.threadId,
       });
-      await tx.externalEffect.updateMany({
-        where: {
-          kind: "work_estimate",
-          status: "running",
-          spaceId: actor.spaceId,
-          run: { threadId: target.threadId, userId: actor.userId },
-        },
-        data: { status: "cancelled" },
-      });
-      // An earlier stopped turn no longer keeps what its searches bring back.
-      await tx.run.updateMany({
-        where: { threadId: target.threadId, status: "cancelled", error: STOPPED_TURN },
-        data: { error: null },
-      });
-      // Stopping the conversation also ends what would wake it later. Pending one-shot
-      // reminders are disarmed, not deleted.
-      await tx.routine.updateMany({
-        where: {
-          threadId: target.threadId,
-          active: true,
-          crons: { equals: [ONCE_ROUTINE_CRON] },
-        },
-        data: { active: false, nextRunAt: null },
-      });
-      await tx.cloudAgent.updateMany({
-        where: {
-          threadId: target.threadId,
-          spaceId: actor.spaceId,
-          userId: actor.userId,
-          status: "running",
-        },
-        data: { cancelRequested: true, version: { increment: 1 }, nextPollAt: new Date() },
-      });
-    }
     if (ids.length && !(runId === undefined && scope === "all")) {
       // Steering the stopped run already claimed went into its context and ends with it.
       // Unclaimed rows (steered but not yet read, or a queued continuation's input) survive
