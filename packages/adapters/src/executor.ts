@@ -398,6 +398,7 @@ import {
   GOOGLE_CALENDAR_EVENT_WRITES,
   googleCalendarApprovalFacts,
 } from "./google-calendar-approval.js";
+import { roleLinkBlocks } from "./role-links.js";
 import { schedulingNextStep } from "./scheduling-next-step.js";
 import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
@@ -9179,6 +9180,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 context,
               );
               const shown = await showGlobalRolePeople(callArgs, result);
+              // Asked about earlier roles, Kruit shows each one's card, which opens it in the drawer.
+              if (
+                args.operation === "roles" &&
+                Array.isArray(args.show) &&
+                thread.groupId?.startsWith("recruiting-global-")
+              ) {
+                const links = await roleLinkBlocks(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId },
+                  args.show.filter((id): id is string => typeof id === "string"),
+                );
+                if (links.length) await publishMessage(deps, run, "bot", links);
+              }
               // Asked whether the next round is ready, Kruit sees what the team is doing right now.
               const progress =
                 !shown &&
