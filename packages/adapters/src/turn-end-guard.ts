@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@rakazo/db";
+import { inGroupOrder } from "./recruiting-round-check.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
 
@@ -148,10 +149,7 @@ export async function recruitingRoundListText(
   if (input.knownOnly && !listed.length) return "";
   // A group's people stand together under its one heading, groups in the order they first appear
   // (gate 11-26: a heading printed twice when its people were not next to each other).
-  const groups = [...new Set(listed.map((key) => input.groupOf?.[key]?.trim()))];
-  const keys = input.groupOf
-    ? groups.flatMap((group) => listed.filter((key) => input.groupOf?.[key]?.trim() === group))
-    : listed;
+  const keys = inGroupOrder(listed, input.groupOf);
   const lines = keys.map((key, index) => {
     const person = people.get(key);
     // The saved key is the profile link, so the name opens the person's LinkedIn profile.

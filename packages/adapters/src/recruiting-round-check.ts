@@ -384,3 +384,18 @@ export function searchRowForAgent(row: Record<string, unknown>): Record<string, 
           : {}),
       };
 }
+
+/**
+ * A round's people in the order the list prints them: a group's people stand together under its
+ * one heading, groups in the order they first appear. The round is recorded in this order too, so
+ * "number 9" names the same person in the list and in the record (staging 11-27: "6 and 9" turned
+ * down the person recorded ninth, who was printed tenth).
+ */
+export function inGroupOrder(
+  keys: readonly string[],
+  groupOf: Readonly<Record<string, string>> | undefined,
+): string[] {
+  if (!groupOf) return [...keys];
+  const group = (key: string) => groupOf[key]?.trim();
+  return [...new Set(keys.map(group))].flatMap((one) => keys.filter((key) => group(key) === one));
+}
