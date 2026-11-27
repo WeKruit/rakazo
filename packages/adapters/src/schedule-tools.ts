@@ -17,10 +17,6 @@ import {
 } from "@rakazo/core";
 import type { PrismaClient, Routine, ThreadEvents } from "@rakazo/db";
 import { IsolationError, Prisma, scoped } from "@rakazo/db";
-import {
-  ROLE_OPERATIONS_OUTSIDE_A_ROLE,
-  recruitingRoleToolDescription,
-} from "./recruiting-role-tool.js";
 
 export { isOneShotRoutineCron, ONCE_ROUTINE_CRON };
 
@@ -38,49 +34,63 @@ export function filterBuiltinToolsForRun<T extends { name: string }>(
   return runTrigger === "routine" ? tools.filter((tool) => tool.name !== "schedule_create") : tools;
 }
 
+/**
+ * What the account-wide conversation offers: reading across roles, opening a role, handing work to
+ * a role's own conversation, and the conversation's own memory and replies. Every operation on a
+ * role (finding people, feedback on them, mail, bookings, reminders, notes) runs in that role's
+ * conversation, so it is not listed here at all: an option the code would refuse is never shown
+ * (Anthropic, "Writing effective tools for agents"; Claude Code subagents get only their own tool
+ * list). Branch play s158 11-27: offered here, Kruit spent the turn on feedback and a search that
+ * were refused before it handed the work to the role.
+ */
+const ACCOUNT_WIDE_TOOLS: ReadonlySet<string> = new Set([
+  "recruiting_candidates",
+  "start_role",
+  "delegate_to_role",
+  "stop_work",
+  "ask_user",
+  "message_user",
+  "artifact_read",
+  "attach_file",
+  "render_view",
+  "render_plot",
+  "read_history",
+  "search_history",
+  "read_memory",
+  "recall_memory",
+  "remember",
+  "save_memory",
+  "forget_memory",
+  "save_group_memory",
+  "skill_read",
+  "web_search",
+  "web_fetch",
+  "request_connection",
+  "wait_for_work",
+  "scratchpad_list",
+  "scratchpad_add",
+  "scratchpad_update",
+  "scratchpad_complete",
+  "scratchpad_remove",
+]);
+
 /** Keep cross-bot messaging thread-specific while exposing schedules in DMs and groups. */
 export function filterBuiltinToolsForThread<T extends { name: string }>(
   tools: T[],
   groupId: string | null | undefined,
 ): T[] {
-  const global = Boolean(groupId?.startsWith("recruiting-global-"));
-  return tools
-    .map((tool) => (global && tool.name === "recruiting_role" ? roleToolOutsideARole(tool) : tool))
-    .filter(
-      (tool) =>
-        (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
-        // In a group the room is the shared surface: hand the stage to a member
-        // rather than starting a private thread off to one side.
-        (!groupId || tool.name !== "message_bot") &&
-        // Only the account-wide conversation sits above the role teams.
-        ((tool.name !== "delegate_to_role" && tool.name !== "start_role") || global) &&
-        // A booking plan belongs to a role's conversation, so a candidate's booking is handed
-        // there (delegate_to_role); offered here, it always failed (branch play 11-27).
-        !(global && tool.name === "recruiting_scheduling") &&
-        // A candidate's reply belongs there too: it answers in the role's own mail thread.
-        !(global && tool.name === "recruiting_reply"),
-    );
-}
-
-/** The account-wide conversation's recruiting_role: only what can work there, in options and text. */
-function roleToolOutsideARole<T extends { name: string }>(tool: T): T {
-  const schema = (tool as { inputSchema?: Record<string, unknown> }).inputSchema;
-  const key = Array.isArray(schema?.oneOf)
-    ? "oneOf"
-    : Array.isArray(schema?.anyOf)
-      ? "anyOf"
-      : null;
-  if (!schema || !key) return tool;
-  const variants = (
-    schema[key] as Array<{ properties?: { operation?: { const?: unknown } } }>
-  ).filter(
-    (variant) => !ROLE_OPERATIONS_OUTSIDE_A_ROLE.has(String(variant.properties?.operation?.const)),
+  if (groupId?.startsWith("recruiting-global-"))
+    return tools.filter((tool) => ACCOUNT_WIDE_TOOLS.has(tool.name));
+  return tools.filter(
+    (tool) =>
+      (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
+      // In a group the room is the shared surface: hand the stage to a member
+      // rather than starting a private thread off to one side.
+      (!groupId || tool.name !== "message_bot") &&
+      // Only the account-wide conversation sits above the role teams.
+      tool.name !== "delegate_to_role" &&
+      tool.name !== "start_role",
   );
-  return {
-    ...tool,
-    description: recruitingRoleToolDescription(true),
-    inputSchema: { ...schema, [key]: variants },
-  };
 }
 
 type ScheduleUnit = "minutes" | "hours" | "days" | "seconds";

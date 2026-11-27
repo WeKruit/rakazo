@@ -171,7 +171,8 @@ describe("people-search agent runs", () => {
   });
 
   it("runs people searches only inside a saved role", async () => {
-    // Staging a986fe51, feedback-round: the main chat searched itself and nothing was saved.
+    // Staging 14d33ed1: a role chat searched before its role was saved. (The main chat is not
+    // offered the people search at all.)
     const inChat = (groupId: string, roleId: string | null = null) => ({
       run: {
         findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: roleId, groupId } })),
@@ -180,14 +181,6 @@ describe("people-search agent runs", () => {
     const check = (db: unknown, tool: string, args: Record<string, unknown>) =>
       requireRoleForPeopleSearch(db as never, actor, server, tool, args);
     const people = { category: "people", query: "Senior SRE Austin" };
-    for (const [tool, args] of [
-      ["web_search_advanced_exa", people],
-      ["web_search_exa", { query: "category:people SRE Austin" }],
-      ["agent_run", { query: "SRE" }],
-    ] as const)
-      await expect(check(inChat("recruiting-global-u"), tool, args)).rejects.toThrow(
-        /delegate_to_role/,
-      );
     await expect(check(inChat("role-abc"), "web_search_advanced_exa", people)).rejects.toThrow(
       /recruiting_role create/,
     );
@@ -196,11 +189,9 @@ describe("people-search agent runs", () => {
       check(inChat("role-abc", "role-1"), "web_search_advanced_exa", people),
     ).resolves.toBeUndefined();
     await expect(
-      check(inChat("recruiting-global-u"), "web_search_exa", { query: "Austin SaaS companies" }),
+      check(inChat("role-abc"), "web_search_exa", { query: "Austin SaaS companies" }),
     ).resolves.toBeUndefined();
-    await expect(
-      check(inChat("recruiting-global-u"), "agent_run", { runId: "r1" }),
-    ).resolves.toBeUndefined();
+    await expect(check(inChat("role-abc"), "agent_run", { runId: "r1" })).resolves.toBeUndefined();
     await expect(
       check(inChat("team-x"), "web_search_advanced_exa", people),
     ).resolves.toBeUndefined();

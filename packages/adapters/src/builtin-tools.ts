@@ -24,7 +24,7 @@ import {
 } from "@rakazo/contracts";
 import { z } from "zod";
 import { allowPrivateHttpSecretOrigins } from "./bot-secrets.js";
-import { recruitingRoleToolDescription } from "./recruiting-role-tool.js";
+import { RECRUITING_ROLE_TOOL_DESCRIPTION } from "./recruiting-role-tool.js";
 
 // The owner flag can land in process.env after static imports run (loadRootEnv
 // parses .env once the entry module is already executing), so the model-facing
@@ -688,7 +688,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "recruiting_role",
-    description: recruitingRoleToolDescription(false),
+    description: RECRUITING_ROLE_TOOL_DESCRIPTION,
     inputSchema: z.toJSONSchema(RecruitingRoleToolInputSchema, { io: "input" }),
   },
   {
