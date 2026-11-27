@@ -15,6 +15,7 @@ import {
   cancelRunsInTransaction,
   countRecruitingPeopleFoundSince,
   createThreadMessageInTransaction,
+  lockConversationPair,
   mirrorAskInTransaction,
   type PrismaClient,
   withTransactionRetry,
@@ -200,9 +201,7 @@ export async function messageBot(
   try {
     committed = await withTransactionRetry(() =>
       deps.prisma.$transaction(async (tx) => {
-        for (const threadId of [run.threadId, targetThreadId].sort()) {
-          await tx.$queryRaw`SELECT id FROM threads WHERE id = ${threadId} FOR UPDATE`;
-        }
+        await lockConversationPair(tx, [run.threadId, targetThreadId]);
         // Claim the delivery key inside the transaction so a concurrent retry
         // either sees the winner or loses on the unique (threadId, clientNonce).
         if (deliveryKey) {
@@ -879,7 +878,8 @@ export async function showDelegatedTeamCard(
     return;
   const shown = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM threads WHERE id = ${found.root.returnThreadId} FOR UPDATE`;
+      // The source card's row too, so an answer to it cannot write the copy's row mid-way.
+      await lockConversationPair(tx, [run.threadId, found.root.returnThreadId]);
       return mirrorAskInTransaction(tx, {
         spaceId: run.spaceId,
         sourceThreadId: run.threadId,

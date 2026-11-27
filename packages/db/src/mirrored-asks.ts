@@ -11,6 +11,22 @@ export function mirroredAskClientNonce(sourceMessageId: string): string {
 }
 
 /**
+ * Lock two conversations for one transaction: role (group) conversations first, then by id.
+ * Answering or closing a role team's card locks the role's row and then writes the card's copy in
+ * the conversation that delegated the work, so a delivery between the two has to take the rows in
+ * that same order, or the two transactions deadlock (Postgres: take row locks in one order).
+ */
+export async function lockConversationPair(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  threadIds: readonly [string, string],
+): Promise<void> {
+  await tx.$queryRaw`
+    SELECT id FROM threads WHERE id IN (${threadIds[0]}, ${threadIds[1]})
+    ORDER BY ("groupId" IS NULL), id
+    FOR UPDATE`;
+}
+
+/**
  * Copy the card a role team's run is waiting on into the conversation that delegated the work,
  * so the person sees and answers it where they are (as Workloop posts a child agent's approval in
  * the user's thread and routes the decision back to that child). Answering the copy answers the

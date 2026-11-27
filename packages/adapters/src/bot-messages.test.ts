@@ -284,7 +284,12 @@ describe("messaging another bot", () => {
       { allowTerminalSource: true },
     );
     expect(sent.ok).toBe(true);
-    expect(harness.tx.$queryRaw).toHaveBeenCalledTimes(2);
+    // Both conversations in one statement, role conversations first: answering a role's card
+    // locks the same rows in that order, so the two cannot deadlock.
+    expect(harness.tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const [lockSql, ...lockedIds] = harness.tx.$queryRaw.mock.calls[0]!;
+    expect(lockSql.join("?")).toMatch(/ORDER BY \("groupId" IS NULL\), id\s+FOR UPDATE/);
+    expect(lockedIds).toEqual([run.threadId, expect.any(String)]);
     expect(harness.tx.message.create).toHaveBeenLastCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
