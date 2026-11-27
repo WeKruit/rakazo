@@ -80,7 +80,7 @@ const match = (row: ReturnType<typeof role>, where: Record<string, unknown>) =>
   (!where.id ||
     (typeof where.id === "string"
       ? row.id === where.id
-      : row.id > (where.id as { gt: string }).gt));
+      : row.id < (where.id as { lt: string }).lt));
 function fixture() {
   const prisma = {
     routine: {
@@ -131,9 +131,12 @@ function fixture() {
     },
     recruitingRole: {
       findFirst: vi.fn(async ({ where }) => rows.find((row) => match(row, where)) ?? null),
-      findMany: vi.fn(async ({ where, skip = 0, take }) =>
+      findMany: vi.fn(async ({ where, orderBy, skip = 0, take }) =>
         rows
           .filter((row) => match(row, where))
+          .sort((a, b) =>
+            orderBy?.id === "desc" ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id),
+          )
           .slice(skip, take === undefined ? undefined : skip + take),
       ),
       count: vi.fn(async ({ where }) => rows.filter((row) => match(row, where)).length),
@@ -215,7 +218,7 @@ describe("account recruiting reads", () => {
   it("pages all native recruiting routines across distinct bots including global Main in one owned query", async () => {
     const { deps, prisma } = fixture();
     const first = await readRecruitingAccountView(deps, actor, { view: "routines", limit: 2 });
-    expect(first.roles.map((role) => role.id)).toEqual(["a", "b", "c"]);
+    expect(first.roles.map((role) => role.id)).toEqual(["c", "b", "a"]);
     expect(first.routines?.map((item) => item.id)).toEqual(["routine-a", "routine-b"]);
     expect(first.nextCursor).toBe("routine-b");
     expect(first.routines?.[0]).toMatchObject({
@@ -279,15 +282,15 @@ describe("account recruiting reads", () => {
   it("paginates active roles while retaining a full owned role picker", async () => {
     const { deps } = fixture();
     const first = await readRecruitingAccountView(deps, actor, { view: "roles", limit: 2 });
-    expect(first.roles.map((role) => role.id)).toEqual(["a", "b", "c"]);
-    expect(first.items.map((item) => item.roleId)).toEqual(["a", "b"]);
+    expect(first.roles.map((role) => role.id)).toEqual(["c", "b", "a"]);
+    expect(first.items.map((item) => item.roleId)).toEqual(["c", "b"]);
     expect(first.nextCursor).toBe("b");
     const second = await readRecruitingAccountView(deps, actor, {
       view: "roles",
       limit: 2,
       cursor: first.nextCursor!,
     });
-    expect(second.items.map((item) => item.roleId)).toEqual(["c"]);
+    expect(second.items.map((item) => item.roleId)).toEqual(["a"]);
     expect(second.nextCursor).toBeNull();
     expect(first.total).toBe(3);
     expect(second.total).toBeUndefined();
@@ -296,7 +299,7 @@ describe("account recruiting reads", () => {
       limit: 2,
       offset: 2,
     });
-    expect(jumped.items.map((item) => item.roleId)).toEqual(["c"]);
+    expect(jumped.items.map((item) => item.roleId)).toEqual(["a"]);
     expect(jumped.total).toBe(3);
     await expect(
       readRecruitingAccountView(deps, actor, {
@@ -309,8 +312,16 @@ describe("account recruiting reads", () => {
   });
   it("reports each role's status from saved records for the global agent", async () => {
     const { deps, prisma } = fixture();
-    const view = await readRecruitingAccountView(deps, actor, { view: "roles", limit: 2 });
+    const view = await readRecruitingAccountView(deps, actor, {
+      view: "roles",
+      limit: 2,
+      offset: 1,
+    });
     expect(view.items).toEqual([
+      {
+        roleId: "b",
+        status: { savedPeople: 0, shortlisted: 0, lastActivityAt: null, waitingOnYou: null },
+      },
       {
         roleId: "a",
         status: {
@@ -319,10 +330,6 @@ describe("account recruiting reads", () => {
           lastActivityAt: "2026-10-30T12:00:00.000Z",
           waitingOnYou: { kind: "question", text: "Approve the first email?" },
         },
-      },
-      {
-        roleId: "b",
-        status: { savedPeople: 0, shortlisted: 0, lastActivityAt: null, waitingOnYou: null },
       },
     ]);
     // Every status read stays inside this user's Space.
@@ -485,7 +492,7 @@ describe("account recruiting reads", () => {
         : workspace(prisma, owner, input),
     );
     const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
-    expect(result.items.map((item) => item.roleId)).toEqual(["a", "c"]);
+    expect(result.items.map((item) => item.roleId)).toEqual(["c", "a"]);
     await expect(
       readRecruitingAccountView(deps, actor, { view: "shortlist", roleId: "b", limit: 20 }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
@@ -504,7 +511,7 @@ describe("account recruiting reads", () => {
       return workspace(prisma, owner, input);
     });
     const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
-    expect(result.items.map((item) => item.roleId)).toEqual(["a", "c"]);
+    expect(result.items.map((item) => item.roleId)).toEqual(["c", "a"]);
   });
   it("skips one role whose agent was removed instead of failing every role", async () => {
     const { deps } = fixture();
@@ -515,7 +522,7 @@ describe("account recruiting reads", () => {
       },
     } as never);
     const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
-    expect(result.items.map((item) => item.roleId)).toEqual(["a", "c"]);
+    expect(result.items.map((item) => item.roleId)).toEqual(["c", "a"]);
     await expect(
       readRecruitingAccountView(deps, actor, { view: "shortlist", roleId: "b", limit: 20 }),
     ).rejects.toThrow("Resource not found");

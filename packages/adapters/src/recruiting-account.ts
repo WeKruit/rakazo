@@ -191,9 +191,12 @@ export async function readRecruitingAccountView(
       where: {
         ...listed,
         ...(input.roleId ? { id: input.roleId } : {}),
-        ...(input.cursor && input.view !== "routines" ? { id: { gt: input.cursor } } : {}),
+        ...(input.cursor && input.view !== "routines" ? { id: { lt: input.cursor } } : {}),
       },
-      orderBy: { id: "asc" },
+      // Newest first, as role and mail lists everywhere are: oldest first put a just-opened role
+      // past the first page on an account with many roles, and the main chat handed "3 more" to an
+      // older role with a near-identical title (stage 3a3ee156, stressed-point-few-meet).
+      orderBy: { id: "desc" },
       ...(input.offset ? { skip: input.offset } : {}),
       take: input.limit + 1,
       select: {
@@ -214,7 +217,7 @@ export async function readRecruitingAccountView(
     const page = rows.slice(0, input.limit);
     const catalog = await deps.prisma.recruitingRole.findMany({
       where: scope,
-      orderBy: { id: "asc" },
+      orderBy: { id: "desc" },
       select: {
         id: true,
         title: true,

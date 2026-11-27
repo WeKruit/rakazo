@@ -21,6 +21,8 @@ type Row = Record<string, unknown>;
 
 function fakePrisma(input: {
   groups?: Row[];
+  /** Groups not among the most recently active, found only by id. */
+  otherGroups?: Row[];
   roles?: Row[];
   recruiter?: Row[];
   /** The account's newest recruiter messages, when they differ from this conversation's. */
@@ -53,7 +55,15 @@ function fakePrisma(input: {
       ),
     },
     recruitingCandidateOccurrence: { findMany: vi.fn(async () => input.shownPeople ?? []) },
-    chatGroup: { findMany: vi.fn(async () => input.groups ?? []) },
+    chatGroup: {
+      findMany: vi.fn(async () => input.groups ?? []),
+      findFirst: vi.fn(
+        async ({ where }: { where: { id: string } }) =>
+          [...(input.groups ?? []), ...(input.otherGroups ?? [])].find(
+            (group) => group.id === where.id,
+          ) ?? null,
+      ),
+    },
     recruitingRole: {
       findMany: vi.fn(async ({ where }: { where: { id?: unknown } }) =>
         where.id ? (input.revisions ?? []) : (input.roles ?? []),
@@ -128,6 +138,7 @@ const groups = [
   },
 ];
 const text = (value: string) => ({ blocks: [{ kind: "text", text: value }] });
+const card = (groupId: string) => ({ blocks: [{ kind: "role_link", groupId, title: groupId }] });
 
 describe("loadWorkingState", () => {
   it("gives the router each role's state from records, its receipts and the role the recruiter names", async () => {
@@ -220,7 +231,7 @@ describe("loadWorkingState", () => {
           groups,
           roles,
           recruiter: [text("#8 不行，再找类似的")],
-          called: [{ payload: { name: "delegate_to_role", roleId: "role-2" } }],
+          messagesByThread: { tg: [card("g2")] },
           round,
         }) as never,
         scope,
@@ -396,26 +407,35 @@ describe("loadWorkingState", () => {
     );
   });
 
-  it("names the role this conversation last handed work to, and says when nothing was done", async () => {
-    const state = await loadWorkingState(
-      fakePrisma({
-        groups,
-        roles,
-        recruiter: [text("ok go ahead and send them now please")],
-        called: [
-          { payload: { name: "recruiting_candidates", argsSummary: "operation=roles" } },
-          { payload: { name: "delegate_to_role", roleId: "role-1" } },
-        ],
-      }) as never,
-      scope,
-      globalThread,
-      (t) => t,
-      now,
-    );
+  it("names the role this conversation last opened or handed work to, and says when nothing was done", async () => {
+    // Stage 3a3ee156: two roles saved as "Senior Data Engineer"; with no record of the one just
+    // opened, Kruit handed "3 more" to the older one.
+    const load = (messages: Row[]) =>
+      loadWorkingState(
+        fakePrisma({
+          groups,
+          otherGroups: [{ id: "g9", name: "Data Engineer 8 · 11491", thread: { id: "t9" } }],
+          roles,
+          recruiter: [text("ok go ahead and send them now please")],
+          messagesByThread: { tg: messages },
+        }) as never,
+        scope,
+        globalThread,
+        (t) => t,
+        now,
+      );
+    const state = await load([text("Done."), card("g1"), card("g2")]);
     expect(state.language).toBe("en");
     expect(state.text).toContain(
-      'This conversation last handed work to "Agent Engineer Ref 0153" (roleId role-1).',
+      'This conversation last opened, or handed work to, "Agent" (roleId role-1).',
     );
+    expect((await load([card("g9")])).text).toContain(
+      'last opened, or handed work to, "Data Engineer 8 · 11491" (groupId g9, no saved role yet).',
+    );
+    // Several roles' cards in one message point to no one role.
+    expect(
+      (await load([{ blocks: [...card("g1").blocks, ...card("g2").blocks] }])).text,
+    ).not.toContain("last opened");
     expect(state.text).toContain("nothing saved, sent or changed by a tool");
     expect(state.text).toContain(
       "Saved emails: none on record for the roles below. An email written only in chat",

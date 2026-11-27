@@ -1526,15 +1526,15 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "delegate_to_role",
     description:
-      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId from recruiting_candidates operation roles (or the groupId from the role summary for a team with no saved role yet), optionally a teammate to give it to directly, and a brief that quotes the recruiter's own words and adds no number of people they did not write (when they turn down people in the round and ask for more like the rest, the brief asks for the next round of ten, never 150 or a scale-out). The team works in the role's conversation, with its usual approval cards there. The call waits up to four minutes for the team's answer and returns it (a round the team shows is posted here as it is shown); answer the recruiter from it in this reply. Word that the team is waiting on the recruiter's card or could not finish comes the same way: tell the recruiter and point them to that role's card. When the call returns without an answer, it comes back here later as a new message; never wait or poll for it. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
+      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId of the role the working state names (the role this conversation last opened or handed work to, or one of its role teams) or from recruiting_candidates operation roles, or the groupId for a team with no saved role yet, optionally a teammate to give it to directly, and a brief that quotes the recruiter's own words and adds no number of people they did not write (when they turn down people in the round and ask for more like the rest, the brief asks for the next round of ten, never 150 or a scale-out). The team works in the role's conversation, with its usual approval cards there. The call waits up to four minutes for the team's answer and returns it (a round the team shows is posted here as it is shown); answer the recruiter from it in this reply. Word that the team is waiting on the recruiter's card or could not finish comes the same way: tell the recruiter and point them to that role's card. When the call returns without an answer, it comes back here later as a new message; never wait or poll for it. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
     inputSchema: {
       type: "object",
       properties: {
-        role_id: { type: "string", description: "Role id from recruiting_candidates roles." },
+        role_id: { type: "string", description: "Role id from the working state or recruiting_candidates roles." },
         group_id: {
           type: "string",
           description:
-            "The role conversation's groupId from the role summary, for a role team with no saved role yet. Use instead of role_id.",
+            "The role conversation's groupId from the working state, for a role team with no saved role yet. Use instead of role_id.",
         },
         teammate: {
           type: "string",
