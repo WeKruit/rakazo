@@ -501,6 +501,22 @@ Everything else goes to the role as your first step. A saved role: delegate_to_r
   },
 ] as const;
 
+/**
+ * The maintained recruiting skills Kruit's account-wide conversation lists. It only reads, opens
+ * a role and hands work to it, so the skills for a role's own work are listed only in the role's
+ * conversation, the way a Claude Code subagent is given only its own skills. Staging 11-27
+ * (handoff3): listed there, "Write an email or template" had Kruit draft in the main chat and
+ * say the calendar was not connected instead of handing the request to the role.
+ */
+export const RECRUITING_ACCOUNT_WIDE_SKILLS: ReadonlySet<string> = new Set([
+  "Progress across roles",
+]);
+
+/** Whether the account-wide conversation lists this skill: the user's own skills, and the above. */
+export function accountWideSkill(name: string): boolean {
+  return !isRecruitingSkillName(name) || RECRUITING_ACCOUNT_WIDE_SKILLS.has(name);
+}
+
 /** Built-in recruiting skills that were renamed or merged: the upgrade removes user copies of them too. */
 export const RECRUITING_RETIRED_SKILL_NAMES = [
   "Global recruiting overview",
