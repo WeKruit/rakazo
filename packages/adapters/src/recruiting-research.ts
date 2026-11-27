@@ -369,7 +369,8 @@ const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
 /**
  * The people search's agent_run as the agent sees it: without the options prepareAgentRun sets or
- * leaves out itself (its own return format, people to grade in input.data, the ultra effort).
+ * leaves out itself (its own return format, its own system prompt for the search, people to grade
+ * in input.data, the ultra effort).
  * What the server would override is not offered, as Anthropic's tool guide advises ("poka-yoke
  * your tools"); plays 11-27 saw four of seven runs carry the agent's own format.
  */
@@ -380,7 +381,7 @@ export function agentRunSchemaForAgent(
 ): Record<string, unknown> {
   const properties = record(schema.properties);
   if (!properties || !isAgentRunTool(server, toolName)) return schema;
-  const { outputSchema: _format, ...offered } = properties;
+  const { outputSchema: _format, systemPrompt: _steer, ...offered } = properties;
   const input = record(offered.input);
   const inputProperties = record(input?.properties);
   if (input && inputProperties) {
@@ -443,7 +444,9 @@ export async function prepareAgentRun(
   const metered = effort === "auto";
   const cap = AGENT_RUN_FIND_MAX_COST_USD;
   const asked = Number(record(args.budget)?.maxCostDollars);
-  const { budget: _budget, ...rest } = args;
+  // The agent's own system prompt for the search is left out: the one staging run that carried one
+  // (2026-11-27) returned all ten people without a score, and what the recruiter wants is the query.
+  const { budget: _budget, systemPrompt: _steer, ...rest } = args;
   // One people search (decided 2026-11-27): a run finds and grades people in one go, so people
   // already saved are never sent back to be graded a second way (agentRunSchemaForAgent).
   const { data: _toGrade, ...input } = record(args.input) ?? {};
