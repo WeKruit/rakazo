@@ -3,10 +3,14 @@ import type { PrismaClient } from "@rakazo/db";
 
 const CAL_ENDPOINT = "https://mcp.cal.com/mcp";
 
-export const CAL_PLAN_NEXT_STEP =
-  "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
-export const GOOGLE_CALENDAR_NEXT_STEP =
-  "This calendar books without a plan: find openings with suggest_time (attendeeEmails primary and the interviewer, the interviewer's time zone), then call create_event once with summary, startTime, endTime, timeZone and every guest in attendees (the candidate and the interviewer). Its card is the approval, and the calendar sends the invitations; read the event back afterwards.";
+/**
+ * The one booking path, for either connected calendar: the plan is built from what was read in
+ * this conversation (the candidate's email and the calendar's free times), and its card is the
+ * approval. Anthropic's tool-writing guide: one schedule tool rather than separate list and
+ * create steps the agent must chain.
+ */
+export const BOOKING_NEXT_STEP =
+  "Book with recruiting_scheduling: read the candidate's email with get_email for the times they offered, read the calendar's free times inside those times (get_availability with format range and duration on Cal.com, or suggest_time with attendeeEmails and durationMinutes on Google Calendar), then call recruiting_scheduling with operation prepare, emailId, candidate {name,timeZone, candidateKey when they are saved}, interviewer {name,email,timeZone}, guests (everyone else the recruiter wants invited, by address; ask the recruiter for an address you do not have before preparing), and start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval and the calendar sends the invitations. An email may say an invitation was sent only after the booking returned.";
 export const NO_CALENDAR_NEXT_STEP =
   "No calendar is connected for booking: call request_connection with provider Google Calendar and keep the times and guests for afterwards.";
 
@@ -16,9 +20,8 @@ const address = (endpoint: string | null) => {
 };
 
 /**
- * The booking path for the calendar this bot actually holds: a Cal.com calendar books through a
- * saved scheduling plan, the recruiter's own Google Calendar through its event tools; with neither
- * connected, the connection comes first. One flow, the provider read from the connection.
+ * The booking path for the calendar this bot actually holds: either calendar books through a
+ * saved scheduling plan; with neither connected, the connection comes first.
  */
 export async function schedulingNextStep(
   prisma: PrismaClient,
@@ -44,7 +47,7 @@ export async function schedulingNextStep(
         (grant.allowAllTools ||
           (Array.isArray(grant.allowedTools) && grant.allowedTools.includes(tool))),
     );
-  if (holds(CAL_ENDPOINT, "create_booking")) return CAL_PLAN_NEXT_STEP;
-  if (holds(GOOGLE_CALENDAR_ENDPOINT, "create_event")) return GOOGLE_CALENDAR_NEXT_STEP;
-  return NO_CALENDAR_NEXT_STEP;
+  return holds(CAL_ENDPOINT, "create_booking") || holds(GOOGLE_CALENDAR_ENDPOINT, "create_event")
+    ? BOOKING_NEXT_STEP
+    : NO_CALENDAR_NEXT_STEP;
 }

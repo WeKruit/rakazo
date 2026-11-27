@@ -290,6 +290,50 @@ export function seenEmailIds(calls: readonly SavedCall[]): Set<string> {
   );
 }
 
+/**
+ * The names the recruiter gave the people this conversation emailed, by address, from the
+ * recipients of its own send calls ("Ada Lin <ada@…>" or a lead's first and last name): a reply
+ * is reported under the name on our record, never one the agent guesses.
+ */
+// The calls that send mail or put a person in a campaign; a draft or any other call names nobody.
+const ADDRESSING_TOOLS = new Set([
+  "ensure_role_campaign",
+  "send_message",
+  "send_email",
+  "reply_to_email",
+  "create_lead",
+  "add_leads",
+  "add_leads_to_campaign_or_list_bulk",
+]);
+export function recipientNames(calls: readonly SavedCall[]): Map<string, string> {
+  const names = new Map<string, string>();
+  const add = (email: unknown, name: unknown) => {
+    if (typeof email !== "string" || typeof name !== "string" || !name.trim()) return;
+    const key = email.trim().toLowerCase();
+    if (!names.has(key)) names.set(key, name.trim());
+  };
+  // Calls come newest first, so a later correction of a name wins.
+  const addressing = (call: SavedCall) =>
+    ADDRESSING_TOOLS.has(call.route.toolName.replace(/^native_(?:instantly_)?/, ""));
+  for (const call of calls.filter(addressing))
+    for (const field of ["recipients", "to", "leads"]) {
+      const value = call.args[field];
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (typeof item === "string")
+          for (const parsed of addressparser(item)) add(parsed.address, parsed.name);
+        const lead = record(item);
+        if (lead)
+          add(
+            lead.email,
+            [lead.first_name ?? lead.firstName, lead.last_name ?? lead.lastName]
+              .filter((part) => typeof part === "string" && part.trim())
+              .join(" "),
+          );
+      }
+    }
+  return names;
+}
+
 /** The emails this conversation sent from the recruiter's own Gmail, by their saved receipts. */
 export async function gmailSends(
   prisma: PrismaClient,

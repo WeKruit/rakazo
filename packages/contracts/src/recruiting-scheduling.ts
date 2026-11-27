@@ -21,11 +21,15 @@ const Participant = z.strictObject({
   email: z.email(),
   timeZone: SchedulingTimeZoneSchema,
 });
+/** The connected calendar a plan books on. A plan saved before Google Calendar is Cal.com's. */
+export const SchedulingCalendarProviderSchema = z.enum(["cal_com", "google_calendar"]);
 export const RecruitingSchedulingSlotSchema = z
   .strictObject({
+    provider: SchedulingCalendarProviderSchema.optional(),
     sourceId: Id,
     sourceRevision: z.number().int().positive(),
-    eventTypeId: z.number().int().positive(),
+    // Cal.com books an event type; Google Calendar books the slot itself.
+    eventTypeId: z.number().int().positive().optional(),
     availabilityEffectId: Id,
     start: z.iso.datetime(),
     end: z.iso.datetime(),
@@ -34,13 +38,18 @@ export const RecruitingSchedulingSlotSchema = z
   .refine(
     (value) => Date.parse(value.end) - Date.parse(value.start) === value.lengthInMinutes * 60_000,
     "The selected interval must match its explicit duration",
+  )
+  .refine(
+    (value) => (value.provider === "google_calendar") === (value.eventTypeId === undefined),
+    "A Cal.com slot names its event type; a Google Calendar slot has none",
   );
 export const RecruitingSchedulingPlanInputSchema = z.strictObject({
   threadId: Id,
   roleId: Id,
   expectedRoleRevision: z.number().int().positive(),
   originalEmail: RecruitingCorrespondenceReferenceSchema,
-  candidate: Participant.extend({ candidateKey: Id }),
+  // A person the recruiter typed by address has no saved candidate: their campaign lead is the record.
+  candidate: Participant.extend({ candidateKey: Id.optional() }),
   interviewer: Participant,
   calendar: RecruitingSchedulingSlotSchema,
   requests: z
@@ -78,14 +87,25 @@ export type RecruitingSchedulingPlan = z.infer<typeof RecruitingSchedulingPlanSc
 export const RecruitingSchedulingPrepareInputSchema = z.strictObject({
   emailId: Id.max(1600).describe("Provider id of the candidate's email you read with get_email."),
   candidate: z.strictObject({
-    candidateKey: Id.describe("The candidate's saved candidateKey in this role."),
+    candidateKey: Id.optional().describe(
+      "The candidate's saved candidateKey in this role; leave it out for a person the recruiter gave by email.",
+    ),
     name: Participant.shape.name,
     timeZone: SchedulingTimeZoneSchema,
   }),
   interviewer: Participant,
-  start: z.iso.datetime().describe("Start of a slot returned by your availability read."),
+  start: z.iso
+    .datetime()
+    .describe(
+      "Start of a slot your calendar read returned (get_availability or suggest_time), inside the times the candidate offered.",
+    ),
   lengthInMinutes: z.number().int().positive(),
   eventTypeId: z.number().int().positive().optional(),
+  guests: z
+    .array(z.email())
+    .max(20)
+    .optional()
+    .describe("Everyone else the recruiter wants invited, by the address they gave."),
 });
 export type RecruitingSchedulingPrepareInput = z.infer<
   typeof RecruitingSchedulingPrepareInputSchema

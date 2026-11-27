@@ -1443,7 +1443,11 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     roleId: RecruitingId.optional(),
   }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("replies") }),
-  RecruitingAccountToolReadSchema.extend({ operation: z.literal("roles") }),
+  RecruitingAccountToolReadSchema.extend({
+    operation: z.literal("roles"),
+    /** In Kruit's conversation: the roles your answer is about, each shown as its card that opens it. */
+    show: z.array(RecruitingId).min(1).max(10).optional(),
+  }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("shortlist") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("sequences") }),

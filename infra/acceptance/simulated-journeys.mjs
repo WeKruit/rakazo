@@ -43,7 +43,7 @@ export const JOURNEYS = [
   {
     name: "send-at-night",
     // Roles earlier plays of this journey left on the reused account; archived before a play.
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
@@ -75,7 +75,7 @@ export const JOURNEYS = [
   },
   {
     name: "send-through-blip",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference"],
     title: "网络刚断过一下，马上要发邮件：发送卡照样要出来",
     area: "reliability",
@@ -368,7 +368,7 @@ export const JOURNEYS = [
   {
     name: "schedule-interview",
     // Roles earlier plays of this journey left on the reused account; archived before a play.
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference"],
     title: "候选人同意面试：约时间、发邀请、改期、在 Interview 页看",
     area: "sending",
@@ -390,7 +390,7 @@ export const JOURNEYS = [
   },
   {
     name: "candidate-conversation",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference", "email-content"],
     title: "整段候选人沟通：发信、回信进来、跟进、不想被联系、约面试",
     area: "sending",
@@ -439,9 +439,55 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "candidate-question-memory",
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
+    mechanisms: ["state-claims", "reference", "email-content"],
+    title: "候选人问到没告诉过的事：卡上回答后记住，下一个候选人直接答",
+    area: "sending",
+    source:
+      "11-27 user: has the whole loop run (unknown candidate question → recruiter answers on the card → same-thread reply → saved to the role → next candidate answered from it)?",
+    account: "mailbox",
+    sends: true,
+    chinese: true,
+    maxTurns: 12,
+    persona: `${AGENCY_RECRUITER} You emailed two candidates for a client role and want Kruit to handle their answers.`,
+    facts: (recipients, tag) =>
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. You also know, but do not volunteer until Kruit asks you or a card shows the question: the client pays up to $10k relocation, and it cannot sponsor or transfer visas.\nTwo candidates you found yourself:\n${twoInboxes(
+        recipients,
+        tag,
+      )
+        .map((address, i) => `${["Ethan Park", "Mia Chen"][i]} <${address}>`)
+        .join(
+          "\n",
+        )}\nYou never see their mailbox yourself: their answers reach the role's sending mailbox, so you learn of them only from Kruit or the app's pages.`,
+    candidates: (recipients, tag) => {
+      const [ethan, mia] = twoInboxes(recipients, tag);
+      return [
+        {
+          name: "Ethan Park",
+          address: ethan,
+          persona:
+            "Ethan Park, a senior data engineer in Portland, on an H-1B visa. In your first answer you say you are interested and ask whether they help with relocation to Seattle and whether they can transfer your H-1B. Once both are answered, thank them briefly.",
+        },
+        {
+          name: "Mia Chen",
+          address: mia,
+          persona:
+            "Mia Chen, a data engineer in Denver on an H-1B visa. Your first answer only says you are interested and asks what the team works on. In your next answer you ask whether they help with relocation to Seattle and whether they can sponsor or transfer a visa. Once both are answered, thank them briefly.",
+        },
+      ];
+    },
+    goals: [
+      "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both; approve the send card once it names both and the email.",
+      "Step away (wait) until a candidate replies. When Kruit shows Ethan's reply, answer his relocation and visa questions with what you know (on the card, edit the reply so it carries your answers, then Send). Met only when that reply goes out in Ethan's own thread with your answers.",
+      "Ask Kruit, in a few words, to answer Mia's first email. Approve a reply that only states facts you gave it.",
+      "When Mia asks about relocation and visa, ask Kruit in a few words to answer her. Never repeat the answers yourself. Met only when Kruit's reply to Mia answers relocation and visa with what you told it for Ethan, without asking you again or listing them as open questions, and the reply goes out after you approve it.",
+    ],
+  },
+  {
     name: "feedback-on-some-people",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
-    leftover: /^测试固定 · 数据工程师 6 · \d{4,5}/,
+    leftover: /^测试固定 · 数据工程师 6 · \d{4,}/,
     mechanisms: ["reference", "long-task"],
     paid: true,
     title: "对几个人给反馈，看下一轮真的改了",
@@ -466,7 +512,7 @@ export const JOURNEYS = [
   {
     name: "stressed-point-few-meet",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
-    leftover: /^测试固定 · 数据工程师 8 · \d{4,5}/,
+    leftover: /^测试固定 · 数据工程师 8 · \d{4,}/,
     mechanisms: ["reference", "long-task"],
     paid: true,
     title: "强调的要求很少人写明：全部给出来并分开说明，不扣人",
@@ -490,7 +536,7 @@ export const JOURNEYS = [
   {
     name: "five-asks-one-role",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
-    leftover: /^测试固定 · 数据工程师 7 · \d{4,5}/,
+    leftover: /^测试固定 · 数据工程师 7 · \d{4,}/,
     mechanisms: ["long-task"],
     paid: true,
     title: "一个岗位连着要五次人，每次都要真的给到",
@@ -515,7 +561,7 @@ export const JOURNEYS = [
   {
     name: "industry-and-what-they-built",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
-    leftover: /^测试固定 · 支付风控数据 · \d{4,5}/,
+    leftover: /^测试固定 · 支付风控数据 · \d{4,}/,
     mechanisms: ["reference", "long-task"],
     paid: true,
     title: "看行业和做过什么，不只是关键词",
@@ -615,7 +661,7 @@ export const JOURNEYS = [
   },
   {
     name: "stop-after-approve",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "guard-dead-end"],
     title: "刚批准发送马上说别发了：要真停下，并说清谁已发、谁没发",
     area: "sending",
@@ -642,7 +688,7 @@ export const JOURNEYS = [
   },
   {
     name: "deny-then-change-and-send",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["email-content", "reference", "guard-dead-end"],
     title: "先拒绝发送卡，改一句再发：不用重说一遍，新卡要带改动",
     area: "sending",

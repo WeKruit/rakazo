@@ -642,7 +642,7 @@ it.each([
   expect(scheduling).not.toContain("call_api_operation");
 });
 
-it("gives Scheduling its calendar access on reconnect and leaves another calendar connected", async () => {
+it("gives Scheduling its calendar access on reconnect and keeps only one calendar connected", async () => {
   const endpoint = "https://calendarmcp.googleapis.com/mcp/v1";
   const booking = server("Booking", {
     endpoint: "https://mcp.cal.com/mcp",
@@ -673,7 +673,7 @@ it("gives Scheduling its calendar access on reconnect and leaves another calenda
   await act(async () => button(host, "Connect").click());
   expect(api.approve.mock.calls.map(([input]) => input.botId)).toEqual(["main", "scheduling"]);
   expect(api.approve.mock.calls[1]![0].allowedTools).toContain("create_event");
-  expect(api.disconnect).not.toHaveBeenCalled();
+  expect(api.disconnect.mock.calls).toEqual([[{ serverId: "Booking" }]]);
 });
 
 it("shows a Gmail sign-in that went through even when giving the assistants access fails", async () => {

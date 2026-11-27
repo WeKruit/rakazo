@@ -178,7 +178,7 @@ import {
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   truncatedPlainText,
-  unattendedMemoryWriteRefusal,
+  unattendedMemoryWrite,
   unattendedTriggerToolRequiresApproval,
   unfilledPlaceholder,
   userTurnMessageForRun,
@@ -398,6 +398,7 @@ import {
   GOOGLE_CALENDAR_EVENT_WRITES,
   googleCalendarApprovalFacts,
 } from "./google-calendar-approval.js";
+import { roleLinkBlocks } from "./role-links.js";
 import { schedulingNextStep } from "./scheduling-next-step.js";
 import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
@@ -5190,13 +5191,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
               if (!deps.connector?.resolveCall)
                 throw new Error("Native scheduling tools are unavailable");
+              // One booking path for either calendar: the plan's own calendar takes the booking.
+              const google = plan.calendar.provider === "google_calendar";
               const route =
                 input.operation === "book"
                   ? {
                       connectorId: "mcp",
                       resourceId: plan.calendar.sourceId,
                       resourceRevision: plan.calendar.sourceRevision,
-                      toolName: "create_booking",
+                      toolName: google ? "create_event" : "create_booking",
                     }
                   : {
                       connectorId: "mcp",
@@ -5223,7 +5226,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const url = assigned.server.endpoint ? URL.parse(assigned.server.endpoint) : null;
               const expected =
                 input.operation === "book"
-                  ? "https://mcp.cal.com/mcp"
+                  ? google
+                    ? GOOGLE_CALENDAR_ENDPOINT
+                    : "https://mcp.cal.com/mcp"
                   : "https://mcp.instantly.ai/mcp";
               if (!url || `${url.origin}${url.pathname.replace(/\/$/, "")}` !== expected)
                 throw new IsolationError();
@@ -6099,13 +6104,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
-          const memoryRefusal = await unattendedMemoryWriteRefusal({
+          // After outside text, a run no person started saves memory only on the user's card.
+          const unattendedMemory = await unattendedMemoryWrite({
             trigger: run.trigger,
             toolName: name,
             preference: Boolean(recruitingPreference),
             readExternalText: runReadExternalText,
           });
-          if (memoryRefusal) return { error: memoryRefusal };
+          if (unattendedMemory && "refusal" in unattendedMemory)
+            return { error: unattendedMemory.refusal };
+          const memoryNeedsConfirmation = Boolean(unattendedMemory);
           if (
             connectorCall.route?.connectorId === "mcp" &&
             thread.groupId?.startsWith("recruiting-global-")
@@ -6323,7 +6331,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 viaConnector,
                 declaredReadOnly,
               ));
-          const requiresMandatoryApproval = requiresUnattendedApproval || requiresExplicitApproval;
+          const requiresMandatoryApproval =
+            requiresUnattendedApproval || requiresExplicitApproval || memoryNeedsConfirmation;
           const connectorKind = connectorKindFromToolName(
             name,
             connectedPlugins.map((plugin) => plugin.provider),
@@ -9179,6 +9188,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 context,
               );
               const shown = await showGlobalRolePeople(callArgs, result);
+              // Asked about earlier roles, Kruit shows each one's card, which opens it in the drawer.
+              // A card that could not be posted is said in the result, never a failed read.
+              const roleCards =
+                args.operation === "roles" &&
+                Array.isArray(args.show) &&
+                thread.groupId?.startsWith("recruiting-global-") &&
+                run.trigger !== "bot_message"
+                  ? await roleLinkBlocks(deps.prisma, { spaceId: run.spaceId, userId: run.userId }, [
+                      ...new Set(args.show.filter((id): id is string => typeof id === "string")),
+                    ])
+                      .then(async (links) => {
+                        if (links.length) await publishMessage(deps, run, "bot", links);
+                        return {};
+                      })
+                      .catch(() => ({ roleCards: "not shown" }))
+                  : {};
               // Asked whether the next round is ready, Kruit sees what the team is doing right now.
               const progress =
                 !shown &&
@@ -9207,7 +9232,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   shown ??
                     (progress
                       ? { ...(result as object), teamWorking: progress.note }
-                      : { ...(result as object), ...counts }),
+                      : { ...(result as object), ...counts, ...roleCards }),
                   runSecrets,
                 ),
               );
