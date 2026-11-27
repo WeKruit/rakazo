@@ -1560,12 +1560,45 @@ export function mergeRecruitingRoleUpdate(
   for (const item of upserts.values())
     if (!saved.criteria.some((existing) => existing.id === item.id)) criteria.push(item);
   const replaced = new Set((update.sourceRefs ?? []).map((ref) => ref.id));
+  // A kept brief follows the criteria this update leaves: a removed requirement loses its rule
+  // and an added one gets the rule its own citation implies. Staging 11-27: an update that only
+  // added the recruiter's new requirement was refused three times for the missing rule.
+  const kept = update.brief === undefined ? saved.brief : undefined;
+  const brief = kept
+    ? {
+        ...kept,
+        rules: [
+          ...kept.rules.flatMap((rule) => {
+            const item = criteria.find((candidate) => candidate.id === rule.criterionId);
+            if (!item) return [];
+            // A requirement this update made a must-have rejects from now on.
+            return upserts.has(item.id) && item.priority === "hard" && rule.origin !== "inferred"
+              ? [{ ...rule, effect: "reject" as const }]
+              : [rule];
+          }),
+          ...criteria.flatMap((item) => {
+            const source = item.sourceRefs.find((ref) => ref.readState === "read");
+            if (!source || kept.rules.some((rule) => rule.criterionId === item.id)) return [];
+            return [
+              {
+                criterionId: item.id,
+                origin: source.anchor.kind === "message" ? "user_instruction" : "jd",
+                effect: item.priority === "hard" ? "reject" : "flag",
+                sourceRefIds: [source.id],
+              },
+            ];
+          }),
+        ],
+      }
+    : update.brief === undefined
+      ? saved.brief
+      : update.brief;
   const merged = RecruitingRoleToolInputSchema.parse({
     operation: "revise",
     roleId: update.roleId,
     expectedRevision: update.expectedRevision,
     title: update.title ?? current.role.title,
-    brief: update.brief === undefined ? saved.brief : update.brief,
+    brief,
     sourceRefs: [
       ...saved.sourceRefs.filter((ref) => !replaced.has(ref.id)),
       ...(update.sourceRefs ?? []),

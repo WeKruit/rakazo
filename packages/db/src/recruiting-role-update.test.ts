@@ -90,4 +90,40 @@ describe("partial recruiting role update", () => {
     expect(merged.criteria.map((item) => item.id)).toEqual(["go", "pg"]);
     expect(merged.preferences).toEqual([]);
   });
+
+  // Staging 2026-11-27: an update that only added a requirement was refused for its missing rule.
+  it("keeps a saved brief's rules in step with the criteria the update leaves", () => {
+    const rule = (criterionId: string, effect: "reject" | "flag") => ({
+      criterionId,
+      origin: "jd" as const,
+      effect,
+      sourceRefIds: [`${criterionId}-source`],
+    });
+    const briefed = {
+      ...current,
+      revision: {
+        ...current.revision,
+        brief: {
+          fields: [],
+          searchFilters: [],
+          questions: [],
+          rules: [rule("go", "reject"), rule("kafka", "flag")],
+        },
+      },
+    } as unknown as typeof current;
+    const merged = mergeRecruitingRoleUpdate(briefed, {
+      operation: "update",
+      roleId: "role",
+      expectedRevision: 3,
+      intent,
+      criteria: {
+        upsert: [criterion("pg", "preferred", "Postgres"), criterion("kafka", "hard", "Kafka")],
+        remove: ["go"],
+      },
+    });
+    expect(merged.brief?.rules).toEqual([
+      rule("kafka", "reject"),
+      { ...rule("pg", "flag"), origin: "user_instruction" },
+    ]);
+  });
 });
