@@ -423,6 +423,12 @@ describe("filterBuiltinToolsForThread", () => {
     expect(names("role-group")).toEqual(["handoff_to_bot"]);
     expect(names(null)).toEqual([]);
   });
+  it("leaves booking plans to the role conversations", () => {
+    const names = (groupId: string) =>
+      filterBuiltinToolsForThread([{ name: "recruiting_scheduling" }], groupId).map((t) => t.name);
+    expect(names("recruiting-global-abc")).toEqual([]);
+    expect(names("role-group")).toEqual(["recruiting_scheduling"]);
+  });
   const tools = [
     { name: "handoff_to_bot" },
     { name: "message_bot" },
