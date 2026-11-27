@@ -608,6 +608,7 @@ import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting
 import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import {
   requestCounts,
+  roundStillMissing,
   roundCountLine,
   withoutShownBefore,
 } from "./recruiting-round-check.js";
@@ -8893,6 +8894,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             try {
               if (researchInput.data.operation === "calibration_round") {
                 if (!applied || !claimedEffect) throw new IsolationError();
+                const roundTarget = researchInput.data.target;
                 // Internal record keeping: the round and this native effect complete together.
                 const round = await saveRecruitingCalibrationRound(
                   deps.prisma,
@@ -8944,6 +8946,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         counts,
                         (recorded.candidateKeys as string[]).length,
                         turnLanguage === "zh",
+                        roundTarget,
                       ),
                     )
                     .catch(() => "");
@@ -8992,7 +8995,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             roleId: recorded.roleId,
                             userId: run.userId,
                             spaceId: run.spaceId,
-                          }).catch(() => ({}))
+                          })
+                            .then((counts) => ({
+                              ...counts,
+                              ...roundStillMissing(counts.counted, roundTarget),
+                            }))
+                            .catch(() => ({}))
                         : {}),
                       ...(roundShown ? { shownToRecruiter: roundShown } : {}),
                       // Gate 9d632819: the turn began on an English JD, the recruiter went on in

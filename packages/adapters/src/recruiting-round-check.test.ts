@@ -2,9 +2,11 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   listedBeforeRound,
+  roundCountLine,
   roundCriteria,
   roundListedNotRecorded,
   roundRepeats,
+  roundStillMissing,
   withoutShownBefore,
 } from "./recruiting-round-check.js";
 
@@ -42,6 +44,18 @@ describe("roundCriteria", () => {
       { id: "titles", statement: "data engineer titles only" },
       { id: "place", statement: "Seattle metro, hybrid" },
     ]);
+  });
+});
+
+describe("roundCountLine", () => {
+  it("says how many are still to come when the round leaves the request short", () => {
+    expect(roundCountLine({ counted: 9, turnedDown: 3 }, 2, true, 17)).toBe(
+      "累计展示 12 人，你淘汰了 3 人，计入 9 人。还差 8 人，继续找。",
+    );
+    expect(roundCountLine({ counted: 13, turnedDown: 0 }, 3, false, 13)).toBe("13 shown so far.");
+    expect(roundCountLine({ counted: 6, turnedDown: 0 }, 6, false, 10)).toBe("4 still to come.");
+    expect(roundStillMissing(9, 17).stillMissing).toBe(8);
+    expect(roundStillMissing(13, 13)).toEqual({});
   });
 });
 
@@ -132,7 +146,11 @@ describe("roundListedNotRecorded", () => {
   it("sees a round list the role's chat posted that is not recorded yet", async () => {
     const findMany = vi.fn(async () => [
       { blocks: [{ kind: "text", text: "Here's what changed." }] },
-      { blocks: [{ kind: "text", text: "10 people this round:\n\n1. **[A](x)**", recruitingRoundList: {} }] },
+      {
+        blocks: [
+          { kind: "text", text: "10 people this round:\n\n1. **[A](x)**", recruitingRoundList: {} },
+        ],
+      },
     ]);
     const prisma = {
       recruitingRole: { findFirst: vi.fn(async () => ({ sourceThreadId: "thread-role" })) },
@@ -153,9 +171,7 @@ describe("roundListedNotRecorded", () => {
     // The list of a round that is recorded is not a next round still being written.
     findMany.mockResolvedValueOnce([
       {
-        blocks: [
-          { kind: "text", text: "…", recruitingRoundList: { roundId: "effect-round-2" } },
-        ],
+        blocks: [{ kind: "text", text: "…", recruitingRoundList: { roundId: "effect-round-2" } }],
       },
     ]);
     await expect(
