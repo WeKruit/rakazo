@@ -9276,7 +9276,7 @@ export async function saveRecruitingCalibrationRound(
         )
         .join("; ");
       throw new RecruitingCalibrationRoundError(
-        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${notes.join(", ")}. Use the exact candidateKey of a saved people row instead (the rows are already saved; no save_search is needed).${choices ? ` Saved people not yet in this round, in key order, to look up the key of the person you meant (never pick someone because they are listed here; every pick still fits every requirement and is not at the hiring company): ${choices}.` : ""}`,
+        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${notes.join(", ")}. The people rows a search returned are already saved under their candidateKey.${choices ? ` Saved people not yet in this round, in key order: ${choices}.` : ""}`,
       );
     }
     const previous = await tx.recruitingCalibrationRound.findFirst({
@@ -9442,7 +9442,7 @@ async function approveLatestCalibrationRound(
   });
   if (!latest)
     throw new RecruitingCalibrationRoundError(
-      "No calibration round has been recorded for this role yet, so there is nothing to accept. Record the ten first (recruiting_research operation calibration_round with ten exact candidateKeys of saved people; recruiting_candidates list returns them), then call this again with the recruiter's words.",
+      "No calibration round has been recorded for this role yet, so there is nothing to accept; a round is recorded by recruiting_research operation calibration_round with ten exact candidateKeys of saved people.",
     );
   if (round !== null && latest.round !== round)
     throw new RecruitingConflictError("A newer calibration round replaced this one");

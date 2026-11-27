@@ -6,7 +6,6 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeRecruitingCandidatesTool,
-  NOTHING_SAVED_IS_NO_BLOCKER,
   peopleToShow,
   retainRecruitingWebMaterial,
 } from "./recruiting-candidates-tool.js";
@@ -608,7 +607,7 @@ describe("native saved candidate reads", () => {
     );
     expect(result).toMatchObject({
       items: [],
-      next: `No saved person matched this query. To list the role's people, call again without query. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
+      next: "No saved person matched this query.",
     });
   });
 
@@ -756,7 +755,6 @@ describe("native saved candidate reads", () => {
       ).toEqual({
         status: "no_current_role",
         roles,
-        next: expect.any(String),
       });
       // Only the caller's own open roles.
       expect(findRoles).toHaveBeenCalledWith(

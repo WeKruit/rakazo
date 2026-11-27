@@ -100,12 +100,9 @@ describe("people-search agent runs that outlive their turn", () => {
       }),
     });
     expect(test.taskCreate.mock.calls[0]?.[0].data.prompt).toContain(
-      'Call agent_run with runId "agent_run_1" once',
+      'agent_run with runId "agent_run_1" collects it',
     );
-    // A run still going ends the wake quietly instead of holding the conversation.
-    expect(test.taskCreate.mock.calls[0]?.[0].data.prompt).toContain(
-      "end the turn with an empty reply",
-    );
+    expect(test.taskCreate.mock.calls[0]?.[0].data.prompt).toContain("An empty reply posts nothing.");
     expect(test.jobs.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ name: "run.continue" }),
     );
@@ -173,14 +170,12 @@ describe("people-search agent runs that outlive their turn", () => {
     expect(test.runCreate).not.toHaveBeenCalled();
   });
 
-  it("reports progress once when the recruiter's countdown runs out", async () => {
+  it("says once that the recruiter's countdown ran out", async () => {
     const countdown = { startedMsAgo: 11 * 60_000, estimateMs: 10 * 60_000 };
     const test = fixture({ answers: [answer("newest", "running")], countdown });
     await waitForRecruitingAgentRun(test, payload, now);
     const prompt = String(test.taskCreate.mock.calls[0]?.[0].data.prompt);
     expect(prompt).toContain("estimated 10 minutes are up");
-    expect(prompt).toContain("tell the recruiter in one line");
-    expect(prompt).not.toContain("end the turn with an empty reply");
     expect(test.effectUpdate).toHaveBeenCalledWith({
       where: { id: "estimate", status: "running" },
       data: { result: { reported: 1 } },
@@ -191,20 +186,16 @@ describe("people-search agent runs that outlive their turn", () => {
       countdown: { ...countdown, reported: 1 },
     });
     await waitForRecruitingAgentRun(reported, payload, now);
-    expect(String(reported.taskCreate.mock.calls[0]?.[0].data.prompt)).toContain(
-      "end the turn with an empty reply",
-    );
+    expect(String(reported.taskCreate.mock.calls[0]?.[0].data.prompt)).not.toContain("are up");
   });
 
-  it("stays quiet while the countdown is still running", async () => {
+  it("says nothing about the countdown while it is still running", async () => {
     const test = fixture({
       answers: [answer("newest", "running")],
       countdown: { startedMsAgo: 3 * 60_000, estimateMs: 10 * 60_000 },
     });
     await waitForRecruitingAgentRun(test, payload, now);
-    expect(String(test.taskCreate.mock.calls[0]?.[0].data.prompt)).toContain(
-      "end the turn with an empty reply",
-    );
+    expect(String(test.taskCreate.mock.calls[0]?.[0].data.prompt)).not.toContain("are up");
     expect(test.effectUpdate).not.toHaveBeenCalled();
   });
 

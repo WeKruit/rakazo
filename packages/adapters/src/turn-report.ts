@@ -247,7 +247,7 @@ export function turnReportText(work: readonly TurnWork[], chinese = false): stri
 
 /** Model-facing: the last silent-turn continuation when the work is unreported. */
 export const REPORT_BEFORE_END =
-  "Finish the original task from the latest tool result, then give the user the final answer: report what you did (counts and names, no internal ids) and show in full anything they asked to see, such as a draft.";
+  "The turn reached its last step after a tool result, with no final answer to the user yet.";
 
 type Entry =
   | { kind: "tool"; id: string; name: string; args: Record<string, unknown> }

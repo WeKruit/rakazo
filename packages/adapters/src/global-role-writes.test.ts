@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  delegatedRequestMessage,
   newestRecruiterWords,
   otherRoleWriteRefusal,
   roleRequestMessage,
@@ -43,52 +44,41 @@ describe("otherRoleWriteRefusal", () => {
 });
 
 describe("roleRequestMessage", () => {
-  const rounds = (round: { approvedAt: Date | null } | null) => ({
-    recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
-  });
-  const words = "3 and 10 aren't a fit, find more like the rest";
-
-  it("sends feedback on an open round as the recruiter's own words (staging 11-15)", async () => {
-    // Kruit's brief turned "find more like the rest" into "find the next 20 people", so the team
-    // scaled out and round 2 was never built.
-    const message = await roleRequestMessage(rounds({ approvedAt: null }) as never, {
-      roleId: "role-1",
-      recruiterWords: words,
-      brief: "Goal: find the next 20 people",
-    });
-    expect(message).toContain(`"${words}"`);
-    expect(message).toMatch(/never a number of people or a scale-out/);
-  });
-
-  it("keeps who the recruiter means while a round waits on them (team-has-no-email 11-16)", async () => {
-    // Kruit's brief named Bhargav; only 「没存的话现在怎么办？」 reached the team, which took
-    // "him" to be the person its own conversation last talked about.
-    const message = await roleRequestMessage(rounds({ approvedAt: null }) as never, {
-      roleId: "role-1",
+  it("puts the recruiter's words first and a teammate's brief after them as a note", () => {
+    // team-has-no-email 11-16: the note named Bhargav; only 「没存的话现在怎么办？」 reached the
+    // team, which took "him" to be the person its own conversation last talked about.
+    const message = roleRequestMessage({
       recruiterWords: "没存的话现在怎么办？",
       brief: "Candidate Bhargav P: is his email saved?",
     });
+    expect(message).toContain('word for word:\n"没存的话现在怎么办？"');
+    expect(message).toContain("Teammate's note (not the recruiter's words):");
     expect(message.indexOf("没存的话")).toBeLessThan(message.indexOf("Bhargav P"));
   });
 
-  it("puts the recruiter's words before Kruit's brief once no round waits on them", async () => {
-    for (const round of [null, { approvedAt: new Date() }]) {
-      const message = await roleRequestMessage(rounds(round) as never, {
-        roleId: "role-1",
-        recruiterWords: "find 20 more",
-        brief: "Goal: 20 more people",
-      });
-      expect(message.indexOf('"find 20 more"')).toBeLessThan(message.indexOf("Goal: 20 more"));
-    }
+  it("keeps the brief alone when no recruiter message started this turn", () => {
+    expect(
+      roleRequestMessage({ recruiterWords: "", brief: "Goal: use Ana's profile from the other role" }),
+    ).toBe("Goal: use Ana's profile from the other role");
   });
+});
 
-  it("keeps the brief alone when no recruiter message started this turn", async () => {
-    const message = await roleRequestMessage(rounds({ approvedAt: null }) as never, {
-      roleId: "role-1",
-      recruiterWords: "",
-      brief: "Goal: use Ana's profile from the other role",
-    });
-    expect(message).toBe("Goal: use Ana's profile from the other role");
+describe("delegatedRequestMessage", () => {
+  it("carries the recruiter's words and only the people and round they refer to", () => {
+    // Staging 11-15: Kruit's brief turned "find more like the rest" into "find the next 20 people".
+    const words = "3 and 10 aren't a fit, find more like the rest";
+    expect(
+      delegatedRequestMessage(
+        words,
+        [{ candidateKey: "linkedin:ada", name: "Ada Chen", linkedinUrl: "https://linkedin.com/in/ada" }],
+        1,
+      ),
+    ).toBe(
+      `The recruiter wrote, word for word:\n"${words}"\n\nPeople they refer to: Ada Chen, https://linkedin.com/in/ada.\n\nRound they refer to: round 1.`,
+    );
+    expect(delegatedRequestMessage("find 20 more", [])).toBe(
+      'The recruiter wrote, word for word:\n"find 20 more"',
+    );
   });
 });
 
@@ -142,20 +132,5 @@ describe("newestRecruiterWords", () => {
       "t",
     );
     expect(words).toBe("新增里还有一堆不是Senior");
-  });
-});
-
-describe("roleRequestMessage inside a role's conversation", () => {
-  it("passes the lead's brief only as a note on who and what, after an accepted round too", async () => {
-    // Play s167: after the round was accepted the lead's brief added 继续找新候选人 as the goal.
-    const message = await roleRequestMessage({} as never, {
-      roleId: "role-1",
-      recruiterWords: "郭小明不合适",
-      brief: "Goal：继续找新候选人",
-      noteOnly: true,
-    });
-    expect(message).toContain('word for word:\n"郭小明不合适"');
-    expect(message).toContain("Kruit's note, only on who and what");
-    expect(message).not.toContain("Kruit's brief");
   });
 });

@@ -400,7 +400,7 @@ describe("loadWorkingState", () => {
         )
       ).text ?? "";
     expect(card).toContain(
-      "  Campaign (campaign_id c-1): 2 people in it, 1 more added and not in it until a confirmed send; the recruiter confirmed a send 13 min ago. Whether it is sending and who has been emailed are known only from get_campaign this turn",
+      "  Campaign (campaign_id c-1): 2 people in it, 1 more added and not in it until a confirmed send; the recruiter confirmed a send 13 min ago. Whether it is sending and who has been emailed are known from get_campaign, not from the confirmation.",
     );
     expect(card).toContain(
       "  Campaign (campaign_id c-2): 1 person in it; no send confirmed, so nobody has been emailed from it.",

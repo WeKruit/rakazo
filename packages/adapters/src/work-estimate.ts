@@ -7,7 +7,6 @@ import {
 } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
-import { COMPLETION_EMAIL_TOOL } from "./completion-email.js";
 
 /**
  * A big search or contact lookup gets a countdown the recruiter sees (Workloop's wait clock).
@@ -322,7 +321,7 @@ export async function waitWithCountdown<T extends { timedOut: boolean }>(
   const more = minutes(open.estimateMs);
   return {
     ...result,
-    countdown: `The recruiter's countdown of about ${more} minutes ran out and started over. Tell them in one line that the work keeps going, about ${more} more minutes; ask nothing. Then wait again.`,
+    countdown: `The recruiter's countdown of about ${more} minutes ran out and started over; the work is still going.`,
   };
 }
 
@@ -346,21 +345,11 @@ export function minutes(ms: number): number {
 
 const STILL_RUNNING = new Set(["running", "pending", "queued", "in_progress"]);
 
-/**
- * A target bigger than what is public (every student of a school) is said up front and again
- * at the end, the way the people-search provider explains its own shortfalls.
- */
-export const SHORTFALL_RULE =
-  "If the target is probably more people than have public profiles (for example every current student of a school), say so in the same line: give the published total if you know it and why not all can be found (no public roster, many people have no public profile). When the search ends short, say how many were found, how many are confirmed and how many only possible, and that the list is partial; do not keep starting waves without saying so.";
-
 /** What the agent hears once when a big piece of work starts its countdown. */
 export function workStartNote(kind: WorkEstimateKind, estimateMs: number): string {
   const what = kind === "search" ? "search" : "contact lookup";
   return [
     `This is a big ${what}: about ${minutes(estimateMs)} minutes. The recruiter sees a countdown.`,
-    `Tell them in one line that it takes about ${minutes(estimateMs)} minutes and they can keep chatting or leave; you report when the time is up.`,
-    `If you have ${COMPLETION_EMAIL_TOOL} and they were not offered it yet in this conversation, add "Want an email when it finishes? Just say so." to that line. Never use an ask_user card here and never wait for an answer: no click is needed for the work or the countdown to go on.`,
-    ...(kind === "search" ? [SHORTFALL_RULE] : []),
   ].join(" ");
 }
 
@@ -402,7 +391,7 @@ export async function contactLookupCountdownNote(
   const due = estimate?.estimateMs ? countdownReportDue(estimate, now) : null;
   if (!estimate?.estimateMs || !due) return null;
   await markCountdownReported(prisma, estimate.id, due);
-  return `The estimated ${minutes(estimate.estimateMs)} minutes for this lookup are up and the recruiter's countdown started over: tell them in one line how many people are looked up and how many emails were found so far, then keep going without asking.`;
+  return `The estimated ${minutes(estimate.estimateMs)} minutes for this lookup are up and the recruiter's countdown started over; the lookup is still going.`;
 }
 
 /** The note rides along with the tool's own result. */

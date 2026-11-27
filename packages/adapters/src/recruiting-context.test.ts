@@ -333,7 +333,7 @@ describe("recruiting run context", () => {
     },
   );
 
-  it("tells the agent how the recruiter judged each round and to rethink a round they mostly turned down", async () => {
+  it("tells the agent how the recruiter judged each round", async () => {
     const { deps } = fixture();
     const noVerdict = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
       reason: "turn",
@@ -358,7 +358,6 @@ describe("recruiting run context", () => {
     expect(loaded!.text).toContain(
       "round 1: 2 good examples, 6 not a fit of 10 shown; round 2: 1 good examples, 5 not a fit of 10 shown; all people on this role: 3 good examples, 11 not a fit.",
     );
-    expect(loaded!.text).toContain("tell the recruiter in one line what you changed");
   });
 
   it("tells the agent what the praised and turned-down people share, on this role and across roles", async () => {
@@ -395,7 +394,6 @@ describe("recruiting run context", () => {
       "turned down: company Example Agency (5); title Staffing Recruiter (4).",
     );
     expect(loaded!.text).not.toContain("One-off Co");
-    expect(loaded!.text).toContain("never a requirement");
   });
 
   it("adopts bounded durable human feedback with the role context after restart", async () => {

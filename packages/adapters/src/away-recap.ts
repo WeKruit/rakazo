@@ -29,5 +29,5 @@ export async function awayRecapNote(
   });
   if (!updates) return undefined;
   const date = previous.createdAt.toISOString().slice(0, 10);
-  return `The person last wrote here on ${date} (UTC), more than a day ago, and work went on while they were away. Answer their message first, without any "while you were away" opener. Then, only for news the answer did not already cover, add at most three lines in their language on what finished, what came in and what now waits on them, from the conversation and saved roles; leave out what did not change.`;
+  return `The person last wrote here on ${date} (UTC), more than a day ago, and work went on while they were away.`;
 }

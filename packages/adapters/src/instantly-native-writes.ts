@@ -253,7 +253,7 @@ export const nativeInstantlyWrites = [
     "ensure_sender",
     EnsureSenderInput,
     false,
-    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. Always call read first and do what it returns. Also call read when asked to send from the recruiter's own email without a send_message tool, and answer with its next; never ask them to connect or reconnect their email. Only when read returns selfSetup true with no sender, ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
+    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. Always call read first. Also call read when asked to send from the recruiter's own email without a send_message tool; never ask them to connect or reconnect their email. Only when read returns selfSetup true with no sender, ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
   ),
   tool(
     "get_role_draft",
@@ -739,22 +739,6 @@ export const historyKey = (serverId: string, roleId: string) =>
   `${bindingKey(serverId, roleId)}:history`;
 
 /** The recruiting role linked to this run's conversation, if any. */
-const ROLE_SENDS_THERE =
-  "Nothing was created: you opened this role's conversation in this turn, and its team writes this email and shows its send card there. Do not email these people from here; tell the recruiter in one line, in their language, that the role is handling it.";
-async function openedRoleThisRun(prisma: PrismaClient, context: AdapterContext) {
-  if (!context.runId) return false;
-  const opened = await prisma.externalEffect.findFirst({
-    where: {
-      runId: context.runId,
-      spaceId: context.spaceId,
-      kind: "start_role",
-      status: "completed",
-    },
-    select: { id: true },
-  });
-  return Boolean(opened);
-}
-
 async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
   if (!context.runId) return null;
   const run = await prisma.run.findFirst({
@@ -767,9 +751,7 @@ async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
 async function requireRole(prisma: PrismaClient, context: AdapterContext, roleId?: string) {
   const id = roleId ?? (await activeRoleId(prisma, context));
   if (!id)
-    throw new Error(
-      "Pass role_id: this conversation has no linked recruiting role. To email someone the recruiter names outside a role, use create_campaign with that email as steps, then add_leads, then activate_campaign with its campaign_id.",
-    );
+    throw new Error("This conversation has no linked recruiting role.");
   const role = await prisma.recruitingRole.findFirst({
     where: { id, spaceId: context.spaceId, userId: context.userId },
     select: { id: true, title: true },
@@ -803,7 +785,7 @@ export async function lastUsedMailbox(
 const NO_MAILBOX = "No sending mailbox is set up for this account yet";
 class NoMailboxError extends Error {
   constructor() {
-    super(`${NO_MAILBOX}; tell the recruiter instead of creating a campaign`);
+    super(NO_MAILBOX);
   }
 }
 /** Default sender: the last-used mailbox if still connected, else the first connected one. */
@@ -1010,9 +992,6 @@ const FEW_RECIPIENTS = 10;
  */
 const PICKUP_MINUTES = 15;
 
-const IN_MINUTES =
-  "Tell the recruiter that time in minutes from now, never as a clock time in any zone";
-
 export function queuePace(
   campaign: Record<string, unknown> | undefined,
   count: number,
@@ -1057,7 +1036,7 @@ export function queuePace(
     if (today && today.left < count) {
       const reset = new Date(today.resetsAt);
       const hours = Math.max(1, Math.round((reset.getTime() - now.getTime()) / 3_600_000));
-      return `held by the sending mailbox's daily limit, not failed: it has sent ${today.sent} of its ${today.limit} emails for today${today.left ? `, so ${today.left} of these go out today and the other ${count - today.left}` : ", so these"} go out after the limit resets at 00:00 UTC (about ${hours} hours from now; ${at(reset)} ${shown} on ${on(reset)}). Tell the recruiter exactly that; sending now or changing the hours cannot get them out sooner today`;
+      return `held by the sending mailbox's daily limit, not failed: it has sent ${today.sent} of its ${today.limit} emails for today${today.left ? `, so ${today.left} of these go out today and the other ${count - today.left}` : ", so these"} go out after the limit resets at 00:00 UTC (about ${hours} hours from now; ${at(reset)} ${shown} on ${on(reset)}); sending now or changing the hours cannot get them out sooner today`;
     }
     const end = overdue ? new Date(now.getTime() + spread) : done;
     // UTC and the time left beside it: agents read the conversation's clock in UTC, so a bare
@@ -1071,11 +1050,11 @@ export function queuePace(
     time = `about ${left} minutes from now`;
     queuedAt = at(start);
   } catch {
-    return `not sent yet and not held for a later time: it goes out by itself (tell the recruiter "not sent yet, out within …", never that it is sending or handed over, which a stop before it leaves makes untrue); the first email can take up to ${PICKUP_MINUTES} minutes to leave, then about one every ${gap} minutes from the mailbox`;
+    return `not sent yet and not held for a later time: it goes out by itself; the first email can take up to ${PICKUP_MINUTES} minutes to leave, then about one every ${gap} minutes from the mailbox`;
   }
   if (overdue)
-    return `handed to the mail service since ${queuedAt} ${shown}, longer than its usual ${PICKUP_MINUTES} minutes; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}. ${IN_MINUTES}`;
-  return `not sent yet and not held for a later time: it goes out by itself (tell the recruiter "not sent yet, out within …", never that it is sending or handed over, which a stop before it leaves makes untrue); the first email usually leaves within a few minutes and at most ${PICKUP_MINUTES}, because the mail service starts each new send on its own schedule, so asking again does not make that first one sooner (say when it will be out at the latest; give that reason once, and if it was already said, give only the time and anything new, such as who has been emailed since), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest. ${IN_MINUTES}`;
+    return `handed to the mail service since ${queuedAt} ${shown}, longer than its usual ${PICKUP_MINUTES} minutes; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}`;
+  return `not sent yet and not held for a later time: it goes out by itself; the first email usually leaves within a few minutes and at most ${PICKUP_MINUTES}, because the mail service starts each new send on its own schedule, so asking again does not make that first one sooner; then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest`;
 }
 /** One role's campaign record is changed by one call at a time: saves, adds and sends. */
 const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
@@ -1468,7 +1447,7 @@ function planSend(
   );
   return blank.length
     ? {
-        refusal: `No first email is saved for ${label(blank)}, so nothing was sent. Save the role's email with ensure_role_campaign steps, or their own with steps and recipients, then call activate_campaign again.`,
+        refusal: `No first email is saved for ${label(blank)}, so nothing was sent.`,
       }
     : plan;
 }
@@ -1488,7 +1467,7 @@ function planSendNow(campaign: Record<string, unknown> | undefined, leads: Perso
   const window = nextSendWindow(campaign);
   return (!window || window.now) && emailGap(campaign) <= FASTEST_GAP
     ? {
-        refusal: `Already sending as fast as the mail service allows: ${label(queued)} ${queuePace(campaign, queued.length, firstQueued(queued))}. Nothing failed, nothing was changed and nobody is emailed twice. Tell the recruiter once, plainly, that this is the fastest the mail service sends and give that time; do not try send_now again. get_campaign shows who has been emailed.`,
+        refusal: `Already sending as fast as the mail service allows: ${label(queued)} ${queuePace(campaign, queued.length, firstQueued(queued))}. This is the fastest the mail service sends. Nothing failed, nothing was changed and nobody is emailed twice.`,
       }
     : { send: "now", recipients: queued };
 }
@@ -1523,7 +1502,7 @@ function planRecipients(
   }
   if (unmatched.length)
     return {
-      refusal: `Not in this campaign, or more than one person matches: ${unmatched.join(", ")}. Add each person with add_shortlist_leads, then call activate_campaign again with their emails as recipients.`,
+      refusal: `Not in this campaign, or more than one person matches: ${unmatched.join(", ")}. Nothing was sent.`,
     };
   // Resuming emails only people with a step left: not those a one-email campaign already emailed.
   const single = stepCount(campaign) <= 1;
@@ -1540,7 +1519,7 @@ function planRecipients(
       refusal: [
         emailed.length ? `Already emailed by this campaign: ${label(emailed)}.` : "",
         queued.length
-          ? `Already in this sending campaign and waiting to be emailed: ${label(queued)}. ${queuedWhen(campaign, queued)} Nothing failed. If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten.`
+          ? `Already in this sending campaign and waiting to be emailed: ${label(queued)}. ${queuedWhen(campaign, queued)} Nothing failed. send_now sends everyone queued one a minute instead of one every ten.`
           : "",
         "Nobody new was added, so nothing else was sent.",
       ]
@@ -1556,7 +1535,7 @@ function planRecipients(
     return { send: "activate", recipients: chosen, remove: others };
   return others.length
     ? {
-        refusal: `This campaign has already run; resuming it would also email ${label(emailed.length ? emailed : others)}, so nothing was sent. Ask the recruiter whether to resume it for everyone in it.`,
+        refusal: `This campaign has already run; resuming it would also email ${label(emailed.length ? emailed : others)}, so nothing was sent.`,
       }
     : { send: "activate", recipients: chosen, remove: [] };
 }
@@ -2179,7 +2158,7 @@ const isNamedEmail = (candidate: { candidate_key: string; email?: string | null 
   namedEmailKey(candidate.email!) === candidate.candidate_key;
 
 const notFound = (people: string[]) =>
-  `Nothing was saved: ${people.join(", ")} is not one of this role's candidates with a saved email, or more than one person matches. Ask the recruiter one question: which person they mean, by full name or email.`;
+  `Nothing was saved: ${people.join(", ")} is not one of this role's candidates with a saved email, or more than one person matches.`;
 
 /**
  * Adds the named people who are this role's saved candidates to its campaign the way
@@ -2258,7 +2237,7 @@ async function addSavedRecipients(
   }
   if (noEmail.length)
     throw new Error(
-      `Nothing was saved: ${noEmail.join(", ")} has no saved email yet. Find their email with find_emails, then save their email again with the same recipients.`,
+      `Nothing was saved: ${noEmail.join(", ")} has no saved email yet; find_emails looks emails up.`,
     );
   if (unknown.length) throw new Error(notFound(unknown));
   const out = await addShortlistLeads(prisma, rest, context, serverId, {
@@ -2268,13 +2247,13 @@ async function addSavedRecipients(
   const stopped = candidates.filter((c) => out.onHoldOrPassed.includes(c.candidate_key));
   if (stopped.length)
     throw new Error(
-      `Nothing was saved: ${stopped.map((c) => [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email).join(", ")} is on hold or passed for this role, or the recruiter asked that they not be contacted again. Ask the recruiter one question: contact them again and email them, or leave them out?`,
+      `Nothing was saved: ${stopped.map((c) => [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email).join(", ")} is on hold or passed for this role, or the recruiter asked that they not be contacted again.`,
     );
   return candidates.map((c) => c.email!);
 }
 
 const askAbout = (who: string, why: string) =>
-  `${who}'s own email was not saved and nothing was sent: ${why}. Ask the recruiter one question: send ${who} the role's saved email instead, or keep this email unsent?`;
+  `${who}'s own email was not saved and nothing was sent: ${why}.`;
 
 /**
  * Saves one email as the first email of only the named people. A campaign whose sequence still
@@ -2381,7 +2360,7 @@ async function saveOwnEmail(
   return {
     campaignId: binding.campaignId,
     ownEmailSavedFor: chosen.map((person) => person.email),
-    next: "Saved as only their first email; everyone else keeps the role's email. To send it, call activate_campaign with them as recipients; its card shows this email for them.",
+    next: "Saved as only their first email; everyone else keeps the role's email. Nothing was sent.",
   };
 }
 
@@ -2668,7 +2647,7 @@ async function addShortlistLeads(
     ...(ready.length
       ? {
           readyToSend: ready,
-          next: "The campaign is already sending, so these people were not added and nothing was sent. To email them, call activate_campaign with their emails as recipients.",
+          next: "The campaign is already sending, so these people were not added and nothing was sent.",
         }
       : {}),
     alreadyInCampaign: already,
@@ -2759,7 +2738,7 @@ async function sendCampaign(
 ) {
   if (!input.campaign_id && !(await activeRoleId(prisma, context)))
     throw new Error(
-      "Pass campaign_id: this conversation has no linked role, so name the campaign to send. It is the campaignId in this conversation's earlier create_campaign or activate_campaign result; read it with get_campaign. Do not ask the recruiter for the role again.",
+      "This conversation has no linked role and no campaign_id was given.",
     );
   const campaignId =
     input.campaign_id ??
@@ -2785,7 +2764,7 @@ async function sendCampaign(
   // The mail service holds a campaign with no mailbox as "no sending accounts available" forever.
   if (!Array.isArray(campaign.email_list) || !campaign.email_list.length)
     throw new Error(
-      "Nothing was sent: this campaign has no sending mailbox, so the mail service would hold it. Tell the recruiter the email has not gone out because no sending address is attached, and set one up before sending.",
+      "Nothing was sent: this campaign has no sending mailbox, so the mail service would hold it.",
     );
   if (!firstEmail(campaign))
     throw new Error(
@@ -2821,7 +2800,7 @@ async function sendCampaign(
     });
     if (elsewhere.size)
       throw new Error(
-        `Nothing was sent: ${[...elsewhere].map(([email, name]) => `${email} already gets a first email from ${name}`).join("; ")}, another of this account's campaigns, which is sending or has sent. Tell the recruiter in one line; only if they ask to email them again, call activate_campaign again with resend: true.`,
+        `Nothing was sent: ${[...elsewhere].map(([email, name]) => `${email} already gets a first email from ${name}`).join("; ")}, another of this account's campaigns, which is sending or has sent. resend: true emails them again.`,
       );
   }
   // The approved card showed each lead's saved email: the mail service holds exactly that first.
@@ -2884,11 +2863,11 @@ async function sendCampaign(
       ? {
           delivery: "held" as const,
           mailServiceSays: held,
-          next: `Nobody is emailed and nobody will be yet: the mail service says "${held.message}" for this campaign${mailbox ? ` (it sends from ${mailbox})` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}. Tell the recruiter the email has not gone out and why in plain words${MAILBOX_BLOCKED.has(held.status) ? ": that sending mailbox cannot send right now, and it needs the mailbox fixed before anything leaves" : ""}; never say it is on its way, and give no time it has not given.`,
+          next: `Nobody is emailed and nobody will be yet: the mail service says "${held.message}" for this campaign${mailbox ? ` (it sends from ${mailbox})` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}${MAILBOX_BLOCKED.has(held.status) ? "; that sending mailbox cannot send until it is fixed" : ""}.`,
         }
       : {
           delivery: "on_its_way" as const,
-          next: `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter their email is on its way and that time, in plain words (never "queue"), never that it was sent. get_campaign with campaign_id ${campaignId} (this campaign, not the role's) shows who has been emailed; until that time nobody listed as emailed there means still on its way, not failed, so never take that answer back.`,
+          next: `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. get_campaign with campaign_id ${campaignId} shows who has been emailed; until that time, nobody listed as emailed there means still on its way, not failed.`,
         };
   };
   if (plan.send === "now") {
@@ -2908,7 +2887,7 @@ async function sendCampaign(
       ? {
           delivery: "scheduled" as const,
           firstEmailAt: later.at,
-          next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are waiting and their first email goes out ${later.local}. Tell the recruiter that time and that activate_campaign send_now can send them now; it is not a failure.`,
+          next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are waiting and their first email goes out ${later.local}; send_now sends them now. Not a failure.`,
         }
       : {};
   const save = async (binding: RoleBinding) => {
@@ -2989,7 +2968,7 @@ async function sendCampaign(
       remaining.every((lead) => plan.recipients.some((p) => sameAddress(p.email, lead.email)));
     if (!exact)
       throw new Error(
-        "The campaign's people changed while preparing the send, so nothing was sent; call activate_campaign again",
+        "The campaign's people changed while preparing the send, so nothing was sent",
       );
   }
   const activated = await rest("POST", `/campaigns/${campaignId}/activate`);
@@ -3009,7 +2988,7 @@ async function sendCampaign(
  */
 /** A paused campaign emails nobody until it is activated again, which only activate_campaign does. */
 const PAUSED_NEXT =
-  'Paused: nobody still waiting is emailed while it stays paused; tell the recruiter who is held in plain words (never "queue"), and if they were told an email was on its way that has not gone out, that it was stopped before it went out, so that person did not get it. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.';
+  "Paused: nobody still waiting is emailed while it stays paused; anyone not emailed yet did not get it. activate_campaign resumes it.";
 async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
   const mailbox = Array.isArray(campaign.email_list) ? campaign.email_list.join(", ") : "";
   const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });
@@ -3034,15 +3013,15 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
     ...(held ? { mailServiceSays: held } : {}),
     ...(held
       ? {
-          next: `The people not emailed yet are not being sent right now: the mail service says "${held.message}"${held.mailbox ? ` (it sends from ${held.mailbox})` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}. Tell the recruiter who is not emailed yet and that reason in plain words, with what would get them out if it says; do not promise a time it has not given, and do not send them again.`,
+          next: `The people not emailed yet are not being sent right now: the mail service says "${held.message}"${held.mailbox ? ` (it sends from ${held.mailbox})` : ""}${held.nextOpenAt ? `, and it next opens at ${held.nextOpenAt}` : ""}.`,
         }
       : window && !window.now
         ? {
-            next: `The people not emailed yet are waiting for the sending hours, not failed. Tell the recruiter who and that their first email goes out ${window.local}, and call activate_campaign with send_now so their card offers to send now.`,
+            next: `The people not emailed yet are waiting for the sending hours, not failed; their first email goes out ${window.local}. send_now sends them now.`,
           }
         : window
           ? {
-              next: `The people not emailed yet are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still waiting to be emailed with that time, the same time each check, in plain words (never "queue"); do not send them again.${people.some((person) => person.contacted) ? " If the recruiter asks to stop or hold, pause_campaign holds everyone not emailed yet; those already emailed cannot be taken back." : " None of them has been emailed yet, so if the recruiter asks to stop or hold, pause_campaign holds every one of them."}${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone waiting one a minute instead of one every ten." : ""}`,
+              next: `The people not emailed yet are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}.${people.some((person) => person.contacted) ? " pause_campaign holds everyone not emailed yet; those already emailed cannot be taken back." : " None of them has been emailed yet; pause_campaign holds every one of them."}${emailGap(campaign) > FASTEST_GAP ? " send_now sends everyone waiting one a minute instead of one every ten." : ""}`,
             }
           : campaign.status === PAUSED && queued.length
             ? { next: PAUSED_NEXT }
@@ -3123,7 +3102,7 @@ async function sentFromAnotherCampaign(
   if (!elsewhere.size) return {};
   return {
     sentFrom: Object.fromEntries(elsewhere),
-    next: `This campaign is an unsent draft, not the send: ${[...elsewhere].map(([email, name]) => `${email} is emailed from "${name}"`).join("; ")}. Read that campaign (get_campaign) for whether it went out, and never tell the recruiter their email is a draft or not sent because of this one.`,
+    next: `This campaign is an unsent draft, not the send: ${[...elsewhere].map(([email, name]) => `${email} is emailed from "${name}"`).join("; ")}. That campaign (get_campaign) shows whether it went out.`,
   };
 }
 
@@ -3148,7 +3127,7 @@ function draftDelivery(campaign: Record<string, unknown>) {
 
 /** The way to change an unsent email this writer cannot edit in place. */
 const RESAVE_DRAFT =
-  "To change this unsent email's subject, wording or people, call ensure_role_campaign with the whole new email as steps; it replaces the draft, then activate_campaign shows a new card. Never put a new subject on the role's title.";
+  "This writer cannot edit this unsent email in place; ensure_role_campaign with the whole new email as steps replaces the draft.";
 
 function editableDraft(campaign: Record<string, unknown>) {
   const list = campaign.sequences;
@@ -3563,10 +3542,7 @@ export async function runInstantlyWrite(
       ? !(await activeRoleId(prisma, context))
       : false;
   if (owned && toolName === "native_instantly_create_campaign" && !direct)
-    throw new Error("In a role conversation, use ensure_role_campaign for the role's campaign");
-  // deny-then-change-and-send 11-21: Kruit opened the role and then also emailed the same people
-  // from this chat, so two send cards with different emails showed at once.
-  if (direct && (await openedRoleThisRun(prisma, context))) throw new Error(ROLE_SENDS_THERE);
+    throw new Error("Not created: in a role conversation the role's campaign comes only from ensure_role_campaign");
   // Mailboxes the owner assigned become this account's on its first mail call of any kind, so a
   // reply in a thread one of them already holds works as well as a new send.
   if (owned && toolName !== "native_instantly_ensure_sender") {
@@ -3762,7 +3738,7 @@ export async function runInstantlyWrite(
       if (input.steps) await requireSavedEmail(rest, campaign.id);
       return {
         ...campaign,
-        next: "Add the person with add_leads on this campaign_id, then call activate_campaign with this campaign_id and them as recipients; its card is the recruiter's one confirmation.",
+        next: "Draft campaign with no leads; nothing was sent.",
       };
     }
     case "native_instantly_add_leads": {

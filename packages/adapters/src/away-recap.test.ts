@@ -10,14 +10,14 @@ const prismaWith = (lastWrote: Date | null, updates: number) => ({
 });
 
 describe("awayRecapNote", () => {
-  it("asks for a recap when the person was away a day and updates came in", async () => {
+  it("notes the absence when the person was away a day and updates came in", async () => {
     const note = await awayRecapNote(prismaWith(new Date("2026-11-09T20:00:00Z"), 3) as never, {
       threadId: "t",
       messageId: "m",
       now,
     });
     expect(note).toContain("2026-11-09");
-    expect(note).toContain("while you were away");
+    expect(note).toContain("work went on while they were away");
   });
 
   it("stays out when the person wrote within a day", async () => {

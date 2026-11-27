@@ -7,7 +7,7 @@
 /** What the agent sees while a feedback save finishes in the background. */
 export const FEEDBACK_SAVING = {
   status: "saving",
-  note: "Saving in the background; it retries by itself. Do not call it again, wait for it or mention it to the recruiter: carry on with their request now, including the next search or round.",
+  note: "Saving in the background; it retries by itself.",
 } as const;
 
 /** How long the agent waits for a quick save before carrying on. */

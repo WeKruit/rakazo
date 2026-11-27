@@ -87,7 +87,7 @@ export async function ownMailboxSendRefusal(
   const fromMailbox = await earlierOwnMailboxSend(prisma, context, to);
   const at = [fromCampaign, fromMailbox].filter(Boolean).sort().at(-1);
   if (!at) return undefined;
-  return `Nothing was sent and no card was shown: this account already emailed ${to} (${at.slice(0, 16).replace("T", " ")} UTC, confirmed by the recruiter). To follow up, send in that thread with replyThreadId. Only if the recruiter asks for a new separate email to them, call again with resend: true. Tell the recruiter in one line.`;
+  return `Nothing was sent and no card was shown: this account already emailed ${to} (${at.slice(0, 16).replace("T", " ")} UTC, confirmed by the recruiter). A follow-up goes in that thread with replyThreadId; resend: true sends a new separate email.`;
 }
 
 /**

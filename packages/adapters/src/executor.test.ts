@@ -919,7 +919,7 @@ describe("steering attachment hydration", () => {
       Promise.reject(new Error("image missing")),
     );
     expect(withoutImage).toMatchObject({ images: undefined });
-    expect(withoutImage.unavailableInstruction).toContain("do not guess its contents");
+    expect(withoutImage.unavailableInstruction).toContain("its contents are unknown");
 
     const partiallyHydratedImages = await loadCurrentTurnImages(
       {
@@ -950,14 +950,14 @@ describe("steering attachment hydration", () => {
       images: partiallyHydratedImages,
     });
     expect(withPartiallyMissingImages.unavailableInstruction).toContain(
-      "do not guess its contents",
+      "its contents are unknown",
     );
 
     const withAllImagesMissing = await settleSteeringAttachmentLoads(
       Promise.resolve(undefined),
       imageBlocks.slice(0, 1),
     );
-    expect(withAllImagesMissing.unavailableInstruction).toContain("do not guess its contents");
+    expect(withAllImagesMissing.unavailableInstruction).toContain("its contents are unknown");
 
     const withoutMissingImages = await settleSteeringAttachmentLoads(
       Promise.resolve(["image.png"]),
@@ -1013,9 +1013,9 @@ describe("steering attachment hydration", () => {
       },
     );
     expect(images).toHaveLength(1);
-    expect(missingTurnImagesInstruction(blocks, images)).toContain("do not guess its contents");
+    expect(missingTurnImagesInstruction(blocks, images)).toContain("its contents are unknown");
     const settled = await settleSteeringAttachmentLoads(Promise.resolve(images), blocks);
-    expect(settled.unavailableInstruction).toContain("do not guess its contents");
+    expect(settled.unavailableInstruction).toContain("its contents are unknown");
   });
 
   it("does not swallow image hydration cancellation", async () => {
@@ -1053,7 +1053,7 @@ describe("steering attachment hydration", () => {
       { kind: "image", artifactId: "image-2", name: "two.png", mimeType: "image/png" },
     ];
     expect(missingTurnImagesInstruction(blocks, [{ name: "one.png" } as never])).toContain(
-      "do not guess its contents",
+      "its contents are unknown",
     );
     expect(
       missingTurnImagesInstruction(blocks, [
@@ -1061,7 +1061,7 @@ describe("steering attachment hydration", () => {
         { name: "two.png" } as never,
       ]),
     ).toBe("");
-    expect(missingTurnImagesInstruction(blocks, undefined)).toContain("do not guess its contents");
+    expect(missingTurnImagesInstruction(blocks, undefined)).toContain("its contents are unknown");
     expect(missingTurnImagesInstruction(undefined, undefined)).toBe("");
   });
 });

@@ -1526,7 +1526,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "delegate_to_role",
     description:
-      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId of the role the working state names (the role this conversation last opened or handed work to, or one of its role teams) or from recruiting_candidates operation roles, or the groupId for a team with no saved role yet, optionally a teammate to give it to directly, and a brief that quotes the recruiter's own words and adds no number of people or request they did not write. The team works in the role's conversation, with its usual approval cards there. The call waits up to four minutes for the team's answer and returns it (a round the team shows is posted here as it is shown); answer the recruiter from it in this reply. Word that the team is waiting on the recruiter's card or could not finish comes the same way: tell the recruiter and point them to that role's card. When the call returns without an answer, it comes back here later as a new message; never wait or poll for it. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
+      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId of the role the working state names (the role this conversation last opened or handed work to, or one of its role teams) or from recruiting_candidates operation roles, or the groupId for a team with no saved role yet, optionally a teammate to give it to directly, and the people and round the recruiter's words refer to. The team receives the recruiter's newest words exactly as written, with those people and that round; nothing else is passed. The team works in the role's conversation, with its usual approval cards there. The role's card is shown here and the turn ends with the call; the team's rounds, emails and results show only in the role's conversation. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1541,13 +1541,19 @@ export const builtinAgentTools: ConnectorTool[] = [
           description:
             "Optional teammate on that role team to give the work to directly (for example Sourcer or Scheduling). Leave out to give it to the team's lead.",
         },
-        message: {
-          type: "string",
+        people: {
+          type: "array",
+          items: { type: "string" },
           description:
-            "The brief: the recruiter's request in their own words, as they wrote it, then only who and what it refers to that the team cannot see (the people they named, the round, an earlier message). Never add your own limits, checks or scope: the team works to their words, and sends still wait for the recruiter's card. End with: ask in this conversation if blocked.",
+            "The saved people the recruiter's words refer to, each by candidateKey or LinkedIn URL from recruiting_candidates.",
+        },
+        round: {
+          type: "integer",
+          minimum: 1,
+          description: "The round the recruiter's words refer to, when they refer to one.",
         },
       },
-      required: ["message"],
+      additionalProperties: false,
     },
   },
   {

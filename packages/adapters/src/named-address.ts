@@ -114,8 +114,7 @@ export async function untypedAddressRefusal(
     .sort((a, b) => a.distance - b.distance);
   // Named only when one address is the closest; two as close could be either person.
   const closest = near[0] && near[1]?.distance !== near[0].distance ? near[0] : undefined;
-  const ask = "ask the recruiter one question: which person they mean, by full name or email.";
-  return `Nothing was saved: ${address} is not an address anyone wrote in this conversation or a saved email of this role's candidates. ${closest ? `If they mean ${closest.email}, the closest saved address, use it exactly; otherwise ${ask}` : `A${ask.slice(1)}`}`;
+  return `Nothing was saved: ${address} is not an address anyone wrote in this conversation or a saved email of this role's candidates.${closest ? ` The closest saved address is ${closest.email}.` : ""}`;
 }
 
 /** "Ada Chen <ada@x.test>", the usual way to write a person with their address, or one value. */

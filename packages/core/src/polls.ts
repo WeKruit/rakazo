@@ -66,8 +66,8 @@ export function pollWakePrompt(block: PollBlock): string {
   return [
     "Your poll has closed. Nobody wrote this message; you are continuing your own work.",
     pollResultLines(block),
-    votes === 0
-      ? "Nobody voted before the deadline. Carry on with your best judgment and say in one line what you chose and why."
-      : "Use the result in the work it was for. Tell the conversation the outcome in one line, then carry on.",
-  ].join("\n");
+    votes === 0 ? "Nobody voted before the deadline." : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

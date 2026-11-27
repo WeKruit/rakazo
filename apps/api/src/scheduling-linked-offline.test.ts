@@ -491,15 +491,6 @@ describe("linked offline scheduling receipts", () => {
     "reschedule_confirmation_rejected",
   ] as const)("links native approvals, receipts and Interview for %s", async (scenario) => {
     const f = fixture("linked-scheduling");
-    const usesPlan = [
-      "success",
-      "stale_confirmation_cancel",
-      "stale_confirmation_reschedule",
-      "stale_confirmation_timeout",
-      "dst_first_0130",
-      "dst_second_0130",
-      "confirmation_uncertain",
-    ].includes(scenario);
     let planId: string | undefined;
     const db = f.prisma as unknown as PrismaClient;
     const messages: Array<{
@@ -685,7 +676,8 @@ describe("linked offline scheduling receipts", () => {
         toolName: "get_email",
       },
     };
-    if (usesPlan) {
+    // One booking route: every scenario books through a reviewed plan, never a direct create.
+    {
       Object.assign(f.runData, {
         initialRecruitingRoleRevisionId: "role-revision",
         sourceMessageId: "source-message",
@@ -867,6 +859,8 @@ describe("linked offline scheduling receipts", () => {
       expect(hostLocal).toContain("GMT+9");
     }
     let providerBooking: Record<string, unknown> | undefined;
+    // The plan reads the slot open; in booking_conflict it is taken by the time the booking runs.
+    let bookingAvailabilityReads = 0;
     f.connector.execute.mockImplementation(async function* (call) {
       let data: unknown;
       if (["get_email", "native_instantly_get_email"].includes(call.route?.toolName ?? "")) {
@@ -882,6 +876,7 @@ describe("linked offline scheduling receipts", () => {
         const changing = call.args.bookingUidToReschedule !== undefined;
         const slot = changing ? "2026-10-28T15:00:00Z" : selected;
         const slotEnd = new Date(Date.parse(slot) + 30 * 60_000).toISOString();
+        if (!changing) bookingAvailabilityReads += 1;
         expect(call.args).toEqual({
           eventTypeId: 42,
           start: slot,
@@ -895,7 +890,7 @@ describe("linked offline scheduling receipts", () => {
           status: "success",
           data: {
             [slot.slice(0, 10)]:
-              scenario === "booking_conflict" ||
+              (scenario === "booking_conflict" && bookingAvailabilityReads > 1) ||
               (changing && scenario === "reschedule_slot_conflict")
                 ? []
                 : [{ start: slot, end: slotEnd }],
@@ -1242,7 +1237,7 @@ describe("linked offline scheduling receipts", () => {
       },
       1,
     );
-    if (usesPlan) {
+    {
       f.setCalls([
         {
           name: originalRead.name,
@@ -1477,7 +1472,8 @@ describe("linked offline scheduling receipts", () => {
       return;
     }
     const confirmationEffect = f.effects.at(-1)!;
-    if (planId && scenario !== "confirmation_uncertain") {
+    // A provider's rejection is a definite failure: there is no sent mail to read back.
+    if (planId && scenario !== "confirmation_uncertain" && scenario !== "confirmation_rejected") {
       const beforeReadback = await loadVerifiedRecruitingSchedulingPlan(db, planActor, {
         threadId: f.runData.threadId,
         planId,
@@ -1502,7 +1498,12 @@ describe("linked offline scheduling receipts", () => {
         bookingEffectId: booked.id,
         confirmationEffectId: confirmationEffect.id,
         bookingStatus: "completed",
-        confirmationStatus: scenario === "confirmation_uncertain" ? "uncertain" : "completed",
+        confirmationStatus:
+          scenario === "confirmation_uncertain"
+            ? "uncertain"
+            : scenario === "confirmation_rejected"
+              ? "failed"
+              : "completed",
       });
       expect(persisted.originalEmail).toMatchObject({
         providerMessageId: originalEmail.id,

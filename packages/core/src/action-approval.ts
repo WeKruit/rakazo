@@ -362,7 +362,7 @@ const DURABLE_MEMORY_TOOLS = new Set([
 ]);
 
 export const UNATTENDED_MEMORY_WRITE_REFUSAL =
-  "Nothing was saved. This run was started by an outside message or webhook, so it cannot change memory, preferences or skills. Tell the user what you would save so they can confirm it in a conversation.";
+  "Nothing was saved. This run was started by an outside message or webhook, so it cannot change memory, preferences or skills.";
 
 export function toolReadsExternalText(toolName: string, viaConnector: boolean): boolean {
   return viaConnector || EXTERNAL_TEXT_BUILTIN_TOOLS.has(toolName);
@@ -451,7 +451,7 @@ function ruleSpecificity(rule: ActionApprovalRule): number {
 const TOOL_BLOCK_EFFECTS = new Set(["block", "hide"]);
 
 export const BLOCKED_TOOL_REFUSAL =
-  "The owner of this workspace has turned this tool off, so it was not run. Continue without it, or tell the user what you would have done.";
+  "The owner of this workspace has turned this tool off, so it was not run.";
 
 /**
  * The owner's block or hide rule for this tool, if any. Unlike allow and ask, a block or hide

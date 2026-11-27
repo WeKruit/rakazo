@@ -265,10 +265,10 @@ export function searchQualityText(quality: RecruitingSearchQualityOutput): strin
       ...rounds,
       `all people on this role: ${quality.goodExample} good examples, ${quality.notFit} not a fit`,
     ].join("; ")}.`,
-    worse
-      ? "The latest round has more people the recruiter turned down than praised: before the next search, find what their not-a-fit reasons in the feedback share and what the good examples show, word the search around that, and tell the recruiter in one line what you changed."
-      : "Use it with the feedback reasons to keep what works in the next search.",
-  ].join(" ");
+    worse ? "The latest round has more people the recruiter turned down than praised." : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 const FACET_LABEL: Record<RecruitingVerdictFacet["facet"], string> = {
@@ -322,7 +322,6 @@ export function verdictPatternText(
       "What the people the recruiter judged have in common, as counts of people from their saved profiles:",
       ...(role ? [role] : []),
       ...(all ? [all] : []),
-      "Word the next search toward what the praised people share and away from what the turned-down people share, within the saved brief. A pattern is a preference, never a requirement: ask the recruiter before making one a rule, and never reject anyone for it.",
     ].join("\n"),
   );
 }

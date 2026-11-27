@@ -9,7 +9,11 @@ import {
   sanitizeMessagingLabel,
 } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
-import { appendEventInTransaction, createThreadMessageInTransaction } from "@rakazo/db";
+import {
+  appendEventInTransaction,
+  createThreadMessageInTransaction,
+  lockConversationPair,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { currentBotMessageHop } from "./bot-messages.js";
 
@@ -298,6 +302,9 @@ export async function messageConnectedAgent(
         toBotName: target.name,
         text: message,
       };
+      // Both conversations before either is written: a reply the other way writes them in the
+      // opposite order.
+      await lockConversationPair(tx, [run.threadId, targetThreadId]);
       const inbound = await createThreadMessageInTransaction(tx, {
         threadId: targetThreadId,
         role: "user",

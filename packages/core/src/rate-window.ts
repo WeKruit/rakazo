@@ -44,4 +44,4 @@ export const CREATING_RPC_PER_MINUTE = 120;
 /** Outbound tool calls (connectors, web) one run may make per minute. */
 export const RUN_EGRESS_PER_MINUTE = 300;
 export const RUN_EGRESS_RATE_LIMITED =
-  "Not run: this conversation made too many outside calls in the last minute. Wait a minute, then continue with fewer calls at once.";
+  "Not run: this conversation made too many outside calls in the last minute.";

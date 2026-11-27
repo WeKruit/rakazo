@@ -56,16 +56,15 @@ export function recruitingAgentRunWaitPrompt(
   agentRunId: string,
   countdown?: { estimateMs: number },
 ): string {
-  const quiet = countdown
-    ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over. Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, tell the recruiter in one line that the search keeps going, about ${minutes(countdown.estimateMs)} more minutes; ask nothing.`
-    : `Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, end the turn with an empty reply: you are woken again later, and the recruiter hears nothing until it finishes.`;
+  // Facts only, like a background-task notification: what to do with it is the skill's.
   return [
-    `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message; you are continuing your own work.`,
-    quiet,
-    // Staging 180051e6 and play s165: the request was already met when a search left running
-    // finished, and its people were shown as a round nobody asked for.
-    "When it has finished: while the recruiter's request is still short of the number they asked for, show its new people who fit with calibration_round (the same asked), and if it stays short say why in plain words, as the provider's own summary explains it, and carry on as the Find more people skill says. When that number is already reached (counted in the result says so), show nobody and write nothing: its people stay in Results until the recruiter asks for more. Start no unrelated search.",
-  ].join("\n");
+    `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message: it is a notice about your own work. agent_run with runId "${agentRunId}" collects it; the people it returns are saved to Results automatically. An empty reply posts nothing.`,
+    countdown
+      ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** A saved provider answer: the executor keeps it whole or under providerResult. */
