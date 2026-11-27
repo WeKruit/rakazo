@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fillRecruitingRoleArgs } from "./recruiting.js";
+import { citeRecruiterMessages, fillRecruitingRoleArgs } from "./recruiting.js";
 
 const actor = { spaceId: "space-1", userId: "user-1", email: "", isDeploymentOwner: false };
 const hash = "a".repeat(64);
@@ -263,6 +263,27 @@ describe("fillRecruitingRoleArgs", () => {
     expect(filled.sourceRefs).toEqual([
       { ...cited, anchor: { kind: "message", messageId: "jd-message", locator: "blocks[0].text" } },
     ]);
+  });
+
+  it("re-points a made-up message id on a preference save (staging 2026-11-27)", async () => {
+    const args = {
+      target: "preference",
+      operation: "add",
+      sourceRefs: [
+        {
+          id: "ask",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: "made-up", locator: "blocks[0].text" },
+          readState: "read",
+        },
+      ],
+    };
+    const filled = await citeRecruiterMessages(
+      prisma({ outside: ["made-up"], messages: [human("typed", "always write in English")] }),
+      "thread-1",
+      args,
+    );
+    expect(filled.sourceRefs[0]!.anchor.messageId).toBe("typed");
   });
 
   // 2026-10-26: roles with several page excerpts, or a JD pasted as a message, left JD facts uncited.
