@@ -1546,13 +1546,8 @@ export const builtinAgentTools: ConnectorTool[] = [
           description:
             "The brief: the recruiter's request in their own words, as they wrote it, then only who and what it refers to that the team cannot see (the people they named, the round, an earlier message). Never add your own limits, checks or scope: the team works to their words, and sends still wait for the recruiter's card. End with: ask in this conversation if blocked.",
         },
-        line: {
-          type: "string",
-          description:
-            "One line for the recruiter, in your own words and the language of their newest message: what is being done for them now and for which role (for example finding the next people for it), never a word about handing over, teams or conversations. It is shown at once, while the call waits; your answer from the result follows it.",
-        },
       },
-      required: ["message", "line"],
+      required: ["message"],
     },
   },
   {

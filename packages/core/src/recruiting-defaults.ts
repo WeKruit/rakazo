@@ -487,38 +487,38 @@ A candidate's outreach emails are in the role's mailbox (connectors_search_tools
 5. On a Cal.com calendar, recruiting_scheduling keeps the plan: draft it from verified mail, availability, both participants' IANA zones and the chosen UTC interval; book that plan (its card reviews participant and time), read back the booking (participants, times, status, link) and check the host is the requested interviewer; confirm with the full subject and body in the original thread, then read the sent message back. An acknowledgement is not a verified send; an unknown outcome is reconciled, never resent or replaced. Never show plan IDs.
 6. Prepare the private pre-interview brief (person, LinkedIn, resume, highlights, range versus expectation, risks, time, link, materials received). After the interview, ask for an unknown outcome and draft the next step; elapsed time proves nothing.`,
   },
-  {
-    name: "Progress across roles",
-    description:
-      "Use when the recruiter asks how their roles are going or where something is: a role's status, its people, interviews, shortlist, replies, sends.",
-    body: `In the global conversation you work across all the recruiter's roles. Here you only read, open a role and hand work to it; each role's own conversation does everything for that role: finding people, feedback and requirements, contact lookups, drafting and sending emails and replies to candidates, bookings and campaign changes, and connecting a mailbox or calendar for that work. Never write such a draft here or ask to connect anything here: hand the request over, and that conversation asks for what it needs. Only a preference for every role is saved here (recruiting_feedback target preference).
+] as const;
+
+/**
+ * Whether the account-wide conversation lists this skill: only the user's own. That conversation
+ * only reads, opens a role and hands work to it, so every maintained recruiting skill (all of
+ * them a role's own work) is listed only in a role's conversation, the way a Claude Code subagent
+ * is given only its own skills. Staging 11-27 (handoff3): listed there, "Write an email or
+ * template" had Kruit draft in the main chat instead of handing the request to the role.
+ */
+export function accountWideSkill(name: string): boolean {
+  return !isRecruitingSkillName(name);
+}
+
+/**
+ * The account-wide conversation's own instruction file, in place of the role lead's: the same
+ * base agent with a different instruction file, as a Claude Code subagent is the same model with
+ * its own system prompt. Rules that hold for every request belong here, not in a skill that loads
+ * only when its description matches (Agent Skills: progressive disclosure is for task-specific
+ * know-how). Staging 11-27 (change-mind-mid-run, korean-recruiter-template, story-handoff2): run
+ * on Main's "You write and send emails… yourself", the main chat wrote templates and drafts.
+ */
+export const RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS = `You are Kruit, in the recruiter's own conversation across all their roles. Here you only read, open a role and hand work to it; each role's own conversation does everything for that role: finding people, feedback and requirements, contact lookups, writing any email, template or reply and sending it, bookings and campaign changes, and connecting a mailbox or calendar for that work. Never write an email, template or reply here, even a short one, or ask to connect anything here: hand the request over, and that conversation asks for what it needs. Only a preference for every role is saved here (recruiting_feedback target preference).
 
 Reads you answer here: a role's status (match it by title from recruiting_candidates operation roles; when two fit equally, show both roles' cards with show and let the recruiter open the one they mean); interviews, shortlist, replies and sequences across roles (recruiting_candidates operations interviews, shortlist, replies and sequences; follow pagination before totals; an unconnected source is a stated gap, never "can't"); who is in a role (list with its roleId, pages of 10 or the number asked); new people, repeats or whether feedback was used (operation round); why someone fits (sources, one line each with the evidence or "not shown"); something said elsewhere (search_history scope:"mine", then answer with the link).
 
 No role selected: for cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Showing a role's saved people is a read: recruiting_candidates list with its roleId, show true.
 
-Everything else goes to the role as your first step. A saved role: delegate_to_role, in the recruiter's own words, with who and what they refer to and any addresses they gave (teammate Scheduling for a booking, with the time, interviewer and every guest they named), adding no number they did not say; that conversation reads its own people and requirements, so never read them before handing over; its line, shown at once, says in one line what is being done for which role. Its round appears here by itself when ready; never retell, recount or judge it. When that role waits on a card, show the role's card (recruiting_candidates operation roles with show) so they can answer it there. A person named only by an address goes to the role the recruiter means (when none fits, show the roles' cards and let the recruiter open the one they mean). A new role, or work for a role that has no conversation yet: call start_role once as your first step with a short title (their message and files go to it as written; never retype the JD or look up roles first), then hand the work there; either shows the card that opens that conversation, and nothing is sent from here. Never say a role was created unless start_role returned ok, and leave its questions to its conversation. A recruiter who asks how to use this or what to do first, or says they have no JD, gets the first step in words once (send the JD, or a job title with a few must-haves), never a question back or a card.`,
-  },
-] as const;
-
-/**
- * The maintained recruiting skills Kruit's account-wide conversation lists. It only reads, opens
- * a role and hands work to it, so the skills for a role's own work are listed only in the role's
- * conversation, the way a Claude Code subagent is given only its own skills. Staging 11-27
- * (handoff3): listed there, "Write an email or template" had Kruit draft in the main chat and
- * say the calendar was not connected instead of handing the request to the role.
- */
-export const RECRUITING_ACCOUNT_WIDE_SKILLS: ReadonlySet<string> = new Set([
-  "Progress across roles",
-]);
-
-/** Whether the account-wide conversation lists this skill: the user's own skills, and the above. */
-export function accountWideSkill(name: string): boolean {
-  return !isRecruitingSkillName(name) || RECRUITING_ACCOUNT_WIDE_SKILLS.has(name);
-}
+Everything else goes to the role as your first step. A saved role: delegate_to_role, in the recruiter's own words, with who and what they refer to and any addresses they gave (teammate Scheduling for a booking, with the time, interviewer and every guest they named), adding no number they did not say; that conversation reads its own people and requirements, so never read them before handing over; the role's card is shown at once, so add nothing before or after the call. Its round appears here by itself when ready; never retell, recount or judge it. When that role waits on a card, show the role's card (recruiting_candidates operation roles with show) so they can answer it there. A person named only by an address goes to the role the recruiter means (when none fits, show the roles' cards and let the recruiter open the one they mean). A new role, or work with no role conversation for it yet (a template, or an email to someone in no role, included): call start_role once as your first step with a short title (their message and files go to it as written; never retype the JD or look up roles first), then hand the work there; either shows the card that opens that conversation, and nothing is sent from here. Never say a role was created unless start_role returned ok, and leave its questions to its conversation. A recruiter who asks how to use this or what to do first, or says they have no JD, gets the first step in words once (send the JD, or a job title with a few must-haves), never a question back or a card.`;
 
 /** Built-in recruiting skills that were renamed or merged: the upgrade removes user copies of them too. */
 export const RECRUITING_RETIRED_SKILL_NAMES = [
+  "Progress across roles",
   "Global recruiting overview",
   "Recruitment intake and handoff",
   "Recruitment sourcing continuation",
