@@ -75,21 +75,19 @@ export async function recruitingRoundPeople(
 }
 
 /**
- * One line under a listed person: how many of the role's requirements the full profile meets and
- * which ones it does not show or contradicts; a person not judged yet gets the search's own
- * reason instead. A row used to quote the profile's opening words, and
- * "Aug 2021 - Present (4 years and 11 months)", one job's length, read as the person's whole
- * experience: a recruiter turned down someone judged to meet five years (11-26).
+ * One line under a listed person whose full profile was judged: the requirements of the role it
+ * only partly shows, does not state or contradicts; nothing when it leaves none open. A tally of
+ * requirements met used to open the line ("Meets 1 of 4 requirements"): it read as a second grade
+ * beside the search's own and did not follow it, and recruiters turned people down on it (11-27).
  */
 export function roundVerdictLine(
   verdicts: NonNullable<RoundPerson["verdicts"]>,
   chinese: boolean,
 ): string | undefined {
-  const asked = verdicts.filter((item) => !item.avoid);
-  if (!asked.length) return undefined;
   const at = (...levels: string[]) =>
-    asked.filter((item) => levels.includes(item.level)).map((item) => item.statement);
-  const met = at("strong").length;
+    verdicts
+      .filter((item) => !item.avoid && levels.includes(item.level))
+      .map((item) => item.statement);
   const parts = chinese
     ? ([
         ["部分符合：", at("medium", "weak")],
@@ -101,13 +99,10 @@ export function roundVerdictLine(
         ["not stated: ", at("silent")],
         ["does not meet: ", at("opposite")],
       ] as const);
-  const rest = parts.flatMap(([label, items]) =>
+  const open = parts.flatMap(([label, items]) =>
     items.length ? [`${label}${items.join(chinese ? "、" : ", ")}`] : [],
   );
-  const head = chinese
-    ? `符合 ${met}/${asked.length} 项要求`
-    : `Meets ${met} of ${asked.length} requirements`;
-  return [head, ...rest].join(chinese ? "；" : "; ");
+  return open.length ? open.join(chinese ? "；" : "; ") : undefined;
 }
 
 /**
@@ -159,13 +154,14 @@ export async function recruitingRoundListText(
     const head = [name ? `**${name}**` : null, person?.title, person?.company, person?.location]
       .filter(Boolean)
       .join(" · ");
-    // A person whose full profile was judged is described by that judgement, else by the search's
-    // own reason for returning them.
+    // A person whose full profile was judged is described by what that judgement leaves open, else
+    // by the search's own reason for returning them.
     const verdicts = person?.verdicts;
     const passage = input.brief
       ? undefined
-      : ((verdicts ? roundVerdictLine(verdicts, !!input.chinese) : undefined) ??
-        roundPassage(person?.reason));
+      : verdicts
+        ? roundVerdictLine(verdicts, !!input.chinese)
+        : roundPassage(person?.reason);
     // The agent's own grouping of the people, in its words.
     const group = input.groupOf?.[key]?.trim();
     const previous = index ? input.groupOf?.[keys[index - 1]!]?.trim() : undefined;
