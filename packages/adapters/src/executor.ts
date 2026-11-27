@@ -7047,7 +7047,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         args.operation === "create" &&
                         thread.groupId?.startsWith("recruiting-global-")
                       ? "A role is not saved in this conversation: open it with start_role, and its team saves it there."
-                      : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
+                      : // Staging 11-27: on "three more" Kruit tried to tie the main conversation to
+                        // the role, was told a reference was foreign, and told the recruiter three
+                        // times that no role was selected.
+                        name === "recruiting_role" &&
+                          args.operation === "bind" &&
+                          thread.groupId?.startsWith("recruiting-global-")
+                        ? "This conversation covers every role and is never tied to one, so nothing needs selecting. Hand the recruiter's request to that role's team with delegate_to_role, in their own words."
+                        : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
               };
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };

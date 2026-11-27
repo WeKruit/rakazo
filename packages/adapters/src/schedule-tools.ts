@@ -17,6 +17,10 @@ import {
 } from "@rakazo/core";
 import type { PrismaClient, Routine, ThreadEvents } from "@rakazo/db";
 import { IsolationError, Prisma, scoped } from "@rakazo/db";
+import {
+  ROLE_OPERATIONS_OUTSIDE_A_ROLE,
+  recruitingRoleToolDescription,
+} from "./recruiting-role-tool.js";
 
 export { isOneShotRoutineCron, ONCE_ROUTINE_CRON };
 
@@ -41,7 +45,7 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
 ): T[] {
   const global = Boolean(groupId?.startsWith("recruiting-global-"));
   return tools
-    .map((tool) => (global && tool.name === "recruiting_role" ? withoutRoleCreate(tool) : tool))
+    .map((tool) => (global && tool.name === "recruiting_role" ? roleToolOutsideARole(tool) : tool))
     .filter(
       (tool) =>
         (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
@@ -56,13 +60,8 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
     );
 }
 
-/**
- * The account-wide conversation opens a role only with start_role, so its recruiting_role lists
- * no create: one tool per action, as Anthropic's tool-writing guide advises against overlapping
- * tools (staging 11-26: Kruit chose the create that cannot work there and told the recruiter it
- * could not open a role).
- */
-function withoutRoleCreate<T extends { name: string }>(tool: T): T {
+/** The account-wide conversation's recruiting_role: only what can work there, in options and text. */
+function roleToolOutsideARole<T extends { name: string }>(tool: T): T {
   const schema = (tool as { inputSchema?: Record<string, unknown> }).inputSchema;
   const key = Array.isArray(schema?.oneOf)
     ? "oneOf"
@@ -72,15 +71,12 @@ function withoutRoleCreate<T extends { name: string }>(tool: T): T {
   if (!schema || !key) return tool;
   const variants = (
     schema[key] as Array<{ properties?: { operation?: { const?: unknown } } }>
-  ).filter((variant) => variant.properties?.operation?.const !== "create");
-  const description = (tool as { description?: string }).description;
+  ).filter(
+    (variant) => !ROLE_OPERATIONS_OUTSIDE_A_ROLE.has(String(variant.properties?.operation?.const)),
+  );
   return {
     ...tool,
-    ...(description
-      ? {
-          description: `${description} In this conversation a new role is opened with start_role, never here.`,
-        }
-      : {}),
+    description: recruitingRoleToolDescription(true),
     inputSchema: { ...schema, [key]: variants },
   };
 }

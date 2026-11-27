@@ -269,6 +269,7 @@ describe("people-search agent runs", () => {
         query: { type: "string" },
         effort: { type: "string", enum: ["low", "auto", "ultra"] },
         outputSchema: { type: "object" },
+        systemPrompt: { type: "string" },
         input: {
           type: "object",
           properties: { data: { type: "array" }, exclusion: { type: "array" } },
@@ -289,7 +290,11 @@ describe("people-search agent runs", () => {
     expect(agentRunSchemaForAgent(server, "web_search_exa", schema)).toBe(schema);
     // People sent to be graded anyway are left out: a run finds and grades in one go.
     const people = [{ name: "Saved", linkedin_url: "https://www.linkedin.com/in/saved-person" }];
-    const prepared = await prepare(fixture(null), { query: "Find", input: { data: people } });
+    const prepared = await prepare(fixture(null), {
+      query: "Find",
+      systemPrompt: "Use fresh searches",
+      input: { data: people },
+    });
     expect(prepared).toEqual({ query: "Find", input: {}, outputSchema: AGENT_RUN_PEOPLE_SCHEMA });
   });
 
