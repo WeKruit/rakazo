@@ -132,7 +132,7 @@ function mailReplyHistoryText(reply: MailReply): string {
       ? `${reply.body.slice(0, MAIL_REPLY_HISTORY_BODY_CHARS)}…`
       : reply.body;
   return [
-    `Reply draft to ${[...reply.to, ...reply.cc].join(", ")}; subject: ${reply.subject}`,
+    `${reply.status === "sent" ? "Reply sent" : "Reply draft"} to ${[...reply.to, ...reply.cc].join(", ")}; subject: ${reply.subject}`,
     `Body: ${body}`,
     ...(reply.status === "needs_approval" ? [] : [`Mail status: ${reply.status}`]),
   ].join("\n");

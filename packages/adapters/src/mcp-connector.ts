@@ -22,6 +22,7 @@ import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
   GMAIL_SEND_TOOLS,
+  GOOGLE_CALENDAR_ENDPOINT,
   PLACEHOLDER_NOTE,
   recruitingBotKey,
   unfilledPlaceholder,
@@ -70,6 +71,7 @@ import {
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import {
   CATALOG_EXECUTE,
+  CATALOG_SEARCH,
   catalogEntries,
   DIRECT_TOOL_LIMIT,
   executeLazyCatalogControl,
@@ -717,6 +719,40 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
 
 /** Tools listed outside the lazy catalog even when an agent has many connected tools. */
 const directTools = new WeakSet<ConnectorTool>();
+/**
+ * A calendar's own create, which only a reviewed booking plan calls (recruiting_scheduling book
+ * resolves it): never listed to an agent, so the one booking route is the only one it sees.
+ */
+const planOnlyTools = new WeakSet<ConnectorTool>();
+const PLAN_ONLY = {
+  "https://mcp.cal.com/mcp": "create_booking",
+  [GOOGLE_CALENDAR_ENDPOINT]: "create_event",
+} as Record<string, string>;
+const endpointBase = (endpoint: string | null | undefined) => {
+  const url = endpoint ? URL.parse(endpoint) : null;
+  return url ? `${url.origin}${url.pathname.replace(/\/$/, "")}` : "";
+};
+/**
+ * Mail for a role (its first emails and the answers to its candidates) runs in that role's
+ * conversation, where its campaign, its replies and their cards are; in the account-wide
+ * conversation Main hands it there (delegate_to_role) and is not offered these. A reply sent
+ * from both places reached one candidate twice (branch play 11-27).
+ */
+const ROLE_MAIL = new Set([
+  "reply_to_email",
+  "create_campaign",
+  "add_leads",
+  "activate_campaign",
+  "ensure_role_campaign",
+  "add_shortlist_leads",
+  "create_role_draft",
+  "update_role_draft",
+  "clone_role_draft",
+]);
+/** Runs whose catalog left out role mail, so a search there names where that mail is sent. */
+const roleMailHidden = new WeakSet<AdapterContext>();
+const ROLE_MAIL_ELSEWHERE =
+  "Mail to candidates is not sent from this conversation. A role's first emails and its answers to candidates are written and sent in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, with any addresses the recruiter gave. Only a one-off email that belongs to no role goes to Outreach here.";
 
 const OUTREACH_CORE = [
   "ensure_role_campaign",
@@ -1031,7 +1067,7 @@ export class McpConnector implements ConnectorProvider {
   }
 
   async discoverTools(context: AdapterContext): Promise<ConnectorTool[]> {
-    const tools = await this.authorizedTools(context);
+    const tools = (await this.authorizedTools(context)).filter((tool) => !planOnlyTools.has(tool));
     if (tools.length <= DIRECT_TOOL_LIMIT) return tools;
     // The built-in people search and each agent's core work tools stay directly callable, so a
     // calibration round or an outreach step needs no catalog search and load turns first.
@@ -1078,9 +1114,18 @@ export class McpConnector implements ConnectorProvider {
     const groups = await Promise.all(
       assignments.map(async (assignment): Promise<ConnectorTool[]> => {
         const core = coreTools(assignment.bot);
+        const planOnly = PLAN_ONLY[endpointBase(assignment.server.endpoint)];
+        const accountWideMain =
+          context.accountWideConversation && recruitingBotKey(assignment.bot) === "main";
         const withCore = (tools: ConnectorTool[]) => {
-          for (const tool of tools) if (core.has(coreName(tool))) directTools.add(tool);
-          return tools;
+          for (const tool of tools) {
+            if (core.has(coreName(tool))) directTools.add(tool);
+            if (tool.route?.toolName === planOnly) planOnlyTools.add(tool);
+          }
+          if (!accountWideMain) return tools;
+          const kept = tools.filter((tool) => !ROLE_MAIL.has(coreName(tool)));
+          if (kept.length < tools.length) roleMailHidden.add(context);
+          return kept;
         };
         // A grant of no tools needs no listing call.
         if (
@@ -1265,11 +1310,23 @@ export class McpConnector implements ConnectorProvider {
     }
     if (isLazyCatalogControlRoute(call.route)) {
       try {
-        yield* executeLazyCatalogControl(
+        const tools = await this.authorizedTools(context);
+        // Search and load list what an agent may pick; a plan's approved booking still runs.
+        for await (const event of executeLazyCatalogControl(
           call,
-          catalogEntries(await this.authorizedTools(context)),
+          catalogEntries(
+            call.route.toolName === CATALOG_EXECUTE
+              ? tools
+              : tools.filter((tool) => !planOnlyTools.has(tool)),
+          ),
           (resolved) => this.execute(resolved, context),
-        );
+        )) {
+          yield call.route.toolName === CATALOG_SEARCH &&
+          event.type === "result" &&
+          roleMailHidden.has(context)
+            ? { ...event, data: { ...(event.data as object), note: ROLE_MAIL_ELSEWHERE } }
+            : event;
+        }
       } catch (error) {
         // A tool of a refused connection is no longer in the catalog; say why, not "unknown".
         const refused = this.refusedCatalogTool(String(call.args.id ?? ""), context);
