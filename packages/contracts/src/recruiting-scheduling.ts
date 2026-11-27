@@ -124,7 +124,6 @@ export type RecruitingSchedulingPrepareInput = z.infer<
 /** This wrapper selects an existing plan; only native action approval grants dispatch. */
 export const RecruitingSchedulingToolInputSchema = z.discriminatedUnion("operation", [
   z.strictObject({ operation: z.literal("read"), planId: Id }),
-  z.strictObject({ operation: z.literal("draft"), plan: RecruitingSchedulingPlanInputSchema }),
   RecruitingSchedulingPrepareInputSchema.extend({ operation: z.literal("prepare") }),
   z.strictObject({
     operation: z.literal("book"),

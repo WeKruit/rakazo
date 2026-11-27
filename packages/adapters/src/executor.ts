@@ -223,7 +223,6 @@ import {
   claimRecruitingCrmImport,
   claimRecruitingReply,
   completedRunBlocks,
-  createRecruitingSchedulingPlan,
   createRunHistoryCache,
   createSpaceForMember,
   createThreadMessageInTransaction,
@@ -5189,14 +5188,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return { error: "This tool is disabled for this bot." };
             try {
               const input = RecruitingSchedulingToolInputSchema.parse(args);
-              if (input.operation === "draft") {
-                if (input.plan.threadId !== thread.id) throw new IsolationError();
-                return await createRecruitingSchedulingPlan(
-                  deps.prisma,
-                  researchActor.actor,
-                  input.plan,
-                );
-              }
               if (input.operation === "prepare") {
                 const { operation: _operation, ...prepare } = input;
                 return await prepareRecruitingSchedulingPlan(deps.prisma, researchActor.actor, {
