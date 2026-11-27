@@ -1438,11 +1438,13 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     roleId: RecruitingId.optional(),
   }),
   // A role conversation always resolves in its own role; a roleId the agent adds is ignored
-  // (staging 11-16: two resolves of named people were refused for carrying one).
+  // (staging 11-16: two resolves of named people were refused for carrying one). A limit is
+  // ignored the same way (staging 11-27: refused for one, and the retry cost 34 s).
   z.strictObject({
     operation: z.literal("resolve"),
     nameOrEmail: Text.max(240),
     roleId: RecruitingId.optional(),
+    limit: z.number().optional(),
   }),
   // As for list: a role conversation always reads its own role.
   // An earlier round by number: "are the people I turned down marked?" is about round 1.

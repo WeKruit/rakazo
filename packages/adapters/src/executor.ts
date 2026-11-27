@@ -944,7 +944,11 @@ function feedbackInputError(result: unknown): boolean {
  * What the agent is told when a feedback save is refused. A check that says what to change
  * (a source reference) is passed on, so the next call can fix it.
  */
-export function feedbackSaveRefused(error: Error): string {
+export function feedbackSaveRefused(error: Error, roleFeedbackInMain = false): string {
+  // Staging 11-27: Kruit marked three people passed from the main conversation, was told to
+  // fix fields it could not fix there, and the marks were made by the role's team anyway.
+  if (roleFeedbackInMain)
+    return "Not recorded here: feedback on a role's people or rounds is saved in that role's conversation. Pass the recruiter's words to its team with delegate_to_role, and do not call this tool for it again in this conversation.";
   const fix =
     error instanceof RecruitingSourceCheckError
       ? error.message
@@ -8907,7 +8911,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   message: error.message,
                   at: error.stack?.split("\n").slice(1, 4).join(" | "),
                 });
-                return finish({ error: feedbackSaveRefused(error) });
+                return finish({
+                  error: feedbackSaveRefused(
+                    error,
+                    args.target !== "preference" &&
+                      !!thread.groupId?.startsWith("recruiting-global-"),
+                  ),
+                });
               }
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
