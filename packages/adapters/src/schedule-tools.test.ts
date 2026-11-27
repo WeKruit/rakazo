@@ -413,6 +413,8 @@ describe("filterBuiltinToolsForThread", () => {
       "message_bot",
       "schedule_create",
       "run_subagent",
+      // Staging bee1b309: a Connect card here stood in for handing a booking to the role.
+      "request_connection",
     ].map((name) => ({ name }));
     const names = (groupId: string | null) =>
       filterBuiltinToolsForThread(all, groupId).map((t) => t.name);
