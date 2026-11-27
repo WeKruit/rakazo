@@ -2562,6 +2562,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           userId: run.userId,
           botId: bot.id,
           runId,
+          accountWideConversation: Boolean(thread.groupId?.startsWith("recruiting-global-")),
           screenLeaseId: screenLeaseIdForRun(computerLease, runId, fence),
           signal: runAbortController.signal,
           connectedConnections: connectedPlugins.map((row) => ({
@@ -11926,6 +11927,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           formatCurrentTimeInstruction(),
         ];
         let replyOutcome: string | undefined;
+        let sentReplyBody: string | undefined;
         const historicalContext: AgentRunRequest["history"] = [];
         // Parts that change on every turn go after the history, so the history stays a prefix the
         // provider's prompt cache can reuse from the previous turn.
@@ -12206,11 +12208,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               run: { userId: run.userId },
             },
           });
-          replyOutcome = mailReplyOutcomeInstruction(
-            currentReplyEffect
-              ? mailReplyState(replyDraft, currentReplyEffect)
-              : { status: "unknown" },
-          );
+          const replyState = currentReplyEffect
+            ? mailReplyState(replyDraft, currentReplyEffect)
+            : undefined;
+          replyOutcome = mailReplyOutcomeInstruction(replyState ?? { status: "unknown" });
+          sentReplyBody = replyState?.status === "sent" ? replyState.body : undefined;
           try {
             const event = await publishMailReplyCard(
               deps.prisma,
@@ -12229,8 +12231,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const card = blocks.data?.find(
                 (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
               );
-              if (card?.kind === "ask" && card.mailReply)
+              if (card?.kind === "ask" && card.mailReply) {
                 replyOutcome = mailReplyOutcomeInstruction(card.mailReply);
+                sentReplyBody = card.mailReply.status === "sent" ? card.mailReply.body : undefined;
+              }
               await deps.events.notify?.(event.threadId, event.seq);
             }
           } catch (error) {
@@ -12248,7 +12252,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               draft: replyDraft,
             });
             if (answered.length) {
-              replyOutcome = `${replyOutcome}\n${openQuestionsAnsweredNote(answered)}`;
+              // What went out, which the recruiter may have edited: the draft in this turn's call
+              // is not it, and an answer it already holds is not sent again (branch play 11-27).
+              replyOutcome = `${replyOutcome}\n${sentReplyBody === undefined ? "" : `Sent body: ${JSON.stringify(sentReplyBody)}\n`}${openQuestionsAnsweredNote(answered)}`;
               replyAnswersToSave = true;
             }
           }
