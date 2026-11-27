@@ -253,7 +253,7 @@ export const nativeInstantlyWrites = [
     "ensure_sender",
     EnsureSenderInput,
     false,
-    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. Always call read first. Also call read when asked to send from the recruiter's own email without a send_message tool; never ask them to connect or reconnect their email. Only when read returns selfSetup true with no sender, ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
+    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. Always call read first. Also call read when asked to send from the recruiter's own email without a send_message tool: its next says how this account sends. Only when read returns selfSetup true with no sender, ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
   ),
   tool(
     "get_role_draft",
@@ -2109,7 +2109,7 @@ async function saveRoleEmail(
     saved: true,
     role: role.title,
     hasEmail: true,
-    next: `Saved as the ${role.title} role's email, with no mailbox needed: it becomes the first email of the role's sequence and is used whenever this role's candidates are emailed. Say in one line that it is saved for the role and that they can ask you to show it any time; never ask for a mailbox or connection to save it.`,
+    next: `Saved as the ${role.title} role's email, with no mailbox needed: it becomes the first email of the role's sequence and is used whenever this role's candidates are emailed.`,
   };
 }
 
