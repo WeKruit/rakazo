@@ -631,43 +631,92 @@ describe("one booking route", () => {
   it.each([
     ["create_booking", "https://mcp.cal.com/mcp?toolsets=bookings"],
     ["create_event", "https://calendarmcp.googleapis.com/mcp/v1"],
-  ])("refuses a calendar's own %s outside a booking plan, with no card", async (operation, endpoint) => {
-    const f = fixture(`direct-${operation}`);
+  ])(
+    "refuses a calendar's own %s outside a booking plan, with no card",
+    async (operation, endpoint) => {
+      const f = fixture(`direct-${operation}`);
+      const tool = {
+        name: `mcp__calendar__${operation}`,
+        description: operation,
+        readOnly: false,
+        inputSchema: { type: "object" },
+        route: {
+          connectorId: "mcp",
+          resourceId: "cal-1",
+          resourceRevision: 3,
+          toolName: operation,
+        },
+      };
+      Object.assign(f.prisma, {
+        botMcpServer: {
+          findFirst: vi.fn(async () => ({
+            allowAllTools: true,
+            allowedTools: [],
+            server: { id: "cal-1", revision: 3, endpoint },
+          })),
+        },
+      });
+      f.connector.discoverTools.mockResolvedValue([tool]);
+      f.setCalls([{ name: tool.name, args: { start: "2026-10-23T15:00:00Z" }, executionId: "x" }]);
+      await f.run();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.effects).toHaveLength(0);
+      expect(f.results[0]).toEqual({ error: expect.stringContaining("recruiting_scheduling") });
+    },
+  );
+
+  // 11-27 play: the approved booking's own call came back after its card and was refused.
+  it("lets an approved plan booking come back after its card", async () => {
+    const f = fixture("approved-plan-booking");
     const tool = {
-      name: `mcp__calendar__${operation}`,
-      description: operation,
+      name: "mcp__calendar__create_event",
+      description: "create_event",
       readOnly: false,
       inputSchema: { type: "object" },
-      route: { connectorId: "mcp", resourceId: "cal-1", resourceRevision: 3, toolName: operation },
+      route: {
+        connectorId: "mcp",
+        resourceId: "cal-1",
+        resourceRevision: 3,
+        toolName: "create_event",
+      },
     };
     Object.assign(f.prisma, {
       botMcpServer: {
         findFirst: vi.fn(async () => ({
           allowAllTools: true,
           allowedTools: [],
-          server: { id: "cal-1", revision: 3, endpoint },
+          server: {
+            id: "cal-1",
+            revision: 3,
+            endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
+          },
         })),
       },
     });
+    const lookup = f.prisma.externalEffect.findFirst;
+    f.prisma.externalEffect.findFirst = vi.fn(async (query: { where: Record<string, unknown> }) =>
+      "idempotencyKey" in query.where
+        ? { result: { schedulingApprovalEvidence: { planId: "plan-1" } } }
+        : lookup(query as never),
+    ) as never;
     f.connector.discoverTools.mockResolvedValue([tool]);
-    f.setCalls([{ name: tool.name, args: { start: "2026-10-23T15:00:00Z" }, executionId: "x" }]);
+    f.setCalls([
+      { name: tool.name, args: { startTime: "2026-10-23T15:00:00Z" }, executionId: "x" },
+    ]);
     await f.run();
-    expect(f.connector.execute).not.toHaveBeenCalled();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.effects).toHaveLength(0);
-    expect(f.results[0]).toEqual({ error: expect.stringContaining("recruiting_scheduling") });
+    expect(f.results[0]).not.toEqual({
+      error: expect.stringContaining("Book with recruiting_scheduling"),
+    });
   });
 });
 
 describe("native Cal.com booking approvals", () => {
   it.each(
     (["direct", "catalog"] as const).flatMap((mode) =>
-      [
-        "reschedule_booking",
-        "cancel_booking",
-        "confirm_booking",
-        "add_booking_attendee",
-      ].map((operation) => ({ mode, operation })),
+      ["reschedule_booking", "cancel_booking", "confirm_booking", "add_booking_attendee"].map(
+        (operation) => ({ mode, operation }),
+      ),
     ),
   )(
     "requires one-time approval and replays the frozen $mode $operation once",
