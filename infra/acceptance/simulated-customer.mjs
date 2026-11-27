@@ -903,10 +903,13 @@ async function play(journey, label, owner, mailbox, out) {
           turns.push(turn);
           continue;
         }
+        // A reply draft's only typed answer is its text box: an answer typed on it is the
+        // recruiter's edited reply, sent with the card's Send, never a discard.
+        const editedOnCard = card.mailReply && move.action === "answer_card" && move.text?.trim();
         let answer =
           move.action === "deny_send"
             ? "deny"
-            : move.action === "approve_send"
+            : move.action === "approve_send" || editedOnCard
               ? "allow"
               : move.text;
         if (card.send) answer = guardSend(journey, card, answer, turn);
