@@ -90,6 +90,8 @@ export type RecruitingFeedbackResult = {
   /** Per named person, how their profile was judged on each requirement of the role. */
   profilesShow?: Record<string, string>;
   profilesShowNote?: string;
+  /** On a decision about people: the role's requirements are as they were before this call. */
+  requirements?: { changed: false; note: string };
 } & (
   | { status: "needs_clarification" }
   | {
@@ -125,9 +127,15 @@ export type RecruitingFeedbackResult = {
 export async function executeRecruitingFeedback(
   ...args: Parameters<typeof recordRecruitingFeedback>
 ): Promise<RecruitingFeedbackResult> {
-  const result = await recordRecruitingFeedback(...args);
-  const { feedback } = result;
-  if (feedback.target !== "candidate") return result;
+  const recorded = await recordRecruitingFeedback(...args);
+  const { feedback } = recorded;
+  if (feedback.target !== "candidate") return recorded;
+  // A turn-down's reason was kept only as the note on those people, and the next rounds were not
+  // judged on it (staging and branch plays 11-27: saved as a requirement in one play of seven).
+  const result =
+    recorded.status === "recorded" || recorded.status === "already_recorded"
+      ? { ...recorded, requirements: { changed: false as const, note: REQUIREMENTS_NOTE } }
+      : recorded;
   const judged = await args[0].prisma.recruitingCandidateOccurrence.findMany({
     where: {
       roleId: feedback.roleId,
@@ -149,6 +157,9 @@ export async function executeRecruitingFeedback(
     ? { ...result, profilesShow, profilesShowNote: PROFILES_SHOW_NOTE }
     : result;
 }
+
+const REQUIREMENTS_NOTE =
+  "This saved the decision on the named people only; the role's requirements are unchanged. When the recruiter's words give a reason later people must also meet, add it to the role's requirements in this step (recruiting_role update, criteria.upsert), so everyone found from now on is judged on it.";
 
 const PROFILES_SHOW_NOTE =
   "profilesShow is how each named person's profile was judged on the role's requirements. The recruiter's decision stands as recorded. Where their reason differs from it, say in one line what the profile shows, and leave that reason out of the next search.";
