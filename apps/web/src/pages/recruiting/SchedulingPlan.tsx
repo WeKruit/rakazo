@@ -172,10 +172,10 @@ export function SchedulingPlanHistory({
         plans.map((plan) => (
           <article className="space-y-3 rounded-lg border p-3" key={plan.id}>
             <p className="text-sm font-medium">
-              {plan.roleTitle} · {plan.originalEmail.subject}
+              {plan.originalEmail ? `${plan.roleTitle} · ${plan.originalEmail.subject}` : plan.roleTitle}
             </p>
             <p className="text-xs text-muted-foreground">
-              {plan.originalEmail.eaccount ?? t`Mailbox not recorded`}
+              {plan.originalEmail?.eaccount ?? t`Mailbox not recorded`}
             </p>
             <PlanTimes plan={plan} />
             <p className="text-xs text-muted-foreground">

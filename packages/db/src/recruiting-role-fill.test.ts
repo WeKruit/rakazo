@@ -18,11 +18,15 @@ const human = (id: string, text: string) => ({
   blocks: [{ kind: "text", text }],
 });
 
+// The note that hands the recruiter's words to a role team: a "user" row no recruiter typed.
+const note = { kind: "bot_message_received", text: "The recruiter wrote, word for word: go on" };
+
 function prisma({
   activeRoleId = null as string | null,
   events = [receipt] as unknown[],
   messages = [] as unknown[],
   outside = [] as string[],
+  notes = [] as string[],
 } = {}) {
   return {
     thread: {
@@ -38,10 +42,11 @@ function prisma({
       // An id lookup finds every message in this conversation except the ones named outside.
       findMany: vi.fn(async ({ where }: { where: { id?: { in: string[] } } }) =>
         where.id
-          ? where.id.in.filter((id) => !outside.includes(id)).map((id) => ({ id }))
+          ? where.id.in
+              .filter((id) => !outside.includes(id))
+              .map((id) => (notes.includes(id) ? { ...human(id, ""), blocks: [note] } : human(id, "")))
           : messages,
       ),
-      findFirst: vi.fn(async () => ({ id: "latest-human" })),
     },
     recruitingRole: { findFirst: vi.fn(async () => null) },
     recruitingRoleRevision: { findUnique: vi.fn(async () => null) },
@@ -224,7 +229,7 @@ describe("fillRecruitingRoleArgs", () => {
       quote: "US$51K–68K",
     };
     const filled = await fillRecruitingRoleArgs(
-      prisma({ events: [], outside: ["human-salary"] }),
+      prisma({ events: [], outside: ["human-salary"], messages: [human("latest-human", "pay")] }),
       actor,
       context,
       { operation: "create", sourceRefs: [made], criteria: [] },
@@ -235,6 +240,28 @@ describe("fillRecruitingRoleArgs", () => {
         ...rest,
         anchor: { kind: "message", messageId: "latest-human", locator: "blocks[0].text" },
       },
+    ]);
+  });
+
+  it("re-points a citation of the hand-off note to the recruiter's own latest message (staging 2026-11-27)", async () => {
+    const cited = {
+      id: "location_src",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "handoff", locator: "blocks[0].text" },
+      readState: "read",
+    };
+    const filled = await fillRecruitingRoleArgs(
+      prisma({
+        events: [],
+        notes: ["handoff"],
+        messages: [{ ...human("handoff", ""), blocks: [note] }, human("jd-message", "Seattle")],
+      }),
+      actor,
+      context,
+      { operation: "create", sourceRefs: [cited], criteria: [] },
+    );
+    expect(filled.sourceRefs).toEqual([
+      { ...cited, anchor: { kind: "message", messageId: "jd-message", locator: "blocks[0].text" } },
     ]);
   });
 

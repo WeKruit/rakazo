@@ -1,4 +1,4 @@
-import { ACTIVE_RUN_STATUSES, AUTOMATION_RUN_TRIGGERS } from "@rakazo/core";
+import { ACTIVE_RUN_STATUSES, AUTOMATION_RUN_TRIGGERS, ONCE_ROUTINE_CRON } from "@rakazo/core";
 import type { Prisma } from "./client.js";
 
 /** A cancelled turn may finish registering research that the provider already accepted. */
@@ -49,5 +49,64 @@ export async function cancelRunsInTransaction(
   await tx.task.updateMany({
     where: { id: { in: runs.map((run) => run.taskId) } },
     data: { status: "cancelled" },
+  });
+}
+
+/**
+ * Stopping a whole conversation also ends what would continue it later: queued steering, a
+ * people search's follow-ups, one-shot reminders and cloud agents. The stop button and the
+ * agent's own stop share it; the caller cancels the runs and holds the thread lock.
+ */
+export async function endThreadWorkInTransaction(
+  tx: Pick<
+    Prisma.TransactionClient,
+    "steeringMessage" | "externalEffect" | "run" | "routine" | "cloudAgent"
+  >,
+  scope: {
+    spaceId: string;
+    userId: string;
+    threadId: string;
+    /** The agent's own turn that is stopping the rest. */
+    keepRunId?: string;
+    /** The agent's stop ends the work, not a reminder the person set. */
+    keepReminders?: boolean;
+  },
+): Promise<void> {
+  // Clear delivery intent, never the original human messages in the transcript.
+  await tx.steeringMessage.deleteMany({
+    where: {
+      userId: scope.userId,
+      message: { threadId: scope.threadId },
+      ...(scope.keepRunId ? { NOT: { runId: scope.keepRunId } } : {}),
+    },
+  });
+  await tx.externalEffect.updateMany({
+    where: {
+      kind: "work_estimate",
+      status: "running",
+      spaceId: scope.spaceId,
+      run: { threadId: scope.threadId, userId: scope.userId },
+    },
+    data: { status: "cancelled" },
+  });
+  // An earlier stopped turn no longer keeps what its searches bring back.
+  await tx.run.updateMany({
+    where: { threadId: scope.threadId, status: "cancelled", error: STOPPED_TURN },
+    data: { error: null },
+  });
+  // Pending one-shot reminders are disarmed, not deleted.
+  if (!scope.keepReminders)
+    await tx.routine.updateMany({
+      where: { threadId: scope.threadId, active: true, crons: { equals: [ONCE_ROUTINE_CRON] } },
+      data: { active: false, nextRunAt: null },
+    });
+  await tx.cloudAgent.updateMany({
+    where: {
+      threadId: scope.threadId,
+      spaceId: scope.spaceId,
+      userId: scope.userId,
+      status: "running",
+    },
+    data: { cancelRequested: true, version: { increment: 1 }, nextPollAt: new Date() },
   });
 }

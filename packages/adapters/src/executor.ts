@@ -731,6 +731,7 @@ import {
 import { createToolFixMemory, withKnownFix } from "./tool-fixes.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
+import { stopConversationWork } from "./stop-work.js";
 import { recruitingRoundListText } from "./turn-end-guard.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
@@ -5213,6 +5214,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 throw new Error("Native scheduling tools are unavailable");
               // One booking path for either calendar: the plan's own calendar takes the booking.
               const google = plan.calendar.provider === "google_calendar";
+              const original = plan.originalEmail;
+              if (
+                input.operation === "confirm" &&
+                (!original || !plan.mailSourceId || !plan.mailSourceRevision)
+              )
+                throw new IsolationError(
+                  "This candidate never wrote, so there is no email to confirm in: the calendar's invitation already told them.",
+                );
               const route =
                 input.operation === "book"
                   ? {
@@ -5223,16 +5232,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     }
                   : {
                       connectorId: "mcp",
-                      resourceId: plan.mailSourceId,
-                      resourceRevision: plan.mailSourceRevision,
+                      resourceId: plan.mailSourceId!,
+                      resourceRevision: plan.mailSourceRevision!,
                       toolName: "native_instantly_reply_to_email",
                     };
               const providerArgs =
                 input.operation === "book"
                   ? (input.arguments ?? schedulingBookingArguments(plan))
                   : {
-                      eaccount: plan.originalEmail.eaccount,
-                      reply_to_uuid: plan.originalEmail.providerMessageId,
+                      eaccount: original!.eaccount,
+                      reply_to_uuid: original!.providerMessageId,
                       subject: input.subject,
                       body: input.body,
                     };
@@ -6259,6 +6268,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             nativeMcpUrl &&
             `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
               GOOGLE_CALENDAR_ENDPOINT;
+          // One booking route: a calendar's own create runs only as a reviewed plan's booking.
+          if (
+            !schedulingSelection &&
+            connectorCall.route?.connectorId === "mcp" &&
+            nativeMcpUrl &&
+            ((connectorCall.route.toolName === "create_booking" &&
+              `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
+                "https://mcp.cal.com/mcp") ||
+              (connectorCall.route.toolName === "create_event" && googleCalendarWrite))
+          )
+            return {
+              error:
+                "Book with recruiting_scheduling: prepare (emailId when the candidate wrote, else candidate.email), then book with its planId.",
+            };
           const authorizeCalendar = async (route: NonNullable<typeof connectorCall.route>) => {
             const { server } = await requireMcpToolAssignment(
               deps.prisma,
@@ -10523,6 +10546,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : { ok: true },
             );
           }
+          if (name === "stop_work") {
+            const stopped = await stopConversationWork(deps, run);
+            return finish({
+              ok: true,
+              ...stopped,
+              note: "Stopped. Searches already sent finish at the provider, but nothing more is collected or shown from them.",
+            });
+          }
           if (name === "delegate_to_role") {
             // A saved role by roleId, or a role conversation not saved yet by its groupId.
             const role = args.role_id
@@ -14293,6 +14324,7 @@ export function selectBuiltinToolsForRun(options: {
           "message_bot",
           "delegate_to_role",
           "start_role",
+          "stop_work",
           "handoff_to_bot",
           "message_agent",
           "create_poll",

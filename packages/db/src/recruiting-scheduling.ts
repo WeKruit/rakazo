@@ -270,8 +270,9 @@ async function verify(
   if (
     workspace.role.id !== input.roleId ||
     workspace.role.revision !== input.expectedRoleRevision ||
-    input.originalEmail.roleId !== input.roleId ||
-    input.originalEmail.threadId !== input.threadId
+    (input.originalEmail &&
+      (input.originalEmail.roleId !== input.roleId ||
+        input.originalEmail.threadId !== input.threadId))
   )
     throw new IsolationError();
   const availability = await effect(tx, actor, input.threadId, input.calendar.availabilityEffectId);
@@ -282,12 +283,23 @@ async function verify(
     !slots(availability).some((slot) => stableJsonValue(slot) === stableJsonValue(input.calendar))
   )
     throw new IsolationError();
-  const saved = retained?.mailRead ?? input.originalEmail.savedRead;
+  // A person the recruiter named only by address never wrote: the booking card shows their
+  // address, and the recruiter's confirmation there is the check.
+  const original = input.originalEmail;
+  if (!original)
+    return {
+      availability,
+      originalEmail: null,
+      mailSourceRevision: null,
+      mailSourceId: null,
+      mailRead: null,
+    };
+  const saved = retained?.mailRead ?? original.savedRead;
   let mail: Awaited<ReturnType<typeof effect>>;
   if (saved) mail = await effect(tx, actor, input.threadId, saved.effectId);
   else {
     const target = workspace.crmTarget?.target;
-    if (!input.originalEmail.crm || !target || input.originalEmail.sourceId !== target.mcpServerId)
+    if (!original.crm || !target || original.sourceId !== target.mcpServerId)
       throw new IsolationError("Read the original email before preparing a scheduling plan");
     const rows = await tx.externalEffect.findMany({
       where: {
@@ -311,7 +323,7 @@ async function verify(
         const candidate = call(row.request);
         if (
           !["get_email", "native_instantly_get_email"].includes(candidate.route.toolName) ||
-          candidate.args.id !== input.originalEmail.providerMessageId ||
+          candidate.args.id !== original.providerMessageId ||
           seen.has(candidate.route.resourceId)
         )
           continue;
@@ -319,11 +331,11 @@ async function verify(
         await grant(tx, actor, row);
         const value = successful(row);
         if (
-          value.id === input.originalEmail.providerMessageId &&
-          value.thread_id === input.originalEmail.providerThreadId &&
-          value.eaccount === input.originalEmail.eaccount &&
+          value.id === original.providerMessageId &&
+          value.thread_id === original.providerThreadId &&
+          value.eaccount === original.eaccount &&
           value.from_address_email === input.candidate.email &&
-          value.campaign_id === input.originalEmail.campaignId
+          value.campaign_id === original.campaignId
         )
           matches.push(row);
       } catch (error) {
@@ -339,28 +351,28 @@ async function verify(
   const native = await grant(tx, actor, mail);
   if (
     !["get_email", "native_instantly_get_email"].includes(native.route.toolName) ||
-    native.args.id !== input.originalEmail.providerMessageId ||
+    native.args.id !== original.providerMessageId ||
     (saved && (mail.runId !== saved.linkedRunId || mail.run.sourceMessageId !== saved.messageId)) ||
-    (!input.originalEmail.crm && native.route.resourceId !== input.originalEmail.sourceId)
+    (!original.crm && native.route.resourceId !== original.sourceId)
   )
     throw new IsolationError();
   const email = successful(mail);
   if (
-    email.id !== input.originalEmail.providerMessageId ||
+    email.id !== original.providerMessageId ||
     typeof email.thread_id !== "string" ||
-    email.thread_id !== input.originalEmail.providerThreadId ||
+    email.thread_id !== original.providerThreadId ||
     typeof email.eaccount !== "string" ||
-    email.eaccount !== input.originalEmail.eaccount ||
+    email.eaccount !== original.eaccount ||
     input.candidate.email !== email.from_address_email ||
-    (email.campaign_id ?? null) !== (input.originalEmail.campaignId ?? null)
+    (email.campaign_id ?? null) !== (original.campaignId ?? null)
   )
     throw new IsolationError();
-  const crm = input.originalEmail.crm;
+  const crm = original.crm;
   if (crm) {
     const target = workspace.crmTarget?.target;
     if (
       !target ||
-      input.originalEmail.sourceId !== target.mcpServerId ||
+      original.sourceId !== target.mcpServerId ||
       target.organizationId !== crm.organizationId ||
       target.crmRoleId !== crm.crmRoleId ||
       target.serverRevision !== crm.serverRevision ||
@@ -391,7 +403,7 @@ async function verify(
       },
     });
     if (!contact) throw new IsolationError();
-    if (!input.originalEmail.savedRead) {
+    if (!original.savedRead) {
       const message = await tx.recruitingCrmMessage.findFirst({
         where: {
           spaceId: actor.spaceId,
@@ -400,8 +412,8 @@ async function verify(
           organizationId: target.organizationId,
           crmRoleId: target.crmRoleId,
           crmCandidateId: crm.candidateId,
-          crmMessageId: input.originalEmail.providerMessageId,
-          threadId: input.originalEmail.providerThreadId,
+          crmMessageId: original.providerMessageId,
+          threadId: original.providerThreadId,
         },
       });
       if (!message)
@@ -479,7 +491,7 @@ async function verify(
   }
   const displaySource = await tx.mcpServer.findFirst({
     where: {
-      id: input.originalEmail.sourceId,
+      id: original.sourceId,
       spaceId: actor.spaceId,
       userId: actor.userId,
       enabled: true,
@@ -487,7 +499,7 @@ async function verify(
   });
   if (!displaySource) throw new IsolationError();
   const originalEmail = {
-    ...input.originalEmail,
+    ...original,
     subject: typeof email.subject === "string" ? email.subject : "",
     sender: typeof email.from_address_email === "string" ? email.from_address_email : null,
     date:
@@ -600,6 +612,7 @@ async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan, lin
       const args = call(row.request).args;
       const content = obj(args.body);
       const recorded = (value: Record<string, unknown>) =>
+        plan.originalEmail !== null &&
         typeof value.id === "string" &&
         value.id !== plan.originalEmail.providerMessageId &&
         value.thread_id === plan.originalEmail.providerThreadId &&
@@ -781,6 +794,7 @@ export async function prepareRecruitingSchedulingPlan(
       const native = call(row.request);
       if (
         !mail &&
+        input.emailId &&
         // A read the recruiter's message started, or one a candidate's reply woke (the
         // recruiter's choice, 11-27): the booking card still confirms what goes out.
         (row.run.sourceMessageId || row.run.trigger === "recruiting_checkin") &&
@@ -799,31 +813,50 @@ export async function prepareRecruitingSchedulingPlan(
     } catch (error) {
       if (!(error instanceof IsolationError)) throw error;
     }
-    if (mail && slot) break;
+    if ((mail || !input.emailId) && slot) break;
   }
-  if (!mail)
+  if (input.emailId && !mail)
     throw new IsolationError(
       "Read the candidate's email (get_email with this id) in this conversation first",
+    );
+  if (!input.emailId && !input.candidate.email)
+    throw new IsolationError(
+      "Pass the candidate's emailId when they wrote, or their address (candidate.email) as the recruiter gave it",
     );
   if (!slot)
     throw new IsolationError(
       "No calendar read in this conversation offers that start and length; read the calendar's free times first (get_availability with format range and duration, or suggest_time with durationMinutes)",
     );
+  const { email: given, ...candidate } = input.candidate;
+  const shared = {
+    threadId: input.threadId,
+    roleId: workspace.role.id,
+    expectedRoleRevision: workspace.role.revision,
+    interviewer: input.interviewer,
+    calendar: slot,
+    ...(input.guests?.length ? { requests: { guests: input.guests, notes: "" } } : {}),
+  };
+  if (!mail)
+    return createRecruitingSchedulingPlan(prisma, actor, {
+      ...shared,
+      originalEmail: null,
+      candidate: { ...candidate, email: given! },
+    });
   const native = call(mail.request);
   const email = successful(mail);
   const text = (value: unknown) => (typeof value === "string" && value ? value : null);
   const sender = text(email.from_address_email);
   if (!sender) throw new IsolationError("The email has no sender");
+  if (given && given.toLowerCase() !== sender.toLowerCase())
+    throw new IsolationError("That email was sent by someone else; book its sender or leave emailId out");
   return createRecruitingSchedulingPlan(prisma, actor, {
-    threadId: input.threadId,
-    roleId: workspace.role.id,
-    expectedRoleRevision: workspace.role.revision,
+    ...shared,
     originalEmail: {
       threadId: input.threadId,
       roleId: workspace.role.id,
       emailId: `${native.route.resourceId}:${input.emailId}`,
       sourceId: native.route.resourceId,
-      providerMessageId: input.emailId,
+      providerMessageId: input.emailId!,
       providerThreadId: text(email.thread_id),
       campaignId: text(email.campaign_id),
       eaccount: text(email.eaccount),
@@ -838,10 +871,7 @@ export async function prepareRecruitingSchedulingPlan(
       date: null,
       snippet: false,
     },
-    candidate: { ...input.candidate, email: sender },
-    interviewer: input.interviewer,
-    calendar: slot,
-    ...(input.guests?.length ? { requests: { guests: input.guests, notes: "" } } : {}),
+    candidate: { ...candidate, email: sender },
   });
 }
 export async function loadVerifiedRecruitingSchedulingPlan(
@@ -984,13 +1014,13 @@ export async function bindRecruitingSchedulingOperation(
       stableJsonValue([
         value.threadId,
         value.roleId,
-        value.originalEmail.providerMessageId,
+        value.originalEmail?.providerMessageId ?? null,
         value.mailSourceId,
         value.mailSourceRevision,
         value.candidate.email.toLowerCase(),
         value.calendar.sourceId,
         value.calendar.sourceRevision,
-        value.calendar.eventTypeId,
+        value.calendar.eventTypeId ?? null,
         Date.parse(value.calendar.start),
         Date.parse(value.calendar.end),
       ]);
@@ -1002,8 +1032,8 @@ export async function bindRecruitingSchedulingOperation(
         AND: [
           {
             request: {
-              path: ["input", "originalEmail", "providerMessageId"],
-              equals: plan.originalEmail.providerMessageId,
+              path: ["input", "candidate", "email"],
+              equals: plan.candidate.email,
             },
           },
           {
@@ -1253,6 +1283,7 @@ export async function bindRecruitingSchedulingOperation(
       }
       if (
         !readback ||
+        !plan.originalEmail ||
         !["reply_to_email", "native_instantly_reply_to_email"].includes(native.route.toolName) ||
         native.route.resourceId !== plan.mailSourceId ||
         native.route.resourceRevision !== plan.mailSourceRevision ||

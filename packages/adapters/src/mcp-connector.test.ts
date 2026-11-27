@@ -2573,7 +2573,7 @@ describe("MCP connector session cache", () => {
   });
 
   it("keeps each agent's core work tools direct when the rest moves to the catalog", async () => {
-    const core = ["create_booking", "get_availability", "get_event_types", "cancel_booking"];
+    const core = ["get_availability", "get_event_types", "cancel_booking"];
     const state = {
       failNext: false,
       initializations: 0,
@@ -2582,7 +2582,7 @@ describe("MCP connector session cache", () => {
           name: `tool_${index}`,
           inputSchema: { type: "object" },
         })),
-        ...core.map((name) => ({ name, inputSchema: { type: "object" } })),
+        ...[...core, "create_booking"].map((name) => ({ name, inputSchema: { type: "object" } })),
       ],
     };
     vi.stubGlobal("fetch", mcpFetch(state));
@@ -2615,15 +2615,12 @@ describe("MCP connector session cache", () => {
       "connectors_load_tool",
       "connectors_execute_tool",
     ]);
-    // The catalog index no longer lists them, so a search never finds them twice.
-    expect(tools.find((tool) => tool.name === "connectors_search_tools")?.description).not.toMatch(
-      /create_booking/,
-    );
+    // A booking goes through recruiting_scheduling, so the calendar's own create is not direct.
+    expect(tools.map((tool) => tool.name)).not.toContain("mcp__demo__create_booking");
     // Kruit itself answers candidates and books from the conversation, so it lists those too.
     expect(
       (await discover({ name: "Main", spawnKey: "recruiting:u1:main" })).map((t) => t.name),
     ).toEqual([
-      "mcp__demo__create_booking",
       "mcp__demo__get_availability",
       "mcp__demo__cancel_booking",
       "connectors_search_tools",
@@ -3980,6 +3977,28 @@ describe("first-party product OIDC MCP connection", () => {
       const other = { ...context, spaceId: "w2", userId: "u2" };
       expect(await connector.discoverTools(other as never)).toHaveLength(1);
       expect(state.lists).toBe(1);
+    } finally {
+      await connector.close();
+    }
+  });
+  it("signs in once when many accounts list the product's own server at the same moment", async () => {
+    const state = { failNext: false, initializations: 0 };
+    vi.stubGlobal("fetch", mcpFetch(state, endpoint));
+    const accessToken = vi.fn(async () => "access");
+    const row = { ...ASSIGNMENT, server: { ...SERVER, endpoint } };
+    const connector = new McpConnector(
+      { botMcpServer: { findMany: vi.fn().mockResolvedValue([row]) } } as never,
+      {} as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+    );
+    try {
+      const lists = await Promise.all(
+        ["u1", "u2", "u3"].map((userId) =>
+          connector.discoverTools({ ...context, spaceId: `s-${userId}`, userId } as never),
+        ),
+      );
+      expect(lists.map((list) => list.length)).toEqual([1, 1, 1]);
+      expect(state.initializations).toBe(1);
     } finally {
       await connector.close();
     }

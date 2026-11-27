@@ -47,7 +47,9 @@ export const RecruitingSchedulingPlanInputSchema = z.strictObject({
   threadId: Id,
   roleId: Id,
   expectedRoleRevision: z.number().int().positive(),
-  originalEmail: RecruitingCorrespondenceReferenceSchema,
+  // Null for a person the recruiter named by address who never wrote: the calendar's own
+  // invitation is the notice, so there is no email thread to confirm in.
+  originalEmail: RecruitingCorrespondenceReferenceSchema.nullable(),
   // A person the recruiter typed by address has no saved candidate: their campaign lead is the record.
   candidate: Participant.extend({ candidateKey: Id.optional() }),
   interviewer: Participant,
@@ -70,9 +72,9 @@ export const RecruitingSchedulingPlanSchema = RecruitingSchedulingPlanInputSchem
   id: Id,
   createdAt: IsoDate,
   roleTitle: z.string().min(1),
-  mailSourceId: Id,
-  mailSourceRevision: z.number().int().positive(),
-  mailRead: z.strictObject({ effectId: Id, linkedRunId: Id, messageId: Id.nullable() }),
+  mailSourceId: Id.nullable(),
+  mailSourceRevision: z.number().int().positive().nullable(),
+  mailRead: z.strictObject({ effectId: Id, linkedRunId: Id, messageId: Id.nullable() }).nullable(),
   // Cancelled: the booking was made and a later confirmed cancellation of it completed.
   bookingStatus: z.enum(["pending", "completed", "failed", "uncertain", "cancelled"]).nullable(),
   confirmationStatus: z.enum(["pending", "completed", "failed", "uncertain"]).nullable(),
@@ -81,12 +83,21 @@ export const RecruitingSchedulingPlanSchema = RecruitingSchedulingPlanInputSchem
 });
 export type RecruitingSchedulingPlan = z.infer<typeof RecruitingSchedulingPlanSchema>;
 /**
- * The agent drafts a plan from a candidate email it read and a time from an availability read in
- * the same conversation; the server takes the exact references from those saved reads.
+ * The agent drafts a plan from a time from an availability read in the same conversation and,
+ * when the candidate wrote, the email it read; the server takes the exact references from those
+ * saved reads. A person the recruiter named only by address is booked by that address.
  */
 export const RecruitingSchedulingPrepareInputSchema = z.strictObject({
-  emailId: Id.max(1600).describe("Provider id of the candidate's email you read with get_email."),
+  emailId: Id.max(1600)
+    .optional()
+    .describe(
+      "Provider id of the candidate's email you read with get_email; leave it out when the candidate never wrote.",
+    ),
   candidate: z.strictObject({
+    email: z
+      .email()
+      .optional()
+      .describe("The candidate's address as the recruiter gave it, when there is no email to read."),
     candidateKey: Id.optional().describe(
       "The candidate's saved candidateKey in this role; leave it out for a person the recruiter gave by email.",
     ),

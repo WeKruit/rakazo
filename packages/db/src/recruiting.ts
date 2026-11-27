@@ -3390,8 +3390,11 @@ export async function fillRecruitingRoleArgs(
     return receipt && record.kind === "original_material" ? { ...filled, ...receipt } : filled;
   };
   let filled = fill(args) as LooseRecord;
-  // A citation of a message outside this conversation (a made-up or mistyped id) cites the
-  // recruiter's latest message instead, as a plain locator, so the save does not fail on it.
+  // A citation of a message the recruiter did not write in this conversation (a made-up or
+  // mistyped id, or the note that handed their words to this team) cites the recruiter's latest
+  // own message instead, as a plain locator, so the save does not fail on it. Staging 11-27:
+  // the latest "user" message was the hand-off note, so citing it, or any unknown id, was refused
+  // six times in one run as not the recruiter's.
   const messageIds = new Set<string>();
   const messageOf = (value: unknown) => {
     const anchor = looseRecord(value) ? value.anchor : undefined;
@@ -3409,18 +3412,20 @@ export async function fillRecruitingRoleArgs(
   };
   collectMessages(filled);
   if (messageIds.size && thread) {
-    const [present, latest] = await Promise.all([
+    const [present, recent] = await Promise.all([
       prisma.message.findMany({
         where: { id: { in: [...messageIds] }, threadId: context.threadId },
-        select: { id: true },
+        include: humanMessageInclude,
       }),
-      prisma.message.findFirst({
-        where: { threadId: context.threadId, role: "user" },
+      prisma.message.findMany({
+        where: { threadId: context.threadId, role: "user", botId: null },
         orderBy: { seq: "desc" },
-        select: { id: true },
+        take: 30,
+        include: humanMessageInclude,
       }),
     ]);
-    const known = new Set(present.map((message) => message.id));
+    const known = new Set(present.filter(isNativeHumanMessage).map((message) => message.id));
+    const latest = recent.find(isNativeHumanMessage);
     const repoint = (value: unknown): unknown => {
       if (Array.isArray(value)) return value.map(repoint);
       if (!looseRecord(value)) return value;
@@ -3429,7 +3434,7 @@ export async function fillRecruitingRoleArgs(
       );
       const id = messageOf(value);
       if (!id || known.has(id) || !latest) return record;
-      getLogger().warn("recruiting.source.repaired", { reason: "message_not_in_thread" });
+      getLogger().warn("recruiting.source.repaired", { reason: "message_not_recruiters" });
       const { quote: _quote, ...rest } = record;
       return {
         ...rest,
