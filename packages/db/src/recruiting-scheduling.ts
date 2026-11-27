@@ -71,7 +71,12 @@ function successful(effect: { status: string; result: unknown }) {
 async function scope(prisma: PrismaClient, actor: Actor, threadId: string) {
   await requireMembership(prisma, actor.userId, actor.spaceId);
   const workspace = await getRecruitingWorkspace(prisma, actor, { threadId });
-  if (!workspace) throw new IsolationError();
+  // A booking belongs to a saved role; this conversation has none (play schedule-interview,
+  // b323fcb6: the bare "Resource not found" led Kruit to ask the recruiter to "link a role").
+  if (!workspace)
+    throw new IsolationError(
+      "No role is saved in this conversation, so no plan can be prepared here.",
+    );
   return workspace;
 }
 async function lockScope(
