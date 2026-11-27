@@ -4,8 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   AGENT_RUN_FIND_MAX_COST_USD,
-  AGENT_RUN_GRADE_SCHEMA,
-  AGENT_RUN_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
@@ -27,7 +25,6 @@ describe("agent run output schemas", () => {
     expect(AGENT_RUN_PEOPLE_SCHEMA.properties.people.items.properties.education.items).toEqual({
       type: "string",
     });
-    expect(AGENT_RUN_GRADE_SCHEMA.properties.rows.items.required).toContain("education");
   });
 });
 
@@ -265,77 +262,12 @@ describe("people-search agent runs", () => {
     ).resolves.toBe(company);
   });
 
-  it("grades given people with the grade format and leaves them in", async () => {
+  it("refuses people given to grade: a run finds and grades in one go", async () => {
     const db = fixture();
     const people = [{ name: "Saved", linkedin_url: "https://www.linkedin.com/in/saved-person" }];
-    await expect(
-      prepare(db, { query: "Grade", effort: "auto", input: { data: people } }),
-    ).resolves.toEqual({
-      query: "Grade",
-      effort: "auto",
-      budget: { maxCostDollars: AGENT_RUN_MAX_COST_USD },
-      input: { data: people },
-      outputSchema: AGENT_RUN_GRADE_SCHEMA,
-    });
-    expect(db.recruitingCandidate.findMany).not.toHaveBeenCalled();
-    // The agent's own schema would drop the reasons and tier Results shows.
-    const own = { type: "object", properties: { score: { type: "number" } } };
-    await expect(
-      prepare(db, { query: "Grade", input: { data: people }, outputSchema: own }),
-    ).resolves.toMatchObject({ outputSchema: AGENT_RUN_GRADE_SCHEMA });
-    expect(AGENT_RUN_GRADE_SCHEMA.properties.rows.items.properties.match_tier.enum).toEqual([
-      "Strong",
-      "Promising",
-      "Partial",
-      "Uncertain",
-    ]);
-  });
-
-  it("reads an earlier grading run of the same people instead of paying again", async () => {
-    const people = [
-      { name: "A", linkedin_url: "https://www.linkedin.com/in/a/" },
-      { name: "B", linkedin_url: "https://linkedin.com/in/b" },
-    ];
-    const effect = (args: Record<string, unknown>, body: Record<string, unknown>) => ({
-      request: ["__rakazoCatalogTool", "direct", { route, args }],
-      result: { content: [{ type: "text", text: JSON.stringify(body) }] },
-    });
-    const graded = effect(
-      { query: "Grade", input: { data: [...people].reverse() } },
-      { id: "agent_run_graded", status: "running" },
+    await expect(prepare(db, { query: "Grade", input: { data: people } })).rejects.toThrow(
+      /does not grade people given in input\.data/,
     );
-    const db = fixture();
-    db.$queryRaw.mockImplementation(receiptQuery(() => [graded]) as never);
-    await expect(
-      prepare(db, {
-        query: "Grade again",
-        input: {
-          data: [
-            { name: "B", linkedin_url: "https://www.linkedin.com/in/b" },
-            { name: "A", linkedin_url: "https://www.linkedin.com/in/a" },
-          ],
-        },
-      }),
-    ).resolves.toEqual({ runId: "agent_run_graded" });
-    expect(receiptScope(db.$queryRaw.mock.calls.at(-1)![0])).toMatchObject({
-      spaceId: "space",
-      userId: "owner",
-      threadId: "thread-1",
-      since: expect.any(Date),
-    });
-    // Other people, or a run that failed, are graded anew.
-    await expect(
-      prepare(db, { query: "Grade", input: { data: people.slice(0, 1) } }),
-    ).resolves.toMatchObject({ outputSchema: AGENT_RUN_GRADE_SCHEMA });
-    db.$queryRaw.mockImplementation(
-      receiptQuery(() => [
-        graded,
-        effect({ runId: "agent_run_graded" }, { id: "agent_run_graded", status: "failed" }),
-      ]) as never,
-    );
-    await expect(prepare(db, { query: "Grade", input: { data: people } })).resolves.toMatchObject({
-      outputSchema: AGENT_RUN_GRADE_SCHEMA,
-    });
   });
 
   it("reads a finished grading run's rows as a page", () => {
