@@ -419,19 +419,42 @@ export async function excludeFoundPeople(
     : args;
 }
 
-/** The full profile text this run's people searches returned, by person. */
+/** Most earlier turns of the conversation read for the profile text their searches returned. */
+const PROFILE_TEXT_RUNS = 12;
+
+/**
+ * The full profile text the conversation's people searches returned, by person: this run's first,
+ * then its earlier turns'. Branch play 11-27: people a quick search found in the first turn were
+ * sent for grading in a later one without their text, and 12 of about 40 came back graded.
+ */
 async function profileTexts(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
 ): Promise<Map<string, string>> {
   const texts = new Map<string, string>();
   try {
-    for (const call of await listRunToolResults(prisma, { ...actor } as Actor, actor.runId!))
-      if (isPeopleSearchEndpoint(call.endpoint))
-        for (const person of peopleFromSearch(call.result, call.endpoint)) {
-          const key = linkedinPersonKey(person.linkedin_url);
-          if (key && person._profile_text && !texts.has(key)) texts.set(key, person._profile_text);
-        }
+    const run = await runRole(prisma, actor);
+    const earlier = run
+      ? await prisma.run.findMany({
+          where: {
+            threadId: run.threadId,
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            id: { not: actor.runId! },
+          },
+          orderBy: { createdAt: "desc" },
+          take: PROFILE_TEXT_RUNS,
+          select: { id: true },
+        })
+      : [];
+    for (const runId of [actor.runId!, ...earlier.map(({ id }) => id)])
+      for (const call of await listRunToolResults(prisma, { ...actor } as Actor, runId))
+        if (isPeopleSearchEndpoint(call.endpoint))
+          for (const person of peopleFromSearch(call.result, call.endpoint)) {
+            const key = linkedinPersonKey(person.linkedin_url);
+            if (key && person._profile_text && !texts.has(key))
+              texts.set(key, person._profile_text);
+          }
   } catch {
     // Without the text the people are graded and checked on what their row holds.
   }
