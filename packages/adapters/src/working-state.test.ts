@@ -5,8 +5,13 @@ import { isRolelessHomeTeam, loadWorkingState } from "./working-state.js";
 
 const now = Date.parse("2026-11-01T04:00:00Z");
 const scope = { spaceId: "s", userId: "u" };
-const globalThread = { id: "tg", groupId: "recruiting-global-abc", activeRecruitingRoleId: null };
-const roleThread: { id: string; groupId: string; activeRecruitingRoleId: string | null } = {
+type ThreadFixture = { id: string; groupId: string; activeRecruitingRoleId: string | null };
+const globalThread: ThreadFixture = {
+  id: "tg",
+  groupId: "recruiting-global-abc",
+  activeRecruitingRoleId: null,
+};
+const roleThread: ThreadFixture = {
   id: "t1",
   groupId: "role-abc",
   activeRecruitingRoleId: "role-1",
