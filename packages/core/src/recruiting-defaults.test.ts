@@ -176,10 +176,11 @@ describe("screenLanguage", () => {
 });
 
 describe("accountWideSkill", () => {
-  it("lists only the account-wide recruiting skill there, and the user's own skills", () => {
+  it("lists only the user's own skills there", () => {
     // Staging handoff3: "Write an email or template" listed there had Kruit draft in the main chat.
     const listed = RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name).filter(accountWideSkill);
-    expect(listed).toEqual(["Progress across roles"]);
+    expect(listed).toEqual([]);
+    expect(accountWideSkill("Progress across roles")).toBe(false);
     expect(accountWideSkill("My weekly summary")).toBe(true);
   });
 });

@@ -150,6 +150,7 @@ import {
   RateWindow,
   EMAIL_SEND_TOOLS,
   RECRUITER_LANGUAGE,
+  RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
@@ -10720,11 +10721,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               rolesDelegatedInTurn.delete(target.threadId);
               return finish({ error: sent.error });
             }
-            // Gate 75f00f7b stop-then-continue: the team took 72 s and 105 s, and the recruiter
-            // saw only the role card. The model's own line shows now; its answer replaces it.
-            const line = visible(redactSecrets(String(args.line ?? ""), runSecrets)).trim();
-            if (line && oneLineNote(line) && runPromotesMidTurnNarration(run.trigger) && !quietRun)
-              await postProgressLine(line);
+            // The role's card is all the recruiter sees while the team works: a line written before
+            // the work said "I've drafted a reply" though nothing was drafted (handoff8 11-27).
             await publishMessage(deps, run, "bot", [
               {
                 kind: "role_link",
@@ -12674,7 +12672,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   prompt,
                   contextStrategy,
                   instructions: userTurnInstructions({
-                    botInstructions: runIdentityInstruction(bot, run.trigger),
+                    // Kruit's own conversation has its own instruction file, not the role lead's.
+                    botInstructions:
+                      thread.groupId?.startsWith("recruiting-global-") &&
+                      recruitingBotKey(bot) === "main"
+                        ? RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS
+                        : runIdentityInstruction(bot, run.trigger),
                     groupContext,
                     messagingContext,
                     hasHistoricalContext: runtimeHistory.length > 0,
