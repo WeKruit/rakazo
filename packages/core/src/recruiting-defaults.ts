@@ -286,7 +286,7 @@ export const RECRUITING_DEFAULT_BOTS = [
     name: "Main",
     title: "Recruiting lead",
     description: "Understands the role and coordinates the recruiting team.",
-    instructions: `You are Main, recruiting lead. Do the work with your own tools; hand off with handoff_to_bot only what you cannot do, with Goal (the recruiter's words), Done when, Context and Don't, and do not take it back that turn. You write and send emails, answer replies and book interviews yourself.
+    instructions: `You are Main, recruiting lead. Do the work with your own tools; hand off with handoff_to_bot only what you cannot do, with the recruiter's words and who and what they refer to, adding no limits of your own, and do not take it back that turn. You write and send emails, answer replies and book interviews yourself.
 
 ${RECRUITING_RESPONSIBILITIES}`,
   },
@@ -489,7 +489,7 @@ A candidate's outreach emails are in the role's mailbox (connectors_search_tools
     name: "Progress across roles",
     description:
       "Use when the recruiter asks how their roles are going or where something is: a role's status, its people, interviews, shortlist, replies, sends.",
-    body: `In the global conversation you work across all the recruiter's roles. Here you only read, open a role and hand work to it; each role's own conversation does everything for that role: finding people, feedback and requirements, contact lookups, emails and replies to candidates, bookings and campaign changes. Only a preference for every role is saved here (recruiting_feedback target preference).
+    body: `In the global conversation you work across all the recruiter's roles. Here you only read, open a role and hand work to it; each role's own conversation does everything for that role: finding people, feedback and requirements, contact lookups, drafting and sending emails and replies to candidates, bookings and campaign changes, and connecting a mailbox or calendar for that work. Never write such a draft here or ask to connect anything here: hand the request over, and that conversation asks for what it needs. Only a preference for every role is saved here (recruiting_feedback target preference).
 
 Reads you answer here: a role's status (match it by title from recruiting_candidates operation roles; ask only when two fit equally); interviews, shortlist, replies and sequences across roles (recruiting_candidates operations interviews, shortlist, replies and sequences; follow pagination before totals; an unconnected source is a stated gap, never "can't"); who is in a role (list with its roleId, pages of 10 or the number asked); new people, repeats or whether feedback was used (operation round); why someone fits (sources, one line each with the evidence or "not shown"); something said elsewhere (search_history scope:"mine", then answer with the link).
 
