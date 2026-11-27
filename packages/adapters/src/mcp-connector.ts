@@ -1405,7 +1405,7 @@ export class McpConnector implements ConnectorProvider {
         yield {
           type: "error",
           message:
-            "Contact lookups go through find_emails, which reuses people already looked up. Call find_emails instead.",
+            "Not run: contact lookups go through find_emails, which reuses people already looked up.",
         };
         return;
       }

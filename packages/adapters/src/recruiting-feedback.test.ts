@@ -312,7 +312,6 @@ describe("recruiting feedback", () => {
     expect(result).toMatchObject({ status: "recorded" });
     const next = (result as { next?: string }).next ?? "";
     expect(next).toContain("1. ? = key-a; 2. Person B = key-b");
-    expect(next).toContain('fit "not_fit"');
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { roleId: "role", status: "shown" } }),
     );
@@ -338,7 +337,7 @@ describe("recruiting feedback", () => {
         workspace,
         status: "recorded",
         // A decision on people leaves the role's requirements as they were, and says so.
-        requirements: { changed: false, note: expect.stringContaining("recruiting_role") },
+        requirements: { changed: false, note: expect.stringContaining("requirements are unchanged") },
       });
       expect(db.readContext).toHaveBeenCalledWith(
         f.deps.prisma,
@@ -399,7 +398,7 @@ describe("recruiting feedback", () => {
     expect(f.commit).toHaveBeenCalledOnce();
   });
 
-  it("explains a pre-write summary mismatch and accepts the corrected exact preference edit", async () => {
+  it("reports a pre-write summary mismatch and accepts the corrected exact preference edit", async () => {
     const f = fixture();
     const content =
       "# Recruiting preferences\n\n- Show the complete prompt.\n- Preserve source references.";
@@ -414,7 +413,7 @@ describe("recruiting feedback", () => {
     ).rejects.toMatchObject({
       name: "RecruitingFeedbackValidationError",
       message: expect.stringContaining(
-        'Nothing was written. Use recruiting_feedback with target:"preference"',
+        "does not match the recruiting preference edit. Nothing was written.",
       ),
     });
     expect(f.commit).not.toHaveBeenCalled();

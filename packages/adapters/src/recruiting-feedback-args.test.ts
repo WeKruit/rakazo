@@ -155,7 +155,7 @@ describe("recruiting_feedback arguments", () => {
         intent,
         ...(candidateKeys ? { candidateKeys } : {}),
       });
-      expect(error).toMatch(/^Not recorded: nothing was saved, so never tell the recruiter/);
+      expect(error).toMatch(/^Not recorded: nothing was saved\. /);
       expect(error).toContain("Jane Doe = linkedin:/in/jane-doe-1a2b");
       expect(error).toContain('target "round" with operation "scope"');
       if (candidateKeys) expect(error).toContain('No saved person on this role matches "Pat Kim"');

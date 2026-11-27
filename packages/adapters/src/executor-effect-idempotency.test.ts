@@ -660,7 +660,7 @@ describe("one booking route", () => {
       expect(f.connector.execute).not.toHaveBeenCalled();
       expect(f.pauseRunForInput).not.toHaveBeenCalled();
       expect(f.effects).toHaveLength(0);
-      expect(f.results[0]).toEqual({ error: expect.stringContaining("recruiting_scheduling") });
+      expect(f.results[0]).toEqual({ error: expect.stringContaining("no approved scheduling plan") });
     },
   );
 
@@ -2672,7 +2672,7 @@ describe("native recruiting role effect delivery", () => {
       await f.run();
       const result = {
         error:
-          "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.",
+          "A role, message or file this call names is not part of this conversation. This is not an outage. A search that already returned keeps its people saved.",
       };
       expect(f.results).toEqual([result]);
       expect(f.effects[0]).toMatchObject({ status: "completed", result });
@@ -2783,7 +2783,7 @@ describe("native recruiting role effect delivery", () => {
     await f.run();
     expect(f.results.at(-1)).toEqual({
       error:
-        "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.",
+        "A role, message or file this call names is not part of this conversation. This is not an outage. A search that already returned keeps its people saved.",
     });
     expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
   });
@@ -5073,13 +5073,13 @@ describe("native recruiting turn delivery", () => {
     const f = await roleTeamFirstTurn("greeting-no-card", "你好，你能帮我做什么？");
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
     expect(await request.beforeAsk?.("你想先处理哪项？")).toEqual({
-      instead: expect.stringContaining("Not asked yet: no role is saved in this chat"),
+      instead: expect.stringContaining("no role is saved in this chat"),
     });
   });
 
   // Staging 11-10: "We need a backend engineer… can you help me find people?" never saved a role,
   // so its question came out as plain text with no buttons. A vague hiring request is a role.
-  it("turns a vague hiring request's bounced question into a saved role and a card", async () => {
+  it("holds a vague hiring request's question until a role is saved", async () => {
     const f = await roleTeamFirstTurn(
       "vague-request-card",
       "We need a backend engineer for our team, can you help me find people?",
@@ -5087,9 +5087,8 @@ describe("native recruiting turn delivery", () => {
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
     const bounced = await request.beforeAsk?.("Which city?");
     expect(bounced).toEqual({
-      instead: expect.stringContaining("save it now with recruiting_role create"),
+      instead: expect.stringContaining("a question card needs a saved role"),
     });
-    expect(JSON.stringify(bounced)).toContain("then ask this same question with ask_user");
   });
 
   // Staging eval 11-11 (mixed-language-ask): a second turn asked the same location question
@@ -6131,7 +6130,7 @@ describe("approval cards on a new user message", () => {
     expect(prompt).toContain(
       'still waiting for the user, nobody has answered: "Confirm interview booking → Adam Test"',
     );
-    expect(prompt).toContain("not an answer to those cards: answer what it actually asks");
+    expect(prompt).toContain("is a new message, not an answer to those cards");
     expect(history).toContain("Approval card waiting for the user");
   });
   it("leaves out a card whose run already ended", async () => {

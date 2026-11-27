@@ -632,13 +632,13 @@ describe("handed-in stage", () => {
     replyTo: null,
   });
 
-  it("opens with a quick line at low thinking when a teammate hands this bot the stage", async () => {
+  it("starts at low thinking and names the brief when a teammate hands this bot the stage", async () => {
     const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       trigger: "follow_up",
       sourceMessage: handoff("bot-1"),
     });
     expect(request.model.firstStepThinkingLevel).toBe("low");
-    expect(request.prompt).toContain("Begin your first step with one short sentence");
+    expect(request.prompt).toContain("A teammate handed this stage to you");
   });
 
   // Gate 264149c9, change-mind-mid-run: the recruiter already had Main's line, and the stage

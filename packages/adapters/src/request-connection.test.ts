@@ -116,7 +116,7 @@ describe("request_connection", () => {
   it("never shows a recruiter a card for a service the product runs", async () => {
     const f = fixture({ endpoint: "https://mcp.instantly.ai/mcp" });
     expect(await requestConnection(f.db, scope, args, f.pause, "", true)).toMatchObject({
-      error: expect.stringContaining("provider gmail"),
+      error: expect.stringContaining("never theirs to connect"),
     });
     expect(f.pause).not.toHaveBeenCalled();
     const gmail = fixture({ name: "Gmail" });
@@ -159,7 +159,7 @@ describe("request_connection", () => {
     expect(await requestConnection(f.db, scope, args, f.pause)).toMatchObject({
       status: "pending",
       askId: "ask-1",
-      message: expect.stringContaining("Do not show another"),
+      message: expect.stringContaining("no second card was shown"),
     });
     expect(f.pause).not.toHaveBeenCalled();
   });

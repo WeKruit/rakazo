@@ -60,17 +60,11 @@ const ASSIGNMENT = {
 describe("scope refusals", () => {
   // 11-12: "Check the current assigned connection and requested scope" read as a missing
   // permission, and a one-off email ended as "the current permission does not support it".
-  it("keeps the server's reason and names the way on, never a permission", () => {
-    const text = scopeRefusal(
-      new IsolationError(
-        "In a role conversation, use ensure_role_campaign for the role's campaign",
-      ),
-    );
-    expect(text).toMatch(
-      /^In a role conversation, use ensure_role_campaign for the role's campaign\. /,
-    );
-    expect(text).toContain("another of your tools, the teammate who can");
-    expect(text).toContain("Never tell the recruiter you lack permission");
+  it("keeps the server's reason and says it is about the path, never a permission", () => {
+    const reason = "Not created: in a role conversation the role's campaign comes only from ensure_role_campaign";
+    const text = scopeRefusal(new IsolationError(reason));
+    expect(text.startsWith(`${reason}. `)).toBe(true);
+    expect(text).toContain("not a permission the recruiter lacks");
     expect(text).not.toContain("Check the current assigned connection");
   });
 
@@ -756,7 +750,7 @@ describe("local native Instantly thread history", () => {
                   campaignId: anchor.campaign_id,
                   stopOnReply: false,
                   warning: expect.stringContaining(
-                    `call pause_campaign with their email and campaign_id ${anchor.campaign_id}`,
+                    `pause_campaign with their email and campaign_id ${anchor.campaign_id} stops only them`,
                   ),
                 },
               ],
@@ -1826,7 +1820,7 @@ describe("MCP connector session cache", () => {
           },
         ]);
         // 11-13 staging: Kruit told the recruiter the draft was "not saved to the mailbox".
-        expect(JSON.stringify(signedOut)).toContain("Never say the draft is not saved");
+        expect(JSON.stringify(signedOut)).toContain("such as a drafted email, is still there");
 
         state.callError = undefined;
         const returned = [];
@@ -2707,7 +2701,7 @@ describe("MCP connector session cache", () => {
         );
         for await (const event of search) if (event.type === "result") return event.data as never;
       };
-      expect(await searched(true)).toMatchObject({ note: expect.stringContaining("start_role") });
+      expect(await searched(true)).toMatchObject({ note: expect.stringContaining("done in that role's conversation") });
       expect(await searched(false)).not.toHaveProperty("note");
       // The booking plan still resolves the create it reviewed.
       const resolved = await connector.resolveCall(
@@ -5691,7 +5685,7 @@ describe("local native Instantly campaign and lead tools", () => {
       expect(out).toMatchObject({
         queued: true,
         recipients: ["abe.new@x.test"],
-        next: expect.stringContaining("never that it was sent"),
+        next: expect.stringContaining("Nobody is emailed at this moment"),
       });
       expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
       const saved = binding.result as { leads: object; staged: object };
@@ -5860,7 +5854,7 @@ describe("local native Instantly campaign and lead tools", () => {
       const out = f.result(await f.run("activate_campaign", { recipients: ["nick@x.test"] }));
       expect(out).toMatchObject({
         mailServiceSays: { status: "no_accounts_available" },
-        next: expect.stringContaining("cannot send right now"),
+        next: expect.stringContaining("cannot send until it is fixed"),
       });
       expect(out.next).not.toMatch(/minutes/);
     });
@@ -5883,7 +5877,7 @@ describe("local native Instantly campaign and lead tools", () => {
         activated: true,
         delivery: "held",
         mailServiceSays: { status: "no_accounts_available" },
-        next: expect.stringContaining("cannot send right now"),
+        next: expect.stringContaining("cannot send until it is fixed"),
       });
       expect(out.next).not.toContain("their email is on its way");
     });
@@ -6073,12 +6067,12 @@ describe("local native Instantly campaign and lead tools", () => {
       }
     });
 
-    it("asks for the campaign, not the role, when a send has no campaign outside a role", async () => {
+    it("says a send outside a role has no campaign", async () => {
       const { f } = await roleWithSixteen();
       f.state.activeRoleId = null;
       const events = await f.run("activate_campaign", { send_now: true });
       expect((events[0] as { message: string }).message).toMatch(
-        /Pass campaign_id: .*Do not ask the recruiter for the role again/,
+        /no linked role and no campaign_id was given/,
       );
       expect(f.state.requests.filter((r) => r.method !== "GET")).toEqual([]);
     });
@@ -6309,7 +6303,7 @@ describe("local native Instantly campaign and lead tools", () => {
           const before = JSON.stringify(binding.result);
           const events = await saveForAbe(f);
           expect((events[0] as { message: string }).message).toBe(
-            "Instantly native_instantly_ensure_role_campaign failed. Abe Stone's own email was not saved and nothing was sent: this role's emails have already gone out, and its first email cannot become one person's own without changing it for people already approved. Ask the recruiter one question: send Abe Stone the role's saved email instead, or keep this email unsent?",
+            "Instantly native_instantly_ensure_role_campaign failed. Abe Stone's own email was not saved and nothing was sent: this role's emails have already gone out, and its first email cannot become one person's own without changing it for people already approved.",
           );
           expect(patches(f)).toEqual([]);
           expect(JSON.stringify(binding.result)).toBe(before);
@@ -6333,7 +6327,7 @@ describe("local native Instantly campaign and lead tools", () => {
           /pass one step: .*or one step per recipient/,
         );
         expect(await message({ steps: [OWN], recipients: ["nobody@x.test"] })).toMatch(
-          /Ask the recruiter one question: which person they mean/,
+          /is not an address anyone wrote in this conversation/,
         );
         expect(patches(f)).toEqual([]);
       });
@@ -6476,7 +6470,7 @@ describe("local native Instantly campaign and lead tools", () => {
           ).message;
         // The campaign holds abe@x.test; the agent retyped it with two letters swapped.
         expect(await message(["abe@x.tset"])).toContain(
-          "Nothing was saved: abe@x.tset is not an address anyone wrote in this conversation or a saved email of this role's candidates. If they mean abe@x.test, the closest saved address, use it exactly; otherwise ask the recruiter one question: which person they mean, by full name or email.",
+          "Nothing was saved: abe@x.tset is not an address anyone wrote in this conversation or a saved email of this role's candidates. The closest saved address is abe@x.test.",
         );
         // Two saved addresses as close says nothing about which one they meant.
         expect(await message(["p@x.test"])).not.toMatch(/closest/);
@@ -6523,7 +6517,7 @@ describe("local native Instantly campaign and lead tools", () => {
           ).message;
         for (const who of ["Sam Lee", "Sam", "Nobody Known"])
           expect(await message([who])).toContain(
-            `Nothing was saved: ${who} is not one of this role's candidates with a saved email, or more than one person matches. Ask the recruiter one question: which person they mean, by full name or email.`,
+            `Nothing was saved: ${who} is not one of this role's candidates with a saved email, or more than one person matches.`,
           );
         expect(await message(["Kim Park"])).toMatch(/Kim Park has no saved email yet.*find_emails/);
         expect(f.state.requests.filter((r) => r.path === "/api/v2/leads/add")).toEqual([]);

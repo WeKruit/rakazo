@@ -322,7 +322,6 @@ export function verdictPatternText(
       "What the people the recruiter judged have in common, as counts of people from their saved profiles:",
       ...(role ? [role] : []),
       ...(all ? [all] : []),
-      "Word the next search toward what the praised people share and away from what the turned-down people share, within the saved brief. A pattern is a preference, never a requirement: ask the recruiter before making one a rule, and never reject anyone for it.",
     ].join("\n"),
   );
 }

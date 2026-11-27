@@ -2237,7 +2237,7 @@ async function addSavedRecipients(
   }
   if (noEmail.length)
     throw new Error(
-      `Nothing was saved: ${noEmail.join(", ")} has no saved email yet. Find their email with find_emails, then save their email again with the same recipients.`,
+      `Nothing was saved: ${noEmail.join(", ")} has no saved email yet; find_emails looks emails up.`,
     );
   if (unknown.length) throw new Error(notFound(unknown));
   const out = await addShortlistLeads(prisma, rest, context, serverId, {
@@ -3542,7 +3542,7 @@ export async function runInstantlyWrite(
       ? !(await activeRoleId(prisma, context))
       : false;
   if (owned && toolName === "native_instantly_create_campaign" && !direct)
-    throw new Error("In a role conversation, use ensure_role_campaign for the role's campaign");
+    throw new Error("Not created: in a role conversation the role's campaign comes only from ensure_role_campaign");
   // Mailboxes the owner assigned become this account's on its first mail call of any kind, so a
   // reply in a thread one of them already holds works as well as a new send.
   if (owned && toolName !== "native_instantly_ensure_sender") {

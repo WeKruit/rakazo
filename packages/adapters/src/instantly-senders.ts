@@ -271,7 +271,7 @@ async function validateOrder(rest: InstantlyRest, value: Sender) {
   const report = await rest("POST", "/dfy-email-account-orders", orderBody(value, true));
   if (report.order_is_valid !== true || report.simulation !== true || report.order_placed === true)
     throw new Error(
-      "That sending address cannot be set up on the current sending domain. Propose another address; if none works, tell the recruiter in one line, in their language, that their sending email is not ready yet and nothing is needed from them.",
+      "That sending address cannot be set up on the current sending domain.",
     );
 }
 
@@ -603,10 +603,9 @@ export async function ensureSendingIdentity(
       defaultMailbox: await defaultSendingMailbox(prisma, context),
       mailboxLimit: limit,
       selfSetup,
-      // The read itself says what to do, so an agent that never loaded sender setup still answers right.
       ...(current.length
         ? {
-            next: "This account sends only through its outreach mailbox, never the recruiter's own email. When asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email. Sign each email as the sender: the recruiter's saved signature, else the mailbox's displayName, never a generic name such as Recruiting Team.",
+            next: "This account sends only through its outreach mailbox, never the recruiter's own email.",
           }
         : {}),
       // missingSender asks the executor to tell support once that this account needs a mailbox.

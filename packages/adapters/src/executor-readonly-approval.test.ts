@@ -741,7 +741,7 @@ describe("native saved candidate reads", () => {
     expect(f.results).toEqual([
       {
         error:
-          "These saved sources could not be read. Use recruiting_candidates list for the people and continue.",
+          "These saved sources could not be read.",
       },
     ]);
     expect(f.effects).toEqual([]);
@@ -1349,7 +1349,7 @@ describe("native saved-candidate CRM workflow", () => {
       expect(f.execute).not.toHaveBeenCalled();
       expect(f.pauseRunForInput).not.toHaveBeenCalled();
       expect(f.effects).toEqual([]);
-      expect(f.results[0]).toMatchObject({ error: expect.stringContaining("saved candidate") });
+      expect(f.results[0]).toMatchObject({ error: expect.stringContaining("runs only through recruiting_crm_import") });
     },
   );
 
@@ -1510,7 +1510,7 @@ describe("native Instantly activation card", () => {
     f.setCalls([{ args: { recipients: ["ada@x.test"] }, executionId: "activate" }]);
     await f.run();
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("Pass campaign_id") });
+    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("has no role campaign") });
   });
 
   it("shows campaign name, status, lead count and sender read before the card", async () => {
@@ -2594,8 +2594,7 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     f.runtimeRun.mockClear();
     await f.run();
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
-    expect(prompt).toContain("user explicitly discarded");
-    expect(prompt).toContain("Stop working on this reply");
+    expect(prompt).toContain("the user discarded it");
     expect(prompt).toContain(replyArgs.reply_to_uuid);
     expect(prompt).toContain("resource-1");
     expect(f.execute).not.toHaveBeenCalled();
@@ -4205,7 +4204,7 @@ describe("connector read-only metadata and approval enforcement", () => {
       await f.run();
       expect(f.execute).not.toHaveBeenCalled();
       expect(f.results.at(-1)).toEqual({
-        error: expect.stringContaining("The user denied this action. Do not retry"),
+        error: expect.stringContaining("The user denied this action on its card; nothing was done."),
       });
       expect(f.pauseRunForInput).toHaveBeenCalledOnce();
     });

@@ -9442,7 +9442,7 @@ async function approveLatestCalibrationRound(
   });
   if (!latest)
     throw new RecruitingCalibrationRoundError(
-      "No calibration round has been recorded for this role yet, so there is nothing to accept. Record the ten first (recruiting_research operation calibration_round with ten exact candidateKeys of saved people; recruiting_candidates list returns them), then call this again with the recruiter's words.",
+      "No calibration round has been recorded for this role yet, so there is nothing to accept; a round is recorded by recruiting_research operation calibration_round with ten exact candidateKeys of saved people.",
     );
   if (round !== null && latest.round !== round)
     throw new RecruitingConflictError("A newer calibration round replaced this one");

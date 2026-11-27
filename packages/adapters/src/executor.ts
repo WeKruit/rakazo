@@ -397,7 +397,6 @@ import {
   googleCalendarApprovalFacts,
 } from "./google-calendar-approval.js";
 import { roleLinkBlocks } from "./role-links.js";
-import { schedulingNextStep } from "./scheduling-next-step.js";
 import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
@@ -926,12 +925,12 @@ export function lateNote(pending: Promise<string | undefined>) {
 /** Role conversations Kruit opens with start_role. */
 const KRUIT_ROLE_GROUP_PREFIX = "role-";
 const ACCOUNT_SETUP_STAYS_HERE =
-  "That team has no role. Work that belongs to no role, such as getting the sending email ready, you do yourself here: call ensure_sender read and do what it returns. For a new role use start_role.";
+  "Not handed off: that team has no role.";
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
 const FEEDBACK_NOT_SAVED =
-  "Not recorded: nothing was saved, so never tell the recruiter it was recorded. Fix the call and call recruiting_feedback again.";
+  "Not recorded: nothing was saved.";
 
 /** Marks a feedback call naming people who are not saved on the role, which only the agent can fix. */
 const FEEDBACK_INPUT_ERROR = "FEEDBACK_INPUT";
@@ -950,7 +949,7 @@ export function feedbackSaveRefused(error: Error): string {
     error instanceof RecruitingSourceCheckError
       ? error.message
       : "roleId must be the conversation's current role, candidateKeys saved people on it, and sourceRefs only references this conversation's tools returned (or none).";
-  return `${FEEDBACK_NOT_SAVED} ${fix} Either way, carry on with the rest of the recruiter's request now; a failed save never holds it up.`;
+  return `${FEEDBACK_NOT_SAVED} ${fix}`;
 }
 
 /** Round feedback words that mean the round's direction, not its acceptance. */
@@ -5307,22 +5306,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               connectorCall = resolved.call;
               resolvedTool = resolved.tool;
             } catch (error) {
-              const operation = (args as { operation?: unknown }).operation;
               return {
                 error: sanitizeConnectorError(error, runSecrets),
                 code: "SCHEDULING_PLAN_UNAVAILABLE",
                 dispatched: false,
-                // A failed draft or plan read left agents stuck on "not found"; the next step is
-                // the booking path of the calendar this bot actually holds.
-                ...(operation === "book" || operation === "confirm"
-                  ? {}
-                  : {
-                      next: await schedulingNextStep(deps.prisma, {
-                        spaceId: run.spaceId,
-                        userId: run.userId,
-                        botId: bot.id,
-                      }),
-                    }),
               };
             }
           }
@@ -6076,7 +6063,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           )
             return {
               error:
-                "Save this person through the saved candidate source so the CRM destination and original evidence stay linked.",
+                "Not saved: a CRM import runs only through recruiting_crm_import, which keeps the CRM destination and original evidence linked.",
             };
           if (crmImportSelection) {
             if (disabledBuiltinTools.has("recruiting_crm_import"))
@@ -7694,7 +7681,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (waitingSend && "unchanged" in waitingSend) {
                 const result = {
                   error:
-                    "Nothing was sent and no card was made: this is exactly the email the recruiter cancelled (same subject, body and people). If their message since asks for any change, such as a new 标题 or title, subject, wording or people, save it first (update_role_draft, or ensure_role_campaign steps), then call activate_campaign again. If they asked to send it unchanged, call activate_campaign again with the same arguments and its card shows.",
+                    "Nothing was sent and no card was made: this is exactly the email the recruiter cancelled (same subject, body and people); a saved change (update_role_draft, or ensure_role_campaign steps) makes a new card, and the same arguments again show its card again.",
                   dispatched: false,
                 };
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))

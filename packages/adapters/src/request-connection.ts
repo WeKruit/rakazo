@@ -97,7 +97,7 @@ async function resolveProvider(prisma: PrismaClient, scope: Scope, provider: str
     // P2002: a disabled row already owns this slug.
     if ((error as { code?: unknown } | null)?.code !== "P2002") throw error;
     return {
-      error: `${entry.name} exists but is disabled; ask the user to re-enable it in Integrations.`,
+      error: `${entry.name} exists but is disabled in Integrations.`,
     };
   }
 }

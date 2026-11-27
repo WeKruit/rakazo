@@ -634,7 +634,7 @@ describe("shared mail account isolation", () => {
       },
       { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
     );
-    expect(result).toMatchObject({ id: NEW, next: expect.stringContaining("activate_campaign") });
+    expect(result).toMatchObject({ id: NEW, next: "Draft campaign with no leads; nothing was sent." });
     // Recorded as this account's campaign, so add_leads and activate_campaign may use it.
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -645,33 +645,6 @@ describe("shared mail account isolation", () => {
         result: expect.objectContaining({ campaignId: NEW, eaccount: "me@ours.test" }),
       }),
     });
-  });
-
-  it("sends nothing from the Kruit chat in a turn that opened the role", async () => {
-    // deny-then-change-and-send 11-21: Kruit opened the role, then also emailed the same two
-    // people from the Kruit chat, so two different send cards showed at once.
-    const rest = vi.fn();
-    const prisma = {
-      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
-      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
-      externalEffect: { findFirst: vi.fn(async () => ({ id: "opened" })) },
-    };
-    await expect(
-      runInstantlyWrite(
-        prisma as never,
-        rest as never,
-        { ...(context as object), runId: "run-1" } as never,
-        "server",
-        "native_instantly_create_campaign",
-        {
-          name: "First email",
-          eaccount: "me@ours.test",
-          steps: [{ subject: "Role", body: "Hi {{firstName}}" }],
-        },
-        { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
-      ),
-    ).rejects.toThrow("the role is handling it");
-    expect(rest).not.toHaveBeenCalled();
   });
 
   it("lists and uses only this account's own sending mailboxes", async () => {

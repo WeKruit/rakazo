@@ -755,7 +755,6 @@ describe("native saved candidate reads", () => {
       ).toEqual({
         status: "no_current_role",
         roles,
-        next: expect.any(String),
       });
       // Only the caller's own open roles.
       expect(findRoles).toHaveBeenCalledWith(

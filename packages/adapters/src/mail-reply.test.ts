@@ -136,7 +136,7 @@ it("reports the recorded card outcome rather than inventing missing or unconfirm
   expect(mailReplyOutcome({ status: "discarded" })).toContain("reply card was created");
   expect(mailReplyOutcome({ status: "failed" })).toContain("definite send failure");
   expect(mailReplyOutcome({ status: "unknown" })).toContain(
-    "Do not claim it sent or that nothing was sent",
+    "whether it was sent is not known yet",
   );
 });
 

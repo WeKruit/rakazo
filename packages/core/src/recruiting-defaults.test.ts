@@ -140,11 +140,10 @@ describe("recruiterLanguageText", () => {
 });
 
 describe("creditEstimateNote", () => {
-  it("tells the agent the balance and what each step usually costs, without asking permission", () => {
+  it("tells the agent the balance and what each step usually costs", () => {
     const note = creditEstimateNote(9876.4);
     expect(note).toContain("9,876 left");
     expect(note).toContain("150 people about 600 to 1,000");
-    expect(note).toContain("Never ask permission because of cost alone");
   });
 });
 

@@ -572,7 +572,7 @@ export async function loadWorkingState(
     )
       continue;
     lines.push(
-      `- Campaign started in this conversation outside any role, ${ago(effect.createdAt, now)}: ${typeof result.campaignName === "string" ? `"${flat(result.campaignName, 80)}" ` : ""}(campaign_id ${result.campaignId}). Who it emailed or still holds is known only from get_campaign with that campaign_id; to stop or hold it, pause_campaign with that campaign_id.`,
+      `- Campaign started in this conversation outside any role, ${ago(effect.createdAt, now)}: ${typeof result.campaignName === "string" ? `"${flat(result.campaignName, 80)}" ` : ""}(campaign_id ${result.campaignId}). Who it emailed or still holds is known only from get_campaign with that campaign_id; pause_campaign with that campaign_id stops or holds it.`,
     );
   }
 
