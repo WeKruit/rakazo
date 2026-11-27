@@ -355,16 +355,12 @@ import {
 import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import {
-  delegatedAnswerResult,
   loadBotMessageContext,
   messageBot,
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
-  returnDelegatedTeamOutcome,
   showDelegatedTeamCard,
-  showRoundWhereAskedNow,
   teamProgress,
-  waitForDelegatedAnswer,
 } from "./bot-messages.js";
 import {
   allowPrivateHttpSecretOrigins,
@@ -9053,14 +9049,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       error: String(error),
                     }),
                   );
-                  await showRoundWhereAskedNow(
-                    deps,
-                    run,
-                    text,
-                    applied.effect.id,
-                  ).catch((error) =>
-                    getLogger().warn("round not shown where asked", { error: String(error) }),
-                  );
                   // The recorded round's list is final. A later round in the same run gets its own
                   // message: it used to rewrite this one, so rounds of 5, 4 and 1 recorded in one
                   // turn left the recruiter a single list of 1 (branch play 11-25).
@@ -10683,11 +10671,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 ok: true,
                 team: `${target.title} team`,
-                note: "Already handed to that team in this turn, with the recruiter's own words; nothing more was sent. Its answer comes back here.",
+                note: "Already handed to that team in this turn, with the recruiter's own words; nothing more was sent.",
               });
             rolesDelegatedInTurn.add(target.threadId);
-            // A second's slack for the database clock, which stamps the team's answer.
-            const handedAt = new Date(Date.now() - 1_000);
             // Only the recruiter's own words are handed over: their turn's, or the message they
             // wrote into a running turn. Branch fosp 11-21 (747382b0): 「这三个不要。换掉，再补人」
             // arrived while Kruit read a team's report, reached the team as Kruit's paraphrase
@@ -10730,42 +10716,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 title: target.title,
               },
             ]);
-            const waited = await waitForDelegatedAnswer(deps.prisma, {
-              spaceId: run.spaceId,
-              threadId: run.threadId,
-              botId: bot.id,
-              since: handedAt,
-              signal: context.signal,
-              userMessageWaiting: () =>
-                hasUnclaimedSteering(deps.prisma, {
-                  threadId: run.threadId,
-                  botId: bot.id,
-                  runId: run.id,
-                }),
-            }).catch((error) => {
-              getLogger().warn("delegated answer wait", { error: String(error) });
-              return undefined;
+            // The work, its rounds and emails are the role's and show only in its conversation; the
+            // recruiter opens it from the card, so Kruit's turn ends here, the way a hand-off passes
+            // control (OpenAI Agents SDK handoffs; Pi's terminate). Replays 11-27 on 49a2a201: told
+            // to answer from the team's returned email, Kruit posted every template a second time.
+            const handed = { ok: true, team: sent.name };
+            return finish({
+              kind: "agent_tool_result",
+              content: [{ type: "text", text: JSON.stringify(handed) }],
+              details: handed,
+              terminate: true,
             });
-            const answered = delegatedAnswerResult(waited);
-            const handed = {
-              ok: true,
-              team: sent.name,
-              ...answered,
-              note: `${answered.note} A card that opens the role's conversation is already shown; do not paste a link.`,
-            };
-            // The role's card is up: the work is the role's now, so Kruit's turn ends here, the
-            // way a hand-off passes control (OpenAI Agents SDK handoffs; Pi's terminate). Branch
-            // play 11-27: told to say nothing more, Kruit still wrote the email draft itself.
-            return finish(
-              waited?.cardShown
-                ? {
-                    kind: "agent_tool_result",
-                    content: [{ type: "text", text: JSON.stringify(handed) }],
-                    details: handed,
-                    terminate: true,
-                  }
-                : handed,
-            );
           }
           if (name === "start_role") {
             const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
@@ -13749,14 +13710,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.text,
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
-          } else if (thread.groupId) {
-            // A teammate's turn may be the last one of work delegated from another conversation.
-            // Send-at-night 11-16: a reply held for a retry (it claimed a record no tool read) went
-            // back as the result, and the retry's real answer never followed. The retry returns it.
-            await returnDelegatedTeamOutcome(deps, {
-              ...run,
-              sourceMessageId: run.sourceMessageId,
-            }).catch((error) => getLogger().error("delegated team outcome return", error));
           }
           const notifyBody = completionNotificationPreview(text);
           if (
