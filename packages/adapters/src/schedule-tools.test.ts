@@ -415,6 +415,8 @@ describe("filterBuiltinToolsForThread", () => {
       "run_subagent",
       // Staging bee1b309: a Connect card here stood in for handing a booking to the role.
       "request_connection",
+      // Handoff8 11-27: a question card here asked the recruiter for the interview slot itself.
+      "ask_user",
     ].map((name) => ({ name }));
     const names = (groupId: string | null) =>
       filterBuiltinToolsForThread(all, groupId).map((t) => t.name);
