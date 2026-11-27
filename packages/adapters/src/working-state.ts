@@ -296,8 +296,16 @@ export async function loadWorkingState(
   now = Date.now(),
 ): Promise<WorkingState> {
   const global = thread.groupId?.startsWith("recruiting-global-") ?? false;
-  const gmailLine = ownGmailLine(prisma, scope).catch(() => undefined);
-  const calendarRead = calendarLine(prisma, scope).catch(() => undefined);
+  // How mail goes out and whether a calendar is connected are for the conversation that sends and
+  // books: a role's. Kruit's own conversation hands that work over, and the role asks for what it
+  // needs (replay handoff4 11-27: told here to write the email now and show a Connect card it is
+  // not offered, Kruit drafted in the main chat and said the calendar was not connected).
+  const gmailLine = global
+    ? Promise.resolve(undefined)
+    : ownGmailLine(prisma, scope).catch(() => undefined);
+  const calendarRead = global
+    ? Promise.resolve(undefined)
+    : calendarLine(prisma, scope).catch(() => undefined);
   // The recruiter's most recently active conversations, Kruit's included: where their newest
   // words are, and (for Kruit) the role teams on the card. Bounded, so a large account reads few.
   const listed = await prisma.chatGroup.findMany({
