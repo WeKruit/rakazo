@@ -7,6 +7,7 @@ import {
   RunCompletedPayloadSchema,
   RunTimingSchema,
 } from "@rakazo/contracts";
+import { buildBotMessageWakePrompt } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -4690,6 +4691,56 @@ describe("claimSteering", () => {
       continuation({ kind: "handoff", fromBotId: "reviewer", toBotId: "bot", text: "Show it" }),
     ).resolves.toBe("next-run");
     await expect(continuation({ kind: "text", text: "more like these" })).resolves.toBeNull();
+  });
+
+  it("restarts a teammate's queued request as the teammate's turn, like one that never waited", async () => {
+    const note = {
+      kind: "bot_message_received",
+      fromBotId: "kruit",
+      fromBotName: "Kruit",
+      text: "Remote is fine too",
+      intent: "request",
+      returnToMessageId: "echo",
+      returnThreadId: "main",
+    };
+    const tx = {
+      run: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "next-run" }),
+      },
+      task: { create: vi.fn().mockResolvedValue({ id: "task" }) },
+      steeringMessage: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "row",
+            userId: "user",
+            originTrigger: null,
+            message: { id: "note", seq: 2, blocks: [note] },
+          },
+        ]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    await createPendingSteeringRun(tx as never, {
+      threadId: "thread",
+      botId: "bot",
+      spaceId: "space",
+    });
+    expect(tx.run.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ trigger: "bot_message", sourceMessageId: "note" }),
+    });
+    expect(tx.task.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        prompt: buildBotMessageWakePrompt({
+          from: { id: "kruit", name: "Kruit" },
+          text: "Remote is fine too",
+          intent: "request",
+        }),
+      }),
+    });
+    // The turn's own prompt carries the request, so it is not also delivered as steering.
+    expect(tx.steeringMessage.deleteMany).toHaveBeenCalledWith({ where: { id: "row" } });
   });
 
   it("keeps follow-up input unread until the old turn ends, then activates it in message order", async () => {
