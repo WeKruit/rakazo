@@ -30,10 +30,6 @@ import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 export const NO_ROLE_HANDOFF =
   "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds. Save the role now with recruiting_role, quoting the recruiter's own words, then hand off again with the same brief.";
 
-/** Above the role teams, only role-free work goes to a teammate in the room itself. */
-export const GLOBAL_HANDOFF_ROLE_WORK =
-  "Not handed off: in this conversation only a one-off email that belongs to no role (Outreach) goes to a teammate here. Role work, including a role's emails (also to addresses the recruiter gives here) and every interview booking, goes to that role's team with delegate_to_role; a new role goes to start_role.";
-
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
   run: {
@@ -132,9 +128,6 @@ export async function handoffToGroupBot(
       const target = group.members.find((member) => member.bot.id === targetId);
       if (!target) return { error: "handoff target is not a group member" } as const;
       const targetKey = recruitingBotKey(target.bot);
-      // One booking route: a booking needs the role's conversation, where the booking plan runs.
-      if (groupId.startsWith("recruiting-global-") && targetKey !== "outreach")
-        return { error: GLOBAL_HANDOFF_ROLE_WORK } as const;
       // A search stage saves people into the conversation's role; without one the sourcing
       // teammate has nowhere to put them, so the coordinator sets the role up first.
       const source = group.members.find((member) => member.bot.id === run.botId);
