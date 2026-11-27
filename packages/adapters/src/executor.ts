@@ -11079,6 +11079,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       roleId: thread.activeRecruitingRoleId ?? undefined,
                       recruiterWords: await newestRecruiterWords(deps.prisma, thread.id),
                       brief,
+                      // Play s167: after an accepted round the lead's "Goal" added 继续找新候选人.
+                      noteOnly: true,
                     }),
                     runSecrets,
                   )

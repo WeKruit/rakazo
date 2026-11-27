@@ -65,21 +65,28 @@ export async function otherRoleWriteRefusal(
  */
 export async function roleRequestMessage(
   prisma: Pick<PrismaClient, "recruitingCalibrationRound">,
-  input: { roleId?: string; recruiterWords: string; brief: string },
+  input: {
+    roleId?: string;
+    recruiterWords: string;
+    brief: string;
+    /** A stage handed on inside a role's conversation: the brief only says who and what. */
+    noteOnly?: boolean;
+  },
 ): Promise<string> {
   const words = input.recruiterWords.trim();
   if (!words) return input.brief;
   const quoted = `The recruiter wrote, word for word:\n"${words}"`;
-  const round = input.roleId
-    ? await prisma.recruitingCalibrationRound.findFirst({
-        where: { roleId: input.roleId },
-        orderBy: { round: "desc" },
-        select: { approvedAt: true },
-      })
-    : null;
+  const round =
+    input.roleId && !input.noteOnly
+      ? await prisma.recruitingCalibrationRound.findFirst({
+          where: { roleId: input.roleId },
+          orderBy: { round: "desc" },
+          select: { approvedAt: true },
+        })
+      : null;
   // team-has-no-email 11-16: with the brief dropped, 「没存的话现在怎么办？」 reached the team
   // without the person Kruit named, and it answered about someone else.
-  if (round && !round.approvedAt)
+  if (input.noteOnly || (round && !round.approvedAt))
     return input.brief.trim()
       ? `${quoted}\n\nKruit's note, only on who and what this refers to; the request is the recruiter's words above, never a number of people or a scale-out this note adds:\n${input.brief}`
       : quoted;

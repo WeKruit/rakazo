@@ -144,3 +144,18 @@ describe("newestRecruiterWords", () => {
     expect(words).toBe("新增里还有一堆不是Senior");
   });
 });
+
+describe("roleRequestMessage inside a role's conversation", () => {
+  it("passes the lead's brief only as a note on who and what, after an accepted round too", async () => {
+    // Play s167: after the round was accepted the lead's brief added 继续找新候选人 as the goal.
+    const message = await roleRequestMessage({} as never, {
+      roleId: "role-1",
+      recruiterWords: "郭小明不合适",
+      brief: "Goal：继续找新候选人",
+      noteOnly: true,
+    });
+    expect(message).toContain('word for word:\n"郭小明不合适"');
+    expect(message).toContain("Kruit's note, only on who and what");
+    expect(message).not.toContain("Kruit's brief");
+  });
+});
