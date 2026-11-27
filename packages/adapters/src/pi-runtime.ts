@@ -932,7 +932,15 @@ export class PiAgentRuntime implements AgentRuntime {
         if (error && !budgetExceeded) {
           throw new Error(sanitizeProviderError(activeStreamTarget.model.provider, error));
         }
-        if (!budgetExceeded && terminalMessage && !messageHasToolCall(terminalMessage)) {
+        // Pi stops after a tool batch that all set terminate, leaving the tool result last: the
+        // tool ended the turn (a hand-off), so it ends with nothing more said, never its result.
+        const toolEnded = terminalMessage?.role === "toolResult";
+        if (
+          !budgetExceeded &&
+          terminalMessage &&
+          !toolEnded &&
+          !messageHasToolCall(terminalMessage)
+        ) {
           const terminalText = assistantText(terminalMessage);
           const sincePendingFinal = streamed.slice(streamedBeforePendingFinal);
           if (terminalText.trim() && !sincePendingFinal.includes(terminalText)) {
@@ -957,7 +965,7 @@ export class PiAgentRuntime implements AgentRuntime {
             queue.push({ type: "text", text: budgetMessage });
             streamed = budgetMessage;
           }
-        } else if (!host.pausePending && toolWorkPendingFinal) {
+        } else if (!host.pausePending && toolWorkPendingFinal && !toolEnded) {
           // Scheduled/FYI runs may finish after tools with no user-visible text; unreported work
           // ends empty too, and the host posts the report from its own records.
           if (request.allowSilentEmpty || request.reportOwed?.()) {
@@ -965,7 +973,7 @@ export class PiAgentRuntime implements AgentRuntime {
           } else {
             throw new Error(MISSING_TOOL_FINAL_RESPONSE_ERROR);
           }
-        } else if (!streamed.trim() && !host.pausePending) {
+        } else if (!streamed.trim() && !host.pausePending && !toolEnded) {
           streamed = "";
           const lastMessage = agent.state.messages.at(-1);
           const fallback = lastMessage?.role === "assistant" ? assistantText(lastMessage) : "";
