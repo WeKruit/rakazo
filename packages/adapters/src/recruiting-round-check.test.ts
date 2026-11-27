@@ -8,6 +8,7 @@ import {
   roundListedNotRecorded,
   roundRepeats,
   roundStillMissing,
+  searchRowForAgent,
   withoutShownBefore,
 } from "./recruiting-round-check.js";
 
@@ -261,5 +262,36 @@ describe("roundRepeats", () => {
       candidates: ["a"].map(person),
     });
     expect(text).toMatch(/^none/);
+  });
+});
+
+describe("searchRowForAgent", () => {
+  it("gives the judge's verdicts as the one account of a judged person", () => {
+    const row = {
+      candidateKey: "linkedin:/in/a",
+      name: "A",
+      grade: "Strong",
+      reason: "All requirements shown",
+      snippet: "x".repeat(300),
+      rowIndex: 3,
+      email: null,
+      locationTag: "there now",
+      requirements_assessment: "Met - Shanghai\nPartial - Mandarin and working English",
+    };
+    expect(searchRowForAgent(row)).toEqual({
+      candidateKey: "linkedin:/in/a",
+      name: "A",
+      grade: "Strong",
+      requirements_assessment: row.requirements_assessment,
+    });
+    // Nobody has judged them yet: the search's own words are all there is.
+    const { requirements_assessment: _judged, ...unjudged } = row;
+    expect(searchRowForAgent(unjudged)).toEqual({
+      candidateKey: "linkedin:/in/a",
+      name: "A",
+      grade: "Strong",
+      reason: "All requirements shown",
+      snippet: "x".repeat(160),
+    });
   });
 });
