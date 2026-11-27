@@ -882,8 +882,13 @@ async function play(journey, label, owner, mailbox, out) {
         waitForKruit = false;
         const chat = move.chat ? await chatNamed(move.chat) : null;
         log(`${label}: recruiter opens ${move.page}${chat ? ` in ${chat.name}` : ""}`);
+        // Staging 11-27: the recruiter worked in the Kruit chat, asked for Results without naming
+        // the role's chat, and every look failed "no page called results". A play that has
+        // talked in one role's chat means that role.
+        const used = chats.filter((one) => one.group.id !== kruit.id && one.messages.length);
+        const only = used.length === 1 ? used[0].group.id : undefined;
         await ui
-          .openPage(move.page, chat && chat.id !== kruit.id ? chat.id : undefined)
+          .openPage(move.page, chat && chat.id !== kruit.id ? chat.id : only)
           .catch((error) => problems.push(`could not open ${move.page}: ${error.message}`));
         turn.screen = await ui.view(2_500);
       } else if (ui && move.action === "click") {
