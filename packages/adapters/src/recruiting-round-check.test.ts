@@ -57,7 +57,9 @@ vi.mock("@rakazo/db", async (original) => ({
 describe("requestTarget", () => {
   const role = { roleId: "role", userId: "u", spaceId: "s" };
   const db = (asked: Date | null, sinceRounds: string[][]) => {
-    const findMany = vi.fn(async () => sinceRounds.map((candidateKeys) => ({ candidateKeys })));
+    const findMany = vi.fn(async (_query: unknown) =>
+      sinceRounds.map((candidateKeys) => ({ candidateKeys })),
+    );
     return {
       prisma: {
         message: { findFirst: async () => (asked ? { createdAt: asked } : null) },
