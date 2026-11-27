@@ -2917,12 +2917,27 @@ export class McpConnector implements ConnectorProvider {
 
   /** The one list key every account shares for a server reached with the deployment's key. */
   private sharedListingKey(server: McpServer): string | undefined {
+    // The product's own CRM server registers the same tools for every signed-in caller; each
+    // call still carries that caller's own token. Kept per account, every new account and every
+    // worker start listed it again before the first reply (gate 6eb3e360: 52 of 133, up to 3.5 s).
+    if (this.isFirstParty(server) && !Object.keys((server.headers as object | null) ?? {}).length)
+      return `first-party ${server.endpoint}`;
     const platform = platformMcpCredential(server);
     if (!platform?.key && !platform?.keyless) return undefined;
     if (server.secretId && !platform.replacesSecret) return undefined;
     if (Object.keys((server.headers as Record<string, unknown> | null) ?? {}).length)
       return undefined;
     return `platform ${server.transport} ${server.endpoint}`;
+  }
+
+  /** The product's own server, reached with the caller's product sign-in. */
+  private isFirstParty(server: McpServer): boolean {
+    return (
+      Boolean(this.options.firstParty) &&
+      !server.secretId &&
+      server.transport === "streamable_http" &&
+      server.endpoint === this.firstPartyEndpoint
+    );
   }
 
   private refusedConnection(server: McpServer, context: AdapterContext): boolean {
@@ -3193,12 +3208,7 @@ export class McpConnector implements ConnectorProvider {
           context.userId,
           this.options.allowPrivateEndpoint === true,
         );
-        const firstParty =
-          !server.secretId &&
-          server.transport === "streamable_http" &&
-          server.endpoint === this.firstPartyEndpoint
-            ? this.options.firstParty
-            : undefined;
+        const firstParty = this.isFirstParty(server) ? this.options.firstParty : undefined;
         let runtimeAuth: McpRuntimeAuth | undefined;
         if (firstParty) {
           const rejected = new WeakMap<Response, { token: string; signal?: AbortSignal }>();

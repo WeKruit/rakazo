@@ -3957,6 +3957,30 @@ describe("first-party product OIDC MCP connection", () => {
       }
     },
   );
+  it("lists the product's own server once for every account", async () => {
+    const state = { failNext: false, initializations: 0, lists: 0 };
+    const native = mcpFetch(state, endpoint);
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "POST" && (await request.clone().text()).includes('"tools/list"'))
+        state.lists += 1;
+      return native(input, init);
+    });
+    const row = { ...ASSIGNMENT, server: { ...SERVER, endpoint } };
+    const connector = new McpConnector(
+      { botMcpServer: { findMany: vi.fn().mockResolvedValue([row]) } } as never,
+      {} as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken: async () => "access" } },
+    );
+    try {
+      expect(await connector.discoverTools(context as never)).toHaveLength(1);
+      const other = { ...context, spaceId: "w2", userId: "u2" };
+      expect(await connector.discoverTools(other as never)).toHaveLength(1);
+      expect(state.lists).toBe(1);
+    } finally {
+      await connector.close();
+    }
+  });
   it("does not retain a completed run's cancellation signal and denies revoked identity before another dispatch", async () => {
     const state = { failNext: false, initializations: 0, calls: [] as string[] };
     vi.stubGlobal("fetch", mcpFetch(state, endpoint));

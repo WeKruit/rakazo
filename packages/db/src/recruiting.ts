@@ -4966,8 +4966,7 @@ export async function saveRecruitingCandidatePeopleSearch(
       actor,
       { run, thread, role, saving, trusted, file },
       {
-        // A person's grade for the role is given once, by the search that graded them (a deep
-        // search, or a grading run for people a quick search returned). The requirement check's
+        // A person's grade for the role is given once, by the search that found them. The requirement check's
         // verdicts ride with it and never grade anyone. Someone already graded keeps theirs.
         rows: captured.rows.map((entry) => {
           const key = normalizeRecruitingCandidateRow(entry.row, {
