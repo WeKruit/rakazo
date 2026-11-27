@@ -368,6 +368,46 @@ export async function keepProfileText(
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
 /**
+ * The people search's agent_run as the agent sees it: without the options prepareAgentRun sets or
+ * leaves out itself (its own return format, its own system prompt for the search, people to grade
+ * in input.data, the ultra effort).
+ * What the server would override is not offered, as Anthropic's tool guide advises ("poka-yoke
+ * your tools"); plays 11-27 saw four of seven runs carry the agent's own format.
+ */
+export function agentRunSchemaForAgent(
+  server: Pick<McpServer, "transport" | "endpoint">,
+  toolName: string,
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  const properties = record(schema.properties);
+  if (!properties || !isAgentRunTool(server, toolName)) return schema;
+  const { outputSchema: _format, systemPrompt: _steer, ...offered } = properties;
+  const input = record(offered.input);
+  const inputProperties = record(input?.properties);
+  if (input && inputProperties) {
+    const { data: _data, ...rest } = inputProperties;
+    offered.input = { ...input, properties: rest, ...withoutRequired(input.required, "data") };
+  }
+  const effort = record(offered.effort);
+  if (effort && Array.isArray(effort.enum))
+    offered.effort = { ...effort, enum: effort.enum.filter((value) => value !== "ultra") };
+  return { ...schema, properties: offered, ...withoutRequired(schema.required, "outputSchema") };
+}
+
+function isAgentRunTool(server: Pick<McpServer, "transport" | "endpoint">, toolName: string) {
+  return (
+    toolName === "agent_run" &&
+    server.transport === "streamable_http" &&
+    !!server.endpoint &&
+    new URL(server.endpoint).host === "mcp.exa.ai"
+  );
+}
+
+function withoutRequired(required: unknown, name: string): { required?: unknown } {
+  return Array.isArray(required) ? { required: required.filter((key) => key !== name) } : {};
+}
+
+/**
  * The people-search key is shared funding, not a shared run history: an agent run is resumed or
  * continued only from a run this person started. A new run returns people by default and skips
  * the people already in the conversation's role, so a wave never pays for someone twice.
@@ -379,13 +419,7 @@ export async function prepareAgentRun(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  if (
-    toolName !== "agent_run" ||
-    server.transport !== "streamable_http" ||
-    !server.endpoint ||
-    new URL(server.endpoint).host !== "mcp.exa.ai"
-  )
-    return args;
+  if (!isAgentRunTool(server, toolName)) return args;
   const named = (["runId", "previousRunId"] as const).filter((field) => args[field] !== undefined);
   if (named.length) {
     const owned = new Set<string>();
@@ -403,13 +437,6 @@ export async function prepareAgentRun(
         );
   }
   if (args.runId !== undefined) return args;
-  // One people search (decided 2026-11-27): a run finds and grades people in one go. People
-  // already saved are not sent back to be graded a second way.
-  const toGrade = record(args.input)?.data;
-  if (Array.isArray(toGrade) && toGrade.length > 0)
-    throw new IsolationError(
-      "A run searches for people and grades the ones it returns; it does not grade people given in input.data. Leave input.data out: people already in Results keep the grade their search gave them.",
-    );
   const run = await runRole(prisma, actor);
   // Every search is a small try of 10 to 20 people (the recruiter's rule), so ultra, which is for
   // thousand-person sweeps, runs as auto.
@@ -417,9 +444,15 @@ export async function prepareAgentRun(
   const metered = effort === "auto";
   const cap = AGENT_RUN_FIND_MAX_COST_USD;
   const asked = Number(record(args.budget)?.maxCostDollars);
-  const { budget: _budget, ...rest } = args;
+  // The agent's own system prompt for the search is left out: the one staging run that carried one
+  // (2026-11-27) returned all ten people without a score, and what the recruiter wants is the query.
+  const { budget: _budget, systemPrompt: _steer, ...rest } = args;
+  // One people search (decided 2026-11-27): a run finds and grades people in one go, so people
+  // already saved are never sent back to be graded a second way (agentRunSchemaForAgent).
+  const { data: _toGrade, ...input } = record(args.input) ?? {};
   const prepared: Record<string, unknown> = {
     ...rest,
+    ...(args.input !== undefined ? { input } : {}),
     ...(effort !== undefined ? { effort } : {}),
     // The recruiter's spending limit for one wave; a lower limit the agent set still applies.
     ...(metered
@@ -445,7 +478,6 @@ export async function prepareAgentRun(
       ? [{ linkedin_url: `https://www.linkedin.com${candidateKey.slice("linkedin:".length)}` }]
       : [],
   );
-  const input = record(args.input) ?? {};
   const given = Array.isArray(input.exclusion) ? input.exclusion : [];
   const ready = exclusion.length
     ? { ...prepared, input: { ...input, exclusion: [...given, ...exclusion] } }

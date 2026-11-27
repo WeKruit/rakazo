@@ -609,6 +609,7 @@ import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting
 import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import {
   requestCounts,
+  requestTarget,
   roundStillMissing,
   roundCountLine,
   withoutShownBefore,
@@ -944,7 +945,11 @@ function feedbackInputError(result: unknown): boolean {
  * What the agent is told when a feedback save is refused. A check that says what to change
  * (a source reference) is passed on, so the next call can fix it.
  */
-export function feedbackSaveRefused(error: Error): string {
+export function feedbackSaveRefused(error: Error, roleFeedbackInMain = false): string {
+  // Staging 11-27: Kruit marked three people passed from the main conversation, was told to
+  // fix fields it could not fix there, and the marks were made by the role's team anyway.
+  if (roleFeedbackInMain)
+    return "Not recorded here: feedback on a role's people or rounds is saved in that role's conversation. Pass the recruiter's words to its team with delegate_to_role, and do not call this tool for it again in this conversation.";
   const fix =
     error instanceof RecruitingSourceCheckError
       ? error.message
@@ -7042,7 +7047,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         args.operation === "create" &&
                         thread.groupId?.startsWith("recruiting-global-")
                       ? "A role is not saved in this conversation: open it with start_role, and its team saves it there."
-                      : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
+                      : // Staging 11-27: on "three more" Kruit tried to tie the main conversation to
+                        // the role, was told a reference was foreign, and told the recruiter three
+                        // times that no role was selected.
+                        name === "recruiting_role" &&
+                          args.operation === "bind" &&
+                          thread.groupId?.startsWith("recruiting-global-")
+                        ? "This conversation covers every role and is never tied to one, so nothing needs selecting. Hand the recruiter's request to that role's team with delegate_to_role, in their own words."
+                        : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
               };
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };
@@ -8908,7 +8920,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   message: error.message,
                   at: error.stack?.split("\n").slice(1, 4).join(" | "),
                 });
-                return finish({ error: feedbackSaveRefused(error) });
+                return finish({
+                  error: feedbackSaveRefused(
+                    error,
+                    args.target !== "preference" &&
+                      !!thread.groupId?.startsWith("recruiting-global-"),
+                  ),
+                });
               }
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
@@ -8961,7 +8979,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             try {
               if (researchInput.data.operation === "calibration_round") {
                 if (!applied || !claimedEffect) throw new IsolationError();
-                const roundTarget = researchInput.data.target;
+                // The agent gives only the number asked; where the request started is data.
+                const roundAsked = researchInput.data.asked;
+                let roundTargetMemo: Promise<number | undefined> | undefined;
+                const roundTargetAt = (roleId: string, counted: number) =>
+                  (roundTargetMemo ??= roundAsked
+                    ? requestTarget(
+                        deps.prisma,
+                        { roleId, userId: run.userId, spaceId: run.spaceId },
+                        thread.id,
+                        roundAsked,
+                        counted,
+                      )
+                    : Promise.resolve(undefined));
                 // Internal record keeping: the round and this native effect complete together.
                 const round = await saveRecruitingCalibrationRound(
                   deps.prisma,
@@ -9008,12 +9038,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     userId: run.userId,
                     spaceId: run.spaceId,
                   })
-                    .then((counts) =>
+                    .then(async (counts) =>
                       roundCountLine(
                         counts,
                         (recorded.candidateKeys as string[]).length,
                         turnLanguage === "zh",
-                        roundTarget,
+                        await roundTargetAt(String(recorded.roleId), counts.counted),
                       ),
                     )
                     .catch(() => "");
@@ -9063,9 +9093,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             userId: run.userId,
                             spaceId: run.spaceId,
                           })
-                            .then((counts) => ({
+                            .then(async (counts) => ({
                               ...counts,
-                              ...roundStillMissing(counts.counted, roundTarget),
+                              ...roundStillMissing(
+                                counts.counted,
+                                await roundTargetAt(String(recorded.roleId), counts.counted),
+                              ),
                             }))
                             .catch(() => ({}))
                         : {}),
