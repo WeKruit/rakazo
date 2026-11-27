@@ -9392,10 +9392,11 @@ async function calibrationRoundView(
     round: round.round,
     createdAt: round.createdAt.toISOString(),
     approvedAt: round.approvedAt?.toISOString() ?? null,
-    candidates: round.candidateKeys.map((candidateKey) => {
+    candidates: round.candidateKeys.map((candidateKey, index) => {
       const row = latest.get(candidateKey);
       const decision = decisions.get(candidateKey);
       return {
+        number: index + 1,
         candidateKey,
         name: row?.name ?? null,
         title: row?.title ?? null,

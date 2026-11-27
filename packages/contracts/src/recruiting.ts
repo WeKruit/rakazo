@@ -2858,6 +2858,8 @@ export const RecruitingCalibrationRoundSchema = z.strictObject({
   approvedAt: IsoDate.nullable(),
   candidates: z.array(
     z.strictObject({
+      /** The number this person carries in the round's list, so "number 6" is read, not counted. */
+      number: z.number().int().positive(),
       candidateKey: RecruitingId,
       name: z.string().nullable(),
       title: z.string().nullable(),
