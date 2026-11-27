@@ -139,10 +139,14 @@ export async function requestCounts(
 
 /**
  * The count a request for `asked` people is met at: what was counted when the recruiter asked,
- * plus the number they asked for. The request starts at the newest message written to the
- * conversation, so rounds recorded since then are its own deliveries and everything before is
- * where it started. The agent gives only the number asked; branch play 11-27: it added the two
- * itself, gave 10 where 12 was meant, and a round one person short said nothing was missing.
+ * plus the number they asked for. Where a request starts comes from the role's shown rounds, each
+ * of which records the number asked. A request is the newest run of rounds asked for the same
+ * number; a round starts a new one when its number differs, or when everyone the run asked for
+ * was already shown (turned down or not) and the recruiter has written since its last round.
+ * A message to an unmet request, such as a progress question, does not move the target, and a
+ * run already shown in full keeps going until turn-downs are replaced unless the recruiter wrote.
+ * Staging find-100 11-27: anchored at the newest message, "进度？" reset the request and 110 were
+ * shown for 100.
  */
 export async function requestTarget(
   prisma: PrismaClient,
@@ -151,31 +155,68 @@ export async function requestTarget(
   asked: number,
   counted: number,
 ): Promise<number> {
-  const newest = await prisma.message.findFirst({
-    where: { threadId, role: "user" },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  const [since, marks] = await Promise.all([
+  const [rounds, marks] = await Promise.all([
     prisma.recruitingCalibrationRound.findMany({
-      where: {
-        roleId: role.roleId,
-        status: "shown",
-        ...(newest ? { createdAt: { gt: newest.createdAt } } : {}),
-      },
-      select: { candidateKeys: true },
+      where: { roleId: role.roleId, status: "shown" },
+      orderBy: { createdAt: "asc" },
+      select: { effectId: true, candidateKeys: true, createdAt: true },
     }),
     readRecruitingResultsMarks(
       prisma,
-      { userId: role.userId, spaceId: role.spaceId, email: "", isDeploymentOwner: false },
+      {
+        userId: role.userId,
+        spaceId: role.spaceId,
+        email: "",
+        isDeploymentOwner: false,
+      },
       { roleId: role.roleId },
     ),
   ]);
+  if (!rounds.length) return counted + asked;
+  const [effects, written] = await Promise.all([
+    prisma.externalEffect.findMany({
+      where: { id: { in: rounds.map((round) => round.effectId) } },
+      select: { id: true, request: true },
+    }),
+    prisma.message.findMany({
+      where: {
+        threadId,
+        role: "user",
+        createdAt: { gt: rounds[0]!.createdAt },
+      },
+      select: { createdAt: true },
+    }),
+  ]);
+  const askedOf = new Map(
+    effects.map((effect) => {
+      const request = effect.request;
+      const value =
+        request && typeof request === "object" && !Array.isArray(request)
+          ? Number((request as Record<string, unknown>).asked)
+          : Number.NaN;
+      return [effect.id, value] as const;
+    }),
+  );
+  const wroteBetween = (after: Date, before: Date) =>
+    written.some((message) => message.createdAt > after && message.createdAt < before);
+  let open: { asked: number; keys: Set<string>; last: Date } | undefined;
+  for (const round of rounds) {
+    const roundAsked = askedOf.get(round.effectId) ?? Number.NaN;
+    if (
+      !open ||
+      open.asked !== roundAsked ||
+      (open.keys.size >= open.asked && wroteBetween(open.last, round.createdAt))
+    ) {
+      open = { asked: roundAsked, keys: new Set(), last: round.createdAt };
+    }
+    for (const key of round.candidateKeys) open.keys.add(key);
+    open.last = round.createdAt;
+  }
+  if (!open || open.asked !== asked) return counted + asked;
   const notAFit = new Set(
     marks.filter((mark) => mark.mark === "not a fit").map((mark) => mark.candidateKey),
   );
-  const delivered = new Set(since.flatMap((round) => round.candidateKeys));
-  return counted - [...delivered].filter((key) => !notAFit.has(key)).length + asked;
+  return counted - [...open.keys].filter((key) => !notAFit.has(key)).length + asked;
 }
 
 /**
