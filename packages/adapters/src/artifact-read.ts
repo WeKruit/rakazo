@@ -9,7 +9,7 @@ import { IsolationError, Prisma } from "@rakazo/db";
 
 /** Internal role-context/request records: tool reads refuse them, but say why and what to read instead. */
 export const INTERNAL_ARTIFACT_ERROR =
-  "This artifact is an internal recruiting role-context or research-request record and is not readable by tools. Use recruiting_role for the current role context, and recruiting_candidates (sources) for saved candidates and their evidence artifactRef IDs.";
+  "This artifact is an internal recruiting role-context or research-request record and is not readable by tools. The current role context is in recruiting_role, saved candidates and their evidence in recruiting_candidates (sources).";
 
 export class InternalArtifactError extends IsolationError {
   constructor() {

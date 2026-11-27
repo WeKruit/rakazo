@@ -52,15 +52,10 @@ export function isSenderRead(name: string, args: Record<string, unknown>): boole
 }
 
 function noSelfSetup(ownEmail: boolean) {
-  if (ownEmail)
-    return 'No product sending mailbox: this account sends from the recruiter\'s own connected email, one send_message per person, each on its own card. Once send_message is among your tools (for example they just connected Gmail), put each email they already asked to send on its card at once, with no question or new draft first. When send_message is not among your tools, Gmail is not connected yet: write the full email (Subject: and body, signed with the recruiter\'s name, else the sign-off alone, never Recruiting Team) once, in the reply that first drafts it, opened by one line that it is written and goes out from their own address once they press Connect on the card below (never "no sending mailbox" or "send confirmation card"), then call request_connection once with provider gmail and a one-sentence reason in the recruiter\'s language saying the email above has not gone out, is kept and goes out on its own card once Gmail is connected. Never say you started, sent or made a connection request: the card is there for them to press. If they say they cannot sign in to Gmail, say in one line that this account sends from their own email (another Google account they can sign in to works too), then give the subject and body once, ready to copy and send themselves; never say that no sender or mailbox exists. Once an email is written and the recruiter asks to send it, which mailbox sends or whether the draft is kept, answer in one short reply without pasting it again (unless they ask for it): it has not gone out; the one step is pressing Connect on the card (call request_connection again so it sits with this reply, with a reason saying it has not gone out); the draft is kept and goes out on its own card once Gmail is connected. With nothing written yet, write it first. If they say they have no Gmail or cannot connect one, say plainly in one line that this account sends only from a connected Google email (Gmail or a company email hosted on Google), so nothing can go out until one is connected, and give the subject and body once, ready to copy, so they can send it themselves. Never say there is nothing to do and never claim another mailbox. Never ask for a company name or propose an address; drafts and contact lookups still work.';
-  return "No sending email yet: we set this account's mailbox up ourselves and have just been notified that it is needed. Tell the recruiter once, in one line, in their language, that this account cannot email candidates yet and that we have been notified to turn it on; then keep drafting and finding contacts. Never give an email address, never tell them to contact anyone, and do not repeat this in later replies unless they ask. Never ask for a company name or propose an address.";
+  return ownEmail
+    ? "No product sending mailbox: this account sends from the recruiter's own connected email, one send_message per person, each on its own card."
+    : "No sending email yet: the product sets this account's mailbox up and has been notified that it is needed.";
 }
-
-export const SEND_NOW_WITHOUT_GMAIL_NOTE =
-  "For an email (never a send on another channel): when send_message is not among your tools, Gmail is not connected, so nothing can go out yet. When they ask whether email can go out without Gmail, the answer is no: say so in one line of your reply, that each email goes out from their own Gmail after they press Send on its card, so Gmail is the one step; there is no other sending account. A question is answered in words, with no card: the connect card comes when they ask to send. Once an email is written and the recruiter asks to send it, what to press or whether the draft is kept, say in one short reply in their language, before any tool call: it has not been sent; the one step is pressing Connect on the card below, so it goes out from their own address; the draft is kept (in those words) and comes back on one Send card here once Gmail is connected. Call request_connection with provider gmail beside that line, with a reason that also says it has not been sent. Never say you are sending or connecting it yourself, or that the draft is not saved. With nothing written yet, write it first.";
-export const OUTREACH_MAILBOX_ONLY_NOTE =
-  "This account sends email only through its outreach mailbox, never the recruiter's own email account. If asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.";
 
 /**
  * Accounts we set up send through their product mailbox, never the recruiter's own email: those
@@ -276,7 +271,7 @@ async function validateOrder(rest: InstantlyRest, value: Sender) {
   const report = await rest("POST", "/dfy-email-account-orders", orderBody(value, true));
   if (report.order_is_valid !== true || report.simulation !== true || report.order_placed === true)
     throw new Error(
-      "That sending address cannot be set up on the current sending domain. Propose another address; if none works, tell the recruiter in one line, in their language, that their sending email is not ready yet and nothing is needed from them.",
+      "That sending address cannot be set up on the current sending domain.",
     );
 }
 
@@ -608,10 +603,9 @@ export async function ensureSendingIdentity(
       defaultMailbox: await defaultSendingMailbox(prisma, context),
       mailboxLimit: limit,
       selfSetup,
-      // The read itself says what to do, so an agent that never loaded sender setup still answers right.
       ...(current.length
         ? {
-            next: "This account sends only through its outreach mailbox, never the recruiter's own email. When asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email. Sign each email as the sender: the recruiter's saved signature, else the mailbox's displayName, never a generic name such as Recruiting Team.",
+            next: "This account sends only through its outreach mailbox, never the recruiter's own email.",
           }
         : {}),
       // missingSender asks the executor to tell support once that this account needs a mailbox.
@@ -674,7 +668,7 @@ export async function ensureSendingIdentity(
     });
     if (!domain)
       throw new Error(
-        "No existing sending domain has room for another address, and no new domain was purchased. This is ours to fix, not the recruiter's: tell them in one line, in their language, that their sending email is not ready yet and nothing is needed from them. Never mention domains, capacity or an account owner.",
+        "No existing sending domain has room for another address, and no new domain was purchased; the product fixes this, nothing is needed from the recruiter.",
       );
     const used = await prisma.externalEffect.count({
       where: { ...receiptScope(context), status: { in: ["executing", "unknown", "completed"] } },

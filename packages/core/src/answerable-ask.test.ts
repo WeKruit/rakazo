@@ -339,11 +339,11 @@ describe("waiting approval cards", () => {
     ).toEqual(["Confirm interview booking → Adam Test"]);
   });
 
-  it("says nothing when no card waits and forbids claiming an answer when one does", () => {
+  it("says nothing when no card waits and names the waiting card when one does", () => {
     expect(waitingApprovalNote([])).toBeUndefined();
     const note = waitingApprovalNote(["Confirm interview booking → Adam Test"]);
     expect(note).toContain('nobody has answered: "Confirm interview booking → Adam Test"');
-    expect(note).toContain("Never say or imply the user approved");
+    expect(note).toContain("Only the user's own answer on a card approves it");
     expect(note).toContain("Every other approval card is closed");
   });
 

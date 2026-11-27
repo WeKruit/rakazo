@@ -15,6 +15,7 @@ import {
   cancelRunsInTransaction,
   countRecruitingPeopleFoundSince,
   createThreadMessageInTransaction,
+  lockConversationPair,
   mirrorAskInTransaction,
   type PrismaClient,
   withTransactionRetry,
@@ -200,9 +201,7 @@ export async function messageBot(
   try {
     committed = await withTransactionRetry(() =>
       deps.prisma.$transaction(async (tx) => {
-        for (const threadId of [run.threadId, targetThreadId].sort()) {
-          await tx.$queryRaw`SELECT id FROM threads WHERE id = ${threadId} FOR UPDATE`;
-        }
+        await lockConversationPair(tx, [run.threadId, targetThreadId]);
         // Claim the delivery key inside the transaction so a concurrent retry
         // either sees the winner or loses on the unique (threadId, clientNonce).
         if (deliveryKey) {
@@ -431,8 +430,8 @@ export async function messageBot(
     name: targetName,
     delivered: message,
     note: progress
-      ? `${progress.note} This message reaches that work now and is answered there; never say a new search began.`
-      : `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
+      ? `${progress.note} This message reaches that work now and is answered there.`
+      : `Sent to ${targetName}; a reply arrives later as a new message.`,
   };
 }
 
@@ -528,7 +527,7 @@ export async function teamProgress(
       name: pending.bot.name,
       minutes,
       peopleFound: 0,
-      note: `The team has searched for the recruiter's request (${minutes < 1 ? "under a minute" : `${minutes} min`} ago) and the people it found are being checked against the requirements; its answer comes back here as soon as that is done. Say so in one line; never say nothing new was found, and give no count of people.`,
+      note: `The team has searched for the recruiter's request (${minutes < 1 ? "under a minute" : `${minutes} min`} ago) and the people it found are being checked against the requirements; the result shows in the role's conversation.`,
     };
   }
   const since = working.startedAt ?? working.createdAt;
@@ -575,10 +574,10 @@ export async function teamProgress(
     // Staging 11-15: asked twice to "just show me the new ten" mid-round, Kruit only repeated the
     // count; the people found so far can be listed, marked as not yet reviewed.
     note: listed
-      ? `The next round is being posted right now. Read it with recruiting_candidates round and roleId ${roleId} in a moment and show its people here; never say it is not ready, never mention records, and never send the recruiter to another chat.`
+      ? `The next round is being posted in the role's conversation right now.`
       : recorded
-        ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
-        : `${working.bot.name} has been working on the recruiter's request for ${started}; the next round comes back here when it is picked. Say in one line that it is being searched and how long it has run; never say it has not started, and give no count of people found or saved: the recruiter counts the people a round shows them.`,
+        ? `Round ${recorded.round} is recorded and shown in the role's conversation; ${working.bot.name} is still working on the rest of the recruiter's request (${started}).`
+        : `${working.bot.name} has been working on the recruiter's request for ${started}; its rounds show in the role's conversation.`,
   };
 }
 
@@ -612,11 +611,9 @@ export async function returnBotMessageOutcome(
   // Work delegated from another conversation returns once, when the team's whole chain is done.
   // A teammate's progress or empty status is not that (send-at-night 11-16: each one woke Kruit,
   // which posted again and asked the team a second time); only a failure goes back at once.
+  // Its results stay in the role's conversation, where the recruiter opens them from the role's
+  // card (user decision 11-27: the main chat neither waits for nor relays them).
   if (source.returnThreadId && (intent === "result" || !options?.forceUnread)) {
-    // fosp 11-22 (352978a2): the team's "found no 5" was marked returned, then dropped because a
-    // teammate was still running, and Kruit said "still searching" three times. A result the team
-    // is still working on stays unreturned, so the reconciler offers it again until it goes back.
-    if ((await returnDelegatedTeamOutcome(deps, run)) === "later") return false;
     await markBotOutcomeReturned(deps.prisma, run.id);
     return true;
   }
@@ -675,381 +672,6 @@ export async function returnBotMessageOutcome(
   );
   if (outcome.ok) await markBotOutcomeReturned(deps.prisma, run.id);
   return outcome.ok;
-}
-
-/** Model-facing: the round a role team returned is already on the recruiter's screen. */
-const ROUND_SHOWN_ABOVE =
-  "The role's new round is already posted above in this conversation, exactly as recorded, and the recruiter already sees it. Do not list, count, retell or judge the round's people again.";
-
-/** Posts the returned round in the conversation that asked for it, once per round or request. */
-async function showRoundWhereAsked(
-  deps: Pick<ExecutorDeps, "prisma" | "events">,
-  run: { id: string; spaceId: string },
-  root: { returnThreadId: string; fromBotId: string },
-  requestId: string,
-  text: string,
-  roundId?: string,
-): Promise<boolean> {
-  const blocks: MessageBlock[] = [
-    { kind: "text", text: clampBotMessage(text), recruitingRoundList: roundId ? { roundId } : {} },
-  ];
-  // fosp 11-20 (1ae3a9c3): "再来5个" and a correction a minute later were two requests the same
-  // round answered, so the recruiter got the round twice, 11 s apart. A recorded round is posted
-  // once, whichever request it answers.
-  const clientNonce = `delegated-round:${roundId ? `round:${roundId}` : requestId}`;
-  const shown = await withTransactionRetry(() =>
-    deps.prisma.$transaction(async (tx) => {
-      const already = await tx.message.findUnique({
-        where: { threadId_clientNonce: { threadId: root.returnThreadId, clientNonce } },
-        select: { id: true },
-      });
-      if (already) return { seq: null };
-      const copy = await createThreadMessageInTransaction(tx, {
-        threadId: root.returnThreadId,
-        role: "bot",
-        blocks,
-        botId: root.fromBotId,
-        runId: run.id,
-        clientNonce,
-        markUnread: true,
-        allowCancelledRun: true,
-      });
-      const event = await appendEventInTransaction(tx, {
-        spaceId: run.spaceId,
-        threadId: root.returnThreadId,
-        botId: root.fromBotId,
-        type: "thread.message.created",
-        runId: run.id,
-        allowCancelledRun: true,
-        payload: { messageId: copy.id, role: "bot", blocks },
-      });
-      return { seq: event.seq };
-    }),
-  ).catch((error) => {
-    getLogger().warn("delegated round not shown", { runId: run.id, error: String(error) });
-    return undefined;
-  });
-  if (!shown) return false;
-  if (shown.seq !== null) await deps.events.notify(root.returnThreadId, shown.seq);
-  return true;
-}
-
-/**
- * A round shown in the role's chat goes to the conversation that asked for it as it is shown, the
- * way a finished subagent's result returns to its caller (Claude Code's Task tool). fosp 11-23
- * (s21, c347): round 2 showed in the role chat while a background check still ran, so the
- * return waited; a newer request then became the open one, the round never reached Kruit's chat,
- * and Kruit said "稍后给你" four times.
- */
-export async function showRoundWhereAskedNow(
-  deps: Pick<ExecutorDeps, "prisma" | "events">,
-  run: { id: string; spaceId: string; threadId: string },
-  text: string,
-  roundId: string,
-): Promise<void> {
-  const found = await openDelegation(deps.prisma, run.threadId);
-  if (!found) return;
-  const { delegated, root } = found;
-  if (
-    await recruiterInRoleChat(deps.prisma, {
-      roleThreadId: run.threadId,
-      returnThreadId: root.returnThreadId,
-      since: delegated.createdAt,
-    })
-  )
-    return;
-  await showRoundWhereAsked(deps, run, root, `round:${roundId}`, text, roundId);
-}
-
-/** The text of the round as posted where it was asked for. */
-const shownText = (message: { blocks: unknown }) =>
-  (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
-    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-    .join("\n");
-
-export const DELEGATED_ANSWER_WAIT_MS = 4 * 60_000;
-const DELEGATED_ANSWER_POLL_MS = 3_000;
-
-/**
- * Kruit's hand-off waits for the role team's answer inside the same turn, the way a subagent call
- * returns its result to the caller (Claude Code's Task tool, Pi's subagent): the team's returned
- * message is taken here and its queued turn cancelled, so Kruit answers once, with the result,
- * instead of "已交给岗位" now and a relayed retelling later. fosp/fr 11-23 (s25, s26): 6 of 20
- * runs were failed for deferrals or relay talk while the round was being prepared. Ends early when
- * the recruiter writes, when the team's round is posted here, or when the team's card is shown here
- * for the recruiter to answer: the team then waits on them, as a subagent hands control back when
- * it needs the person (branch play 11-27: Kruit sat 3 minutes behind a card shown at 49 s). After
- * the timeout the answer still comes back as a new message.
- */
-export async function waitForDelegatedAnswer(
-  prisma: PrismaClient,
-  input: {
-    spaceId: string;
-    threadId: string;
-    botId: string;
-    since: Date;
-    signal: AbortSignal;
-    timeoutMs?: number;
-    pollMs?: number;
-    userMessageWaiting?: () => Promise<boolean>;
-  },
-): Promise<{ answer?: string; roundShown?: string; cardShown?: true } | undefined> {
-  const deadline = Date.now() + (input.timeoutMs ?? DELEGATED_ANSWER_WAIT_MS);
-  for (;;) {
-    const [returned, round, card] = await Promise.all([
-      prisma.message.findFirst({
-        where: {
-          threadId: input.threadId,
-          role: "user",
-          createdAt: { gte: input.since },
-          blocks: { array_contains: [{ kind: "bot_message_received" }] },
-          sourceRuns: {
-            some: { botId: input.botId, status: "queued", trigger: "bot_message", leaseFence: 0 },
-          },
-        },
-        orderBy: { seq: "asc" },
-        select: {
-          blocks: true,
-          sourceRuns: {
-            where: { status: "queued", trigger: "bot_message", leaseFence: 0 },
-            select: { id: true, taskId: true },
-          },
-        },
-      }),
-      prisma.message.findFirst({
-        where: {
-          threadId: input.threadId,
-          role: "bot",
-          createdAt: { gte: input.since },
-          clientNonce: { startsWith: "delegated-round:" },
-        },
-        orderBy: { seq: "desc" },
-        select: { blocks: true },
-      }),
-      prisma.message.findFirst({
-        where: {
-          threadId: input.threadId,
-          role: "bot",
-          createdAt: { gte: input.since },
-          blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
-        },
-        select: { blocks: true },
-      }),
-    ]);
-    if (returned) {
-      const taken = await prisma.$transaction(async (tx) => {
-        const runs = await tx.run.findMany({
-          where: {
-            id: { in: returned.sourceRuns.map((queued) => queued.id) },
-            status: "queued",
-            leaseFence: 0,
-          },
-          select: { id: true, taskId: true },
-        });
-        if (!runs.length) return false;
-        await cancelRunsInTransaction(tx, runs, new Date());
-        for (const taken of runs)
-          await appendEventInTransaction(tx, {
-            spaceId: input.spaceId,
-            threadId: input.threadId,
-            botId: input.botId,
-            type: "run.cancelled",
-            runId: taken.id,
-            payload: { reason: "answered_in_turn" },
-          });
-        return true;
-      });
-      const answer = botMessageContext(
-        Array.isArray(returned.blocks) ? (returned.blocks as MessageBlock[]) : [],
-      )?.text;
-      if (taken && answer) return { answer, ...(round ? { roundShown: shownText(round) } : {}) };
-    } else if (round) return { roundShown: shownText(round) };
-    else if (
-      (Array.isArray(card?.blocks) ? (card.blocks as MessageBlock[]) : []).some(
-        (block) => block.kind === "ask" && block.answerTarget,
-      )
-    )
-      return { cardShown: true };
-    if (
-      Date.now() >= deadline ||
-      input.signal.aborted ||
-      (await input.userMessageWaiting?.().catch(() => false))
-    )
-      return undefined;
-    await sleep(
-      Math.min(input.pollMs ?? DELEGATED_ANSWER_POLL_MS, deadline - Date.now()),
-      input.signal,
-    );
-  }
-}
-
-/** Model-facing fields for delegate_to_role once its wait ends. */
-export function delegatedAnswerResult(
-  waited: { answer?: string; roundShown?: string; cardShown?: true } | undefined,
-) {
-  if (waited?.answer)
-    return {
-      answer: waited.answer,
-      note: "The team's answer to this hand-off, returned in this turn; it does not come again. Answer the recruiter from it now.",
-    };
-  // fosp 11-23 (s27): told only not to retell the round, Kruit said nothing, and
-  // "下一批照这个改" went without a word on what changed.
-  // fosp 11-24 (s72): knowing only that a round was posted, Kruit said no replacement existed.
-  if (waited?.roundShown)
-    return {
-      shown: waited.roundShown,
-      // fosp 11-25 (s101): with nothing here on where the request stood, Kruit read its memory notes
-      // and told the recruiter about "work.md" and its search tally.
-      note: `${ROUND_SHOWN_ABOVE} The team is still on the request: when this round is fewer than the recruiter asked for, the team shows the rest as its next round or says itself what is missing, so promise no number. Answer whatever else the recruiter asked in this message, such as what changed in the search, in one line from this result and this conversation only, never from memory notes; what neither shows, the team answers in its own next message.`,
-    };
-  if (waited?.cardShown)
-    return {
-      note: "The team's card is shown above for the recruiter to answer; the team goes on once they do. Say nothing more about it.",
-    };
-  return {
-    note: "The team is still working on it; its answer comes back here as a new message. Tell the recruiter in one line what the team is doing now, without promising a time.",
-  };
-}
-
-/**
- * A role team's conversation went quiet after work another conversation delegated to it: send
- * the team's latest reply back there, exactly once per delegated request. Waits while a teammate
- * still has a turn queued, running or waiting on the recruiter, or the role's research is still
- * running, so a handoff to a specialist returns the specialist's result, not "it's on it".
- */
-export async function returnDelegatedTeamOutcome(
-  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
-  run: {
-    id: string;
-    spaceId: string;
-    threadId: string;
-    botId: string;
-    userId: string;
-    sourceMessageId?: string | null;
-  },
-): Promise<"later" | undefined> {
-  const thread = await deps.prisma.thread.findFirst({
-    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
-    select: { activeRecruitingRoleId: true, group: { select: { name: true } } },
-  });
-  if (!thread?.group) return;
-  const found = await openDelegation(deps.prisma, run.threadId);
-  if (!found) return;
-  const { delegated, root } = found;
-  if (
-    await recruiterInRoleChat(deps.prisma, {
-      roleThreadId: run.threadId,
-      returnThreadId: root.returnThreadId,
-      since: delegated.createdAt,
-    })
-  )
-    return;
-  // Staging 11-13: the role's intake turn sat on its next-step card the whole time, so a check
-  // Kruit delegated finished in the role's chat and never came back. Only a card asked since the
-  // request holds the result.
-  const busy = await deps.prisma.run.findFirst({
-    where: {
-      threadId: run.threadId,
-      id: { not: run.id },
-      OR: [
-        { status: { in: ["queued", "running"] } },
-        { status: "waiting_input", createdAt: { gte: delegated.createdAt } },
-      ],
-      // Staging 11-13: Kruit asked "where's the next round?" twice while the round ran; those
-      // follow-ups queued behind it and held the finished round back for six minutes. A later
-      // request still queued is answered by this result, not waited on.
-      NOT: [
-        { status: "queued", trigger: "bot_message", createdAt: { gt: delegated.createdAt } },
-        // Background checks of saved people are not the team's answer; a round they hold is.
-        { trigger: { in: [...BACKGROUND_RUN_TRIGGERS] } },
-      ],
-    },
-    select: { id: true },
-  });
-  // The chain is still going: its last turn returns the result, and so does the reconciler.
-  if (busy) return "later";
-  // The team's replies since the request, up to the recruiter's next own message there.
-  const later = await deps.prisma.message.findMany({
-    where: { threadId: run.threadId, seq: { gt: delegated.seq } },
-    orderBy: { seq: "asc" },
-    take: 200,
-    select: { role: true, blocks: true },
-  });
-  // fr 11-21 (41c12cca): the recruiter tapped an answer on the role's intake question there; that
-  // ended the scan, so the round that followed never came back and Kruit said it wasn't recorded.
-  // A tapped card answer is not the recruiter taking the conversation there.
-  const answersCard = (blocks: MessageBlock[]) =>
-    blocks.some((block) => block.kind === "text" && block.cardAnswer);
-  let text = "";
-  let round = "";
-  let roundId: string | undefined;
-  let answeredThere = false;
-  for (const message of later) {
-    const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
-    if (message.role === "user" && !botMessageContext(blocks)) {
-      if (answersCard(blocks)) continue;
-      answeredThere = true;
-      break;
-    }
-    if (message.role !== "bot") continue;
-    const reply = blocks
-      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-      .join("\n")
-      .trim();
-    if (reply) text = reply;
-    const list = blocks.find((block) => block.kind === "text" && block.recruitingRoundList);
-    if (reply && list?.kind === "text") {
-      round = reply;
-      roundId = list.recruitingRoundList?.roundId;
-    }
-  }
-  // Staging 11-15: the recruiter answered the round in the role's chat, and nine minutes later
-  // it came back here and was shown as the new search. A round is seen once, where it was.
-  if (answeredThere && round) return;
-  // Staging 11-14: only the team's closing line ("the next round has been posted") came back, so
-  // Kruit could neither show the people nor say who has both must-haves. The round comes too.
-  if (round && round !== text) text = `${text}\n\n${round}`;
-  // fr 11-23 (s30): a code-built list of what the request saved, beside or instead of the team's
-  // answer, was refused or blanked by its own guards after a newer round, so "find 20 more" came
-  // back with no people and Kruit read the older round instead. Like a subagent's result, the
-  // team's answer goes back as written, with where its saved people are read.
-  const saved =
-    thread.activeRecruitingRoleId && !round
-      ? `People this request saved are in the role's Results: read them with recruiting_candidates {operation:"activity", since:"${delegated.createdAt.toISOString()}", roleId:"${thread.activeRecruitingRoleId}"} when the recruiter asks who they are.`
-      : "";
-  if (saved) text = `${text}\n\n${saved}`;
-  // feedback-round x5 on 44c1ad44: Kruit retold the team's round, graded its people itself and
-  // listed eight more from the pool, so the recruiter got three versions of one round. The round
-  // is shown as recorded where they asked; Kruit learns only that it is there.
-  // Branch dc97b5bc 11-20: the copy carried the saved list's note to Kruit ("Reply with one line
-  // giving that count…") to the recruiter. Only the round is posted; the note stays Kruit's.
-  // fosp/fr 11-21 (f68ae6bf): told the round was already shown and to say nothing, Kruit still
-  // summarised it 5 s later, or relayed the team's closing line, so the recruiter read the round
-  // twice. A round with nothing else to pass on is the whole answer: Kruit gets no turn for it.
-  const roundShown =
-    Boolean(round) && (await showRoundWhereAsked(deps, run, root, delegated.id, round, roundId));
-  if (roundShown) text = "";
-  const mail = await readMailReplyOutcomeReport(deps.prisma, run);
-  if (mail)
-    text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
-  if (!text) return;
-  const sent = await messageBot(
-    deps,
-    run,
-    { id: run.botId, name: thread.group.name },
-    {
-      bot_id: root.fromBotId,
-      thread_id: root.returnThreadId,
-      sender_label: `${thread.group.name} team`,
-      target_label: root.fromBotName,
-      message: clampBotMessage(text),
-      intent: "result",
-      deliveryKey: `delegation-outcome:${delegated.id}`,
-    },
-    { allowTerminalSource: true },
-  );
-  if (!sent.ok)
-    getLogger().warn("delegated team outcome not returned", { runId: run.id, error: sent.error });
 }
 
 /**
@@ -1256,7 +878,8 @@ export async function showDelegatedTeamCard(
     return;
   const shown = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM threads WHERE id = ${found.root.returnThreadId} FOR UPDATE`;
+      // The source card's row too, so an answer to it cannot write the copy's row mid-way.
+      await lockConversationPair(tx, [run.threadId, found.root.returnThreadId]);
       return mirrorAskInTransaction(tx, {
         spaceId: run.spaceId,
         sourceThreadId: run.threadId,

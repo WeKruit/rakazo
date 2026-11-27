@@ -110,7 +110,7 @@ const INSTANTLY_MCP = "https://mcp.instantly.ai/mcp";
 const GMAIL_MCP = "https://gmailmcp.googleapis.com/mcp/v1";
 /** Model-facing: a call refused because the recruiter has not connected this account. */
 export function signedOutMessage(service: string): string {
-  return `${service} is not connected for this recruiter, so this call did nothing: nothing was sent, saved or read. Anything already shown in the conversation, such as a drafted email, is still there: asked whether the draft is kept, answer yes, it is the email above, and do not look for it in the mailbox. Reply in one or two plain lines in the recruiter's language: it has not gone out yet; the one step is to connect on the card here; the draft above is kept, and once connected you send this exact email on its own Send card for them to approve. Never say the draft is not saved, only in the chat or not in the mailbox. Then call request_connection so the connect card sits with that reply; if the recruiter cannot connect, give them the email's subject and body ready to copy and send themselves.`;
+  return `${service} is not connected for this recruiter, so this call did nothing: nothing was sent, saved or read. Anything already shown in the conversation, such as a drafted email, is still there.`;
 }
 const MAIL_ADDRESS = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 const THREAD_HISTORY = "native_instantly_get_thread_history";
@@ -313,7 +313,7 @@ function instantlyErrorCode(text: string) {
  * email outside a role ended as "the current permission does not support this email".
  */
 export const PATH_REFUSAL_NOTE =
-  "This is about this call's path, not a permission the recruiter lacks or can change. Do the request another way now: another of your tools, the teammate who can (handoff_to_bot), or one ask_user question if who or what is unclear. Never tell the recruiter you lack permission, or ask them to open a role, enable access or contact anyone.";
+  "This is about this call's path, not a permission the recruiter lacks or can change.";
 
 /** What the agent reads when a call is refused for its scope: the server's reason, then the way on. */
 export function scopeRefusal(error: Error): string {
@@ -747,7 +747,7 @@ const accountWideRead = (tool: ConnectorTool) =>
 /** Runs whose catalog left out operations, so a search there names where they are done. */
 const operationsHidden = new WeakSet<AdapterContext>();
 const OPERATIONS_ELSEWHERE =
-  "This conversation only reads. Searching for people, contact lookups, mail to candidates, bookings and changes to a role's records are done in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, in the recruiter's own words; either shows the recruiter the card that opens that conversation. Never tell the recruiter it cannot be done.";
+  "This conversation only reads. Searching for people, contact lookups, mail to candidates, bookings and changes to a role's records are done in that role's conversation.";
 
 const OUTREACH_CORE = [
   "ensure_role_campaign",
@@ -1405,7 +1405,7 @@ export class McpConnector implements ConnectorProvider {
         yield {
           type: "error",
           message:
-            "Contact lookups go through find_emails, which reuses people already looked up. Call find_emails instead.",
+            "Not run: contact lookups go through find_emails, which reuses people already looked up.",
         };
         return;
       }
@@ -1632,7 +1632,7 @@ export class McpConnector implements ConnectorProvider {
         } catch (error) {
           if (readTimeout?.aborted && !context.signal.aborted)
             throw new Error(
-              `${call.route.toolName} did not answer within ${REMOTE_READ_MS / 1000} seconds. Continue with the other tools, or tell the user this service is not answering.`,
+              `${call.route.toolName} did not answer within ${REMOTE_READ_MS / 1000} seconds.`,
             );
           // Staging 11-16: a dropped connection failed a people search as "uncertain", so it was
           // never run again, and the calls sharing that session then failed as not connected.
@@ -2822,7 +2822,7 @@ export class McpConnector implements ConnectorProvider {
           ...(stopOnReply
             ? {}
             : {
-                warning: `This person replied, but ${stopOnReply === false ? "this campaign keeps sending them its follow-ups" : "whether this campaign stops their follow-ups could not be confirmed"}. Unless the recruiter wants the follow-ups to continue, call pause_campaign with their email and campaign_id ${campaignId}: it stops only them and sends nothing. Tell the recruiter in plain words that their follow-ups were stopped, never naming the mail service.`,
+                warning: `This person replied, but ${stopOnReply === false ? "this campaign keeps sending them its follow-ups" : "whether this campaign stops their follow-ups could not be confirmed"}. pause_campaign with their email and campaign_id ${campaignId} stops only them and sends nothing.`,
               }),
         });
       }

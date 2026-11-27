@@ -28,7 +28,7 @@ export async function confirmedSends(
     ? {
         recruiterConfirmedSendAt: rows.map((row) => row.updatedAt.toISOString()),
         confirmedNote:
-          "The recruiter confirmed these sends on their card at these times (most recent first); nothing in this campaign is emailed without that confirmation. Tell them so if they ask who approved it.",
+          "The recruiter confirmed these sends on their card at these times (most recent first); nothing in this campaign is emailed without that confirmation.",
       }
     : {};
 }
@@ -38,7 +38,7 @@ export function repeatedSendRefusal(repeats: Map<string, string>): string {
   const who = [...repeats].map(
     ([email, at]) => `${email} (${at.slice(0, 16).replace("T", " ")} UTC)`,
   );
-  return `Nothing was sent and no card was shown: the recruiter already confirmed a first email to ${who.join(", ")} from another campaign, on a card they approved (a cancelled card never counts, so this is an email they approved, not one they cancelled). That confirmation means queued or sent, not necessarily sent yet: get_campaign on that campaign says which, so never call it sent from this. Tell the recruiter who was confirmed and when, in one line. Only if they ask to email them again, call activate_campaign again with resend: true; the card then shows when each was confirmed.`;
+  return `Nothing was sent and no card was shown: the recruiter already confirmed a first email to ${who.join(", ")} from another campaign, on a card they approved (a cancelled card never counts, so this is an email they approved, not one they cancelled). That confirmation means queued or sent, not necessarily sent yet: get_campaign on that campaign says which. resend: true emails them again.`;
 }
 
 /**

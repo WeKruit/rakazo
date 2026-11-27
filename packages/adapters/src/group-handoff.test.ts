@@ -161,7 +161,7 @@ describe("group handoff ownership", () => {
       }),
     ).resolves.toEqual({
       error:
-        "do not hand this stage back to its sender; post the result in the shared thread instead",
+        "Not handed off: this stage came from that teammate, and a stage is not handed back to its sender.",
     });
     expect(runCreate).not.toHaveBeenCalled();
   });
@@ -451,8 +451,8 @@ describe("group handoff report back", () => {
     await reportGroupHandoffOutcome(h.deps as never, worker, "group-1", { status: "completed" });
     const message = JSON.stringify(h.messageCreate.mock.calls);
     const task = JSON.stringify(h.taskCreate.mock.calls);
-    expect(message).toContain("user explicitly discarded");
-    expect(task).toContain("user explicitly discarded");
+    expect(message).toContain("the user discarded it");
+    expect(task).toContain("the user discarded it");
     expect(message + task).not.toMatch(/private-effect|my result is my last message/);
   });
 
@@ -670,9 +670,6 @@ describe("group handoff report back", () => {
       expect(text.includes(`Your question "${question}" was closed when the recruiter typed`)).toBe(
         reminds,
       );
-      // Staging 11-10: "继续深搜，保留全部硬性要求" answered the card, yet the old wording made the
-      // agent ask the same question again. A typed answer is acted on, never asked again.
-      if (reminds) expect(text).toContain("act on that answer and never ask it again");
     },
   );
 
@@ -864,7 +861,7 @@ describe("open stage watch", () => {
         data: expect.objectContaining({
           blocks: [
             expect.objectContaining({
-              text: expect.stringContaining("Want an email when it finishes? Just say so."),
+              text: expect.stringContaining("has not been offered an email"),
             }),
           ],
         }),

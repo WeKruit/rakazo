@@ -407,6 +407,9 @@ export async function transcripts(rpc, since, chinese = false) {
         card: (message.blocks ?? []).some((block) => block.kind === "ask"),
         controls: cardControls(message, newestConnect, chinese),
         sendCard: (message.blocks ?? []).some((block) => block.approvalEffectId),
+        // The main chat answers a request by opening the role's card (the 11-27 decision): that
+        // card is its reply, with no words of its own.
+        roleCard: (message.blocks ?? []).some((block) => block.kind === "role_link"),
         at: message.createdAt,
       }));
     chats.push({ group, messages });

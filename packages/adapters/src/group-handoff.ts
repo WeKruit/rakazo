@@ -28,7 +28,7 @@ import { NO_RESPONSE } from "./silent-reply.js";
 import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
 export const NO_ROLE_HANDOFF =
-  "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds. Save the role now with recruiting_role, quoting the recruiter's own words, then hand off again with the same brief.";
+  "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds.";
 
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -154,7 +154,7 @@ export async function handoffToGroupBot(
       if (sourceHandoff?.fromBotId === targetId && !sourceHandoff.report) {
         return {
           error:
-            "do not hand this stage back to its sender; post the result in the shared thread instead",
+            "Not handed off: this stage came from that teammate, and a stage is not handed back to its sender.",
         } as const;
       }
       const hop = nextBotMessageHop(sourceHandoff?.hop);
@@ -238,8 +238,8 @@ export async function handoffToGroupBot(
     botId: committed.botId,
     runId: committed.runId,
     note: input.report_back
-      ? "Handoff recorded. Do not narrate it or redo that work; the result comes back to you when that stage ends, so you can check it before the user relies on it."
-      : "Handoff recorded. Do not narrate it or redo that work; the next bot owns the next stage.",
+      ? "Handoff recorded; the result comes back to you when that stage ends."
+      : "Handoff recorded; the next bot owns the next stage.",
   };
 }
 
@@ -290,7 +290,7 @@ async function confirmedSend(
  * Whether the stage recorded a round of people and the request for a number it served is met, by
  * the same counts the round's own result gives. The round's list is what the user sees, so there
  * is nothing left to check: play s151 woke the lead after a round and it recorded the same people
- * again. A round recorded without a number asked serves no number and is not short.
+ * again. A round with no request for a number open is not short.
  */
 async function roundDelivered(
   prisma: PrismaClient,
@@ -298,7 +298,7 @@ async function roundDelivered(
 ): Promise<boolean> {
   const effects = await prisma.externalEffect.findMany({
     where: { runId: run.id, status: "completed" },
-    select: { id: true, request: true },
+    select: { id: true },
     orderBy: { createdAt: "desc" },
     take: 200,
   });
@@ -307,19 +307,13 @@ async function roundDelivered(
     ? await prisma.recruitingCalibrationRound.findFirst({
         where: { effectId: { in: ids }, status: "shown" },
         orderBy: { createdAt: "desc" },
-        select: { roleId: true, effectId: true },
+        select: { roleId: true },
       })
     : null;
   if (!round) return false;
-  const request = effects.find((effect) => effect.id === round.effectId)?.request;
-  const asked =
-    request && typeof request === "object" && !Array.isArray(request)
-      ? Number((request as Record<string, unknown>).asked)
-      : Number.NaN;
-  if (!Number.isFinite(asked) || asked <= 0) return true;
   const role = { roleId: round.roleId, userId: run.userId, spaceId: run.spaceId };
   const { counted } = await requestCounts(prisma, role);
-  const target = await requestTarget(prisma, role, run.threadId, asked, counted);
+  const target = await requestTarget(prisma, role, counted);
   return !roundStillMissing(counted, target).stillMissing;
 }
 
@@ -423,22 +417,22 @@ export async function reportGroupHandoffOutcome(
       // means the next step is theirs, not the sender's.
       if (posted && (await cardWaitsOnRecruiter(tx, run.threadId))) return undefined;
       const report = mail
-        ? `Stage status: ${outcome.status}. Verified reply-card outcome:\n${mail.text}\nUse this recorded card outcome as the result, even when the last text above was only a progress update.`
+        ? `Stage status: ${outcome.status}. Verified reply-card outcome:\n${mail.text}`
         : outcome.status === "completed" && !posted
-          ? `Ended the stage you handed me without posting any result: no message and no card. This is not done. Hand me a correction that restates what this request needs, at most twice; after that, tell the user it did not get done.`
+          ? `Ended the stage you handed me without posting any result: no message and no card.`
           : outcome.status === "completed"
-            ? `Finished the stage you handed me; my result is my last message above, which the user already sees. When it answers what the user asked or does what they asked (a send or booking whose card the recruiter confirmed is done), reply exactly ${NO_RESPONSE}: never ask me to prove it, re-check it or say it again in your words. Hand me a correction only when a concrete part of the request is still undone, naming that part, at most twice; after that, or when I said what blocks it, tell the user only what blocks the rest.`
+            ? `Finished the stage you handed me; my result is my last message above, which the user already sees. A reply of exactly ${NO_RESPONSE} posts nothing.`
             : outcome.watch
-              ? `Check-in: ${outcome.watch.state} If this drifts from what you asked for or looks stuck, hand me a correction now. Tell the user only if something changed that they need to know; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
+              ? `Check-in: ${outcome.watch.state} The final result comes back to you when the stage ends. A reply of exactly ${NO_RESPONSE} posts nothing.`
               : outcome.status === "progress"
-                ? `Check-in: the stage you handed me is still running, and the first results are saved above. If they drift from what you asked for, hand me a correction now. Tell the user only if something changed that they need to know or the work looks stuck; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
-                : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
+                ? `Check-in: the stage you handed me is still running, and the first results are saved above. The final result comes back to you when the stage ends. A reply of exactly ${NO_RESPONSE} posts nothing.`
+                : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}.`;
       const reask =
         outcome.status === "progress"
           ? undefined
           : await questionClosedByChat(tx, { threadId: run.threadId, botId: asked.fromBotId });
       const text = reask
-        ? `${report}\n\nYour question "${reask.question}" was closed when the recruiter typed "${reask.reply.slice(0, 300)}" in the chat. When that message answers it, act on that answer and never ask it again. Only when it is plainly about something else is the question still open: then ask it again with ask_user now instead of replying ${NO_RESPONSE}.`
+        ? `${report}\n\nYour question "${reask.question}" was closed when the recruiter typed "${reask.reply.slice(0, 300)}" in the chat.`
         : report;
       const message = await createThreadMessageInTransaction(tx, {
         threadId: run.threadId,

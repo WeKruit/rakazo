@@ -31,7 +31,7 @@ function store(rows: Array<Record<string, unknown>> = [], saved = 0) {
 }
 
 describe("countdowns for big work", () => {
-  it("starts a countdown for a big search still running and tells the agent once", async () => {
+  it("starts a countdown for a big search still running and says so once", async () => {
     const test = store();
     const note = await workEstimateAfterAgentRun(
       test.prisma,
@@ -39,7 +39,7 @@ describe("countdowns for big work", () => {
       mcp({ id: "agent_run_1", status: "running" }),
     );
     expect(note).toContain("about 2 minutes");
-    expect(note).toContain("email_when_done");
+    expect(note).toContain("The recruiter sees a countdown.");
     expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
       kind: "work_estimate",
       idempotencyKey: "work_estimate:agent_run_1",
@@ -122,7 +122,7 @@ describe("countdowns for big work", () => {
     });
   });
 
-  it("asks for a progress line when a lookup's countdown runs out", async () => {
+  it("says when a lookup's countdown ran out", async () => {
     const test = store([
       {
         id: "e",
@@ -132,7 +132,7 @@ describe("countdowns for big work", () => {
       },
     ]);
     expect(await contactLookupCountdownNote(test.prisma, run, now)).toContain(
-      "how many emails were found so far",
+      "the lookup is still going",
     );
     expect(withWorkNote({ summary: {} }, "note")).toEqual({ summary: {}, countdown: "note" });
   });

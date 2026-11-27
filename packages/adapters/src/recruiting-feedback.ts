@@ -27,7 +27,7 @@ import { criteriaAssessment } from "./recruiting-criteria-check.js";
  * mark the ones the recruiter's words were about.
  */
 function roundDirectionNext(people: string[]) {
-  return `Saved as direction for the next round; it marks no one on Results. The latest round as numbered for the recruiter: ${people.join("; ")}. If their words turned down or praised any of these people, by name or by number, record those people now with target "candidate", operation "review" and fit "not_fit" or "good_example" (one call per fit), using these keys.`;
+  return `Saved as direction for the next round; it marks no one on Results. The latest round as numbered for the recruiter: ${people.join("; ")}. People are marked with target "candidate", operation "review" and these keys.`;
 }
 
 /** The latest round the recruiter saw, as "1. Name = key" in the order its list numbers them. */
@@ -77,9 +77,9 @@ export function recruitingFeedbackInputError(error: ZodError): string {
     });
   });
   return [
-    "Not recorded: nothing was saved, so never tell the recruiter it was recorded.",
+    "Not recorded: nothing was saved.",
     `${[...new Set(fields)].join("; ")}.`,
-    'Fix these and call recruiting_feedback again. Targets: "round" with operation "scope" for feedback or a new direction for the next round, or "approve" only when the recruiter accepts the round; "candidate" with operation "review" and the keys of the people they named; "role" with operation "revise" for changed requirements.',
+    'Targets: "round" with operation "scope" for feedback or a new direction for the next round, or "approve" only when the recruiter accepts the round; "candidate" with operation "review" and the keys of the people they named; "role" with operation "revise" for changed requirements.',
   ].join(" ");
 }
 
@@ -159,10 +159,10 @@ export async function executeRecruitingFeedback(
 }
 
 const REQUIREMENTS_NOTE =
-  "This saved the decision on the named people only; the role's requirements are unchanged. When the recruiter's words give a reason later people must also meet, add it to the role's requirements in this step (recruiting_role update, criteria.upsert), so everyone found from now on is judged on it.";
+  "This saved the decision on the named people only; the role's requirements are unchanged.";
 
 const PROFILES_SHOW_NOTE =
-  "profilesShow is how each named person's profile was judged on the role's requirements. The recruiter's decision stands as recorded. Where their reason differs from it, say in one line what the profile shows, and leave that reason out of the next search.";
+  "profilesShow is how each named person's profile was judged on the role's requirements. The recruiter's decision stands as recorded.";
 
 async function recordRecruitingFeedback(
   deps: { prisma: PrismaClient; memory: MemoryStore },
@@ -312,7 +312,7 @@ async function recordRecruitingFeedback(
     tidyPreferenceDocument(expected.content) !== tidyPreferenceDocument(edited.content)
   )
     throw new RecruitingFeedbackValidationError(
-      'Memory content does not match the recruiting preference edit. Nothing was written. Use recruiting_feedback with target:"preference", the loaded scope, path and expectedRevision, and the full exact edit: add appends content; replace changes only its exact anchor; revoke removes only that anchor. Do not substitute a summary for content. Correct and resubmit only the originally authorized edit; required approvals still apply.',
+      'Memory content does not match the recruiting preference edit. Nothing was written. A preference edit needs the loaded scope, path and expectedRevision and the full exact edit: add appends content; replace changes only its exact anchor; revoke removes only that anchor.',
     );
   context.signal.throwIfAborted();
   const saved = await deps.memory.commit(

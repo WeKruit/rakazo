@@ -235,7 +235,7 @@ export function profileLookupArgs(
  * empty answer. The recruiter chose (2026-11-27) to see the closest people with their gaps.
  */
 export const SEARCH_RETURNED_NOBODY =
-  "This search returned no one, so nothing was saved. A search grades every person it returns and each person's requirement check shows what their profile does not state: ask the next search for the people closest to the role's requirements, a full run's worth, never only for people who meet or prove every requirement. Then show the closest of them, each with the requirement their profile leaves open.";
+  "This search returned no one, so nothing was saved.";
 
 /** A completed people search with nobody in it, as the agent reads it; null for any other. */
 export function searchThatFoundNobody(
@@ -527,7 +527,7 @@ export async function requireFullEnrichJobOwnership(
     // A mistyped id must not lead to a second paid lookup: name the ones this person started.
     if (owned.length)
       throw new IsolationError(
-        `No lookup with that id. Your latest lookups, newest first: ${owned.slice(0, 3).join(", ")}. Read one of these, copying the id unchanged, or pass "latest"; do not start a new lookup.`,
+        `No lookup with that id. Your latest lookups, newest first: ${owned.slice(0, 3).join(", ")}. "latest" reads the newest.`,
       );
   }
   throw new IsolationError(

@@ -644,7 +644,7 @@ it("never lets a recruiter set up or buy a sender unless the deployment allows s
     senders: [],
     selfSetup: false,
     missingSender: true,
-    next: expect.stringContaining("cannot email candidates yet"),
+    next: expect.stringContaining("No sending email yet"),
   });
   const read = (await ensureSendingIdentity(f.prisma, f.rest, context, "source", {
     operation: "read",
@@ -655,7 +655,7 @@ it("never lets a recruiter set up or buy a sender unless the deployment allows s
       operation: "propose",
       display_name: "Acme",
     }),
-  ).rejects.toThrow("cannot email candidates yet");
+  ).rejects.toThrow("No sending email yet");
   approve("chosen@product.test");
   await expect(
     ensureSendingIdentity(f.prisma, f.rest, context, "source", {
@@ -663,7 +663,7 @@ it("never lets a recruiter set up or buy a sender unless the deployment allows s
       email: "chosen@product.test",
       display_name: "Acme",
     }),
-  ).rejects.toThrow("cannot email candidates yet");
+  ).rejects.toThrow("No sending email yet");
   expect(f.rest).not.toHaveBeenCalled();
   expect(f.orders()).toBe(0);
   expect(f.rows).toHaveLength(0);
@@ -699,7 +699,7 @@ it("tells a self-signup account without a mailbox to send from its own email", a
     operation: "read",
   });
   expect(read).toMatchObject({ senders: [], next: expect.stringContaining("own connected email") });
-  expect(JSON.stringify(read)).not.toContain("cannot email candidates yet");
+  expect(JSON.stringify(read)).not.toContain("No sending email yet");
   expect(JSON.stringify(read)).not.toContain("Integrations");
 });
 

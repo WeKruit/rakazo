@@ -1060,7 +1060,7 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       .max(10_000)
       .optional()
       .describe(
-        "The number of people the recruiter's current request asked for, exactly as they said it (\"3 more\": 3; a role's first ten: 10). Give it with every round of that request and never add to it or subtract from it yourself: the server works out where the request started, says under the list how many are still to come and returns stillMissing.",
+        "Only on the first round of a request: the number of people the recruiter's words ask for, exactly as they said it (\"3 more\": 3; \"find 100\": 100; a role's first ten: 10). Leave it out on every later round of that request and on rounds after feedback or a question that names no number: such a round belongs to the request already open. Never add to it or subtract from it yourself: the server works out where the request started, says under the list how many are still to come and returns stillMissing.",
       ),
   }),
   // People returned by a people-search connector call in this same run, saved as one unassessed page.

@@ -243,12 +243,12 @@ export async function findEmails(
       ...(input.remaining_after
         ? {
             not_looked_up: input.remaining_after,
-            next_step: `${input.remaining_after} of the first ${input.next_from_role} people are still to look up. Call find_emails again with next_from_role ${input.next_from_role} right away, and keep calling until none are left; do not stop, ask or report a final count before that.`,
+            next_step: `${input.remaining_after} of the first ${input.next_from_role} people are still to look up; the same next_from_role looks up the next batch.`,
           }
         : later.length
           ? {
               not_looked_up: later.length,
-              next_step: `Looked up the first ${LOOKUP_BATCH}. Call again with the other ${later.length} people, starting with ${later[0]!.name}.`,
+              next_step: `Looked up the first ${LOOKUP_BATCH}; the other ${later.length}, starting with ${later[0]!.name}, are not looked up yet.`,
             }
           : {}),
     },

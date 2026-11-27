@@ -15,7 +15,6 @@ import type { ActionApprovalRule } from "@rakazo/core";
 import {
   boundDirectApprovalRequest,
   COMPUTER_START_FAILED,
-  REPLY_IN_CHINESE_NOTE,
 } from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
@@ -36,7 +35,7 @@ import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.j
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as BotMessagesModule from "./bot-messages.js";
-import { messageBot, waitForDelegatedAnswer } from "./bot-messages.js";
+import { messageBot } from "./bot-messages.js";
 import type * as BotSecretsModule from "./bot-secrets.js";
 import { shellCommandEnvironment } from "./bot-secrets.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
@@ -88,7 +87,6 @@ vi.mock("./group-handoff.js", async (importOriginal) => {
 vi.mock("./bot-messages.js", async (importOriginal) => ({
   ...(await importOriginal<typeof BotMessagesModule>()),
   messageBot: vi.fn(async () => ({ ok: true, name: "Role team" })),
-  waitForDelegatedAnswer: vi.fn(async () => undefined),
 }));
 vi.mock("./recruiting-context.js", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -662,7 +660,7 @@ describe("one booking route", () => {
       expect(f.connector.execute).not.toHaveBeenCalled();
       expect(f.pauseRunForInput).not.toHaveBeenCalled();
       expect(f.effects).toHaveLength(0);
-      expect(f.results[0]).toEqual({ error: expect.stringContaining("recruiting_scheduling") });
+      expect(f.results[0]).toEqual({ error: expect.stringContaining("no approved scheduling plan") });
     },
   );
 
@@ -1256,6 +1254,22 @@ describe("one request handed to a role", () => {
       spawnKey: "recruiting:user-1:main",
     } as typeof bot);
     Object.assign(f.thread, { groupId: "recruiting-global-1" });
+    // The recruiter's message this turn hands over.
+    const history = f.prisma.message.findMany.getMockImplementation()!;
+    f.prisma.message.findMany.mockImplementation((async (query?: { select?: Record<string, boolean> }) =>
+      query?.select?.id && query.select.seq && Object.keys(query.select).length === 2
+        ? history(query as never)
+        : [
+            {
+              id: "recruiter-1",
+              seq: 1,
+              role: "user",
+              botId: null,
+              runId: null,
+              createdAt: new Date(),
+              blocks: [{ kind: "text", text: "郭小明不合适" }],
+            },
+          ]) as never);
     Object.assign(f.prisma, {
       chatGroup: {
         findUnique: vi.fn(async () => ({ id: "recruiting-global-1", name: "Kruit", members: [] })),
@@ -1275,7 +1289,7 @@ describe("one request handed to a role", () => {
   it("goes to that role's conversation once per turn", async () => {
     const f = await roleFixture("delegate-once");
     vi.mocked(messageBot).mockClear();
-    const ask = { name: "delegate_to_role", args: { role_id: "role-1", message: "Add Ada" } };
+    const ask = { name: "delegate_to_role", args: { role_id: "role-1" } };
     f.setCalls([
       { ...ask, executionId: "d1" },
       { ...ask, executionId: "d2" },
@@ -1287,18 +1301,53 @@ describe("one request handed to a role", () => {
 
   // Branch play 11-27 (handoff5): the role's card was shown and Kruit still wrote the email draft
   // in its own conversation after the hand-off returned.
-  it("ends Kruit's turn once the role's card is shown", async () => {
+  it("ends Kruit's turn at the hand-off, with the role's card shown", async () => {
     const f = await roleFixture("delegate-card-shown");
-    vi.mocked(waitForDelegatedAnswer).mockResolvedValueOnce({ cardShown: true });
     f.setCalls([
       {
         name: "delegate_to_role",
-        args: { role_id: "role-1", message: "Book Ada" },
+        args: { role_id: "role-1" },
         executionId: "d",
       },
     ]);
     await f.run();
     expect(f.results[0]).toMatchObject({ kind: "agent_tool_result", terminate: true });
+  });
+
+  // Play s174: Kruit's own brief added 「并继续做下一轮」 and the team searched a round nobody asked for.
+  it("hands over only the recruiter's words and the saved people they refer to", async () => {
+    const f = await roleFixture("delegate-referents");
+    vi.mocked(messageBot).mockClear();
+    const queryRaw = vi.fn(async () => [
+      { candidateKey: "linkedin:ada", name: "Ada Chen", linkedinUrl: "https://linkedin.com/in/ada" },
+    ]);
+    Object.assign(f.prisma, { $queryRaw: queryRaw });
+    f.setCalls([
+      {
+        name: "delegate_to_role",
+        args: { role_id: "role-1", people: ["https://www.linkedin.com/in/ada/"], round: 2 },
+        executionId: "d",
+      },
+    ]);
+    await f.run();
+    const message = String(vi.mocked(messageBot).mock.calls[0]?.[3].message);
+    expect(message).toMatch(/^The recruiter wrote, word for word:\n"/);
+    expect(message).toContain("People they refer to: Ada Chen, https://linkedin.com/in/ada.");
+    expect(message).toContain("Round they refer to: round 2.");
+    expect(message).not.toContain("note");
+
+    vi.mocked(messageBot).mockClear();
+    const g = await roleFixture("delegate-unknown-person");
+    Object.assign(g.prisma, { $queryRaw: vi.fn(async () => []) });
+    g.setCalls([
+      { name: "delegate_to_role", args: { role_id: "role-1", people: ["Ada"] }, executionId: "d" },
+    ]);
+    await g.run();
+    // Play s179: a name the model wrote still hands off; the recruiter's words name the person.
+    const unmatched = String(vi.mocked(messageBot).mock.calls[0]?.[3].message);
+    expect(unmatched).toMatch(/^The recruiter wrote, word for word:\n"/);
+    expect(unmatched).not.toContain("People they refer to");
+    expect(g.results[0]).toMatchObject({ details: { ok: true, notSavedPeople: ["Ada"] } });
   });
 });
 
@@ -1382,7 +1431,7 @@ describe("steered message language", () => {
       yield { type: "done" as const, text: "好的。" };
     });
     await f.run();
-    expect(steered).toContain(REPLY_IN_CHINESE_NOTE);
+    expect(steered).toContain("The recruiter's newest message is in Chinese.");
   });
 });
 
@@ -2675,7 +2724,7 @@ describe("native recruiting role effect delivery", () => {
       await f.run();
       const result = {
         error:
-          "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.",
+          "A role, message or file this call names is not part of this conversation. This is not an outage. A search that already returned keeps its people saved.",
       };
       expect(f.results).toEqual([result]);
       expect(f.effects[0]).toMatchObject({ status: "completed", result });
@@ -2786,7 +2835,7 @@ describe("native recruiting role effect delivery", () => {
     await f.run();
     expect(f.results.at(-1)).toEqual({
       error:
-        "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.",
+        "A role, message or file this call names is not part of this conversation. This is not an outage. A search that already returned keeps its people saved.",
     });
     expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
   });
@@ -5076,13 +5125,13 @@ describe("native recruiting turn delivery", () => {
     const f = await roleTeamFirstTurn("greeting-no-card", "你好，你能帮我做什么？");
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
     expect(await request.beforeAsk?.("你想先处理哪项？")).toEqual({
-      instead: expect.stringContaining("Not asked yet: no role is saved in this chat"),
+      instead: expect.stringContaining("no role is saved in this chat"),
     });
   });
 
   // Staging 11-10: "We need a backend engineer… can you help me find people?" never saved a role,
   // so its question came out as plain text with no buttons. A vague hiring request is a role.
-  it("turns a vague hiring request's bounced question into a saved role and a card", async () => {
+  it("holds a vague hiring request's question until a role is saved", async () => {
     const f = await roleTeamFirstTurn(
       "vague-request-card",
       "We need a backend engineer for our team, can you help me find people?",
@@ -5090,9 +5139,8 @@ describe("native recruiting turn delivery", () => {
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
     const bounced = await request.beforeAsk?.("Which city?");
     expect(bounced).toEqual({
-      instead: expect.stringContaining("save it now with recruiting_role create"),
+      instead: expect.stringContaining("a question card needs a saved role"),
     });
-    expect(JSON.stringify(bounced)).toContain("then ask this same question with ask_user");
   });
 
   // Staging eval 11-11 (mixed-language-ask): a second turn asked the same location question
@@ -6134,7 +6182,7 @@ describe("approval cards on a new user message", () => {
     expect(prompt).toContain(
       'still waiting for the user, nobody has answered: "Confirm interview booking → Adam Test"',
     );
-    expect(prompt).toContain("not an answer to those cards: answer what it actually asks");
+    expect(prompt).toContain("is a new message, not an answer to those cards");
     expect(history).toContain("Approval card waiting for the user");
   });
   it("leaves out a card whose run already ended", async () => {

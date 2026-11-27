@@ -167,7 +167,6 @@ import {
   renderBotDirectory,
   replyLanguageNote,
   resolveActionApprovalDetail,
-  ROLE_OPENED_NOTE,
   runBudgetExceeded,
   runBudgetStopText,
   sandboxCommandTimeoutMs,
@@ -269,6 +268,7 @@ import {
   remainingUsageCredits,
   resolveRecruitingCampaignLead,
   resolveRecruitingCrmImport,
+  roleReferents,
   resolveRecruitingReply,
   SpaceLimitError,
   saveRecruitingCalibrationRound,
@@ -355,16 +355,12 @@ import {
 import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import {
-  delegatedAnswerResult,
   loadBotMessageContext,
   messageBot,
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
-  returnDelegatedTeamOutcome,
   showDelegatedTeamCard,
-  showRoundWhereAskedNow,
   teamProgress,
-  waitForDelegatedAnswer,
 } from "./bot-messages.js";
 import {
   allowPrivateHttpSecretOrigins,
@@ -402,7 +398,6 @@ import {
   googleCalendarApprovalFacts,
 } from "./google-calendar-approval.js";
 import { roleLinkBlocks } from "./role-links.js";
-import { schedulingNextStep } from "./scheduling-next-step.js";
 import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
@@ -476,6 +471,7 @@ import {
 import {
   newestRecruiterWords,
   otherRoleWriteRefusal,
+  delegatedRequestMessage,
   roleRequestMessage,
 } from "./global-role-writes.js";
 import {
@@ -507,9 +503,7 @@ import {
 } from "./instantly-reply.js";
 import {
   isSenderRead,
-  OUTREACH_MAILBOX_ONLY_NOTE,
   ownMailboxSendingAllowed,
-  SEND_NOW_WITHOUT_GMAIL_NOTE,
   senderApprovalDisplay,
 } from "./instantly-senders.js";
 import type { TextJudge } from "./judge.js";
@@ -522,7 +516,7 @@ import {
 import {
   gmailReplyRoute,
   mailReplyFromAnchor,
-  mailReplyOutcomeInstruction,
+  mailReplyOutcome,
   readGmailReplyCard,
 } from "./mail-reply.js";
 import { requireMcpToolAssignment } from "./mcp-connector.js";
@@ -787,7 +781,7 @@ const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
 const SHOWN_ROLE_PEOPLE = 10;
 /** Outside a role there is no campaign to default to; a card naming nothing must never show. */
 export const NO_CAMPAIGN_TO_ACTIVATE =
-  "Pass campaign_id: outside a role conversation, activate the campaign create_campaign returned (its id) with the same recipients. Nothing was sent.";
+  "No campaign_id, and this conversation has no role campaign. Nothing was sent.";
 // One mail page saves the files of at most this many received emails; a later read saves the rest.
 const MAX_ATTACHMENT_EMAILS = 5;
 
@@ -933,12 +927,12 @@ export function lateNote(pending: Promise<string | undefined>) {
 /** Role conversations Kruit opens with start_role. */
 const KRUIT_ROLE_GROUP_PREFIX = "role-";
 const ACCOUNT_SETUP_STAYS_HERE =
-  "That team has no role. Work that belongs to no role, such as getting the sending email ready, you do yourself here: call ensure_sender read and do what it returns. For a new role use start_role.";
+  "Not handed off: that team has no role.";
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
 const FEEDBACK_NOT_SAVED =
-  "Not recorded: nothing was saved, so never tell the recruiter it was recorded. Fix the call and call recruiting_feedback again.";
+  "Not recorded: nothing was saved.";
 
 /** Marks a feedback call naming people who are not saved on the role, which only the agent can fix. */
 const FEEDBACK_INPUT_ERROR = "FEEDBACK_INPUT";
@@ -957,7 +951,7 @@ export function feedbackSaveRefused(error: Error): string {
     error instanceof RecruitingSourceCheckError
       ? error.message
       : "roleId must be the conversation's current role, candidateKeys saved people on it, and sourceRefs only references this conversation's tools returned (or none).";
-  return `${FEEDBACK_NOT_SAVED} ${fix} Either way, carry on with the rest of the recruiter's request now; a failed save never holds it up.`;
+  return `${FEEDBACK_NOT_SAVED} ${fix}`;
 }
 
 /** Round feedback words that mean the round's direction, not its acceptance. */
@@ -1246,16 +1240,16 @@ export { shortQuestion };
  */
 /** How recent a finished run's one-line reply must be for the next run's answer to take its place. */
 const LINE_TAKEOVER_MS = 120_000;
-const HANDOFF_STAGE_NOTE =
-  "The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to what the brief asks (the recruiter's own words, when it quotes them, are the request), and end the stage in exactly one of two ways: done, when that is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find; a record not saved yet is no such block when the recruiter's words describe the work: do it from them and ask the one missing fact beside the result): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
-const HANDOFF_OPENING_NOTE = `A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in their language, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. ${HANDOFF_STAGE_NOTE}`;
-// Gate 264149c9: the recruiter already had a line saying what was being done, and the stage's
-// own opening sentence said it again before the answer.
-const HANDOFF_ANSWER_NOTE = `A teammate just handed this stage to you, and the recruiter already has a reply saying what is being done: do not say it again; your text is the result itself. ${HANDOFF_STAGE_NOTE}`;
+// Facts only: how to work a handed stage is in the bots' instructions (RECRUITING_RESPONSIBILITIES).
+const HANDOFF_OPENING_NOTE =
+  "A teammate handed this stage to you; the hand-off note above is the brief. The recruiter has seen nothing since their last message.";
+// Gate 264149c9: the recruiter already had a line saying what was being done.
+const HANDOFF_ANSWER_NOTE =
+  "A teammate handed this stage to you; the hand-off note above is the brief. The recruiter already has a reply saying what is being done.";
 
 /** A message typed while an approval card waits is its own request, never the card's answer. */
 const WAITING_CARDS_NEW_MESSAGE_NOTE =
-  "The user's latest message is a new message, not an answer to those cards: answer what it actually asks. If it asks to go ahead with one of them, point the user to that card.";
+  "The user's latest message is a new message, not an answer to those cards.";
 
 /**
  * Failures that a fresh attempt can clear: a silent or dropped stream, a timeout, an outage, or a
@@ -1280,37 +1274,37 @@ export function modelOutageRetryDelayMs(
 
 /** A JD sent as a file is read in the model's first step; nothing is written before that read. */
 const ASK_WITHOUT_ROLE =
-  'Not asked yet: no role is saved in this chat, and a question card needs one. When the recruiter names a role or asks you to find people for one, however short or vague (for example "We need a backend engineer, can you help me find people?"), that is a role: save it now with recruiting_role create, titled with the role in their words, then ask this same question with ask_user. Only a greeting or a question about what you can do gets a one or two line plain-text answer instead.';
+  "Not asked: a question card needs a saved role, and no role is saved in this chat.";
 
 export const questionAlreadyWaiting = (question: string) =>
-  `Not asked: the recruiter has not answered the question already waiting in this conversation ("${question.slice(0, 300)}"). Never ask it or another question again now; carry on with work that does not need the answer, or end the turn with no reply.`;
+  `Not asked: the recruiter has not answered the question already waiting in this conversation ("${question.slice(0, 300)}"). One question card waits at a time.`;
 
 /** Model-facing: a research save the server refused, never a reason to ask for the JD again. */
 export const RESEARCH_SAVE_REFUSED =
-  "Not saved: the server refused this save just now. The JD, its file and the people your searches found are still available, so never ask the recruiter for them again. When this conversation's role is not saved yet, save it first with recruiting_role create (title and the JD's requirements), then call this operation once more; otherwise call it once more. If it fails again, say in one line that the people found could not be saved yet, never that the JD or file is unreadable.";
+  "Not saved: the server refused this save just now. The JD, its file and the people your searches found are still available.";
 
 /** A handed-off request has one owner, so the recruiter gets one question about it. */
 /** Model-facing: a turn that recorded its round leaves a newer request to the turn answering it. */
 export const newerRequestElsewhere = (text: string) =>
-  `Not run: the person's newer message ("${text.slice(0, 200)}") is being answered in another turn, which does that work. Finish only what this turn started and end with a short report of what it did, in the person's language; when it did nothing the person has not already seen, reply exactly ${NO_RESPONSE}. Do not act on, mention or answer the newer message, and do not say that anything was not run.`;
+  `Not run: the person's newer message ("${text.slice(0, 200)}") is being answered in another turn, which does that work. A final reply of exactly ${NO_RESPONSE} posts nothing.`;
 /** Model-facing: a backgrounded turn must not question the person after they moved on. */
 export const askAfterNewerMessage = (text: string) =>
-  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. End the turn with a final reply of one or two lines on what this work did, without mentioning or answering that message.`;
+  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it.`;
 
 /** Work behind a newer message reports once, in its final reply, never also mid-turn. */
 export const HANDED_OFF_NOT_SHOWN =
-  "Not shown: the teammate you handed this request to answers the person. Say nothing more about it; end the turn.";
+  "Not shown: the teammate you handed this request to answers the person.";
 
 export const REPORT_IN_FINAL_REPLY =
-  "Not sent: another turn is answering the person's newer message. Give this report once, as this turn's final reply.";
+  "Not sent: another turn is answering the person's newer message; this turn's final reply is shown.";
 
 /** A message that arrives mid-turn is acknowledged within seconds, not after the work ends. */
 /** Model-facing: a message this turn took before it paused, shown again when it resumes. */
 export const EARLIER_STEERING =
-  "The recruiter sent this earlier in this turn and you already acknowledged it and folded it into the work. Keep following it; do not acknowledge, repeat or restate it.";
+  "The recruiter sent this earlier in this turn, and it was already acknowledged.";
 
 export const STEERING_ACK =
-  'The recruiter wrote this while you are working. Deal with it before any other work: a question is answered now with message_user, after only the reads the answer needs, never with a promise to check; a request for something else is done in this turn like any request, not only acknowledged; a change to the running work gets one line with message_user saying how it changes it. Then continue the work with it, and never say work has stopped while it is still running. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
+  "The recruiter sent this message while you were working. Address it and continue with your work.";
 
 /** Whether a bot message shows the person words or a card, not only the run's steps. */
 // A handoff or teammate message shows the recruiter only a marker, never words to them.
@@ -1411,7 +1405,7 @@ export function voiceCallInstruction(disabled?: ReadonlySet<string>): string {
 }
 const MAX_MODEL_FILE_BYTES = 250_000;
 const TURN_ATTACHMENT_UNAVAILABLE =
-  "An attachment in this message could not be loaded. Tell the user the attachment was unavailable and do not guess its contents.";
+  "An attachment in this message could not be loaded; its contents are unknown.";
 const STEERING_ATTACHMENT_UNAVAILABLE = TURN_ATTACHMENT_UNAVAILABLE;
 const BUILTIN_AGENT_TOOL_NAMES = new Set(builtinAgentTools.map((tool) => tool.name));
 
@@ -3238,7 +3232,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               changed,
               ...(briefError
                 ? {
-                    briefNotSaved: `The role is saved; its brief was not: ${briefError} Fix that with recruiting_role update in this turn and keep going. Do not tell the recruiter anything failed.`,
+                    briefNotSaved: `The role is saved; its brief was not: ${briefError}`,
                   }
                 : {}),
               roleContext:
@@ -4274,8 +4268,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (item) =>
                   typeof item.candidateKey === "string" && globalListed.has(item.candidateKey),
               )
-                ? "Everyone left on this page is already listed in chat above in this reply: never list them again. Say in one line how many new people are listed above, or read the next page."
-                : "Nobody on this page is left to show: the recruiter already saw them in a round, turned them down, or they live too far. Read the next page, or say so in one line.",
+                ? "Everyone left on this page is already listed in chat above in this reply."
+                : "Nobody on this page is left to show: the recruiter already saw them in a round, turned them down, or they live too far.",
             };
           const first =
             typeof args.page === "number" && args.cursor === undefined
@@ -4317,7 +4311,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   fewerThanAsked: `Only ${shown.length} of the ${size} asked for are listed. List on now, in this turn: call list again with show true, this result's nextCursor and limit ${size - shown.length}, until ${size} are listed or nothing is left.`,
                 }
               : {}),
-            shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
+            shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them.`,
           };
         };
         const showRoundList = async (text: string, roundId?: string) => {
@@ -4738,7 +4732,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               if (isUniqueViolation(error)) {
                 return {
-                  error: `An MCP server named "${parsed.name}" already exists. Ask the user to remove it first or pick another name.`,
+                  error: `An MCP server named "${parsed.name}" already exists.`,
                 };
               }
               throw error;
@@ -4881,7 +4875,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!roleId)
               return {
                 error:
-                  "next_from_role works in a role conversation. Pass the people (name, LinkedIn URL, company) instead.",
+                  "next_from_role needs this conversation's saved role, and none is saved.",
               };
             const actor = { spaceId: run.spaceId, userId: run.userId };
             const target = args.next_from_role;
@@ -5314,22 +5308,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               connectorCall = resolved.call;
               resolvedTool = resolved.tool;
             } catch (error) {
-              const operation = (args as { operation?: unknown }).operation;
               return {
                 error: sanitizeConnectorError(error, runSecrets),
                 code: "SCHEDULING_PLAN_UNAVAILABLE",
                 dispatched: false,
-                // A failed draft or plan read left agents stuck on "not found"; the next step is
-                // the booking path of the calendar this bot actually holds.
-                ...(operation === "book" || operation === "confirm"
-                  ? {}
-                  : {
-                      next: await schedulingNextStep(deps.prisma, {
-                        spaceId: run.spaceId,
-                        userId: run.userId,
-                        botId: bot.id,
-                      }),
-                    }),
               };
             }
           }
@@ -5561,7 +5543,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           )
             return {
               error:
-                "Draft each reply with GMAIL_REPLY_TO_THREAD directly so the recruiter can edit and send its individual Mail card.",
+                "Not run: a Gmail reply inside a batch is refused; each reply gets its own Mail card through GMAIL_REPLY_TO_THREAD.",
               dispatched: false,
             };
           if (
@@ -6083,7 +6065,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           )
             return {
               error:
-                "Save this person through the saved candidate source so the CRM destination and original evidence stay linked.",
+                "Not saved: a CRM import runs only through recruiting_crm_import, which keeps the CRM destination and original evidence linked.",
             };
           if (crmImportSelection) {
             if (disabledBuiltinTools.has("recruiting_crm_import"))
@@ -6211,7 +6193,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (await ownMailboxSendsToday(deps.prisma, run)) >= OWN_MAILBOX_DAILY_SENDS
           )
             return {
-              error: `This account already sent ${OWN_MAILBOX_DAILY_SENDS} emails from the recruiter's own mailbox in the last 24 hours, the daily limit that protects it from being flagged as spam. Tell the recruiter the rest can go out tomorrow; never try another way to send them.`,
+              error: `This account already sent ${OWN_MAILBOX_DAILY_SENDS} emails from the recruiter's own mailbox in the last 24 hours, the daily limit that protects it from being flagged as spam; the rest can go out after 24 hours.`,
             };
           // The checks a campaign send makes, before a card is shown for someone it must not reach.
           if (
@@ -6701,7 +6683,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )
               return {
                 error:
-                  "Book with recruiting_scheduling: prepare (emailId when the candidate wrote, else candidate.email), then book with its planId.",
+                  "Not booked: this booking has no approved scheduling plan.",
               };
           }
           // Connector read-only hints must not bypass approval, review, or replay decisions.
@@ -6758,7 +6740,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // declined comes back declined; a bare "not found" was retried six times (play 11-27).
                 if (!stored && applied.effect.status === "denied")
                   throw new IsolationError(
-                    "The recruiter declined this exact booking on its card. Ask what to change (time, guests) before booking again.",
+                    "The recruiter declined this exact booking on its card.",
                   );
                 if (!stored && applied.effect.status !== "intended") throw new IsolationError();
                 if (!connectorCall.route) throw new IsolationError();
@@ -7040,19 +7022,34 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 tool: name,
                 operation: args.operation,
                 error: error.name,
-                message: error.message,
+                // The server's own wording of the failed check (a place in the definition and a
+                // source id), and a schema refusal's place and code; never the model's values.
+                ...(error instanceof RecruitingPlaybookValidationError
+                  ? { check: error.message }
+                  : {}),
+                ...(error.name === "ZodError"
+                  ? {
+                      issues: (
+                        error as unknown as {
+                          issues: Array<{ code: string; path: PropertyKey[]; keys?: string[] }>;
+                        }
+                      ).issues
+                        .slice(0, 5)
+                        .map((issue) => ({ code: issue.code, path: issue.path, keys: issue.keys })),
+                    }
+                  : {}),
                 at: error.stack?.split("\n").slice(1, 4).join(" | "),
               });
             const retry =
-              "Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.";
+              "This is not an outage. A search that already returned keeps its people saved.";
             if (error instanceof RecruitingSourceCheckError)
               return { error: `${error.message} ${retry}` };
             if (error instanceof IsolationError)
               return {
                 error:
                   name === "recruiting_candidates"
-                    ? "These saved sources could not be read. Use recruiting_candidates list for the people and continue."
-                    : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
+                    ? "These saved sources could not be read."
+                    : `A role, message or file this call names is not part of this conversation. ${retry}`,
               };
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };
@@ -7303,7 +7300,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
                 return {
                   error:
-                    "Nothing was sent: the emails or people changed after this card was shown, so it no longer shows what would go out. Tell the recruiter in one line, then call activate_campaign again; its new card shows the current emails.",
+                    "Nothing was sent: the emails or people changed after this card was shown, so it no longer shows what would go out.",
                   dispatched: false,
                 };
               }
@@ -7430,7 +7427,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ) {
                   const result = {
                     error:
-                      "A card for this exact change to this booking is already waiting for the recruiter. Do not request another; tell them it is waiting for their decision.",
+                      "A card for this exact change to this booking is already waiting for the recruiter.",
                     code: "CALENDAR_CHANGE_ALREADY_WAITING",
                     dispatched: false,
                   };
@@ -7663,7 +7660,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           ...(r.followUps ?? []),
                         ]),
                       ].some((email) => email && unfilledPlaceholder(`${email.subject}\n${email.body}`))
-                    ? `${PLACEHOLDER_NOTE} Save the corrected email with ensure_role_campaign steps, then activate again.`
+                    ? PLACEHOLDER_NOTE
                     : instantlyActivation?.recipientCount === 0
                       ? "This campaign has no recipients yet. Add the people the recruiter named (recruiting_candidates) with add_shortlist_leads, then activate again."
                       : null);
@@ -7691,7 +7688,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (waitingSend && "declined" in waitingSend) {
                 const result = {
                   error:
-                    "Nothing was sent and no card was made: the recruiter declined this campaign's last send card and has not written since. Do not guess a change and ask again; tell the recruiter in one line that it was not sent and ask what they want changed.",
+                    "Nothing was sent and no card was made: the recruiter declined this campaign's last send card and has not written since.",
                   dispatched: false,
                 };
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
@@ -7701,7 +7698,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (waitingSend && "unchanged" in waitingSend) {
                 const result = {
                   error:
-                    "Nothing was sent and no card was made: this is exactly the email the recruiter cancelled (same subject, body and people). If their message since asks for any change, such as a new 标题 or title, subject, wording or people, save it first (update_role_draft, or ensure_role_campaign steps), then call activate_campaign again. If they asked to send it unchanged, call activate_campaign again with the same arguments and its card shows.",
+                    "Nothing was sent and no card was made: this is exactly the email the recruiter cancelled (same subject, body and people); a saved change (update_role_draft, or ensure_role_campaign steps) makes a new card, and the same arguments again show its card again.",
                   dispatched: false,
                 };
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
@@ -7712,7 +7709,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const result = {
                   status: "already_waiting",
                   dispatched: false,
-                  message: `This send's card is waiting for the recruiter right now${waitingSend.threadId === thread.id ? " in this conversation" : ` in the ${waitingSend.place ? `"${waitingSend.place}"` : "role's"} conversation`}, so no second card was made and nothing was sent. Tell the recruiter in one line where it is ready to send; do not call activate_campaign again until they answer it. This is true only now: once they answer it the card is gone, so in later replies never say a card is waiting; read get_campaign for who has been emailed or is queued.`,
+                  message: `This send's card is waiting for the recruiter right now${waitingSend.threadId === thread.id ? " in this conversation" : ` in the ${waitingSend.place ? `"${waitingSend.place}"` : "role's"} conversation`}, so no second card was made and nothing was sent.`,
                 };
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
                   ? result
@@ -7856,7 +7853,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const result = {
                     status: "discarded",
                     dispatched: false,
-                    message: mailReplyOutcomeInstruction({
+                    message: mailReplyOutcome({
                       status: "discarded",
                     }),
                   };
@@ -7879,7 +7876,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     dispatched: false,
                     mailReplyApproval: approvalBlock.mailReply,
                     message:
-                      "The reply card was created, but its sender check refused sending before dispatch. Nothing was sent. Do not retry this card.",
+                      "The reply card was created, but its sender check refused sending before dispatch. Nothing was sent.",
                   };
                   if (!(await completeEffect(deps, applied!.effect.id, "intended", result)))
                     return uncertainEffectResult(name);
@@ -7919,8 +7916,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     dispatched: false,
                     message:
                       same.status === "needs_approval"
-                        ? "This exact reply is already waiting on its Send card in this conversation, so no second card was made. Tell the recruiter in one line that it is ready to send there; do not draft it again."
-                        : "This exact reply was already sent from this conversation, so nothing was drafted or sent again. Tell the recruiter in one line; do not draft it again.",
+                        ? "This exact reply is already waiting on its Send card in this conversation, so no second card was made."
+                        : "This exact reply was already sent from this conversation, so nothing was drafted or sent again.",
                   };
                   return (await completeEffect(deps, applied!.effect.id, "intended", result))
                     ? result
@@ -7967,7 +7964,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               return {
                 error:
-                  "Not run yet: another card from this same step is already waiting for the recruiter, and only one card is shown at a time. Call this again after they answer that card; do not describe it as done or failed.",
+                  "Not run yet: another card from this same step is already waiting for the recruiter, and only one card is shown at a time. Nothing was done.",
                 dispatched: false,
               };
             }
@@ -8962,18 +8959,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (researchInput.data.operation === "calibration_round") {
                 if (!applied || !claimedEffect) throw new IsolationError();
                 // The agent gives only the number asked; where the request started is data.
-                const roundAsked = researchInput.data.asked;
                 let roundTargetMemo: Promise<number | undefined> | undefined;
                 const roundTargetAt = (roleId: string, counted: number) =>
-                  (roundTargetMemo ??= roundAsked
-                    ? requestTarget(
-                        deps.prisma,
-                        { roleId, userId: run.userId, spaceId: run.spaceId },
-                        thread.id,
-                        roundAsked,
-                        counted,
-                      )
-                    : Promise.resolve(undefined));
+                  (roundTargetMemo ??= requestTarget(
+                    deps.prisma,
+                    { roleId, userId: run.userId, spaceId: run.spaceId },
+                    counted,
+                  ));
                 // Internal record keeping: the round and this native effect complete together.
                 const round = await saveRecruitingCalibrationRound(
                   deps.prisma,
@@ -9052,14 +9044,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     getLogger().warn("round list not posted", {
                       error: String(error),
                     }),
-                  );
-                  await showRoundWhereAskedNow(
-                    deps,
-                    run,
-                    text,
-                    applied.effect.id,
-                  ).catch((error) =>
-                    getLogger().warn("round not shown where asked", { error: String(error) }),
                   );
                   // The recorded round's list is final. A later round in the same run gets its own
                   // message: it used to rewrite this one, so rounds of 5, 4 and 1 recorded in one
@@ -10644,7 +10628,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!target)
               return finish({
                 error:
-                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. A role with no conversation yet is opened with start_role, which takes its emails too.",
+                  "No active role team with that roleId or groupId.",
               });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
@@ -10675,7 +10659,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 ok: true,
                 team: `${target.title} team`,
-                note: "Already with that team: the role was opened from this same message, so its team is working on it now; nothing more was sent. Do not hand it over again or repeat that the role is open; the team's result comes back here.",
+                note: "Already with that team: the role was opened from this same message; nothing more was sent.",
               });
             // Staging 426d09b9, stop-after-approve: two hand-offs of one request a second apart
             // gave the role two runs racing on the same send card.
@@ -10683,16 +10667,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 ok: true,
                 team: `${target.title} team`,
-                note: "Already handed to that team in this turn, with the recruiter's own words; nothing more was sent. Its answer comes back here.",
+                note: "Already handed to that team in this turn, with the recruiter's own words; nothing more was sent.",
               });
             rolesDelegatedInTurn.add(target.threadId);
-            // A second's slack for the database clock, which stamps the team's answer.
-            const handedAt = new Date(Date.now() - 1_000);
             // Only the recruiter's own words are handed over: their turn's, or the message they
             // wrote into a running turn. Branch fosp 11-21 (747382b0): 「这三个不要。换掉，再补人」
             // arrived while Kruit read a team's report, reached the team as Kruit's paraphrase
             // alone, and the search cap took the role's first "找10个人" as the request.
-            const delegatedWords = run.trigger === "user" ? lastRecruiterText : (steeredText ?? "");
+            const delegatedWords = (
+              run.trigger === "user" ? lastRecruiterText : (steeredText ?? "")
+            ).trim();
+            if (!delegatedWords) {
+              rolesDelegatedInTurn.delete(target.threadId);
+              return finish({
+                error: "Not handed off: this turn has no recruiter words to hand over.",
+              });
+            }
+            // Only structured referents go with the recruiter's words; Kruit writes no brief
+            // (the user's decision 11-27 08:36: 只传原话加指代). Play s174: a free brief added
+            // 「并继续做下一轮」 and the team searched a round nobody asked for.
+            const delegatedRoleId = role
+              ? String(args.role_id)
+              : (group?.thread?.activeRecruitingRoleId ?? undefined);
+            const refs = Array.isArray(args.people) ? args.people.map(String) : [];
+            const referents =
+              refs.length && delegatedRoleId
+                ? await roleReferents(deps.prisma, delegatedRoleId, refs)
+                : { people: [], unknown: refs };
+            // A referent that matches no saved person is not passed on: the recruiter's own words,
+            // which go with the hand-off, already name them. Play s179: refusing the names the
+            // model wrote left a turn-down unrecorded and the recruiter asked three times.
+            const roundRef = Number.isInteger(args.round) ? Number(args.round) : undefined;
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },
@@ -10703,13 +10708,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 sender_label: RECRUITING_GLOBAL_AGENT_NAME,
                 target_label: `${target.title} team`,
                 message: redactSecrets(
-                  await roleRequestMessage(deps.prisma, {
-                    roleId: role
-                      ? String(args.role_id)
-                      : (group?.thread?.activeRecruitingRoleId ?? undefined),
-                    recruiterWords: delegatedWords,
-                    brief: String(args.message ?? ""),
-                  }),
+                  delegatedRequestMessage(delegatedWords, referents.people, roundRef),
                   runSecrets,
                 ),
                 recruiter_words: redactSecrets(delegatedWords, runSecrets),
@@ -10730,42 +10729,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 title: target.title,
               },
             ]);
-            const waited = await waitForDelegatedAnswer(deps.prisma, {
-              spaceId: run.spaceId,
-              threadId: run.threadId,
-              botId: bot.id,
-              since: handedAt,
-              signal: context.signal,
-              userMessageWaiting: () =>
-                hasUnclaimedSteering(deps.prisma, {
-                  threadId: run.threadId,
-                  botId: bot.id,
-                  runId: run.id,
-                }),
-            }).catch((error) => {
-              getLogger().warn("delegated answer wait", { error: String(error) });
-              return undefined;
-            });
-            const answered = delegatedAnswerResult(waited);
+            // The work, its rounds and emails are the role's and show only in its conversation; the
+            // recruiter opens it from the card, so Kruit's turn ends here, the way a hand-off passes
+            // control (OpenAI Agents SDK handoffs; Pi's terminate). Replays 11-27 on 49a2a201: told
+            // to answer from the team's returned email, Kruit posted every template a second time.
             const handed = {
               ok: true,
               team: sent.name,
-              ...answered,
-              note: `${answered.note} A card that opens the role's conversation is already shown; do not paste a link.`,
+              ...(referents.unknown.length ? { notSavedPeople: referents.unknown } : {}),
             };
-            // The role's card is up: the work is the role's now, so Kruit's turn ends here, the
-            // way a hand-off passes control (OpenAI Agents SDK handoffs; Pi's terminate). Branch
-            // play 11-27: told to say nothing more, Kruit still wrote the email draft itself.
-            return finish(
-              waited?.cardShown
-                ? {
-                    kind: "agent_tool_result",
-                    content: [{ type: "text", text: JSON.stringify(handed) }],
-                    details: handed,
-                    terminate: true,
-                  }
-                : handed,
-            );
+            return finish({
+              kind: "agent_tool_result",
+              content: [{ type: "text", text: JSON.stringify(handed) }],
+              details: handed,
+              terminate: true,
+            });
           }
           if (name === "start_role") {
             const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
@@ -10840,10 +10818,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: group.id, title },
             ]);
+            // The role's card is up and its conversation does the work, so Kruit's turn ends here,
+            // as delegate_to_role's does (Pi's terminate).
+            const roleOpened = { ok: true, team: `${title} team` };
             return finish({
-              ok: true,
-              team: `${title} team`,
-              note: ROLE_OPENED_NOTE,
+              kind: "agent_tool_result",
+              content: [{ type: "text", text: JSON.stringify(roleOpened) }],
+              details: roleOpened,
+              terminate: true,
             });
           }
           if (name === "render_view") {
@@ -10974,7 +10956,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ok: true,
               pollId,
               closesAt: closesAt.toISOString(),
-              note: "The poll is posted. Keep working; you are woken here with the result when it closes. Do not wait for it or ask the same question again.",
+              note: "The poll is posted; its result arrives here as a new message when it closes.",
             });
           }
           if (name === "vote_poll") {
@@ -11094,12 +11076,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // "找10人" as the request after a turn-down, and ten more people were searched).
               message: thread.groupId.startsWith(KRUIT_ROLE_GROUP_PREFIX)
                 ? redactSecrets(
-                    await roleRequestMessage(deps.prisma, {
-                      roleId: thread.activeRecruitingRoleId ?? undefined,
+                    roleRequestMessage({
                       recruiterWords: await newestRecruiterWords(deps.prisma, thread.id),
                       brief,
-                      // Play s167: after an accepted round the lead's "Goal" added 继续找新候选人.
-                      noteOnly: true,
                     }),
                     runSecrets,
                   )
@@ -11879,18 +11858,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const signingNote = hideVendors
           ? await recruiterSigningNote(deps.prisma, run.userId).catch(() => undefined)
           : undefined;
-        // Accounts we set up send only through their outreach mailbox.
-        const mailboxNote =
-          hideVendors && !(await ownMailboxSendingAllowed(deps.prisma, run).catch(() => true))
-            ? OUTREACH_MAILBOX_ONLY_NOTE
-            : undefined;
-        // Own-email accounts: "send now" before Gmail is connected gets one plain line and the card.
-        // Every turn carries it: a phrase list missed 「发给他」 and 「不连邮箱」 (one-off-email,
-        // first-timer-no-gmail), and the agent then showed the card with no word that nothing went out.
-        const sendNowNote =
-          hideVendors && (await ownMailboxSendingAllowed(deps.prisma, run).catch(() => false))
-            ? SEND_NOW_WITHOUT_GMAIL_NOTE
-            : undefined;
         // Back after a day or more with news waiting: the reply opens with what changed.
         const awayNote =
           hideVendors && run.trigger === "user" && currentTurnMessage?.role === "user"
@@ -11921,8 +11888,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           languageNote,
           creditsNote,
           signingNote,
-          mailboxNote,
-          sendNowNote,
           jobPageNote,
           handedIn
             ? (await recruiterHasReply())
@@ -11935,7 +11900,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           discardedReplies
             .map(
               (reply) =>
-                `${mailReplyOutcomeInstruction({ status: "discarded" })}\nDiscarded reply scope: ${JSON.stringify({ from: reply.from, ...reply.inReplyTo })}`,
+                `${mailReplyOutcome({ status: "discarded" })}\nDiscarded reply scope: ${JSON.stringify({ from: reply.from, ...reply.inReplyTo })}`,
             )
             .join("\n\n"),
           waitingCardsNote && `${waitingCardsNote} ${WAITING_CARDS_NEW_MESSAGE_NOTE}`,
@@ -12144,7 +12109,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               approvedEffectReplays.take(approvedEffectReplays.nextToolName()!);
               sendOutcomes.push(
-                `The recruiter confirmed the send card, but that send could not start, so nothing was sent: ${redactSecrets(why, runSecrets).slice(0, 1_000)} Tell the recruiter in one line, then call activate_campaign again; its new card is theirs to confirm.`,
+                `The recruiter confirmed the send card, but that send could not start, so nothing was sent: ${redactSecrets(why, runSecrets).slice(0, 1_000)}`,
               );
               continue;
             }
@@ -12157,8 +12122,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     uncertain?: unknown;
                   } | null
                 )?.uncertain !== true
-                ? `The recruiter confirmed the send card and it ran just now, before this turn, but the mail service refused it, so nothing was sent: ${redactSecrets(String(toolResultError(outcome)), runSecrets).slice(0, 1_000)} Tell the recruiter in one line and offer to send it again; if they want that, call activate_campaign again, and its new card is theirs to confirm.`
-                : `The recruiter confirmed the send card and that approved send already ran just now, before this turn, with the result below; never call activate_campaign for it again. Result: ${redactSecrets(JSON.stringify(outcome), runSecrets).slice(0, 4_000)}`,
+                ? `The recruiter confirmed the send card and it ran just now, before this turn, but the mail service refused it, so nothing was sent: ${redactSecrets(String(toolResultError(outcome)), runSecrets).slice(0, 1_000)}`
+                : `The recruiter confirmed the send card and that approved send already ran just now, before this turn, with the result below. Result: ${redactSecrets(JSON.stringify(outcome), runSecrets).slice(0, 4_000)}`,
             );
             continue;
           }
@@ -12229,7 +12194,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const replyState = currentReplyEffect
             ? mailReplyState(replyDraft, currentReplyEffect)
             : undefined;
-          replyOutcome = mailReplyOutcomeInstruction(replyState ?? { status: "unknown" });
+          replyOutcome = mailReplyOutcome(replyState ?? { status: "unknown" });
           sentReplyBody = replyState?.status === "sent" ? replyState.body : undefined;
           try {
             const event = await publishMailReplyCard(
@@ -12250,7 +12215,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
               );
               if (card?.kind === "ask" && card.mailReply) {
-                replyOutcome = mailReplyOutcomeInstruction(card.mailReply);
+                replyOutcome = mailReplyOutcome(card.mailReply);
                 sentReplyBody = card.mailReply.status === "sent" ? card.mailReply.body : undefined;
               }
               await deps.events.notify?.(event.threadId, event.seq);
@@ -12263,7 +12228,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // A sent reply ends the run quietly, unless it carried the recruiter's answers to the
           // candidate's open questions: then the agent gets the turn to save them in role memory.
-          if (replyOutcome === mailReplyOutcomeInstruction({ status: "sent" })) {
+          if (replyOutcome === mailReplyOutcome({ status: "sent" })) {
             const answered = await openQuestionsForEmail(deps.prisma, {
               spaceId: run.spaceId,
               threadId: thread.id,
@@ -13749,14 +13714,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.text,
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
-          } else if (thread.groupId) {
-            // A teammate's turn may be the last one of work delegated from another conversation.
-            // Send-at-night 11-16: a reply held for a retry (it claimed a record no tool read) went
-            // back as the result, and the retry's real answer never followed. The retry returns it.
-            await returnDelegatedTeamOutcome(deps, {
-              ...run,
-              sourceMessageId: run.sourceMessageId,
-            }).catch((error) => getLogger().error("delegated team outcome return", error));
           }
           const notifyBody = completionNotificationPreview(text);
           if (
@@ -15261,7 +15218,7 @@ export function runAllowsSilentEmpty(trigger: string): boolean {
 
 /** Model-facing: a message the person typed instead of pressing Connect is answered first. */
 export const connectAnswerFirst = (message: string) =>
-  `Not shown yet: the recruiter wrote "${message.trim().slice(0, 300)}" instead of pressing the card. Answer that message first in your reply, in one or two plain lines in their language, then call request_connection again so the card sits under your answer.`;
+  `Not shown yet: the recruiter wrote "${message.trim().slice(0, 300)}" instead of pressing the card.`;
 
 export function runPromotesMidTurnNarration(trigger: string): boolean {
   return trigger !== "routine" && !isBackgroundRunTrigger(trigger);
