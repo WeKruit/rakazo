@@ -2812,6 +2812,10 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     expect(f.execute).toHaveBeenCalledOnce();
     expect(f.runtimeRun).toHaveBeenCalledOnce();
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain('"Do you offer relocation?"');
+    // The recruiter's edit is what went out, not the draft in the agent's own call.
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
+      `Sent body: ${JSON.stringify(editedBody)}`,
+    );
   });
 
   it("also does when the recruiter discarded the card that listed them and answered in words", async () => {

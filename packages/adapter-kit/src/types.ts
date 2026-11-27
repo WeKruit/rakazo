@@ -17,6 +17,8 @@ export interface AdapterContext {
   runId?: string;
   /** Internal lifecycle CAS captured after claiming suspending; never accepted from RPC input. */
   homeLifecycleClaim?: { computerId: string; providerRef: string | null; updatedAt: Date };
+  /** Trusted: the run is in the account-wide conversation above the role teams. */
+  accountWideConversation?: boolean;
   /** Trusted in-process scheduling confirmation binding; never a provider argument. */
   schedulingConfirmationEffectId?: string;
   /** Trusted native approval for creating/selecting a sending identity; never an RPC/tool argument. */

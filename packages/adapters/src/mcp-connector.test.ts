@@ -2635,6 +2635,86 @@ describe("MCP connector session cache", () => {
     ]);
   });
 
+  // 11-27 branch plays: an agent that saw the calendar's own create booked with it and left the
+  // recruiter's guests off; Main in the account-wide chat answered a candidate the role's
+  // conversation answered too, so the candidate got two replies.
+  it("lists one route: no calendar create, and no role mail in the account-wide chat", async () => {
+    const names = ["create_booking", "get_availability", "reply_to_email", "get_email"];
+    vi.stubGlobal(
+      "fetch",
+      mcpFetch(
+        {
+          failNext: false,
+          initializations: 0,
+          tools: names.map((name) => ({ name, inputSchema: { type: "object" } })),
+        },
+        "https://mcp.cal.com/mcp?toolsets=bookings",
+      ),
+    );
+    const connector = new McpConnector(
+      {
+        botMcpServer: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              ...ASSIGNMENT,
+              server: { ...SERVER, endpoint: "https://mcp.cal.com/mcp?toolsets=bookings" },
+              bot: { name: "Main", spawnKey: "recruiting:u1:main" },
+            },
+          ]),
+          findFirst: vi.fn().mockResolvedValue(ASSIGNMENT),
+        },
+      } as never,
+      {} as never,
+      { network: TEST_NETWORK },
+    );
+    const context = (accountWideConversation: boolean) =>
+      ({
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        accountWideConversation,
+        signal: new AbortController().signal,
+      }) as never;
+    try {
+      const listed = async (accountWide: boolean) =>
+        (await connector.discoverTools(context(accountWide))).map((tool) => tool.name);
+      expect(await listed(false)).toEqual([
+        "mcp__demo__get_availability",
+        "mcp__demo__reply_to_email",
+        "mcp__demo__get_email",
+      ]);
+      expect(await listed(true)).toEqual(["mcp__demo__get_availability", "mcp__demo__get_email"]);
+      // A search there says where role mail is sent instead of leaving a dead end.
+      const searched = async (accountWide: boolean) => {
+        const search = connector.execute(
+          {
+            tool: "connectors_search_tools",
+            route: { connectorId: "mcp", toolName: "__catalog_search" },
+            args: { query: "send email" },
+            executionId: "search",
+          } as never,
+          context(accountWide),
+        );
+        for await (const event of search) if (event.type === "result") return event.data as never;
+      };
+      expect(await searched(true)).toMatchObject({ note: expect.stringContaining("start_role") });
+      expect(await searched(false)).not.toHaveProperty("note");
+      // The booking plan still resolves the create it reviewed.
+      const resolved = await connector.resolveCall(
+        {
+          tool: "connectors_execute_tool",
+          route: { connectorId: "mcp", toolName: "__catalog_execute" },
+          args: { id: "server-1:create_booking", arguments: {} },
+          executionId: "plan",
+        } as never,
+        context(false),
+      );
+      expect(resolved?.tool.route?.toolName).toBe("create_booking");
+    } finally {
+      await connector.close();
+    }
+  });
+
   describe("a connection whose provider refuses access", () => {
     const MAIL = {
       ...SERVER,
