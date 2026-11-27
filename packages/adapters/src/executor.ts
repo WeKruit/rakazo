@@ -4332,6 +4332,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
             payload: { messageId, role: "bot", blocks },
           });
         };
+        // The picks stream in before the server checks the call; a round it did not record (all
+        // shown before, a bad key) takes its preview back, so the chat never keeps a list no round
+        // holds (branch play s151: a report-back turn re-listed nine people already shown).
+        const retractRoundPreview = async (executionId: string) => {
+          const stream = roundStream;
+          if (!stream || !executionId.includes(JSON.stringify(stream.callId))) return;
+          roundStream = undefined;
+          await stream.posting;
+          if (!stream.messageId) return;
+          await deps.prisma.message.deleteMany({ where: { id: stream.messageId, runId } });
+          await deps.events.append({
+            spaceId: run.spaceId,
+            threadId: thread.id,
+            botId: bot.id,
+            runId,
+            type: "thread.message.deleted",
+            payload: { messageId: stream.messageId },
+          });
+        };
         const streamRoundPicks = (call: {
           id: string;
           name: string;
@@ -11304,6 +11323,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 await toolFixes.succeeded(name, rawArgs);
                 return result;
               }
+              await retractRoundPreview(executionId).catch((error) =>
+                getLogger().warn("round preview not retracted", { error: String(error) }),
+              );
               const errorText = redactSecrets(
                 typeof failure === "string" ? failure : JSON.stringify(failure),
                 runSecrets,
@@ -11321,6 +11343,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             },
             async (error: unknown) => {
               turnReport.settle(executionId, { ok: false });
+              await retractRoundPreview(executionId).catch(() => undefined);
               // Only plain errors carry a message meant for the model; typed ones are control flow.
               if (error instanceof Error && error.constructor === Error) {
                 const note = await toolFixes.failed(
