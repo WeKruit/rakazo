@@ -13,7 +13,8 @@ const fakeAgentState = vi.hoisted(() => ({
     | "ask-pause"
     | "nested-ask-pause"
     | "tools-then-empty-failure"
-    | "tools-then-final-text",
+    | "tools-then-final-text"
+    | "tool-terminates",
   terminalMessage: undefined as
     | {
         role: "assistant";
@@ -164,6 +165,28 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
             toolResults: [],
           });
         }
+        return;
+      }
+
+      if (fakeAgentState.mode === "tool-terminates") {
+        // Pi ends the loop after a batch whose results all set terminate: the tool result is last.
+        const target = this.tools[0];
+        if (!target) throw new Error("expected tool was not exposed");
+        const result = (await target.execute("call-1", {})) as { content: unknown[] };
+        this.emit({
+          type: "turn_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "call-1", name: target.name, arguments: {} }],
+          },
+          toolResults: [{ toolCallId: "call-1", result }],
+        });
+        this.state.messages.push({
+          role: "toolResult",
+          toolCallId: "call-1",
+          toolName: target.name,
+          content: result.content,
+        });
         return;
       }
 
@@ -1196,6 +1219,41 @@ describe("Pi connector tool dispatch", () => {
         error: result.error,
       }),
     ]);
+  });
+
+  // Branch play 11-27: a hand-off that ended Kruit's turn showed its JSON result as the reply.
+  it("ends with no reply when a tool ends the turn, instead of showing its result", async () => {
+    fakeAgentState.mode = "tool-terminates";
+    const runtime = new PiAgentRuntime();
+    const events: Array<{ type?: string; text?: string }> = [];
+    for await (const event of runtime.run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "tool-terminates",
+        prompt: "hand this to the role",
+        instructions: "Hand the work over.",
+        history: [],
+        tools: [destinationTool],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool: vi.fn(async () => ({
+          kind: "agent_tool_result",
+          content: [{ type: "text", text: '{"ok":true}' }],
+          details: { ok: true },
+          terminate: true,
+        })),
+      },
+      {
+        operationId: "tool-terminates",
+        traceId: "tool-terminates",
+        spaceId: "w",
+        userId: "u",
+        signal: new AbortController().signal,
+      },
+    ))
+      events.push(event as { type?: string; text?: string });
+    expect(events.filter((event) => event.type === "text")).toEqual([]);
+    expect(events.at(-1)).toEqual({ type: "done" });
   });
 
   it("fails a tool turn that never writes a final answer instead of asking to continue", async () => {
