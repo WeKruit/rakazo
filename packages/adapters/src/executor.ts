@@ -9143,7 +9143,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchInput.data,
                   context,
                 );
-                return saved;
+                // The same rows the search's own save handed over, in the same form: a save the
+                // agent asks for again returned them with the search's prose still on them.
+                const savedRows = (saved as { candidateRows?: unknown }).candidateRows;
+                return Array.isArray(savedRows)
+                  ? { ...(saved as object), candidateRows: savedRows.map(searchRowForAgent) }
+                  : saved;
               }
               if (!applied || !claimedEffect) throw new IsolationError();
               // Internal record keeping: page, rows and effect commit together.
