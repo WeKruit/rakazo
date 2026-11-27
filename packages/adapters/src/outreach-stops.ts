@@ -149,7 +149,7 @@ export function outreachStopRefusal(stops: Map<string, OutreachStop>): string {
     on_hold: "they are on hold for this role",
     passed: "they were passed on for this role",
   };
-  return `Nothing was sent and no card was shown: ${[...stops].map(([email, stop]) => `${email} (${why[stop]})`).join("; ")}. Tell the recruiter in one line, in plain words. Only if the recruiter says to contact them again: for a stop, call pause_campaign with their email and allow_again; for a hold or pass, resume them with recruiting_feedback; then send again.`;
+  return `Nothing was sent and no card was shown: ${[...stops].map(([email, stop]) => `${email} (${why[stop]})`).join("; ")}. A stop is lifted with pause_campaign allow_again; a hold or pass with recruiting_feedback.`;
 }
 
 type Rest = (
@@ -254,6 +254,6 @@ export async function stopContact(
     email,
     stopped: true,
     stoppedInCampaigns: stoppedIn,
-    next: `Recorded: ${email} is not contacted again from this account, and no follow-up goes to them${stoppedIn.length ? "" : " (no campaign of this account was emailing them)"}. Nothing was sent; emails already sent cannot be taken back. Tell the recruiter in one line, in plain words.`,
+    next: `Recorded: ${email} is not contacted again from this account, and no follow-up goes to them${stoppedIn.length ? "" : " (no campaign of this account was emailing them)"}. Nothing was sent; emails already sent cannot be taken back.`,
   };
 }

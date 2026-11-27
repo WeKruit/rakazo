@@ -15,7 +15,6 @@ import type { ActionApprovalRule } from "@rakazo/core";
 import {
   boundDirectApprovalRequest,
   COMPUTER_START_FAILED,
-  REPLY_IN_CHINESE_NOTE,
 } from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
@@ -36,7 +35,7 @@ import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.j
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as BotMessagesModule from "./bot-messages.js";
-import { messageBot, waitForDelegatedAnswer } from "./bot-messages.js";
+import { messageBot } from "./bot-messages.js";
 import type * as BotSecretsModule from "./bot-secrets.js";
 import { shellCommandEnvironment } from "./bot-secrets.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
@@ -88,7 +87,6 @@ vi.mock("./group-handoff.js", async (importOriginal) => {
 vi.mock("./bot-messages.js", async (importOriginal) => ({
   ...(await importOriginal<typeof BotMessagesModule>()),
   messageBot: vi.fn(async () => ({ ok: true, name: "Role team" })),
-  waitForDelegatedAnswer: vi.fn(async () => undefined),
 }));
 vi.mock("./recruiting-context.js", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -1287,9 +1285,8 @@ describe("one request handed to a role", () => {
 
   // Branch play 11-27 (handoff5): the role's card was shown and Kruit still wrote the email draft
   // in its own conversation after the hand-off returned.
-  it("ends Kruit's turn once the role's card is shown", async () => {
+  it("ends Kruit's turn at the hand-off, with the role's card shown", async () => {
     const f = await roleFixture("delegate-card-shown");
-    vi.mocked(waitForDelegatedAnswer).mockResolvedValueOnce({ cardShown: true });
     f.setCalls([
       {
         name: "delegate_to_role",
@@ -1382,7 +1379,7 @@ describe("steered message language", () => {
       yield { type: "done" as const, text: "好的。" };
     });
     await f.run();
-    expect(steered).toContain(REPLY_IN_CHINESE_NOTE);
+    expect(steered).toContain("The recruiter's newest message is in Chinese.");
   });
 });
 

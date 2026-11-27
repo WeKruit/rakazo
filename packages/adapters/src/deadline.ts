@@ -17,7 +17,7 @@ export const RECORD_TOOLS: ReadonlySet<string> = new Set([
   "save_group_memory",
 ]);
 export const RECORD_TOOL_LATE_TEXT =
-  "This step did not finish in time and its outcome is unknown. Read the saved state before repeating it, answer any new message from the recruiter now, and keep going.";
+  "This step did not finish in time and its outcome is unknown; the saved state shows whether it happened.";
 
 /**
  * A stuck save must not hold the turn, because the recruiter's messages wait behind it. After

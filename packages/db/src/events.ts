@@ -1370,8 +1370,8 @@ async function commitAnswerRunInput(
             ? JSON.stringify(formResponse)
             : connection
               ? connectAnswer === "connected"
-                ? `${connection.name} is connected. Continue the original task.`
-                : `${connection.name} is still not connected. Continue without it or tell the user what it blocks; do not request it again unless the user asks.`
+                ? `${connection.name} is connected.`
+                : `${connection.name} is still not connected.`
               : selectedChoice
                 ? `Selected choice ${selectedChoice.id}: ${resumeLabel}`
                 : input.answerMessageId

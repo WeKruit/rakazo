@@ -300,13 +300,7 @@ export type ExternalEffectStore = {
   };
 };
 
-const DENIED_ACTION =
-  "The user denied this action. Do not retry it unchanged. If the user has written since and asks for a change (such as a new subject, wording or people), save that change and ask again, which shows a new card; never say it is changed before the tool that saves it succeeds. Do not show again what the card showed (an email, its subject or people): a copy goes stale once they change it.";
-const DENIED_OTHERWISE =
-  "Otherwise tell the user in one line, in their language, that it was not done and ask what they want instead.";
-/** Deny plays 11-20/21: "标题不对" after a cancelled send card was put on the role's name. */
-const DENIED_SEND =
-  "A 标题, title or subject they give now is this email's subject line, never the role's name. Save the whole email with it the way this campaign got its email (a role's campaign: ensure_role_campaign steps; a one-off campaign from create_campaign: a new create_campaign with the new email, add_leads with the same people, then activate_campaign on that new campaign_id), then call activate_campaign for a new card. Until they write, only say in one line that it was not sent; do not ask a question, since they usually write the change next. Reply in the language of the recruiter's last message.";
+const DENIED_ACTION = "The user denied this action on its card; nothing was done.";
 
 /** The send card's own subject beside the reading of a new title, when the card was a send. */
 function sendCard(result: unknown, toolName: string) {
@@ -320,7 +314,7 @@ function sendCard(result: unknown, toolName: string) {
     recipients?: { firstEmail?: { subject?: unknown } }[];
   };
   const subject = card.firstEmail?.subject ?? card.recipients?.[0]?.firstEmail?.subject;
-  return `${typeof subject === "string" ? `The cancelled card's subject was "${subject.slice(0, 200)}". ` : ""}${DENIED_SEND}`;
+  return typeof subject === "string" ? `The cancelled card's subject was "${subject.slice(0, 200)}".` : "";
 }
 
 export function resolveDuplicateEffectGate(
@@ -342,13 +336,13 @@ export function resolveDuplicateEffectGate(
           status: "discarded",
           dispatched: false,
           message:
-            "The reply card was already created and the user discarded it. Nothing was sent. Do not claim card creation failed and do not retry.",
+            "The reply card was already created and the user discarded it. Nothing was sent.",
         },
       };
     return {
       action: "return",
       result: {
-        error: `${DENIED_ACTION} ${sendCard(effect.result, toolName) || DENIED_OTHERWISE}`,
+        error: [DENIED_ACTION, sendCard(effect.result, toolName)].filter(Boolean).join(" "),
       },
     };
   }
@@ -468,7 +462,7 @@ export async function replaceCompletedExternalEffectResult(
 
 export const DENIED_THIS_TURN_RESULT = {
   error:
-    "The user already denied this kind of action in this turn. Do not ask again with changed content; tell the user it was not done and ask what they want instead.",
+    "The user already denied this kind of action in this turn; nothing was done.",
   dispatched: false,
 } as const;
 

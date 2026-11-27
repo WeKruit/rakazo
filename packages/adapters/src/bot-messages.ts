@@ -431,8 +431,8 @@ export async function messageBot(
     name: targetName,
     delivered: message,
     note: progress
-      ? `${progress.note} This message reaches that work now and is answered there; never say a new search began.`
-      : `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
+      ? `${progress.note} This message reaches that work now and is answered there.`
+      : `Sent to ${targetName}; a reply arrives later as a new message.`,
   };
 }
 
@@ -528,7 +528,7 @@ export async function teamProgress(
       name: pending.bot.name,
       minutes,
       peopleFound: 0,
-      note: `The team has searched for the recruiter's request (${minutes < 1 ? "under a minute" : `${minutes} min`} ago) and the people it found are being checked against the requirements; its answer comes back here as soon as that is done. Say so in one line; never say nothing new was found, and give no count of people.`,
+      note: `The team has searched for the recruiter's request (${minutes < 1 ? "under a minute" : `${minutes} min`} ago) and the people it found are being checked against the requirements; the result shows in the role's conversation.`,
     };
   }
   const since = working.startedAt ?? working.createdAt;
@@ -575,10 +575,10 @@ export async function teamProgress(
     // Staging 11-15: asked twice to "just show me the new ten" mid-round, Kruit only repeated the
     // count; the people found so far can be listed, marked as not yet reviewed.
     note: listed
-      ? `The next round is being posted right now. Read it with recruiting_candidates round and roleId ${roleId} in a moment and show its people here; never say it is not ready, never mention records, and never send the recruiter to another chat.`
+      ? `The next round is being posted in the role's conversation right now.`
       : recorded
-        ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
-        : `${working.bot.name} has been working on the recruiter's request for ${started}; the next round comes back here when it is picked. Say in one line that it is being searched and how long it has run; never say it has not started, and give no count of people found or saved: the recruiter counts the people a round shows them.`,
+        ? `Round ${recorded.round} is recorded and shown in the role's conversation; ${working.bot.name} is still working on the rest of the recruiter's request (${started}).`
+        : `${working.bot.name} has been working on the recruiter's request for ${started}; its rounds show in the role's conversation.`,
   };
 }
 

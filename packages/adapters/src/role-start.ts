@@ -156,7 +156,7 @@ export async function roleAlreadyOpenedHere(
 
 /** Model-facing: start_role refused because this role is already open. */
 export const roleAlreadyOpenNote = (role: { groupId: string; title: string }) =>
-  `Not opened: "${role.title}" is already open (group_id "${role.groupId}"), with its people and the recruiter's earlier requirements. Pass this request to its team with delegate_to_role and that group_id, in the recruiter's own words. Only if the recruiter clearly wants a second, separate role with the same title, call start_role again.`;
+  `Not opened: "${role.title}" is already open (group_id "${role.groupId}"), with its people and the recruiter's earlier requirements. A second call opens a second role with the same title.`;
 
 /**
  * Open (or find) the role conversation for one start_role call. The key is chosen under the

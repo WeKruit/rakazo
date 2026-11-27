@@ -56,8 +56,6 @@ type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; bot
 const ROLE_STATUS_NOTE =
   "status.savedPeople counts everyone saved in the role's Results, checked or not (a list read of that role gives counted, the people rounds have shown the recruiter without those they turned down, and fitNotShownYet); status.shortlisted counts only the shortlist page's people, so name which one you give. status.lastActivityAt is the last message in the role's chat (a check or a question counts), not a new person, send or reply: for what is new since a time, read operation activity.";
 
-export const NOTHING_SAVED_IS_NO_BLOCKER =
-  "Nothing saved is not a blocker: when the recruiter's own words describe the work (an email to a person they name, a role they describe), do it now from those words, and ask only the one missing fact the result still needs (such as the address to send to) beside it.";
 /** Role sequences are all this read covers; a one-off email's reply lives only in the mailbox. */
 export const ONE_OFF_REPLIES_NOTE =
   "Covers replies to role email sequences only. For a reply to an email sent outside a role (a one-off email), read the mailbox with search_contact_emails on that person's address before saying there is no reply.";
@@ -88,8 +86,8 @@ async function noOpenRoles(prisma: Pick<PrismaClient, "recruitingRole">, actor: 
       closedAt: role.archivedAt?.toISOString() ?? null,
     })),
     note: closed.length
-      ? "No open roles. closedRoles are the account's closed roles, newest first: name them when the recruiter says a role is missing, and offer to reopen it as a new role."
-      : "No open or closed roles: this account has never had a role, so this is its whole record. Say so plainly, keep that answer when the recruiter insists they made some, and offer to open the roles they name now.",
+      ? "No open roles. closedRoles are the account's closed roles, newest first."
+      : "No open or closed roles: this account has never had a role; this is its whole record.",
   };
 }
 
@@ -236,9 +234,6 @@ export async function executeRecruitingCandidatesTool(
         take: 30,
         select: { id: true, title: true },
       }),
-      // Gate 71a2cac2 (one-off-email): with no fintech role saved, "直接发" became a request for the
-      // role's title or JD instead of the send.
-      next: `If one of these roles is the one the recruiter named, call again with its roleId. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
     });
     if (input.operation === "resolve") {
       // A role conversation resolves in its own role; elsewhere a named role narrows it.
@@ -258,11 +253,7 @@ export async function executeRecruitingCandidatesTool(
           );
       itemCount = result.matches.length;
       succeeded = true;
-      // Branch x5 61eaccec (one-off-email): no saved match for "给 Wei Zhang 写封邮件" became a
-      // request for the role's JD instead of the email.
-      return result.status === "not_found"
-        ? { ...result, next: NOTHING_SAVED_IS_NO_BLOCKER }
-        : result;
+      return result;
     }
     if (input.operation === "activity") {
       // Simulated 11-16 (what-happened-since-yesterday, 1/10): "what's new on each role since
@@ -281,7 +272,7 @@ export async function executeRecruitingCandidatesTool(
         since: input.since,
         until,
         ...result,
-        note: `Roles not listed had nothing new (quietRoles counts them): say so plainly. emailedPeople and repliedPeople come from the role's stored email; mail "none_stored" means those two are unknown for that role, not zero; mail "no_outreach" means no email was ever set up for that role, so it sent none and has 0 replies: say 0. ${ONE_OFF_REPLIES_NOTE}`,
+        note: `Roles not listed had nothing new (quietRoles counts them). emailedPeople and repliedPeople come from the role's stored email; mail "none_stored" means those two are unknown for that role, not zero; mail "no_outreach" means no email was ever set up for that role, so it sent none and has 0 replies. ${ONE_OFF_REPLIES_NOTE}`,
       };
     }
     if (input.operation === "contacts") {
@@ -498,7 +489,7 @@ export async function executeRecruitingCandidatesTool(
       if (!result.items.length && query.query?.trim())
         return {
           ...result,
-          next: `No saved person matched this query. To list the role's people, call again without query. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
+          next: "No saved person matched this query.",
         };
       const emails = new Map(enriched.map(({ item, email }) => [item, email]));
       // Every list carries what the recruiter already saw of each person, from the one record.
@@ -589,7 +580,7 @@ export async function executeRecruitingCandidatesTool(
         : null;
       const nextListed = listedNext
         ? {
-            nextRoundBeingPosted: `Round ${(round?.round ?? 0) + 1} is being posted right now and is not the round below. Read round again in a moment and show its people; never call it not ready, never mention records, never send the recruiter to another chat, and never show the round below as the new one.`,
+            nextRoundBeingPosted: `Round ${(round?.round ?? 0) + 1} is being posted right now and is not the round below.`,
           }
         : {};
       if (!round) return { status: "no_round" as const, ...nextListed };
@@ -657,7 +648,7 @@ export async function executeRecruitingCandidatesTool(
           ...(feedback.length ? { feedbackBeforeThisRound: feedback } : {}),
           ...(listed.length
             ? {
-                listedInThisChatBeforeTheRound: `${listed.join(", ")}: listed in this chat before round ${round.round} as saved, unreviewed results, never in an earlier round. Say exactly that; they are not repeats of any round.`,
+                listedInThisChatBeforeTheRound: `${listed.join(", ")}: listed in this chat before round ${round.round} as saved, unreviewed results, never in an earlier round; they are not repeats of any round.`,
               }
             : {}),
         },

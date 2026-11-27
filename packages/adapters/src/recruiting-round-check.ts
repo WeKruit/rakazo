@@ -75,7 +75,6 @@ export async function roundRepeats(
     `round ${input.round} keeps people already shown: ${kept.join("; ")}.`,
     fresh.length ? `New in it: ${fresh.join(", ")}.` : "Nobody in it is new.",
     untouched.length ? `It has nobody from round ${untouched.join(" or ")}.` : "",
-    "Answer a question about repeats with exactly this.",
   ]
     .filter(Boolean)
     .join(" ");
@@ -215,7 +214,7 @@ export function roundStillMissing(counted: number, target?: number) {
   return stillMissing
     ? {
         stillMissing,
-        requestOpen: `The recruiter's request is ${stillMissing} short and the list says so: search on in this step and record the next round with the same asked. Never end the turn on this list.`,
+        requestOpen: `The recruiter's request is ${stillMissing} short.`,
       }
     : {};
 }

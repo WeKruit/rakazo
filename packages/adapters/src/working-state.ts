@@ -75,7 +75,7 @@ async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userI
   // deny-then-change-and-send 11-16: with no line on how this account sends, Kruit blamed a
   // missing Gmail and a role run with no mail tools loaded said it had no email connection.
   if (!(await ownMailboxSendingAllowed(prisma, scope)))
-    return "- How this account's emails go out: from the outreach mailbox the product runs for it, not the recruiter's Gmail, so Gmail is never needed for a send nor the reason one cannot happen. A role's emails go out on their Send card; its sending tools are found with connectors_search_tools group \"instantly\".";
+    return "- How this account's emails go out: from the outreach mailbox the product runs for it, not the recruiter's Gmail; a role's emails go out on their Send card (sending tools: connectors_search_tools group \"instantly\").";
   const gmail = await prisma.mcpServer.findFirst({
     where: {
       spaceId: scope.spaceId,
@@ -88,7 +88,7 @@ async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userI
   });
   return gmail
     ? undefined
-    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Writing one needs no mailbox: show it in the reply now; it goes out once they press Connect on the connect card and then Send on its card. Asked where to connect: the Connect button on that card in this chat, or later the menu under their name at the bottom left, then Integrations (集成); no other place exists. Their Inbox page shows only \"No emails yet\" and a Connect Gmail button until then: candidates' replies show there once Gmail is connected and an email has gone out from it.";
+    : "- Recruiter's own Gmail: not connected, so no email can go out yet; one goes out after they press Connect on a connect card and then Send on its card. Connecting is on that card, or under their name at the bottom left, then Integrations (集成). Their Inbox page stays empty until Gmail is connected and an email has gone out from it.";
 }
 
 /** Calendar connectors the product books interviews through (request_connection's catalog). */
@@ -124,7 +124,7 @@ async function calendarLine(prisma: StatePrisma, scope: { spaceId: string; userI
   ]);
   return server || linked
     ? undefined
-    : "- Recruiter's calendar: none connected, so you cannot see when they are free or busy (saved interviews are not their calendar), and no interview can be booked or invited yet. Asked about their time or schedule, say first that you can't see their calendar because it isn't connected; when they ask for that or a booking, show the calendar Connect card (request_connection) in that same reply rather than handing the booking to a team. Asked how or where to connect: press Connect on that card in this chat, or later the menu under their name at the bottom left, then Integrations (集成); no other place exists.";
+    : "- Recruiter's calendar: none connected, so their free or busy times are not visible (saved interviews are not their calendar), and no interview can be booked or invited yet. Connecting is on a calendar connect card (request_connection), or under their name at the bottom left, then Integrations (集成).";
 }
 
 /** A role's latest calibration round, as the recruiter sees it. */
@@ -499,7 +499,7 @@ export async function loadWorkingState(
       : null;
     if (waiting && !waiting.approvedAt)
       lines.push(
-        `  Its round ${waiting.round} waits on the recruiter's answer. A change to who is searched (turning people down, asking for more) reaches its team as their own words only and the team resolves the people itself: hand it with delegate_to_role as your first call, before reading or resolving anyone. A question about the people shown (any repeats, whether they fit what was asked, how many, which are checked) is a read you answer yourself in this reply from recruiting_candidates round or list with this roleId, never handed to the team.`,
+        `  Its round ${waiting.round} waits on the recruiter's answer.`,
       );
   }
 
@@ -524,7 +524,7 @@ export async function loadWorkingState(
     // Send-at-night 11-16: with no id here Kruit's main chat read another role's old campaign.
     const people = `Campaign (campaign_id ${campaign.id}): ${campaign.people} ${campaign.people === 1 ? "person" : "people"} in it${campaign.waiting ? `, ${campaign.waiting} more added and not in it until a confirmed send` : ""}`;
     if (campaign.confirmedAt)
-      return `${people}; the recruiter confirmed a send ${ago(campaign.confirmedAt, now)}. Whether it is sending and who has been emailed are known only from get_campaign this turn, never from the confirmation.`;
+      return `${people}; the recruiter confirmed a send ${ago(campaign.confirmedAt, now)}. Whether it is sending and who has been emailed are known from get_campaign, not from the confirmation.`;
     return campaign.adopted
       ? `${people}; taken over from the account's history, so who was emailed is known only from get_campaign this turn.`
       : `${people}; no send confirmed, so nobody has been emailed from it.`;
@@ -544,7 +544,7 @@ export async function loadWorkingState(
   // gate df83586a, "kept nowhere" made Kruit retract "the draft is kept" after the Connect card.
   if (![...records.values()].some((record) => record.savedEmail))
     lines.push(
-      `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat stays in this conversation as the email above (the one a send card takes up), but is in no role, campaign or mailbox draft until a save tool returns it.`,
+      `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat is in no role, campaign or mailbox draft until a save tool returns it.`,
     );
 
   // A campaign started outside any role has no role card: without its id here, a later "stop it"
@@ -592,7 +592,7 @@ export async function loadWorkingState(
     lines.push(
       sent.length
         ? `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: ${sent.length >= 50 ? "50 or more sends" : `${sent.length} send${sent.length === 1 ? "" : "s"}`} (latest ${ago(sent[0]!.createdAt, now)}), each confirmed on its card. A campaign send queues its emails: who has received one is known from get_campaign.`
-        : `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: none. Every send needs its card and leaves a record, so this is a definite none: nothing was sent from here and nothing is waiting to go out, whatever earlier chat or the recruiter remembers. A mailbox or CRM that is not connected, or a mailbox read that fails, does not make it unknown; only a campaign imported from another tool sends outside this record, and get_campaign reads it.`,
+        : `- Emails sent from this account through the product in the last ${SEND_WINDOW_DAYS} days: none. Every send needs its card and leaves a record, so this is a definite none: nothing was sent from here and nothing is waiting to go out. Only a campaign imported from another tool sends outside this record (get_campaign reads it).`,
     );
 
   const own = receiptLine(receiptsOf(thread.id), now);
@@ -734,7 +734,6 @@ export async function loadWorkingState(
                   ? "  Team posted since the round line above: nothing."
                   : "  Team posted since: nothing yet.",
               ]),
-          "  Asked how this work is going, answer from these lines in this reply: never say you asked or will ask the team, and never name a person or count the team has not posted or the records above do not show.",
         );
         return;
       }
