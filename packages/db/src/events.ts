@@ -20,6 +20,7 @@ import {
   askFormAnswerText,
   blocksToAgentHistoryText,
   boundDirectApprovalDetails,
+  buildBotMessageWakePrompt,
   callIdFromClientNonce,
   catalogApprovalDetails,
   isApprovalAskBlock,
@@ -27,8 +28,8 @@ import {
   isSecretAskBlock,
   isWorkActivity,
   messagingChannelId,
-  resolveAskChoice,
   RETIRED_APPROVAL_KINDS,
+  resolveAskChoice,
   runsBesidePerson,
   sanitizeJsonValue,
   takesPersonMessages,
@@ -2310,13 +2311,27 @@ export async function createPendingSteeringRun(
   const batch = pending.filter((item) => steeringOrigin(item) === origin);
   const source = batch.at(-1)!;
   const modelPin = continuationModelPin(batch);
+  // A teammate's request that waited behind the team's turn starts the same turn it would have
+  // started had the team been free. Staging 11-27: such a request restarted as a person's
+  // follow-up, so the team's feedback save found no recruiter behind it and was refused.
+  const blocks = source.message.blocks as MessageBlock[] | null;
+  const fromTeammate =
+    origin === "app" && blocks?.length === 1 && blocks[0]!.kind === "bot_message_received"
+      ? blocks[0]!
+      : null;
   const task = await tx.task.create({
     data: {
       spaceId: input.spaceId,
       botId: input.botId,
       threadId: input.threadId,
       userId: batch[0]!.userId,
-      prompt: "Respond to the user's steering context.",
+      prompt: fromTeammate
+        ? buildBotMessageWakePrompt({
+            from: { id: fromTeammate.fromBotId, name: fromTeammate.fromBotName ?? "" },
+            text: fromTeammate.text,
+            intent: fromTeammate.intent,
+          })
+        : "Respond to the user's steering context.",
       status: "queued",
     },
   });
@@ -2328,11 +2343,13 @@ export async function createPendingSteeringRun(
       taskId: task.id,
       userId: batch[0]!.userId,
       status: "queued",
-      trigger: origin === "app" ? "follow_up" : "messaging",
+      trigger: fromTeammate ? "bot_message" : origin === "app" ? "follow_up" : "messaging",
       sourceMessageId: source.message.id,
       ...(modelPin ?? {}),
     },
   });
+  // The teammate's request is this turn's own prompt, so it is not delivered again as steering.
+  if (fromTeammate) await tx.steeringMessage.deleteMany({ where: { id: source.id } });
   await tx.steeringMessage.updateMany({
     where: { id: { in: batch.map((item) => item.id) }, runId: null },
     data: { runId: run.id, claimedAt: null, ...(origin === "app" ? { originTrigger: null } : {}) },
