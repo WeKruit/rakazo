@@ -6,7 +6,11 @@ import { isRolelessHomeTeam, loadWorkingState } from "./working-state.js";
 const now = Date.parse("2026-11-01T04:00:00Z");
 const scope = { spaceId: "s", userId: "u" };
 const globalThread = { id: "tg", groupId: "recruiting-global-abc", activeRecruitingRoleId: null };
-const roleThread = { id: "t1", groupId: "role-abc", activeRecruitingRoleId: "role-1" };
+const roleThread: { id: string; groupId: string; activeRecruitingRoleId: string | null } = {
+  id: "t1",
+  groupId: "role-abc",
+  activeRecruitingRoleId: "role-1",
+};
 
 type Row = Record<string, unknown>;
 
