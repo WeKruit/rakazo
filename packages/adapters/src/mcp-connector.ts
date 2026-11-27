@@ -732,27 +732,23 @@ const endpointBase = (endpoint: string | null | undefined) => {
   const url = endpoint ? URL.parse(endpoint) : null;
   return url ? `${url.origin}${url.pathname.replace(/\/$/, "")}` : "";
 };
+/** The people-search tools. */
+const PEOPLE_SEARCH_TOOLS = ["web_search_exa", "web_search_advanced_exa", "agent_run"];
 /**
- * Mail for a role (its first emails and the answers to its candidates) runs in that role's
- * conversation, where its campaign, its replies and their cards are; in the account-wide
- * conversation it is handed there (delegate_to_role) and no agent is offered these. A reply sent
- * from both places reached one candidate twice (branch play 11-27).
+ * The account-wide conversation only reads: every operation on a role (its people searches and
+ * contact lookups, its mail, bookings and record changes) runs in that role's conversation, so
+ * here an agent is listed a connection's reads and nothing else. A reply sent from both places
+ * reached one candidate twice (branch play 11-27); the user's rule 11-27: the main chat does no
+ * operations, it hands them to the role.
  */
-const ROLE_MAIL = new Set([
-  "reply_to_email",
-  "create_campaign",
-  "add_leads",
-  "activate_campaign",
-  "ensure_role_campaign",
-  "add_shortlist_leads",
-  "create_role_draft",
-  "update_role_draft",
-  "clone_role_draft",
-]);
-/** Runs whose catalog left out role mail, so a search there names where that mail is sent. */
-const roleMailHidden = new WeakSet<AdapterContext>();
-const ROLE_MAIL_ELSEWHERE =
-  "Mail to candidates is not sent from this conversation. A role's first emails and its answers to candidates are written and sent in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, with any addresses the recruiter gave; either shows the recruiter the card that opens that conversation.";
+const ROLE_LOOKUPS = new Set([...PEOPLE_SEARCH_TOOLS, "find_emails"]);
+const accountWideRead = (tool: ConnectorTool) =>
+  !ROLE_LOOKUPS.has(coreName(tool)) &&
+  (tool.readOnly ?? REMOTE_READ.test(tool.route?.toolName ?? ""));
+/** Runs whose catalog left out operations, so a search there names where they are done. */
+const operationsHidden = new WeakSet<AdapterContext>();
+const OPERATIONS_ELSEWHERE =
+  "This conversation only reads. Searching for people, contact lookups, mail to candidates, bookings and changes to a role's records are done in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, in the recruiter's own words; either shows the recruiter the card that opens that conversation. Never tell the recruiter it cannot be done.";
 
 const OUTREACH_CORE = [
   "ensure_role_campaign",
@@ -1121,8 +1117,8 @@ export class McpConnector implements ConnectorProvider {
             if (tool.route?.toolName === planOnly) planOnlyTools.add(tool);
           }
           if (!context.accountWideConversation) return tools;
-          const kept = tools.filter((tool) => !ROLE_MAIL.has(coreName(tool)));
-          if (kept.length < tools.length) roleMailHidden.add(context);
+          const kept = tools.filter(accountWideRead);
+          if (kept.length < tools.length) operationsHidden.add(context);
           return kept;
         };
         // A grant of no tools needs no listing call.
@@ -1321,8 +1317,8 @@ export class McpConnector implements ConnectorProvider {
         )) {
           yield call.route.toolName === CATALOG_SEARCH &&
           event.type === "result" &&
-          roleMailHidden.has(context)
-            ? { ...event, data: { ...(event.data as object), note: ROLE_MAIL_ELSEWHERE } }
+          operationsHidden.has(context)
+            ? { ...event, data: { ...(event.data as object), note: OPERATIONS_ELSEWHERE } }
             : event;
         }
       } catch (error) {

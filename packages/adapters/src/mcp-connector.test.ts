@@ -2638,8 +2638,15 @@ describe("MCP connector session cache", () => {
   // 11-27 branch plays: an agent that saw the calendar's own create booked with it and left the
   // recruiter's guests off; Main in the account-wide chat answered a candidate the role's
   // conversation answered too, so the candidate got two replies.
-  it("lists one route: no calendar create, and no role mail in the account-wide chat", async () => {
-    const names = ["create_booking", "get_availability", "reply_to_email", "get_email"];
+  it("lists one route: no calendar create, and only reads in the account-wide chat", async () => {
+    const names = [
+      "create_booking",
+      "get_availability",
+      "reply_to_email",
+      "get_email",
+      "cancel_booking",
+      "agent_run",
+    ];
     vi.stubGlobal(
       "fetch",
       mcpFetch(
@@ -2682,9 +2689,12 @@ describe("MCP connector session cache", () => {
         "mcp__demo__get_availability",
         "mcp__demo__reply_to_email",
         "mcp__demo__get_email",
+        "mcp__demo__cancel_booking",
+        "mcp__demo__agent_run",
       ]);
+      // The main chat does no operations (user's rule 11-27): no mail, booking change or search.
       expect(await listed(true)).toEqual(["mcp__demo__get_availability", "mcp__demo__get_email"]);
-      // A search there says where role mail is sent instead of leaving a dead end.
+      // A search there says where operations are done instead of leaving a dead end.
       const searched = async (accountWide: boolean) => {
         const search = connector.execute(
           {
