@@ -471,11 +471,7 @@ import {
   emailsWithAttachments,
   saveEmailAttachments,
 } from "./email-attachments.js";
-import {
-  globalRoleWriteRefusal,
-  otherRoleWriteRefusal,
-  roleRequestMessage,
-} from "./global-role-writes.js";
+import { otherRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -610,6 +606,7 @@ import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-
 import {
   requestCounts,
   requestTarget,
+  searchRowForAgent,
   roundStillMissing,
   roundCountLine,
   withoutShownBefore,
@@ -945,11 +942,7 @@ function feedbackInputError(result: unknown): boolean {
  * What the agent is told when a feedback save is refused. A check that says what to change
  * (a source reference) is passed on, so the next call can fix it.
  */
-export function feedbackSaveRefused(error: Error, roleFeedbackInMain = false): string {
-  // Staging 11-27: Kruit marked three people passed from the main conversation, was told to
-  // fix fields it could not fix there, and the marks were made by the role's team anyway.
-  if (roleFeedbackInMain)
-    return "Not recorded here: feedback on a role's people or rounds is saved in that role's conversation. Pass the recruiter's words to its team with delegate_to_role, and do not call this tool for it again in this conversation.";
+export function feedbackSaveRefused(error: Error): string {
   const fix =
     error instanceof RecruitingSourceCheckError
       ? error.message
@@ -6152,16 +6145,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (unattendedMemory && "refusal" in unattendedMemory)
             return { error: unattendedMemory.refusal };
           const memoryNeedsConfirmation = Boolean(unattendedMemory);
-          if (
-            connectorCall.route?.connectorId === "mcp" &&
-            thread.groupId?.startsWith("recruiting-global-")
-          ) {
-            const roleWrite = await globalRoleWriteRefusal(deps.prisma, run, {
-              toolName: connectorCall.route.toolName,
-              args: connectorCall.args,
-            });
-            if (roleWrite) return { error: roleWrite };
-          } else if (connectorCall.route?.connectorId === "mcp" && thread.activeRecruitingRoleId) {
+          if (connectorCall.route?.connectorId === "mcp" && thread.activeRecruitingRoleId) {
             const otherRole = await otherRoleWriteRefusal(
               deps.prisma,
               run,
@@ -7041,20 +7025,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error:
                   name === "recruiting_candidates"
                     ? "These saved sources could not be read. Use recruiting_candidates list for the people and continue."
-                    : // Staging 11-26: Kruit created the role in the main conversation three times,
-                      // was told only that a reference was foreign, and opened no role at all.
-                      name === "recruiting_role" &&
-                        args.operation === "create" &&
-                        thread.groupId?.startsWith("recruiting-global-")
-                      ? "A role is not saved in this conversation: open it with start_role, and its team saves it there."
-                      : // Staging 11-27: on "three more" Kruit tried to tie the main conversation to
-                        // the role, was told a reference was foreign, and told the recruiter three
-                        // times that no role was selected.
-                        name === "recruiting_role" &&
-                          args.operation === "bind" &&
-                          thread.groupId?.startsWith("recruiting-global-")
-                        ? "This conversation covers every role and is never tied to one, so nothing needs selecting. Hand the recruiter's request to that role's team with delegate_to_role, in their own words."
-                        : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
+                    : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
               };
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };
@@ -8221,11 +8192,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const rows = (saved as { candidateRows?: unknown }).candidateRows;
                   // An agent run can return hundreds; the rest stay in Results, not in context.
                   const shown = Array.isArray(rows)
-                    ? rows.slice(0, AUTOSAVED_PEOPLE_SHOWN).map((row: Record<string, unknown>) => ({
-                        ...row,
-                        snippet:
-                          typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
-                      }))
+                    ? rows.slice(0, AUTOSAVED_PEOPLE_SHOWN).map(searchRowForAgent)
                     : rows;
                   // Saved is not fit, and fit is not shown: every search states where the
                   // request stands.
@@ -8920,13 +8887,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   message: error.message,
                   at: error.stack?.split("\n").slice(1, 4).join(" | "),
                 });
-                return finish({
-                  error: feedbackSaveRefused(
-                    error,
-                    args.target !== "preference" &&
-                      !!thread.groupId?.startsWith("recruiting-global-"),
-                  ),
-                });
+                return finish({ error: feedbackSaveRefused(error) });
               }
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
@@ -10657,7 +10618,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!target)
               return finish({
                 error:
-                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. An email to an address the recruiter gave needs no role: hand it to Outreach here with handoff_to_bot.",
+                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. A role with no conversation yet is opened with start_role, which takes its emails too.",
               });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")

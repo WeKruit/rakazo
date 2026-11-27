@@ -393,49 +393,53 @@ describe("resolveScheduleTiming", () => {
 });
 
 describe("filterBuiltinToolsForThread", () => {
-  it("lists no role create or select in the account-wide conversation, in options or text", () => {
-    const role = {
-      name: "recruiting_role",
-      description: "Read, create or select a role.",
-      inputSchema: {
-        oneOf: [
-          { properties: { operation: { const: "read" } } },
-          { properties: { operation: { const: "create" } } },
-          { properties: { operation: { const: "update" } } },
-          { properties: { operation: { const: "bind" } } },
-        ],
-      },
-    };
-    const [global] = filterBuiltinToolsForThread([role], "recruiting-global-abc");
-    expect(global!.inputSchema.oneOf.map((v) => v.properties.operation.const)).toEqual([
-      "read",
-      "update",
-    ]);
-    expect(global!.description).not.toContain('operation:"create"');
-    expect(global!.description).not.toContain('operation:"bind"');
-    expect(global!.description).toContain('operation:"update"');
-    const [inRole] = filterBuiltinToolsForThread([role], "role-group");
-    expect(inRole).toBe(role);
-  });
-  it("offers role-team delegation only in the account-wide conversation, beside in-room handoff", () => {
-    const names = (groupId: string | null) =>
-      filterBuiltinToolsForThread(
-        [{ name: "delegate_to_role" }, { name: "start_role" }, { name: "handoff_to_bot" }],
-        groupId,
-      ).map((t) => t.name);
-    expect(names("recruiting-global-abc")).toEqual([
-      "delegate_to_role",
+  it("offers the account-wide conversation only reads, opening a role and handing work to it", () => {
+    // The user's rule 11-27: the main chat does no operations; branch play s158 spent its turn on
+    // feedback and a search that were refused there before it handed the work over.
+    const all = [
+      "recruiting_candidates",
       "start_role",
+      "delegate_to_role",
+      "stop_work",
+      "read_memory",
+      "recruiting_role",
+      "recruiting_feedback",
+      "recruiting_research",
+      "recruiting_scheduling",
+      "recruiting_reply",
+      "recruiting_shortlist",
+      "recruiting_reminders",
       "handoff_to_bot",
+      "message_bot",
+      "schedule_create",
+      "run_subagent",
+    ].map((name) => ({ name }));
+    const names = (groupId: string | null) =>
+      filterBuiltinToolsForThread(all, groupId).map((t) => t.name);
+    expect(names("recruiting-global-abc")).toEqual([
+      "recruiting_candidates",
+      "start_role",
+      "delegate_to_role",
+      "stop_work",
+      "read_memory",
+      "recruiting_feedback",
     ]);
-    expect(names("role-group")).toEqual(["handoff_to_bot"]);
-    expect(names(null)).toEqual([]);
+    expect(names("role-group")).not.toContain("delegate_to_role");
+    expect(names("role-group")).not.toContain("start_role");
+    expect(names("role-group")).toContain("recruiting_scheduling");
+    expect(names("role-group")).toContain("handoff_to_bot");
+    expect(names(null)).not.toContain("handoff_to_bot");
   });
-  it("leaves booking plans to the role conversations", () => {
-    const names = (groupId: string) =>
-      filterBuiltinToolsForThread([{ name: "recruiting_scheduling" }], groupId).map((t) => t.name);
-    expect(names("recruiting-global-abc")).toEqual([]);
-    expect(names("role-group")).toEqual(["recruiting_scheduling"]);
+  it("offers the main chat recruiting_feedback for cross-role preferences only", () => {
+    const feedback = builtinAgentTools.find((tool) => tool.name === "recruiting_feedback")!;
+    const [global] = filterBuiltinToolsForThread([feedback], "recruiting-global-abc");
+    const schema = JSON.stringify(global!.inputSchema);
+    expect(schema).toContain('"const":"preference"');
+    expect(schema).not.toMatch(/"const":"(role|round|candidate)"/);
+    expect(global!.description).toContain('target:"preference"');
+    expect(global!.description).not.toContain('operation:"hold"');
+    const [inRole] = filterBuiltinToolsForThread([feedback], "role-group");
+    expect(inRole).toBe(feedback);
   });
   const tools = [
     { name: "handoff_to_bot" },

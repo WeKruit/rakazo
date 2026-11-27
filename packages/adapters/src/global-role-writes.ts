@@ -1,7 +1,6 @@
-import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 
-/** Instantly writes that change what a role's campaign sends: they belong to that role's conversation while it has a run open. */
+/** Instantly writes that change what a role's campaign sends: they belong to that role's own conversation. */
 const ROLE_CAMPAIGN_WRITES = new Set([
   "native_instantly_activate_campaign",
   "native_instantly_pause_campaign",
@@ -10,13 +9,6 @@ const ROLE_CAMPAIGN_WRITES = new Set([
   "native_instantly_clone_role_draft",
   "native_instantly_add_leads",
   "native_instantly_add_shortlist_leads",
-]);
-
-/** The people-search tools. */
-export const PEOPLE_SEARCH_TOOLS: ReadonlySet<string> = new Set([
-  "web_search_exa",
-  "web_search_advanced_exa",
-  "agent_run",
 ]);
 
 /** The saved role a campaign write is for, by its role_id or the role its campaign is bound to. */
@@ -62,36 +54,6 @@ export async function otherRoleWriteRefusal(
   const role = await campaignRole(prisma, actor, call);
   if (!role || role.id === activeRoleId) return undefined;
   return `Not done: that campaign belongs to another role, "${role.title}". This conversation changes only its own role's emails; leave other roles' as they are and say in one line what you changed here.`;
-}
-
-/**
- * One owner per role's campaign: Kruit changes a role's campaign itself unless that role's own
- * conversation has a run open right now (working, or paused on the recruiter's card), which then
- * owns it. Staging 11-14: global Kruit paused a role's confirmed send while the role's team was
- * fixing the same campaign, so a mistyped address reached the card. Read from the run records, not
- * from which conversation asks. Returns the model-facing refusal.
- */
-export async function globalRoleWriteRefusal(
-  prisma: Pick<PrismaClient, "externalEffect" | "recruitingRole" | "run">,
-  actor: { spaceId: string; userId: string; threadId: string },
-  call: { toolName: string; args: Record<string, unknown> },
-): Promise<string | undefined> {
-  const role = await campaignRole(prisma, actor, call);
-  if (!role) return undefined;
-  const open = await prisma.run.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      userId: actor.userId,
-      status: { in: [...ACTIVE_RUN_STATUSES] },
-      threadId: { not: actor.threadId },
-      thread: { activeRecruitingRoleId: role.id },
-    },
-    select: { status: true },
-  });
-  if (!open) return undefined;
-  const now =
-    open.status === "waiting_input" ? "is waiting on the recruiter's card" : "is working on it now";
-  return `Not done: the conversation of "${role.title}" ${now}, so it owns this change. Pass the recruiter's request to it with delegate_to_role, role_id "${role.id}", in their own words, instead of a second change here. In the same reply, answer what they asked from what you have already read.`;
 }
 
 /**

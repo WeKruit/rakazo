@@ -182,9 +182,6 @@ async function runRole(
     : null;
 }
 
-/** Model-facing: a people search in the main chat, whose people would have nowhere to go. */
-export const PEOPLE_SEARCH_NEEDS_ROLE =
-  "Not searched: people found here would have no role to be saved, checked and kept in, so the search for a role runs in that role's conversation. For a saved role, pass the recruiter's request to it with delegate_to_role in their own words; for a new one, open it with start_role.";
 /** Model-facing: a people search in a role chat whose role is not saved yet. */
 export const PEOPLE_SEARCH_NEEDS_SAVED_ROLE =
   "Not searched: this role is not saved yet, so the people found would have nowhere to go. Save it first with recruiting_role create (title and the JD's requirements), then search again.";
@@ -219,8 +216,6 @@ export async function requireRoleForPeopleSearch(
     select: { thread: { select: { activeRecruitingRoleId: true, groupId: true } } },
   });
   if (!run || run.thread.activeRecruitingRoleId) return;
-  if (run.thread.groupId?.startsWith("recruiting-global-"))
-    throw new IsolationError(PEOPLE_SEARCH_NEEDS_ROLE);
   if (run.thread.groupId?.startsWith("role-"))
     throw new IsolationError(PEOPLE_SEARCH_NEEDS_SAVED_ROLE);
 }

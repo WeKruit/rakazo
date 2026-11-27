@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  globalRoleWriteRefusal,
-  otherRoleWriteRefusal,
-  roleRequestMessage,
-} from "./global-role-writes.js";
+import { otherRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
 
-function prisma(boundRoleId?: string, openRun?: { status: string }) {
+function prisma(boundRoleId?: string) {
   return {
     externalEffect: {
       findFirst: vi.fn(async () => (boundRoleId ? { request: { roleId: boundRoleId } } : null)),
@@ -15,58 +11,9 @@ function prisma(boundRoleId?: string, openRun?: { status: string }) {
         where.id === "role-1" ? { id: "role-1", title: "Senior Data Engineer — Seattle" } : null,
       ),
     },
-    run: { findFirst: vi.fn(async () => openRun ?? null) },
   };
 }
 const actor = { spaceId: "s", userId: "u", threadId: "global" };
-
-describe("globalRoleWriteRefusal", () => {
-  it("leaves a role's campaign to its conversation while that has a run open (staging 11-14)", async () => {
-    // Global Kruit paused a role's confirmed send and rewrote its email while the role's own
-    // team was fixing the same campaign.
-    for (const status of ["running", "waiting_input"]) {
-      const db = prisma("role-1", { status });
-      const error = await globalRoleWriteRefusal(db as never, actor, {
-        toolName: "native_instantly_pause_campaign",
-        args: { campaign_id: "c-1" },
-      });
-      expect(error).toContain('delegate_to_role, role_id "role-1"');
-      expect(db.run.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            threadId: { not: "global" },
-            thread: { activeRecruitingRoleId: "role-1" },
-          }),
-        }),
-      );
-    }
-  });
-
-  it("lets Kruit change a role's campaign itself when no other conversation is on it", async () => {
-    expect(
-      await globalRoleWriteRefusal(prisma() as never, actor, {
-        toolName: "native_instantly_ensure_role_campaign",
-        args: { role_id: "role-1", steps: [] },
-      }),
-    ).toBeUndefined();
-  });
-
-  it("never checks reads, one-off campaigns or account setup", async () => {
-    for (const [toolName, args] of [
-      ["native_instantly_get_campaign", { campaign_id: "c-1" }],
-      ["native_instantly_activate_campaign", { campaign_id: "one-off" }],
-      ["native_instantly_ensure_sender", {}],
-    ] as const) {
-      const bound = toolName === "native_instantly_get_campaign" ? "role-1" : undefined;
-      expect(
-        await globalRoleWriteRefusal(prisma(bound, { status: "running" }) as never, actor, {
-          toolName,
-          args,
-        }),
-      ).toBeUndefined();
-    }
-  });
-});
 
 describe("otherRoleWriteRefusal", () => {
   it("keeps a role's conversation to its own role's campaigns (stop-after-approve, 11-20)", async () => {

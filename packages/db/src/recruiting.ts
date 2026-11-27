@@ -1564,6 +1564,25 @@ export function mergeRecruitingRoleUpdate(
   // and an added one gets the rule its own citation implies. Staging 11-27: an update that only
   // added the recruiter's new requirement was refused three times for the missing rule.
   const kept = update.brief === undefined ? saved.brief : undefined;
+  const roleSources = [
+    ...saved.sourceRefs.filter((ref) => !replaced.has(ref.id)),
+    ...(update.sourceRefs ?? []),
+  ];
+  const held = new Set([
+    ...roleSources.map((ref) => ref.id),
+    ...criteria.flatMap((item) => item.sourceRefs.map((ref) => ref.id)),
+  ]);
+  // What a requirement's own citation implies for its rule.
+  const cited = (item: (typeof criteria)[number]) => {
+    const source = item.sourceRefs.find((ref) => ref.readState === "read");
+    return source
+      ? {
+          origin:
+            source.anchor.kind === "message" ? ("user_instruction" as const) : ("jd" as const),
+          sourceRefIds: [source.id],
+        }
+      : null;
+  };
   const brief = kept
     ? {
         ...kept,
@@ -1571,20 +1590,24 @@ export function mergeRecruitingRoleUpdate(
           ...kept.rules.flatMap((rule) => {
             const item = criteria.find((candidate) => candidate.id === rule.criterionId);
             if (!item) return [];
+            // A rule whose source the update dropped cites what its requirement now cites
+            // (staging 11-27: a changed requirement's rule still named the replaced source, and
+            // the update was refused three times).
+            const moved = rule.sourceRefIds.some((id) => !held.has(id)) ? cited(item) : null;
+            const next = moved ? { ...rule, ...moved } : rule;
             // A requirement this update made a must-have rejects from now on.
-            return upserts.has(item.id) && item.priority === "hard" && rule.origin !== "inferred"
-              ? [{ ...rule, effect: "reject" as const }]
-              : [rule];
+            return upserts.has(item.id) && item.priority === "hard" && next.origin !== "inferred"
+              ? [{ ...next, effect: "reject" as const }]
+              : [next];
           }),
           ...criteria.flatMap((item) => {
-            const source = item.sourceRefs.find((ref) => ref.readState === "read");
-            if (!source || kept.rules.some((rule) => rule.criterionId === item.id)) return [];
+            const from = cited(item);
+            if (!from || kept.rules.some((rule) => rule.criterionId === item.id)) return [];
             return [
               {
                 criterionId: item.id,
-                origin: source.anchor.kind === "message" ? "user_instruction" : "jd",
-                effect: item.priority === "hard" ? "reject" : "flag",
-                sourceRefIds: [source.id],
+                ...from,
+                effect: item.priority === "hard" ? ("reject" as const) : ("flag" as const),
               },
             ];
           }),
@@ -1593,16 +1616,28 @@ export function mergeRecruitingRoleUpdate(
     : update.brief === undefined
       ? saved.brief
       : update.brief;
+  // A kept fact, filter or answer keeps its saved source when the requirement that carried it
+  // was removed or changed.
+  const stillCited = new Set(
+    kept
+      ? [
+          ...kept.fields.flatMap((field) => field.sourceRefIds),
+          ...kept.searchFilters.flatMap((filter) => filter.sourceRefIds),
+          ...kept.questions.flatMap((question) => question.answeredBySourceRefId ?? []),
+        ]
+      : [],
+  );
+  const carried = saved.criteria
+    .flatMap((item) => item.sourceRefs)
+    .filter((ref, index, all) => all.findIndex((other) => other.id === ref.id) === index)
+    .filter((ref) => stillCited.has(ref.id) && !held.has(ref.id));
   const merged = RecruitingRoleToolInputSchema.parse({
     operation: "revise",
     roleId: update.roleId,
     expectedRevision: update.expectedRevision,
     title: update.title ?? current.role.title,
     brief,
-    sourceRefs: [
-      ...saved.sourceRefs.filter((ref) => !replaced.has(ref.id)),
-      ...(update.sourceRefs ?? []),
-    ],
+    sourceRefs: [...roleSources, ...carried],
     criteria,
     preferences: update.preferences ?? saved.preferences,
     definitionQuestions: update.definitionQuestions ?? saved.definitionQuestions,
