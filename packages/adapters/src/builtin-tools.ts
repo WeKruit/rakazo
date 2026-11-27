@@ -1544,7 +1544,7 @@ export const builtinAgentTools: ConnectorTool[] = [
         message: {
           type: "string",
           description:
-            "The brief: Goal; Done when (a check the result can be held to); Context (the recruiter's own words and anything the team cannot see); Don't (limits, such as no sends without the recruiter's card). End with: ask in this conversation if blocked.",
+            "The brief: the recruiter's request in their own words, as they wrote it, then only who and what it refers to that the team cannot see (the people they named, the round, an earlier message). Never add your own limits, checks or scope: the team works to their words, and sends still wait for the recruiter's card. End with: ask in this conversation if blocked.",
         },
         line: {
           type: "string",
@@ -1592,7 +1592,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "handoff_to_bot",
     description:
-      "In a group chat only: transfer a genuinely distinct next stage to another current member. Appends a visible handoff and starts that bot asynchronously. Your reply after a handoff is not shown, so hand off last, at most once per turn; never redo the handed work yourself. Do not hand a stage back merely to report or repeat the same work; post results in the shared thread. Write message as a brief the member can finish without asking, in this order: Goal (the user's own words), Where (the role or thread the work belongs to), Done when (a result anyone can count or check), Context it needs, Approach, and Don't. When the stage ends, finished, failed or stopped, it comes back to you as your next turn with how it ended: check it against Done when before the user relies on it, and hand a correction to the same member when it falls short. Set report_back for this outside a coordinator, which always gets it.",
+      "In a group chat only: transfer a genuinely distinct next stage to another current member. Appends a visible handoff and starts that bot asynchronously. Your reply after a handoff is not shown, so hand off last, at most once per turn; never redo the handed work yourself. Do not hand a stage back merely to report or repeat the same work; post results in the shared thread. Write message as a brief the member can finish without asking, in this order: Goal (the user's own words, never narrowed by limits or checks of your own), Where (the role or thread the work belongs to), and Context it needs (who and what the words refer to). When the stage ends, finished, failed or stopped, it comes back to you as your next turn with how it ended: check it against the Goal before the user relies on it, and hand a correction to the same member when it falls short. Set report_back for this outside a coordinator, which always gets it.",
     inputSchema: {
       type: "object",
       properties: {
