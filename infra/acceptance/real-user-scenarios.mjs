@@ -5,8 +5,8 @@
 // newest role chat, { answerCard } types into the newest open question card, { results } waits for
 // a round of people after the last message (and fails if it repeats people already shown),
 // { wait } pauses (ms), { stop } presses Stop.
-// Expectations: noRole (no role may be opened), role (a role must be opened, not titled "New
-// role"), roleTitle (regex the new role's name must match), requirement (regex that must be saved as required in the role brief), last / lastNot
+// Expectations: role (a role must be opened, not titled "New role"; since the 11-27 decision
+// the main chat opens a role for any work, so no scenario forbids one), roleTitle (regex the new role's name must match), requirement (regex that must be saved as required in the role brief), last / lastNot
 // (regex the last reply must / must not match), sendCard (a send card must appear; it is denied),
 // foundEmail (the reply may show an address the recruiter never typed: a lookup's result).
 // account: "onboarded" plays on the fixture account we set up by hand (no credit limit, no
@@ -160,7 +160,6 @@ export const SCENARIOS = [
     name: "email-no-mailbox-zh",
     area: "email",
     source: "11-10 outside user told to contact an internal address, three times",
-    noRole: true,
     turns: [
       { say: `帮我给 ${CANDIDATE} 发封邮件，问他下周有没有空聊一个后端岗位` },
       { say: "其他几位可以根据实际情况发送邮件吗" },
@@ -174,7 +173,6 @@ export const SCENARIOS = [
     area: "email",
     source: "11-10 onboarded account told three times to contact an internal address",
     account: "onboarded",
-    noRole: true,
     turns: [{ say: "其他几位可以根据实际情况发送邮件吗" }, { say: "那你就直接发啊" }],
   },
   {
@@ -183,7 +181,6 @@ export const SCENARIOS = [
     area: "email",
     source: "11-12 assigned mailbox had no way to send one email to a named address",
     account: "mailbox",
-    noRole: true,
     turns: [
       {
         say: `请给 ${CANDIDATE} 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?`,
@@ -197,7 +194,6 @@ export const SCENARIOS = [
     area: "email",
     source: "11-12 second one-off email found no way to send and asked to connect a mailbox",
     account: "mailbox",
-    noRole: true,
     turns: [
       {
         say: `再给 ${CANDIDATE} 发一封新邮件，主题 Kruit test 2，正文：Second test, please ignore.`,
@@ -209,14 +205,12 @@ export const SCENARIOS = [
     name: "email-no-mailbox-en",
     area: "email",
     source: "11-10 outside user told to contact an internal address",
-    noRole: true,
     turns: [{ say: "Can you just email the candidates for me?" }],
   },
   {
     name: "template-zh",
     area: "email",
     source: "11-09/10 template written in the candidate's voice",
-    noRole: true,
     turns: [{ say: "帮我写一封面试后跟进邮件的模板" }],
     // Greets the candidate with a mail-merge variable ({{firstName}}); a bracket blank fails the
     // placeholder check.
@@ -248,7 +242,6 @@ export const SCENARIOS = [
     area: "email",
     source: "11-11 messages sat unread behind an open send card",
     account: "mailbox",
-    noRole: true,
     turns: [
       {
         say: `请给 ${CANDIDATE} 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?`,
@@ -322,7 +315,6 @@ export const SCENARIOS = [
     source: "11-12 agents dead-ended outside pre-built paths",
     paid: true,
     foundEmail: true,
-    noRole: true,
     turns: [
       {
         say: "帮我查一下这个人的邮箱：Alex Chen，linkedin.com/in/alex-chen-test-0000，现在在 Stripe 做后端",
@@ -335,7 +327,6 @@ export const SCENARIOS = [
     area: "off path",
     source: "11-12 agents dead-ended outside pre-built paths",
     account: "mailbox",
-    noRole: true,
     turns: [
       {
         say: `给 ${CANDIDATE} 和 sam.lee.test@example.com 各发一封邮件，主题 Quick chat，正文：Hi, do you have 15 minutes next week to talk about a backend role?`,
@@ -357,14 +348,12 @@ export const SCENARIOS = [
     name: "offpath-reply-no-mail-zh",
     area: "off path",
     source: "11-12 agents dead-ended outside pre-built paths",
-    noRole: true,
     turns: [{ say: `帮我回复 ${CANDIDATE} 的上一封邮件，就说周四下午可以聊` }],
   },
   {
     name: "offpath-company-en",
     area: "off path",
     source: "11-12 agents dead-ended outside pre-built paths",
-    noRole: true,
     turns: [{ say: "Roughly how big is Stripe's engineering team, and which cities are they in?" }],
     last: /Stripe/,
   },
@@ -372,14 +361,12 @@ export const SCENARIOS = [
     name: "offpath-reminder-zh",
     area: "off path",
     source: "11-12 agents dead-ended outside pre-built paths",
-    noRole: true,
     turns: [{ say: "下周一上午提醒我跟进一下 Alex Chen" }],
   },
   {
     name: "offpath-rewrite-jd-zh",
     area: "off path",
     source: "11-12 agents dead-ended outside pre-built paths",
-    noRole: true,
     turns: [{ say: `先别开岗位，帮我把这段 JD 改写得更吸引候选人：${JD_ZH_MUST}` }],
     last: /销售总监/,
   },
@@ -387,7 +374,6 @@ export const SCENARIOS = [
     name: "offpath-calendar-en",
     area: "off path",
     source: "11-12 agents dead-ended outside pre-built paths",
-    noRole: true,
     turns: [{ say: "What's on my calendar tomorrow?" }],
   },
   // Paid: answering a role's first question starts the first-ten search.
