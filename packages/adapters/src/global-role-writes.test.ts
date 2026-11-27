@@ -57,7 +57,7 @@ describe("roleRequestMessage", () => {
       brief: "Goal: find the next 20 people",
     });
     expect(message).toContain(`"${words}"`);
-    expect(message).toMatch(/never a number of people or a scale-out/);
+    expect(message).toContain("Kruit's note (not the recruiter's words):");
   });
 
   it("keeps who the recruiter means while a round waits on them (team-has-no-email 11-16)", async () => {
@@ -155,7 +155,7 @@ describe("roleRequestMessage inside a role's conversation", () => {
       noteOnly: true,
     });
     expect(message).toContain('word for word:\n"郭小明不合适"');
-    expect(message).toContain("Kruit's note, only on who and what");
+    expect(message).toContain("Kruit's note (not the recruiter's words):");
     expect(message).not.toContain("Kruit's brief");
   });
 });

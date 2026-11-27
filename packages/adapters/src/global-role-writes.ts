@@ -88,7 +88,7 @@ export async function roleRequestMessage(
   // without the person Kruit named, and it answered about someone else.
   if (input.noteOnly || (round && !round.approvedAt))
     return input.brief.trim()
-      ? `${quoted}\n\nKruit's note, only on who and what this refers to; the request is the recruiter's words above, never a number of people or a scale-out this note adds:\n${input.brief}`
+      ? `${quoted}\n\nKruit's note (not the recruiter's words):\n${input.brief}`
       : quoted;
   return input.brief.trim() ? `${quoted}\n\nKruit's brief:\n${input.brief}` : quoted;
 }
