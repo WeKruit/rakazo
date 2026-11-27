@@ -2684,6 +2684,21 @@ describe("MCP connector session cache", () => {
         "mcp__demo__get_email",
       ]);
       expect(await listed(true)).toEqual(["mcp__demo__get_availability", "mcp__demo__get_email"]);
+      // A search there says where role mail is sent instead of leaving a dead end.
+      const searched = async (accountWide: boolean) => {
+        const search = connector.execute(
+          {
+            tool: "connectors_search_tools",
+            route: { connectorId: "mcp", toolName: "__catalog_search" },
+            args: { query: "send email" },
+            executionId: "search",
+          } as never,
+          context(accountWide),
+        );
+        for await (const event of search) if (event.type === "result") return event.data as never;
+      };
+      expect(await searched(true)).toMatchObject({ note: expect.stringContaining("start_role") });
+      expect(await searched(false)).not.toHaveProperty("note");
       // The booking plan still resolves the create it reviewed.
       const resolved = await connector.resolveCall(
         {

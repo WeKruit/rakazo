@@ -71,6 +71,7 @@ import {
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import {
   CATALOG_EXECUTE,
+  CATALOG_SEARCH,
   catalogEntries,
   DIRECT_TOOL_LIMIT,
   executeLazyCatalogControl,
@@ -747,6 +748,10 @@ const ROLE_MAIL = new Set([
   "update_role_draft",
   "clone_role_draft",
 ]);
+/** Runs whose catalog left out role mail, so a search there names where that mail is sent. */
+const roleMailHidden = new WeakSet<AdapterContext>();
+const ROLE_MAIL_ELSEWHERE =
+  "Mail to candidates is not sent from this conversation. A role's first emails and its answers to candidates are written and sent in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role. Only a one-off email to an address the recruiter gave, for no role, goes to Outreach here.";
 
 const OUTREACH_CORE = [
   "ensure_role_campaign",
@@ -1116,7 +1121,10 @@ export class McpConnector implements ConnectorProvider {
             if (core.has(coreName(tool))) directTools.add(tool);
             if (tool.route?.toolName === planOnly) planOnlyTools.add(tool);
           }
-          return accountWideMain ? tools.filter((tool) => !ROLE_MAIL.has(coreName(tool))) : tools;
+          if (!accountWideMain) return tools;
+          const kept = tools.filter((tool) => !ROLE_MAIL.has(coreName(tool)));
+          if (kept.length < tools.length) roleMailHidden.add(context);
+          return kept;
         };
         // A grant of no tools needs no listing call.
         if (
@@ -1299,7 +1307,7 @@ export class McpConnector implements ConnectorProvider {
       try {
         const tools = await this.authorizedTools(context);
         // Search and load list what an agent may pick; a plan's approved booking still runs.
-        yield* executeLazyCatalogControl(
+        for await (const event of executeLazyCatalogControl(
           call,
           catalogEntries(
             call.route.toolName === CATALOG_EXECUTE
@@ -1307,7 +1315,13 @@ export class McpConnector implements ConnectorProvider {
               : tools.filter((tool) => !planOnlyTools.has(tool)),
           ),
           (resolved) => this.execute(resolved, context),
-        );
+        )) {
+          yield call.route.toolName === CATALOG_SEARCH &&
+          event.type === "result" &&
+          roleMailHidden.has(context)
+            ? { ...event, data: { ...(event.data as object), note: ROLE_MAIL_ELSEWHERE } }
+            : event;
+        }
       } catch (error) {
         // A tool of a refused connection is no longer in the catalog; say why, not "unknown".
         const refused = this.refusedCatalogTool(String(call.args.id ?? ""), context);
