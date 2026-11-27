@@ -83,6 +83,7 @@ import {
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
   ACTIVE_RUN_STATUSES,
+  accountWideSkill,
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
@@ -11522,7 +11523,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const skillTools = skillAvailabilityFromTools(tools.map((tool) => tool.name));
         const skillSecrets = new Set(agentSecretRows.map((row) => row.name.toLowerCase()));
         const agentSkillsLine = formatSkillsCatalogInstruction(
-          agentSkills.map((skill) => ({
+          (thread.groupId?.startsWith("recruiting-global-")
+            ? agentSkills.filter((skill) => accountWideSkill(skill.name))
+            : agentSkills
+          ).map((skill) => ({
             ...skill,
             unavailable: missingSkillRequirement(skillRequirements(skill.content), {
               ...skillTools,
