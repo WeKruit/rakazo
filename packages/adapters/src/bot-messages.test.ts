@@ -288,7 +288,7 @@ describe("messaging another bot", () => {
     // locks the same rows in that order, so the two cannot deadlock.
     expect(harness.tx.$queryRaw).toHaveBeenCalledTimes(1);
     const [lockSql, ...lockedIds] = harness.tx.$queryRaw.mock.calls[0]!;
-    expect(lockSql.join("?")).toMatch(/ORDER BY \("groupId" IS NULL\), id\s+FOR UPDATE/);
+    expect(lockSql.join("?")).toContain(`ORDER BY ("groupId" IS NULL OR "groupId" LIKE 'recruiting-global-%'), id`);
     expect(lockedIds).toEqual([run.threadId, expect.any(String)]);
     expect(harness.tx.message.create).toHaveBeenLastCalledWith(
       expect.objectContaining({
