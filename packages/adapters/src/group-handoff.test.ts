@@ -9,6 +9,14 @@ import {
   reportGroupStageOutcome,
   watchOpenStages,
 } from "./group-handoff.js";
+import type * as RoundCheck from "./recruiting-round-check.js";
+
+const roundCounts = vi.hoisted(() => ({ counted: 10, target: 10 }));
+vi.mock("./recruiting-round-check.js", async (original) => ({
+  ...(await original<typeof RoundCheck>()),
+  requestCounts: vi.fn(async () => ({ counted: roundCounts.counted })),
+  requestTarget: vi.fn(async () => roundCounts.target),
+}));
 
 const run = {
   id: "run-a",
@@ -591,6 +599,36 @@ describe("group handoff report back", () => {
         where: expect.objectContaining({ runId: "run-b", status: "completed" }),
       }),
     );
+  });
+
+  it("does not wake the sender after a round that meets the number asked", async () => {
+    // Play s151: the report after a round of ten woke the lead, which recorded the same people as
+    // a second round. A round one person short still reports, so the lead can steer the rest.
+    const roundRun = (counted: number) => {
+      roundCounts.counted = counted;
+      const h = harness([asked], undefined, undefined, [
+        { blocks: [{ kind: "text", text: "本轮 10 人" }] },
+      ]);
+      Object.assign(h.deps.prisma, {
+        externalEffect: {
+          findMany: vi.fn(async () => [{ id: "effect-round", request: { asked: 10 } }]),
+        },
+        recruitingCalibrationRound: {
+          findFirst: vi.fn(async () => ({ roleId: "role-1", effectId: "effect-round" })),
+        },
+      });
+      return h;
+    };
+    const met = roundRun(10);
+    await expect(
+      reportGroupHandoffOutcome(met.deps as never, worker, "group-1", { status: "completed" }),
+    ).resolves.toBeUndefined();
+    expect(met.runCreate).not.toHaveBeenCalled();
+    const short = roundRun(9);
+    await reportGroupHandoffOutcome(short.deps as never, worker, "group-1", {
+      status: "completed",
+    });
+    expect(short.messageCreate).toHaveBeenCalled();
   });
 
   it("counts a held-back reply's retry as the stage's result", async () => {
