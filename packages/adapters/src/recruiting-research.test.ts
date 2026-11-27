@@ -139,11 +139,10 @@ describe("people-search agent runs", () => {
         where: { roleId: "role-1", role: { id: "role-1", spaceId: "space", userId: "owner" } },
       }),
     );
-    const own = { type: "object" };
-    await expect(prepare(fixture(null), { query: "Find", outputSchema: own })).resolves.toEqual({
-      query: "Find",
-      outputSchema: own,
-    });
+    // The agent's own format would drop the grade Results shows.
+    await expect(
+      prepare(fixture(null), { query: "Find", outputSchema: { type: "object" } }),
+    ).resolves.toEqual({ query: "Find", outputSchema: AGENT_RUN_PEOPLE_SCHEMA });
   });
 
   it("keeps every search a small try: 20 people, two dollars, never ultra", async () => {
