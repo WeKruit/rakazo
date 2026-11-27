@@ -138,32 +138,23 @@ export async function requestCounts(
 }
 
 /**
- * The count a request for `asked` people is met at: what was counted when the recruiter asked,
- * plus the number they asked for. The request starts at the newest message written to the
- * conversation, so rounds recorded since then are its own deliveries and everything before is
- * where it started. The agent gives only the number asked; branch play 11-27: it added the two
- * itself, gave 10 where 12 was meant, and a round one person short said nothing was missing.
+ * The count the open request is met at: what was counted when the recruiter asked, plus the
+ * number they asked for. A request starts at a round that records a number asked and goes on
+ * through every later round that records none. The same number again on a request not yet shown
+ * in full continues it. Messages play no part. Undefined when no round has asked for a number.
+ * Staging find-100 11-27: anchored at the newest message, "进度？" reset the request and 110 were
+ * shown for 100; fosp s178: a turn-down naming no number started ten more nobody asked for.
  */
 export async function requestTarget(
   prisma: PrismaClient,
   role: { roleId: string; userId: string; spaceId: string },
-  threadId: string,
-  asked: number,
   counted: number,
-): Promise<number> {
-  const newest = await prisma.message.findFirst({
-    where: { threadId, role: "user" },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  const [since, marks] = await Promise.all([
+): Promise<number | undefined> {
+  const [rounds, marks] = await Promise.all([
     prisma.recruitingCalibrationRound.findMany({
-      where: {
-        roleId: role.roleId,
-        status: "shown",
-        ...(newest ? { createdAt: { gt: newest.createdAt } } : {}),
-      },
-      select: { candidateKeys: true },
+      where: { roleId: role.roleId, status: "shown" },
+      orderBy: { createdAt: "asc" },
+      select: { effectId: true, candidateKeys: true },
     }),
     readRecruitingResultsMarks(
       prisma,
@@ -171,11 +162,35 @@ export async function requestTarget(
       { roleId: role.roleId },
     ),
   ]);
+  const effects = rounds.length
+    ? await prisma.externalEffect.findMany({
+        where: { id: { in: rounds.map((round) => round.effectId) } },
+        select: { id: true, request: true },
+      })
+    : [];
+  const askedOf = new Map(
+    effects.map((effect) => {
+      const request = effect.request;
+      const value =
+        request && typeof request === "object" && !Array.isArray(request)
+          ? Number((request as Record<string, unknown>).asked)
+          : Number.NaN;
+      return [effect.id, Number.isInteger(value) && value > 0 ? value : undefined] as const;
+    }),
+  );
+  let open: { asked: number; keys: Set<string> } | undefined;
+  for (const round of rounds) {
+    const asked = askedOf.get(round.effectId);
+    if (asked !== undefined && (asked !== open?.asked || open.keys.size >= open.asked)) {
+      open = { asked, keys: new Set() };
+    }
+    for (const key of round.candidateKeys) open?.keys.add(key);
+  }
+  if (!open) return undefined;
   const notAFit = new Set(
     marks.filter((mark) => mark.mark === "not a fit").map((mark) => mark.candidateKey),
   );
-  const delivered = new Set(since.flatMap((round) => round.candidateKeys));
-  return counted - [...delivered].filter((key) => !notAFit.has(key)).length + asked;
+  return counted - [...open.keys].filter((key) => !notAFit.has(key)).length + open.asked;
 }
 
 /**

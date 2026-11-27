@@ -233,7 +233,7 @@ async function play(scenario, owner, sample) {
     lines.push(`## ${group.name}`);
     for (const message of messages)
       lines.push(
-        `[${message.at}] ${message.role}${message.card ? " (card)" : ""}: ${message.text}`,
+        `[${message.at}] ${message.role}${message.card ? " (card)" : ""}${message.roleCard ? " (role card)" : ""}: ${message.text}`,
       );
     failures.push(
       ...conversationChecks(messages, { recruiter })

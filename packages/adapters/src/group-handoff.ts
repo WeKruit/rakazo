@@ -290,7 +290,7 @@ async function confirmedSend(
  * Whether the stage recorded a round of people and the request for a number it served is met, by
  * the same counts the round's own result gives. The round's list is what the user sees, so there
  * is nothing left to check: play s151 woke the lead after a round and it recorded the same people
- * again. A round recorded without a number asked serves no number and is not short.
+ * again. A round with no request for a number open is not short.
  */
 async function roundDelivered(
   prisma: PrismaClient,
@@ -298,7 +298,7 @@ async function roundDelivered(
 ): Promise<boolean> {
   const effects = await prisma.externalEffect.findMany({
     where: { runId: run.id, status: "completed" },
-    select: { id: true, request: true },
+    select: { id: true },
     orderBy: { createdAt: "desc" },
     take: 200,
   });
@@ -307,19 +307,13 @@ async function roundDelivered(
     ? await prisma.recruitingCalibrationRound.findFirst({
         where: { effectId: { in: ids }, status: "shown" },
         orderBy: { createdAt: "desc" },
-        select: { roleId: true, effectId: true },
+        select: { roleId: true },
       })
     : null;
   if (!round) return false;
-  const request = effects.find((effect) => effect.id === round.effectId)?.request;
-  const asked =
-    request && typeof request === "object" && !Array.isArray(request)
-      ? Number((request as Record<string, unknown>).asked)
-      : Number.NaN;
-  if (!Number.isFinite(asked) || asked <= 0) return true;
   const role = { roleId: round.roleId, userId: run.userId, spaceId: run.spaceId };
   const { counted } = await requestCounts(prisma, role);
-  const target = await requestTarget(prisma, role, run.threadId, asked, counted);
+  const target = await requestTarget(prisma, role, counted);
   return !roundStillMissing(counted, target).stillMissing;
 }
 

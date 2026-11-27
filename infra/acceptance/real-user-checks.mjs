@@ -315,7 +315,7 @@ export function conversationChecks(messages, { recruiter } = {}) {
     if (message.role !== "user") continue;
     const next = messages.findIndex((item, at) => at > index && item.role === "user");
     const turn = messages.slice(index + 1, next === -1 ? undefined : next);
-    const first = turn.find((item) => item.text.trim());
+    const first = turn.find((item) => item.text.trim() || item.roleCard);
     const waited = first && message.at ? Date.parse(first.at) - Date.parse(message.at) : 0;
     if (waited > FIRST_REPLY_MS)
       failures.push(

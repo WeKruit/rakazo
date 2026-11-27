@@ -214,6 +214,14 @@ test("a message answered only after the long step ends fails as a slow first rep
   assert(failures.some((failure) => failure.startsWith("slow first reply: 16 s")));
 });
 
+test("the main chat's role card within seconds is its first reply", () => {
+  const failures = conversationChecks([
+    { ...user("Senior Data Engineer — Seattle, WA"), at: at(0) },
+    { ...bot(""), roleCard: true, at: at(4) },
+  ]);
+  assert(!failures.some((failure) => failure.startsWith("slow first reply")));
+});
+
 test("a quick line within seconds passes the first-reply check", () => {
   const failures = conversationChecks([
     { ...user("对了，远程也可以，不一定要在西雅图"), at: at(0) },

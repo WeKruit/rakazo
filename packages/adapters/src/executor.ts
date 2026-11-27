@@ -8959,18 +8959,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (researchInput.data.operation === "calibration_round") {
                 if (!applied || !claimedEffect) throw new IsolationError();
                 // The agent gives only the number asked; where the request started is data.
-                const roundAsked = researchInput.data.asked;
                 let roundTargetMemo: Promise<number | undefined> | undefined;
                 const roundTargetAt = (roleId: string, counted: number) =>
-                  (roundTargetMemo ??= roundAsked
-                    ? requestTarget(
-                        deps.prisma,
-                        { roleId, userId: run.userId, spaceId: run.spaceId },
-                        thread.id,
-                        roundAsked,
-                        counted,
-                      )
-                    : Promise.resolve(undefined));
+                  (roundTargetMemo ??= requestTarget(
+                    deps.prisma,
+                    { roleId, userId: run.userId, spaceId: run.spaceId },
+                    counted,
+                  ));
                 // Internal record keeping: the round and this native effect complete together.
                 const round = await saveRecruitingCalibrationRound(
                   deps.prisma,
@@ -10699,12 +10694,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               refs.length && delegatedRoleId
                 ? await roleReferents(deps.prisma, delegatedRoleId, refs)
                 : { people: [], unknown: refs };
-            if (referents.unknown.length) {
-              rolesDelegatedInTurn.delete(target.threadId);
-              return finish({
-                error: `Not handed off: ${referents.unknown.map((ref) => JSON.stringify(ref)).join(", ")} ${referents.unknown.length === 1 ? "is" : "are"} not a saved person of that role.`,
-              });
-            }
+            // A referent that matches no saved person is not passed on: the recruiter's own words,
+            // which go with the hand-off, already name them. Play s179: refusing the names the
+            // model wrote left a turn-down unrecorded and the recruiter asked three times.
             const roundRef = Number.isInteger(args.round) ? Number(args.round) : undefined;
             const sent = await messageBot(
               deps,
@@ -10741,7 +10733,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // recruiter opens it from the card, so Kruit's turn ends here, the way a hand-off passes
             // control (OpenAI Agents SDK handoffs; Pi's terminate). Replays 11-27 on 49a2a201: told
             // to answer from the team's returned email, Kruit posted every template a second time.
-            const handed = { ok: true, team: sent.name };
+            const handed = {
+              ok: true,
+              team: sent.name,
+              ...(referents.unknown.length ? { notSavedPeople: referents.unknown } : {}),
+            };
             return finish({
               kind: "agent_tool_result",
               content: [{ type: "text", text: JSON.stringify(handed) }],
