@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@rakazo/db";
+import type { PrismaClient, RoleReferent } from "@rakazo/db";
 
 /** Instantly writes that change what a role's campaign sends: they belong to that role's own conversation. */
 const ROLE_CAMPAIGN_WRITES = new Set([
@@ -53,44 +53,42 @@ export async function otherRoleWriteRefusal(
 ): Promise<string | undefined> {
   const role = await campaignRole(prisma, actor, call);
   if (!role || role.id === activeRoleId) return undefined;
-  return `Not done: that campaign belongs to another role, "${role.title}". This conversation changes only its own role's emails; leave other roles' as they are and say in one line what you changed here.`;
+  return `Not done: that campaign belongs to another role, "${role.title}". This conversation changes only its own role's emails.`;
 }
 
 /**
- * What Kruit's handoff of the recruiter's turn tells a role's team. Staging 11-15: "3 and 10
- * aren't a fit, find more like the rest" reached the team as Kruit's brief "find the next 20
- * people", so it scaled out and the next round was never built. The recruiter's own words go
- * first, exactly as written; while a round waits on their answer they are the whole request (Kruit's
- * note after them only says who it is about), so the team reads the feedback itself.
+ * What the account-wide chat's hand-off tells a role's team: the recruiter's newest words exactly as
+ * written, and the saved people and round they refer to. Kruit adds no words of its own.
  */
-export async function roleRequestMessage(
-  prisma: Pick<PrismaClient, "recruitingCalibrationRound">,
-  input: {
-    roleId?: string;
-    recruiterWords: string;
-    brief: string;
-    /** A stage handed on inside a role's conversation: the brief only says who and what. */
-    noteOnly?: boolean;
-  },
-): Promise<string> {
+export function delegatedRequestMessage(
+  words: string,
+  people: readonly RoleReferent[],
+  round?: number,
+): string {
+  const named = people.map((person) =>
+    [person.name?.trim() || person.candidateKey, person.linkedinUrl].filter(Boolean).join(", "),
+  );
+  const refers = [
+    ...(named.length ? [`People they refer to: ${named.join("; ")}.`] : []),
+    ...(round ? [`Round they refer to: round ${round}.`] : []),
+  ];
+  return [`The recruiter wrote, word for word:\n"${words}"`, ...refers].join("\n\n");
+}
+
+/**
+ * What a hand-off inside a role's conversation tells a teammate: the recruiter's newest words
+ * first, exactly as written, then the teammate's note (play s165: a brief quoted the role's
+ * opening "找10人" as the request after a turn-down).
+ */
+export function roleRequestMessage(input: { recruiterWords: string; brief: string }): string {
   const words = input.recruiterWords.trim();
   if (!words) return input.brief;
   const quoted = `The recruiter wrote, word for word:\n"${words}"`;
-  const round =
-    input.roleId && !input.noteOnly
-      ? await prisma.recruitingCalibrationRound.findFirst({
-          where: { roleId: input.roleId },
-          orderBy: { round: "desc" },
-          select: { approvedAt: true },
-        })
-      : null;
   // team-has-no-email 11-16: with the brief dropped, 「没存的话现在怎么办？」 reached the team
-  // without the person Kruit named, and it answered about someone else.
-  if (input.noteOnly || (round && !round.approvedAt))
-    return input.brief.trim()
-      ? `${quoted}\n\nKruit's note (not the recruiter's words):\n${input.brief}`
-      : quoted;
-  return input.brief.trim() ? `${quoted}\n\nKruit's brief:\n${input.brief}` : quoted;
+  // without the person named, and it answered about someone else.
+  return input.brief.trim()
+    ? `${quoted}\n\nTeammate's note (not the recruiter's words):\n${input.brief}`
+    : quoted;
 }
 
 /**

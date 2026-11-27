@@ -268,6 +268,7 @@ import {
   remainingUsageCredits,
   resolveRecruitingCampaignLead,
   resolveRecruitingCrmImport,
+  roleReferents,
   resolveRecruitingReply,
   SpaceLimitError,
   saveRecruitingCalibrationRound,
@@ -470,6 +471,7 @@ import {
 import {
   newestRecruiterWords,
   otherRoleWriteRefusal,
+  delegatedRequestMessage,
   roleRequestMessage,
 } from "./global-role-writes.js";
 import {
@@ -10662,7 +10664,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // wrote into a running turn. Branch fosp 11-21 (747382b0): 「这三个不要。换掉，再补人」
             // arrived while Kruit read a team's report, reached the team as Kruit's paraphrase
             // alone, and the search cap took the role's first "找10个人" as the request.
-            const delegatedWords = run.trigger === "user" ? lastRecruiterText : (steeredText ?? "");
+            const delegatedWords = (
+              run.trigger === "user" ? lastRecruiterText : (steeredText ?? "")
+            ).trim();
+            if (!delegatedWords) {
+              rolesDelegatedInTurn.delete(target.threadId);
+              return finish({
+                error: "Not handed off: this turn has no recruiter words to hand over.",
+              });
+            }
+            // Only structured referents go with the recruiter's words; Kruit writes no brief
+            // (the user's decision 11-27 08:36: 只传原话加指代). Play s174: a free brief added
+            // 「并继续做下一轮」 and the team searched a round nobody asked for.
+            const delegatedRoleId = role
+              ? String(args.role_id)
+              : (group?.thread?.activeRecruitingRoleId ?? undefined);
+            const refs = Array.isArray(args.people) ? args.people.map(String) : [];
+            const referents =
+              refs.length && delegatedRoleId
+                ? await roleReferents(deps.prisma, delegatedRoleId, refs)
+                : { people: [], unknown: refs };
+            if (referents.unknown.length) {
+              rolesDelegatedInTurn.delete(target.threadId);
+              return finish({
+                error: `Not handed off: ${referents.unknown.map((ref) => JSON.stringify(ref)).join(", ")} ${referents.unknown.length === 1 ? "is" : "are"} not a saved person of that role.`,
+              });
+            }
+            const roundRef = Number.isInteger(args.round) ? Number(args.round) : undefined;
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },
@@ -10673,13 +10701,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 sender_label: RECRUITING_GLOBAL_AGENT_NAME,
                 target_label: `${target.title} team`,
                 message: redactSecrets(
-                  await roleRequestMessage(deps.prisma, {
-                    roleId: role
-                      ? String(args.role_id)
-                      : (group?.thread?.activeRecruitingRoleId ?? undefined),
-                    recruiterWords: delegatedWords,
-                    brief: String(args.message ?? ""),
-                  }),
+                  delegatedRequestMessage(delegatedWords, referents.people, roundRef),
                   runSecrets,
                 ),
                 recruiter_words: redactSecrets(delegatedWords, runSecrets),
@@ -11043,12 +11065,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // "找10人" as the request after a turn-down, and ten more people were searched).
               message: thread.groupId.startsWith(KRUIT_ROLE_GROUP_PREFIX)
                 ? redactSecrets(
-                    await roleRequestMessage(deps.prisma, {
-                      roleId: thread.activeRecruitingRoleId ?? undefined,
+                    roleRequestMessage({
                       recruiterWords: await newestRecruiterWords(deps.prisma, thread.id),
                       brief,
-                      // Play s167: after an accepted round the lead's "Goal" added 继续找新候选人.
-                      noteOnly: true,
                     }),
                     runSecrets,
                   )

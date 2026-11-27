@@ -1254,6 +1254,22 @@ describe("one request handed to a role", () => {
       spawnKey: "recruiting:user-1:main",
     } as typeof bot);
     Object.assign(f.thread, { groupId: "recruiting-global-1" });
+    // The recruiter's message this turn hands over.
+    const history = f.prisma.message.findMany.getMockImplementation()!;
+    f.prisma.message.findMany.mockImplementation((async (query?: { select?: Record<string, boolean> }) =>
+      query?.select?.id && query.select.seq && Object.keys(query.select).length === 2
+        ? history(query as never)
+        : [
+            {
+              id: "recruiter-1",
+              seq: 1,
+              role: "user",
+              botId: null,
+              runId: null,
+              createdAt: new Date(),
+              blocks: [{ kind: "text", text: "郭小明不合适" }],
+            },
+          ]) as never);
     Object.assign(f.prisma, {
       chatGroup: {
         findUnique: vi.fn(async () => ({ id: "recruiting-global-1", name: "Kruit", members: [] })),
@@ -1273,7 +1289,7 @@ describe("one request handed to a role", () => {
   it("goes to that role's conversation once per turn", async () => {
     const f = await roleFixture("delegate-once");
     vi.mocked(messageBot).mockClear();
-    const ask = { name: "delegate_to_role", args: { role_id: "role-1", message: "Add Ada" } };
+    const ask = { name: "delegate_to_role", args: { role_id: "role-1" } };
     f.setCalls([
       { ...ask, executionId: "d1" },
       { ...ask, executionId: "d2" },
@@ -1290,12 +1306,46 @@ describe("one request handed to a role", () => {
     f.setCalls([
       {
         name: "delegate_to_role",
-        args: { role_id: "role-1", message: "Book Ada" },
+        args: { role_id: "role-1" },
         executionId: "d",
       },
     ]);
     await f.run();
     expect(f.results[0]).toMatchObject({ kind: "agent_tool_result", terminate: true });
+  });
+
+  // Play s174: Kruit's own brief added 「并继续做下一轮」 and the team searched a round nobody asked for.
+  it("hands over only the recruiter's words and the saved people they refer to", async () => {
+    const f = await roleFixture("delegate-referents");
+    vi.mocked(messageBot).mockClear();
+    const queryRaw = vi.fn(async () => [
+      { candidateKey: "linkedin:ada", name: "Ada Chen", linkedinUrl: "https://linkedin.com/in/ada" },
+    ]);
+    Object.assign(f.prisma, { $queryRaw: queryRaw });
+    f.setCalls([
+      {
+        name: "delegate_to_role",
+        args: { role_id: "role-1", people: ["https://www.linkedin.com/in/ada/"], round: 2 },
+        executionId: "d",
+      },
+    ]);
+    await f.run();
+    const message = String(vi.mocked(messageBot).mock.calls[0]?.[3].message);
+    expect(message).toMatch(/^The recruiter wrote, word for word:\n"/);
+    expect(message).toContain("People they refer to: Ada Chen, https://linkedin.com/in/ada.");
+    expect(message).toContain("Round they refer to: round 2.");
+    expect(message).not.toContain("note");
+
+    vi.mocked(messageBot).mockClear();
+    queryRaw.mockResolvedValueOnce([]);
+    const g = await roleFixture("delegate-unknown-person");
+    Object.assign(g.prisma, { $queryRaw: queryRaw });
+    g.setCalls([
+      { name: "delegate_to_role", args: { role_id: "role-1", people: ["Ada"] }, executionId: "d" },
+    ]);
+    await g.run();
+    expect(messageBot).not.toHaveBeenCalled();
+    expect(g.results[0]).toEqual({ error: 'Not handed off: "Ada" is not a saved person of that role.' });
   });
 });
 
