@@ -46,7 +46,8 @@ const SEND_WINDOW_DAYS = 7;
 const RECEIPTS_SHOWN = 8;
 const ROLES_FOR_REFERENCE = 500;
 /** Calls in this conversation read for the role it last handed work to. */
-const HANDOFF_CALLS = 30;
+/** Kruit's own newest messages read for the role card it last showed. */
+const ROLE_CARD_MESSAGES = 30;
 
 type StatePrisma = Pick<
   PrismaClient,
@@ -285,6 +286,36 @@ export async function recruiterLanguageNow(
 }
 
 /**
+ * The role this conversation last pointed the recruiter to: the card that opens it, which
+ * start_role, delegate_to_role and a role read's show each post. Stage 3a3ee156
+ * (stressed-point-few-meet): with no record of the role just opened, Kruit handed "3 more" to an
+ * older role of the same title. A message that shows several roles' cards names no one role.
+ */
+async function lastRoleCard(
+  prisma: StatePrisma,
+  scope: { spaceId: string; userId: string },
+  messages: { blocks: unknown }[],
+): Promise<{ groupId: string; name: string; roleId?: string } | undefined> {
+  for (const message of messages) {
+    const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
+    const cards = blocks.filter((block) => block.kind === "role_link");
+    if (!cards.length) continue;
+    const [card] = cards;
+    if (cards.length > 1 || !card || card.kind !== "role_link") return undefined;
+    const group = await prisma.chatGroup
+      .findFirst({
+        where: { id: card.groupId, spaceId: scope.spaceId, userId: scope.userId, archivedAt: null },
+        select: { name: true, thread: { select: { activeRecruitingRoleId: true } } },
+      })
+      .catch(() => null);
+    if (!group) return undefined;
+    const roleId = group.thread?.activeRecruitingRoleId ?? undefined;
+    return { groupId: card.groupId, name: group.name, ...(roleId ? { roleId } : {}) };
+  }
+  return undefined;
+}
+
+/**
  * The working state card for one turn. For the account-wide agent it covers every recent role
  * team; for a role conversation, its own receipts. The language is returned for the turn's lines.
  */
@@ -373,7 +404,7 @@ export async function loadWorkingState(
         })
         .catch(() => [])
     : Promise.resolve([]);
-  const [recruiterRows, roles, recent, runs, completed, handoffs, roleTotal] = await Promise.all([
+  const [recruiterRows, roles, recent, runs, completed, ownBotMessages, roleTotal] = await Promise.all([
     recruiterLanguageRows(prisma, thread.id, accountThreadIds),
     global
       ? prisma.recruitingRole.findMany({
@@ -418,11 +449,11 @@ export async function loadWorkingState(
       select: { threadId: true, payload: true, createdAt: true },
     }),
     global
-      ? prisma.event.findMany({
-          where: { threadId: thread.id, type: "agent.tool.called" },
+      ? prisma.message.findMany({
+          where: { threadId: thread.id, role: "bot" },
           orderBy: { seq: "desc" },
-          take: HANDOFF_CALLS,
-          select: { payload: true },
+          take: ROLE_CARD_MESSAGES,
+          select: { blocks: true },
         })
       : [],
     global ? prisma.recruitingRole.count({ where: openRecruitingRoles(scope) }) : 0,
@@ -448,17 +479,12 @@ export async function loadWorkingState(
 
   if (global) {
     let focusId: string | undefined;
-    const roleById = new Map(roles.map((role) => [role.id, role]));
-    const lastHanded = handoffs
-      .map((event) => (event.payload ?? {}) as Record<string, unknown>)
-      .filter((payload) => payload.name === "delegate_to_role")
-      .map((payload) => (typeof payload.roleId === "string" ? payload.roleId : undefined))
-      .find((id): id is string => Boolean(id && roleById.has(id)));
-    if (lastHanded) {
+    const focus = await lastRoleCard(prisma, scope, ownBotMessages);
+    if (focus) {
       lines.push(
-        `- This conversation last handed work to "${roleById.get(lastHanded)?.title}" (roleId ${lastHanded}).`,
+        `- This conversation last opened, or handed work to, "${focus.name}" (${focus.roleId ? `roleId ${focus.roleId}` : `groupId ${focus.groupId}, no saved role yet`}).`,
       );
-      focusId = lastHanded;
+      focusId = focus.roleId;
     }
     // Feedback-round 11-16: Kruit spent 30 s resolving the people the recruiter turned down
     // before handing off, though the team gets only the recruiter's words while a round waits.
@@ -622,7 +648,8 @@ export async function loadWorkingState(
       const threadId = group.thread?.id ?? "";
       lines.push(
         `- ${[
-          role?.title || group.name,
+          // The conversation's name, as the recruiter sees it: two roles' saved titles can be the same.
+          group.name || role?.title,
           role ? `roleId ${role.id}` : `groupId ${group.id}, no saved role yet`,
           role ? `${role._count.candidates} people saved` : undefined,
           roundLine(roleId ? roundOf.get(roleId) : undefined, now),
