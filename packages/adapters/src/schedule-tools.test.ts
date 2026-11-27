@@ -422,12 +422,24 @@ describe("filterBuiltinToolsForThread", () => {
       "delegate_to_role",
       "stop_work",
       "read_memory",
+      "recruiting_feedback",
     ]);
     expect(names("role-group")).not.toContain("delegate_to_role");
     expect(names("role-group")).not.toContain("start_role");
     expect(names("role-group")).toContain("recruiting_scheduling");
     expect(names("role-group")).toContain("handoff_to_bot");
     expect(names(null)).not.toContain("handoff_to_bot");
+  });
+  it("offers the main chat recruiting_feedback for cross-role preferences only", () => {
+    const feedback = builtinAgentTools.find((tool) => tool.name === "recruiting_feedback")!;
+    const [global] = filterBuiltinToolsForThread([feedback], "recruiting-global-abc");
+    const schema = JSON.stringify(global!.inputSchema);
+    expect(schema).toContain('"const":"preference"');
+    expect(schema).not.toMatch(/"const":"(role|round|candidate)"/);
+    expect(global!.description).toContain('target:"preference"');
+    expect(global!.description).not.toContain('operation:"hold"');
+    const [inRole] = filterBuiltinToolsForThread([feedback], "role-group");
+    expect(inRole).toBe(feedback);
   });
   const tools = [
     { name: "handoff_to_bot" },

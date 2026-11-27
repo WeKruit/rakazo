@@ -17,6 +17,7 @@ import {
 } from "@rakazo/core";
 import type { PrismaClient, Routine, ThreadEvents } from "@rakazo/db";
 import { IsolationError, Prisma, scoped } from "@rakazo/db";
+import { RECRUITING_PREFERENCE_TEXT } from "./builtin-tools.js";
 
 export { isOneShotRoutineCron, ONCE_ROUTINE_CRON };
 
@@ -45,6 +46,7 @@ export function filterBuiltinToolsForRun<T extends { name: string }>(
  */
 const ACCOUNT_WIDE_TOOLS: ReadonlySet<string> = new Set([
   "recruiting_candidates",
+  "recruiting_feedback",
   "start_role",
   "delegate_to_role",
   "stop_work",
@@ -80,7 +82,9 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
   groupId: string | null | undefined,
 ): T[] {
   if (groupId?.startsWith("recruiting-global-"))
-    return tools.filter((tool) => ACCOUNT_WIDE_TOOLS.has(tool.name));
+    return tools
+      .filter((tool) => ACCOUNT_WIDE_TOOLS.has(tool.name))
+      .map((tool) => (tool.name === "recruiting_feedback" ? preferencesOnly(tool) : tool));
   return tools.filter(
     (tool) =>
       (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
@@ -92,6 +96,24 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
       tool.name !== "start_role",
   );
 }
+
+const PREFERENCES_ONLY_LEAD =
+  "Save the recruiter's explicit reusable recruiting preferences, which hold across all their roles. Feedback on a role's people or rounds, and its requirements, are given in that role's conversation (delegate_to_role). Use direct human wording; inferred or ambiguous intent needs ask_user. ";
+
+/** The main chat's recruiting_feedback: a preference across roles, never a role's feedback. */
+function preferencesOnly<T extends { name: string }>(tool: T): T {
+  const schema = (tool as { inputSchema?: Record<string, unknown> }).inputSchema;
+  if (!schema || !Array.isArray(schema.oneOf)) return tool;
+  const variants = (
+    schema.oneOf as Array<{ properties?: { target?: { const?: unknown } } }>
+  ).filter((variant) => !ROLE_FEEDBACK_TARGETS.has(String(variant.properties?.target?.const)));
+  return {
+    ...tool,
+    description: PREFERENCES_ONLY_LEAD + RECRUITING_PREFERENCE_TEXT,
+    inputSchema: { ...schema, oneOf: variants },
+  };
+}
+const ROLE_FEEDBACK_TARGETS: ReadonlySet<string> = new Set(["role", "round", "candidate"]);
 
 type ScheduleUnit = "minutes" | "hours" | "days" | "seconds";
 
