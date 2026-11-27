@@ -59,29 +59,6 @@ export function criteriaAssessment(
     .join("\n");
 }
 
-/**
- * The grade of a person no search graded (a quick search returns none), in the search's own grade
- * words, read off the judge's verdicts so the grade and the lines under the person cannot disagree
- * (11-26: asked as a question of its own, the judge said Strong for 17 of 26 people it had also
- * judged partial or not met on a requirement).
- */
-export function gradeOf(
-  criteria: ReadonlyArray<{ level: string; avoid?: boolean }>,
-): string | undefined {
-  const words = criteria
-    .filter((item) => !item.avoid || item.level === "opposite")
-    .map((item) => ASSESSED[item.level as keyof typeof ASSESSED] ?? "Unknown");
-  if (!words.length) return undefined;
-  if (words.includes("Gap")) return "Partial";
-  if (words.every((word) => word === "Met")) return "Strong";
-  // Promising is the search's word for most requirements shown and none contradicted. Staging
-  // 11-26: with every person short of a full match called Promising, people meeting one
-  // requirement of four counted as found and filled the next round.
-  return words.filter((word) => word === "Met").length * 2 > words.length
-    ? "Promising"
-    : "Uncertain";
-}
-
 /** A place tag as people read it: "there_before" is "there before". */
 const placeWords = (tag: string) => tag.replace(/_/g, " ");
 
@@ -260,15 +237,13 @@ export async function checkPeopleCriteria(
               };
             },
           );
-          const grade = gradeOf(criteria);
           entry.check = {
             requirementsRevision: role.revision,
             criteria,
+            // The verdicts explain a person; only the search grades one (P2).
             ...(typeof tier === "string" && typeof score === "number"
               ? { match_tier: tier, match_score: score }
-              : grade
-                ? { match_tier: grade }
-                : {}),
+              : {}),
           };
           entry.row.requirements_assessment = criteriaAssessment(entry.check.criteria);
           const place = entry.check.criteria.find((item) => item.place)?.place;

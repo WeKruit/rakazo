@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { JudgeSettings, typeSafeJudge } from "./judge.js";
-import { criteriaAssessment, gradeOf } from "./recruiting-criteria-check.js";
+import { criteriaAssessment } from "./recruiting-criteria-check.js";
 
 const answer = (body: unknown, status = 200) =>
   vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -164,18 +164,6 @@ describe("JudgeSettings", () => {
       apiKey: "good",
       languageUrl: "https://check.example/",
     });
-  });
-
-  it("grades a person from the verdicts, so the grade agrees with the lines", () => {
-    const of = (...levels: string[]) => gradeOf(levels.map((level) => ({ level })));
-    expect(of("strong", "strong")).toBe("Strong");
-    expect(of("strong", "strong", "medium")).toBe("Promising");
-    expect(of("strong", "medium", "weak", "medium")).toBe("Uncertain");
-    expect(of("strong", "strong", "opposite")).toBe("Partial");
-    expect(of("strong", "silent", "silent")).toBe("Uncertain");
-    expect(of()).toBeUndefined();
-    // A turned-down reason counts only when the profile shows it.
-    expect(gradeOf([{ level: "strong" }, { level: "strong", avoid: true }])).toBe("Strong");
   });
 
   it("writes the verdicts as the assessment lines Results reads", () => {
