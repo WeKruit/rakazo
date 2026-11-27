@@ -5,19 +5,18 @@ import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   AGENT_RUN_FIND_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
-  agentRunSchemaForAgent,
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
-  excludeFoundPeople,
-  limitPeopleSearch,
   lookedUpContacts,
   prepareAgentRun,
+  profileLookupArgs,
   projectRecruitingCandidateReport,
   recordAgentRunCost,
   requireFullEnrichJobOwnership,
   requireRoleForPeopleSearch,
   savedContactLookups,
+  searchSchemaForAgent,
 } from "./recruiting-research.js";
 import { receiptQuery, receiptScope } from "./testing/receipt-query.js";
 
@@ -180,77 +179,50 @@ describe("people-search agent runs", () => {
     });
     const check = (db: unknown, tool: string, args: Record<string, unknown>) =>
       requireRoleForPeopleSearch(db as never, actor, server, tool, args);
-    const people = { category: "people", query: "Senior SRE Austin" };
-    await expect(check(inChat("role-abc"), "web_search_advanced_exa", people)).rejects.toThrow(
+    const people = { query: "Senior SRE Austin" };
+    await expect(check(inChat("role-abc"), "agent_run", people)).rejects.toThrow(
       /recruiting_role create/,
     );
     // A saved role, a company search, reading a running agent run, or another chat go ahead.
-    await expect(
-      check(inChat("role-abc", "role-1"), "web_search_advanced_exa", people),
-    ).resolves.toBeUndefined();
+    await expect(check(inChat("role-abc", "role-1"), "agent_run", people)).resolves.toBeUndefined();
     await expect(
       check(inChat("role-abc"), "web_search_exa", { query: "Austin SaaS companies" }),
     ).resolves.toBeUndefined();
     await expect(check(inChat("role-abc"), "agent_run", { runId: "r1" })).resolves.toBeUndefined();
-    await expect(
-      check(inChat("team-x"), "web_search_advanced_exa", people),
-    ).resolves.toBeUndefined();
+    await expect(check(inChat("team-x"), "agent_run", people)).resolves.toBeUndefined();
   });
 
-  it("asks each quick people search for at most ten people", async () => {
-    // Long-search-finishes 11-15: four searches of 25 saved 64 people for a request of 20.
-    const limit = (args: Record<string, unknown>, to = server) =>
-      Promise.resolve(limitPeopleSearch(to, "web_search_advanced_exa", args));
-    await expect(limit({ category: "people", numResults: 25 })).resolves.toMatchObject({
-      numResults: 10,
-    });
-    await expect(limit({ category: "people" })).resolves.toMatchObject({ numResults: 10 });
-    await expect(limit({ category: "people", numResults: 5 })).resolves.toMatchObject({
-      numResults: 5,
-    });
-    // The profiles' full text comes back with the people; one person's lookup keeps its size.
-    await expect(limit({ category: "people" })).resolves.toMatchObject({ textMaxCharacters: 6000 });
-    await expect(
-      limit({
-        category: "people",
-        query: "https://www.linkedin.com/in/someone",
-        textMaxCharacters: 300,
-      }),
-    ).resolves.toMatchObject({ textMaxCharacters: 300 });
-    // Other searches and other servers are left as they are.
-    const company = { category: "company", numResults: 25 };
-    await expect(limit(company)).resolves.toBe(company);
-    const people = { category: "people", numResults: 25 };
-    await expect(limit(people, { ...server, endpoint: "https://example.com/mcp" })).resolves.toBe(
-      people,
-    );
-  });
-
-  it("leaves the role's saved people out of a quick people search", async () => {
-    // Plays of 11-25: 50–80% of each later search's rows were people an earlier one had saved.
-    const db = (roleId: string | null) => ({
-      run: {
-        findFirst: vi.fn(async () => ({
-          threadId: "t",
-          thread: { activeRecruitingRoleId: roleId },
-        })),
+  it("finds people only through the agent run: the web search has no people index for the agent", () => {
+    // Staging 9be9b522: ten people found through that index reached Results with no grade.
+    const schema = {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        category: { type: "string", enum: ["company", "people", "news"] },
       },
-      recruitingCandidateOccurrence: {
-        findMany: vi.fn(async () => [{ name: "Saved One" }, { name: " " }, { name: "Saved Two" }]),
+    };
+    expect(searchSchemaForAgent(server, "web_search_advanced_exa", schema)).toEqual({
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        category: { type: "string", enum: ["company", "news"] },
       },
     });
-    const people = { category: "people", query: "q", excludeText: ["Saved One", "Given"] };
-    await expect(
-      excludeFoundPeople(db("role-1") as never, actor, server, "web_search_advanced_exa", people),
-    ).resolves.toEqual({ ...people, excludeText: ["Saved One", "Given", "Saved Two"] });
-    // No role, another kind of search: sent as asked.
-    await expect(
-      excludeFoundPeople(db(null) as never, actor, server, "web_search_advanced_exa", people),
-    ).resolves.toBe(people);
-    const company = { category: "company", query: "q" };
-    await expect(
-      excludeFoundPeople(db("role-1") as never, actor, server, "web_search_advanced_exa", company),
-    ).resolves.toBe(company);
+    // One person's profile lookup reads that index, picked by the server.
+    const lookup = { query: "https://www.linkedin.com/in/someone", numResults: 1 };
+    expect(profileLookupArgs(server, "web_search_advanced_exa", lookup)).toEqual({
+      ...lookup,
+      category: "people",
+    });
+    const company = { query: "Austin SaaS companies", category: "company" };
+    expect(profileLookupArgs(server, "web_search_advanced_exa", company)).toBe(company);
+    expect(
+      profileLookupArgs(
+        { ...server, endpoint: "https://example.com/mcp" },
+        "web_search_advanced_exa",
+        lookup,
+      ),
+    ).toBe(lookup);
   });
 
   it("offers the agent only the options a run keeps: no own format, no people to grade, no ultra", async () => {
@@ -269,7 +241,7 @@ describe("people-search agent runs", () => {
       },
       required: ["query", "outputSchema"],
     };
-    expect(agentRunSchemaForAgent(server, "agent_run", schema)).toEqual({
+    expect(searchSchemaForAgent(server, "agent_run", schema)).toEqual({
       type: "object",
       properties: {
         query: { type: "string" },
@@ -278,7 +250,7 @@ describe("people-search agent runs", () => {
       },
       required: ["query"],
     });
-    expect(agentRunSchemaForAgent(server, "web_search_exa", schema)).toBe(schema);
+    expect(searchSchemaForAgent(server, "web_search_exa", schema)).toBe(schema);
     // People sent to be graded anyway are left out: a run finds and grades in one go.
     const people = [{ name: "Saved", linkedin_url: "https://www.linkedin.com/in/saved-person" }];
     const prepared = await prepare(fixture(null), {
