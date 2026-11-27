@@ -3317,6 +3317,68 @@ const looseRecord = (value: unknown): value is LooseRecord =>
 const looseArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /**
+ * A citation of a message the recruiter did not write in this conversation (a made-up or
+ * mistyped id, or the note that handed their words to this team) cites the recruiter's latest
+ * own message instead, as a plain locator, so a save does not fail on it. Staging 11-27: the
+ * latest "user" message was the hand-off note, so citing it, or any unknown id, was refused six
+ * times in one run as not the recruiter's; a preference save in the main conversation was
+ * refused the same way for an id that did not exist.
+ */
+export async function citeRecruiterMessages<T>(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+  args: T,
+): Promise<T> {
+  const messageIds = new Set<string>();
+  const messageOf = (value: unknown) => {
+    const anchor = looseRecord(value) ? value.anchor : undefined;
+    return looseRecord(anchor) && anchor.kind === "message" && typeof anchor.messageId === "string"
+      ? anchor.messageId
+      : null;
+  };
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(collect);
+    else if (looseRecord(value)) {
+      const id = messageOf(value);
+      if (id) messageIds.add(id);
+      Object.values(value).forEach(collect);
+    }
+  };
+  collect(args);
+  if (!messageIds.size) return args;
+  const [present, recent] = await Promise.all([
+    prisma.message.findMany({
+      where: { id: { in: [...messageIds] }, threadId },
+      include: humanMessageInclude,
+    }),
+    prisma.message.findMany({
+      where: { threadId, role: "user", botId: null },
+      orderBy: { seq: "desc" },
+      take: 30,
+      include: humanMessageInclude,
+    }),
+  ]);
+  const known = new Set(present.filter(isNativeHumanMessage).map((message) => message.id));
+  const latest = recent.find(isNativeHumanMessage);
+  const repoint = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(repoint);
+    if (!looseRecord(value)) return value;
+    const record = Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, repoint(item)]),
+    );
+    const id = messageOf(value);
+    if (!id || known.has(id) || !latest) return record;
+    getLogger().warn("recruiting.source.repaired", { reason: "message_not_recruiters" });
+    const { quote: _quote, ...rest } = record;
+    return {
+      ...rest,
+      anchor: { kind: "message", messageId: latest.id, locator: "blocks[0].text" },
+    };
+  };
+  return repoint(args) as T;
+}
+
+/**
  * Fill a role save from the server's own records before it is checked, so a value the model
  * copied imperfectly never rejects the save. Ownership is unchanged: every artifact, message and
  * role read here is scoped to the actor, and the save still runs every isolation check.
@@ -3423,59 +3485,7 @@ export async function fillRecruitingRoleArgs(
     return receipt && record.kind === "original_material" ? { ...filled, ...receipt } : filled;
   };
   let filled = fill(args) as LooseRecord;
-  // A citation of a message the recruiter did not write in this conversation (a made-up or
-  // mistyped id, or the note that handed their words to this team) cites the recruiter's latest
-  // own message instead, as a plain locator, so the save does not fail on it. Staging 11-27:
-  // the latest "user" message was the hand-off note, so citing it, or any unknown id, was refused
-  // six times in one run as not the recruiter's.
-  const messageIds = new Set<string>();
-  const messageOf = (value: unknown) => {
-    const anchor = looseRecord(value) ? value.anchor : undefined;
-    return looseRecord(anchor) && anchor.kind === "message" && typeof anchor.messageId === "string"
-      ? anchor.messageId
-      : null;
-  };
-  const collectMessages = (value: unknown): void => {
-    if (Array.isArray(value)) value.forEach(collectMessages);
-    else if (looseRecord(value)) {
-      const id = messageOf(value);
-      if (id) messageIds.add(id);
-      Object.values(value).forEach(collectMessages);
-    }
-  };
-  collectMessages(filled);
-  if (messageIds.size && thread) {
-    const [present, recent] = await Promise.all([
-      prisma.message.findMany({
-        where: { id: { in: [...messageIds] }, threadId: context.threadId },
-        include: humanMessageInclude,
-      }),
-      prisma.message.findMany({
-        where: { threadId: context.threadId, role: "user", botId: null },
-        orderBy: { seq: "desc" },
-        take: 30,
-        include: humanMessageInclude,
-      }),
-    ]);
-    const known = new Set(present.filter(isNativeHumanMessage).map((message) => message.id));
-    const latest = recent.find(isNativeHumanMessage);
-    const repoint = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map(repoint);
-      if (!looseRecord(value)) return value;
-      const record = Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, repoint(item)]),
-      );
-      const id = messageOf(value);
-      if (!id || known.has(id) || !latest) return record;
-      getLogger().warn("recruiting.source.repaired", { reason: "message_not_recruiters" });
-      const { quote: _quote, ...rest } = record;
-      return {
-        ...rest,
-        anchor: { kind: "message", messageId: latest.id, locator: "blocks[0].text" },
-      };
-    };
-    filled = repoint(filled) as LooseRecord;
-  }
+  if (thread) filled = await citeRecruiterMessages(prisma, context.threadId, filled);
   if (
     (filled.operation === "update" || filled.operation === "revise") &&
     thread?.activeRecruitingRoleId
