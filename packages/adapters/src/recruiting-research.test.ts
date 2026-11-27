@@ -15,8 +15,10 @@ import {
   recordAgentRunCost,
   requireFullEnrichJobOwnership,
   requireRoleForPeopleSearch,
+  SEARCH_RETURNED_NOBODY,
   savedContactLookups,
   searchSchemaForAgent,
+  searchThatFoundNobody,
 } from "./recruiting-research.js";
 import { receiptQuery, receiptScope } from "./testing/receipt-query.js";
 
@@ -223,6 +225,21 @@ describe("people-search agent runs", () => {
         lookup,
       ),
     ).toBe(lookup);
+  });
+
+  it("tells the agent what to ask next when a finished search returned nobody", () => {
+    // Plays 11-27: eight searches asked for fully verified people only and each returned no one.
+    const finished = (people: unknown[], status = "completed") => {
+      const body = { id: "agent_run_1", status, output: { structured: { people } } };
+      return { content: [{ type: "text", text: JSON.stringify(body) }], structuredContent: body };
+    };
+    expect(searchThatFoundNobody(finished([]), server.endpoint)).toMatchObject({
+      people: [],
+      note: SEARCH_RETURNED_NOBODY,
+    });
+    const one = { name: "Ada Fake", linkedin_url: "https://www.linkedin.com/in/ada-fake" };
+    expect(searchThatFoundNobody(finished([one]), server.endpoint)).toBeNull();
+    expect(searchThatFoundNobody(finished([], "running"), server.endpoint)).toBeNull();
   });
 
   it("offers the agent only the options a run keeps: no own format, no people to grade, no ultra", async () => {
