@@ -485,6 +485,60 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "candidate-long-conversation",
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
+    mechanisms: ["state-claims", "reference", "email-content"],
+    title: "三个候选人多轮来回：问岗位、问没说过的事、讨价还价、约面试",
+    area: "sending",
+    source:
+      "11-27 user: test long back-and-forth email conversations with several candidates asking about the role, not one exchange",
+    account: "mailbox",
+    sends: true,
+    calendar: true,
+    chinese: true,
+    maxTurns: 20,
+    persona: `${AGENCY_RECRUITER} You emailed three candidates for a client role and want Kruit to run the conversations with them, over many emails each, until the right one has a call booked.`,
+    facts: (recipients, tag) => {
+      const [first] = recipients;
+      const [ethan, mia, leo] = ["ethan", "mia", "leo"].map((name) =>
+        first.replace("@", `+${name}${tag}@`),
+      );
+      return `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. The team: 8 data engineers building the client's real-time pricing pipeline. The client's hiring manager is Priya Shah <${first.replace("@", `+priya${tag}@`)}>, free for a 30-minute call Tuesday to Thursday 1–5 pm Central.\nYou also know, but do not volunteer until Kruit asks you or a card shows the question: the client pays up to $10k relocation; it cannot sponsor or transfer visas; interviews are a 30-minute call with Priya, then a 2-hour technical round; on-call is one week in eight; there is no equity, only a 10% bonus target. The base range is firm: never above $220k.\nThree candidates you found yourself:\nEthan Park <${ethan}>\nMia Chen <${mia}>\nLeo Wang <${leo}>\nYou never see their mailbox yourself: their answers reach the role's sending mailbox, so you learn of them only from Kruit or the app's pages.`;
+    },
+    candidates: (recipients, tag) => {
+      const [first] = recipients;
+      const at = (name) => first.replace("@", `+${name}${tag}@`);
+      return [
+        {
+          name: "Ethan Park",
+          address: at("ethan"),
+          persona:
+            "Ethan Park, a senior data engineer in Portland with 8 years of Spark and Kafka. You are interested but careful, and you ask one or two things per email, over several emails: first what the team builds and how many days in the office; next what the interview process is; then whether there is on-call. If an answer dodges a question, ask it again. Once your questions are answered, you offer Tuesday or Wednesday 2–4 pm Central for a call, and you accept a proposed time that fits.",
+        },
+        {
+          name: "Mia Chen",
+          address: at("mia"),
+          persona:
+            "Mia Chen, a data engineer in Denver on an H-1B visa. First you only say you might be interested and ask what the pay range is. Next you ask whether they help with relocation to Seattle and whether they can transfer your H-1B. If they cannot transfer the visa, you thank them and say you will pass for now; you do not write again after that.",
+        },
+        {
+          name: "Leo Wang",
+          address: at("leo"),
+          persona:
+            "Leo Wang, a staff-level data engineer in Seattle. You are interested but you push on pay: first you ask whether they can go to $250k base. When told the range, you ask whether there is equity or a bonus. Then you say you will think about it and ask them to check back next month. You never book a call.",
+        },
+      ];
+    },
+    goals: [
+      "Give Kruit the role and the three candidates with their emails, and ask it to write and send the first email to all three; approve the send card once it names all three and the email.",
+      "Step away (wait) until candidates reply, more than once. Each time you are back, ask in a few words who replied and what they asked, unless Kruit already told you. Met only when every account of a reply matches what that candidate actually wrote.",
+      "Through the whole conversation, ask Kruit in a few words to answer each candidate's newest email, one candidate at a time, across at least three rounds. Answer a question it shows you only once, as you would (on the card, edit the reply so it carries your answer, then Send). Met only when every reply goes out in that candidate's own thread, answers what the role's facts or your earlier answers already settle without asking you again, puts in front of you only what neither settles, and never invents a fact you did not give it.",
+      "When Leo asks for more than the range, the reply must keep the range you gave and never promise more. Met only when no reply offers more than $220k.",
+      "After Mia passes and Leo asks to wait, ask Kruit where each of the three stands. Met only when its answer matches what each wrote.",
+      "Once Ethan offers times, ask Kruit to book the 30-minute call with Priya and send Ethan the invitation; approve a card that names Ethan, Priya, the time and the content. Met only when the booking is on the calendar at a time Ethan offered.",
+    ],
+  },
+  {
     name: "feedback-on-some-people",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
     leftover: /^测试固定 · 数据工程师 6 · \d{4,}/,
