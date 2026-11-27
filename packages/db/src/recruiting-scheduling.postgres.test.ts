@@ -8,6 +8,7 @@ import { createRecruitingRole, openVerifiedRecruitingCrmWorkspace } from "./recr
 import {
   bindRecruitingSchedulingOperation,
   createRecruitingSchedulingPlan,
+  googleEventArguments,
   loadVerifiedRecruitingSchedulingPlan,
   prepareRecruitingSchedulingPlan,
 } from "./recruiting-scheduling.js";
@@ -335,6 +336,76 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     expect(plan.calendar).toEqual(input.calendar);
     const { email: _, ...nameless } = person;
     await expect(prepare(nameless)).rejects.toThrow(/candidate.email/);
+  });
+  // 11-27 play: a second Google plan for the same candidate and time failed on every booking
+  // ("Approval arguments must contain only JSON values"): Google plans have no event type.
+  it("replaces an unanswered Google booking with a newer plan's", async () => {
+    const google = await prisma.mcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        slug: "google-calendar",
+        name: "Google Calendar",
+        transport: "http",
+        endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
+      },
+    });
+    const made: string[] = [];
+    try {
+      await prisma.botMcpServer.create({
+        data: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          serverId: google.id,
+          botId: identity.botId,
+          allowAllTools: true,
+        },
+      });
+      const start = new Date(input.calendar.start).toISOString();
+      const end = new Date(input.calendar.end).toISOString();
+      const free = await effect(
+        google.id,
+        "suggest_time",
+        { startTime: start, endTime: end, durationMinutes: 30 },
+        { timeSlots: [{ start: { dateTime: start }, end: { dateTime: end } }] },
+      );
+      made.push(free.id);
+      const calendar = {
+        provider: "google_calendar" as const,
+        sourceId: google.id,
+        sourceRevision: 1,
+        availabilityEffectId: free.id,
+        start,
+        end,
+        lengthInMinutes: 30,
+      };
+      const book = async (interviewer: typeof input.interviewer) => {
+        const plan = await createRecruitingSchedulingPlan(prisma, actor, {
+          ...input,
+          calendar,
+          interviewer,
+        });
+        const created = await effect(google.id, "create_event", googleEventArguments(plan));
+        made.push(plan.id, created.id);
+        await bindRecruitingSchedulingOperation(prisma, actor, {
+          threadId: input.threadId,
+          planId: plan.id,
+          operation: "book",
+          effectId: created.id,
+        });
+        return created;
+      };
+      const first = await book(input.interviewer);
+      await book({ name: "Priya", email: "priya@example.test", timeZone: "America/Chicago" });
+      expect(
+        (await prisma.externalEffect.findUniqueOrThrow({ where: { id: first.id } })).status,
+      ).toBe("denied");
+    } finally {
+      // Later tests read the conversation's newest calendar read; this one's calendar is gone.
+      await prisma.externalEffect.deleteMany({ where: { id: { in: made } } });
+      await prisma.botMcpServer.deleteMany({ where: { serverId: google.id } });
+      await prisma.mcpServer.delete({ where: { id: google.id } });
+    }
   });
   it("accepts a local Instantly mail read under the official server's narrow grant", async () => {
     await prisma.botMcpServer.updateMany({
