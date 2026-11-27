@@ -269,6 +269,7 @@ async function cardsOpen(rpc) {
           messageId: message.id,
           send: Boolean(block.approvalEffectId),
           connect: Boolean(block.connection),
+          serverId: block.connection?.serverId,
           text,
           options: (block.actions ?? []).map((action) => action.label),
           actions: block.actions ?? [],
@@ -491,7 +492,7 @@ const describeCards = (cards) =>
     ? cards
         .map(
           (card, i) =>
-            `[${i}] in "${card.chat}"${card.send ? " SEND CONFIRMATION" : card.connect ? " ACCOUNT CONNECTION (a sign-in you cannot do here; say what you would do instead)" : ""}: ${card.text}${card.options.length ? `\n    options: ${card.options.join(" | ")}` : ""}${card.schema ? `\n    form fields: ${Object.keys(card.schema.properties ?? {}).join(", ")} (type your answer)` : ""}`,
+            `[${i}] in "${card.chat}"${card.send ? " SEND CONFIRMATION" : card.connect ? " ACCOUNT CONNECTION (answer_card presses Connect and signs you in)" : ""}: ${card.text}${card.options.length ? `\n    options: ${card.options.join(" | ")}` : ""}${card.schema ? `\n    form fields: ${Object.keys(card.schema.properties ?? {}).join(", ")} (type your answer)` : ""}`,
         )
         .join("\n")
     : "(none)";
@@ -616,28 +617,10 @@ async function connectCalendar(rpc) {
       transport: "streamable_http",
       endpoint,
     }));
-  const started = await rpc("mcp/oauth/begin", {
-    serverId: server.id,
-    redirectUri: `${ORIGIN}/mcp/oauth/callback`,
-  });
-  if (started.status === "authorization_required") {
-    const consent = await fetch(`${BASE}/__e2e/calendar`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ authorizationUrl: started.authorizationUrl }),
-    });
-    if (!consent.ok)
-      throw new InfraError(
-        `this environment has no emulated calendar (${consent.status}); booking journeys play on pnpm sim:branch`,
-      );
-    const back = new URL((await consent.json()).redirect);
-    await rpc("mcp/oauth/complete", {
-      sessionId: back.searchParams.get("state"),
-      code: back.searchParams.get("code"),
-      state: back.searchParams.get("state"),
-    });
-  }
-  await rpc("bootstrap", {});
+  if (!(await signIn(rpc, server.id)))
+    throw new InfraError(
+      "this environment has no emulated calendar; booking journeys play on pnpm sim:branch",
+    );
   // Sign-in setup grants the calendar in the background; the first turn needs it.
   for (const deadline = Date.now() + 60_000; Date.now() < deadline; await sleep(2_000))
     if (
@@ -647,6 +630,34 @@ async function connectCalendar(rpc) {
     )
       return;
   throw new InfraError("the connected calendar was not given to the booking agents");
+}
+
+/**
+ * Signs in to one connector the way the app's Connect does: its sign-in started by the backend,
+ * consent given on the branch backend's emulated consent screen, the code handed back as the
+ * callback page does. False where this environment has no emulated consent for it (staging).
+ */
+async function signIn(rpc, serverId) {
+  const started = await rpc("mcp/oauth/begin", {
+    serverId,
+    redirectUri: `${ORIGIN}/mcp/oauth/callback`,
+  });
+  if (started.status === "authorization_required") {
+    const consent = await fetch(`${BASE}/__e2e/calendar`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authorizationUrl: started.authorizationUrl }),
+    });
+    if (!consent.ok) return false;
+    const back = new URL((await consent.json()).redirect);
+    await rpc("mcp/oauth/complete", {
+      sessionId: back.searchParams.get("state"),
+      code: back.searchParams.get("code"),
+      state: back.searchParams.get("state"),
+    });
+  }
+  await rpc("bootstrap", {});
+  return true;
 }
 
 async function outreachMail() {
@@ -834,11 +845,20 @@ async function play(journey, label, owner, mailbox, out) {
         break;
       }
       const card = cards[move.card];
-      // A sign-in card takes no typed answer; the recruiter's words go to that chat as a message,
-      // as a real recruiter would type them under the card.
-      if (card?.connect && move.action === "answer_card" && move.text) {
-        move.action = "say";
-        move.chat = card.chat;
+      // A sign-in card is pressed, as a recruiter does (user 11-27: tests assume the card is
+      // pressed): the sign-in is made where this environment can make it, and the card then
+      // answers "connected" as the app's Connect does. Where it cannot (staging), the play ends at
+      // the press, so nothing after it is judged as Kruit's.
+      if (card?.connect && move.action === "answer_card") {
+        log(`${label}: recruiter presses Connect on "${card.text.slice(0, 60)}"`);
+        if (!(await signIn(rpc, card.serverId).catch(() => false))) {
+          turn.limit =
+            "pressed Connect; this test environment cannot complete a sign-in, so the play ends here";
+          log(`${label}:   ${turn.limit}`);
+          turns.push(turn);
+          break;
+        }
+        move.text = "connected";
       }
       let waitForKruit = true;
       if (move.action === "wait" && waited >= 2) {
@@ -906,11 +926,6 @@ async function play(journey, label, owner, mailbox, out) {
         waitForKruit = Boolean(await newestBotMessageAfter(rpc, at));
         turn.screen = await ui.view(2_500);
       } else if (card && ["answer_card", "approve_send", "deny_send"].includes(move.action)) {
-        if (card.connect) {
-          turn.invalid = "a sign-in card cannot be answered by the simulated recruiter";
-          turns.push(turn);
-          continue;
-        }
         // A reply draft's only typed answer is its text box: an answer typed on it is the
         // recruiter's edited reply, sent with the card's Send, never a discard.
         const editedOnCard = card.mailReply && move.action === "answer_card" && move.text?.trim();
@@ -948,7 +963,8 @@ async function play(journey, label, owner, mailbox, out) {
           turn.underCard = true;
         }
         let pressed = value === null;
-        if (ui && !pressed) {
+        // The page's Connect opens a sign-in window; the sign-in above already made it.
+        if (ui && !pressed && !card.connect) {
           await ui.openChat(card.groupId);
           const action = card.actions.find((item) => item.id === (card.mailReply ? answer : value));
           pressed = action
@@ -1165,12 +1181,12 @@ async function answered(rpc, card) {
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
 - truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no" (check a claim about named people's grades against the role's grades, not against how much fit changed: someone graded in an earlier step is already in fit), and so is saying people were found, added or saved for a role when its "saved" count after the reply is lower. The records are read after the step settles, while a search may still be adding and grading people: a progress count lower than the record (57 graded so far, the record later showing 73) does not contradict it; a count above the record, or a finished total the record does not reach, does. The records hold only the campaigns the test could read: when a claim is about a campaign, role or person missing from them, it is "unknown", never "no"; a candidate name you cannot find in the records is not "invented" (saved search results are not in the records). Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send can take up to about 15 minutes to go out (a healthy mailbox started in about two on staging): within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
-- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat (Kruit says the same thing again unprompted or posts a message twice; answering a new or overlapping question with the same fact is not a repeat; a list posted once in the role's own chat and copied once into Kruit's chat, where the recruiter asked, is one showing, and only the same thing twice within one chat is a repeat), wrong language (Kruit's own words not in the recruiter's language; an email or template written for candidates is meant to be English and is never wrong language), false claim, internal jargon (anything in Kruit's own words a recruiter would not understand or should not see: a supplier or service name such as Exa, Instantly, FullEnrich, ContactOut, Modal or Supabase; an internal helper's name such as Sourcer, Reviewer, Main or a sub-agent; internal mechanics such as a handoff, queue, worker, session, retry, timeout, tool, task or record ID, or a gate code. Gmail, Calendar, LinkedIn, the app's own pages and the role's own chat by its role name are the recruiter's words, and quoted candidate profiles are not Kruit's own words), fake block (Kruit hands the work back or stalls without a result when it could act: "want me to…?"/"要不要我…？" about something the recruiter already asked for, "I couldn't check"/"我查不了" without saying what it tried, or "I've asked the team to check"/"已让团队核实" with no result later in the conversation; a confirmation before an outside send and a plain "cannot" for something it has no way to do are not fake blocks), slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), broken email (an email or template Kruit offers as ready contains a question to the recruiter, a "[...]" fill-in or any {{...}} field other than the merge fields the sender fills for each person ({{firstName}}, {{lastName}}, {{companyName}}, {{personalization}}), or a sign-off with no name), did not act, asked again (only when Kruit actually asks a question or shows a card that asks about, or asks to confirm, something the recruiter's JD or messages already stated: location, work mode or commute when a city and mode are given, a stated number of years, including asking for a cap on it, or a language requirement when nothing implies a second language; a reply that asks nothing is never asked again; quote where the recruiter said it, and if you cannot, it is not asked again), screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
+- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat (Kruit says the same thing again unprompted or posts a message twice; answering a new or overlapping question with the same fact is not a repeat; a list posted once in the role's own chat and copied once into Kruit's chat, where the recruiter asked, is one showing, and only the same thing twice within one chat is a repeat), wrong language (Kruit's own words not in the recruiter's language; an email or template written for candidates is meant to be English and is never wrong language), false claim, internal jargon (anything in Kruit's own words a recruiter would not understand or should not see: a supplier or service name such as Exa, Instantly, FullEnrich, ContactOut, Modal or Supabase; an internal helper's name such as Sourcer, Reviewer, Main or a sub-agent; internal mechanics such as a handoff, queue, worker, session, retry, timeout, tool, task or record ID, or a gate code. Gmail, Calendar, LinkedIn, the app's own pages and the role's own chat by its role name are the recruiter's words, and quoted candidate profiles are not Kruit's own words), fake block (Kruit hands the work back or stalls without a result when it could act: "want me to…?"/"要不要我…？" about something the recruiter already asked for, "I couldn't check"/"我查不了" without saying what it tried, or "I've asked the team to check"/"已让团队核实" with no result later in the conversation; a confirmation before an outside send and a plain "cannot" for something it has no way to do are not fake blocks), slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), broken email (an email or template Kruit offers as ready contains a question to the recruiter, a "[...]" fill-in or any {{...}} field other than the merge fields the sender fills for each person ({{firstName}}, {{lastName}}, {{companyName}}, {{personalization}}), a sign-off with no name, or a line about what the recruiter is still doing instead of what the candidate needs, such as "I'm checking my calendar and will follow up"), did not act, asked again (only when Kruit actually asks a question or shows a card that asks about, or asks to confirm, something the recruiter's JD or messages already stated: location, work mode or commute when a city and mode are given, a stated number of years, including asking for a cap on it, or a language requirement when nothing implies a second language; a reply that asks nothing is never asked again; quote where the recruiter said it, and if you cannot, it is not asked again), screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
 - gap: only for a move that asked for people and got fewer new people than asked (the move says both numbers): "said" when Kruit said how many are missing, or that none fit, and why, and asked what to change or whether to go on; else "not said". null for every other move.
 - Check every move against the records and against what the page showed after Kruit's reply ("screen"): a claim the screen contradicts (a count, a status, "saved", "sent", a place to click that is not there) is truthful "no". Do not give the benefit of the doubt: an answer that is only "I'll check" or "on it" with nothing after it is "did not act".
 A new role searches first (the product's order): its first people come straight from the JD as written, and at most one short question about something the recruiter left open comes beside them, never before them. Opening the role and saying its team is searching counts as answered when the role chat then shows that search; no question is expected, a question about something already said is "asked again", and a second question is "wordy". When the customer asks for something else (a template, an email), doing it is the right move and no role question is expected.
 What goes out is what was on the card the customer approved and what the records show, never a card the customer denied: a denied card's email was not queued or sent, so a reply that describes the approved email truthfully is "yes" even when a denied card said otherwise. Two send cards with different emails shown at once is its own problem ("other"), not a false claim.
-The simulated customer cannot complete an account sign-in (connecting Gmail or a calendar), so "I can't click that here" about a connection card is the test's limit, not Kruit's dead end. Judge whether Kruit showed the card, said in one step what connecting does, and kept the work for afterwards.
+A connection card (connecting Gmail or a calendar) is pressed by the customer: after the press the account is connected, or, where the test cannot sign in, the play ends right there. Showing that card when the work needs the connection is the right move, not a dead end.
 When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; compare a number only with records of the same scope, so a total labelled for the account or all time is not wrong because one role shows less; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for. A "wait" move asks nothing: judge "answered" by whether Kruit told the customer, unasked, about what happened meanwhile (a candidate's reply); saying nothing after a reply arrived is "did not act".
 Quote what each fault breaks. A correctness fault (false claim, asked again, broken email, did not act, a candidate who misses a requirement) needs, in the note, the exact sentence it breaks, quoted from these rules, the recruiter's messages or the JD; if you cannot quote one, it is not a fault and costs nothing. A candidate requirement is only something the JD or the recruiter says the person must have or be (skills, years, the place they must work from, a language). Terms the employer offers, such as the pay range, office days, benefits or the start date, are never candidate requirements: a person or list that does not show them misses nothing. Each fake block costs at least 3 points of the score.
 Judge an email or template only against what the customer actually told Kruit in the conversation: a draft without details the customer never gave (a role they only named, a salary they never said) is the honest result, not a fault and not a lower score.
@@ -1188,7 +1204,7 @@ async function judge(journey, result, requests = []) {
   const moves = result.turns
     .map(
       (turn) =>
-        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.editedReply ? " (the recruiter rewrote the reply draft to this text and sent it: every fact in it is the recruiter's own)" : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.candidateMail?.length ? `\n  candidates replied after this move: ${turn.candidateMail.map((m) => `${m.name} at ${m.at.slice(11, 19)}: "${m.text}"`).join(" | ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}${turn.screen.fields?.length ? `\n    text boxes: ${turn.screen.fields.join(" | ")}` : ""}` : ""}`,
+        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${askedLine(requests, turn)}${turn.guard ? ` (${turn.guard})` : ""}${turn.editedReply ? " (the recruiter rewrote the reply draft to this text and sent it: every fact in it is the recruiter's own)" : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.limit ? ` (${turn.limit})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.candidateMail?.length ? `\n  candidates replied after this move: ${turn.candidateMail.map((m) => `${m.name} at ${m.at.slice(11, 19)}: "${m.text}"`).join(" | ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}${turn.screen.fields?.length ? `\n    text boxes: ${turn.screen.fields.join(" | ")}` : ""}` : ""}`,
     )
     .join("\n");
   const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? `This account is a test fixture that earlier plays used too: on a page, roles, campaigns, totals and messages from those plays (older or same-named entries) are the test's leftovers, not Kruit's fault.${result.accountName ? ` The account's own name is "${result.accountName}": an email signed with it, or with the sending mailbox's name, is signed by the sender, not a placeholder.` : ""}\n\n` : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}${result.mail ? `\n\nEvery email between the role's mailbox and the candidates (the mail service's own record; ue_type 1 = sent to the candidate, 2 = the candidate's reply, 3 = the recruiter's reply to the candidate):\n${result.mail.map((email) => `${String(email.timestamp_created).slice(11, 19)} ${email.ue_type === 2 ? `from ${email.lead}` : `to ${email.lead}`}: "${email.subject}" ${String(email.body?.text ?? "").slice(0, 600)}`).join("\n")}\nThe candidates' replies are real mail the recruiter's inbox received: Kruit saying nobody replied after a reply arrived, or misquoting one, is a false claim.` : ""}`;
