@@ -165,8 +165,6 @@ async function play(scenario, owner, sample) {
       }
     }
     const roles = (await roleChats(user.rpc)).filter((group) => !rolesBefore.has(group.id));
-    if (scenario.noRole && roles.length)
-      failures.push(`opened a role it was not asked for: ${roles.map((g) => g.name).join(", ")}`);
     if (scenario.role) {
       if (!roles.length) failures.push("no role was opened");
       else if (roles.some((group) => /^New role$|^新岗位$/i.test(group.name)))

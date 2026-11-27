@@ -328,7 +328,7 @@ export function conversationChecks(messages, { recruiter } = {}) {
       );
   }
   const lastAt = messages.findLastIndex(
-    (message) => message.role !== "user" && message.text.trim(),
+    (message) => message.role !== "user" && (message.text.trim() || message.roleCard),
   );
   const last = messages[lastAt];
   const lastAsk = messages.findLastIndex((message) => message.role === "user");

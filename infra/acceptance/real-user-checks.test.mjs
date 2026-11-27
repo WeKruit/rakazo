@@ -222,6 +222,14 @@ test("the main chat's role card within seconds is its first reply", () => {
   assert(!failures.some((failure) => failure.startsWith("slow first reply")));
 });
 
+test("a main chat that ends on the role card has replied", () => {
+  const failures = conversationChecks([
+    { ...user("继续吧"), at: at(0) },
+    { ...bot(""), roleCard: true, at: at(5) },
+  ]);
+  assert(!failures.some((failure) => failure.startsWith("no reply")));
+});
+
 test("a quick line within seconds passes the first-reply check", () => {
   const failures = conversationChecks([
     { ...user("对了，远程也可以，不一定要在西雅图"), at: at(0) },
