@@ -218,6 +218,7 @@ import {
   campaignSendCardHash,
   canvasOf,
   changeCanvas,
+  citeRecruiterMessages,
   claimRecruitingCrmImport,
   claimRecruitingReply,
   completedRunBlocks,
@@ -5033,6 +5034,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The server fills what it knows about the thread's role and names a person the recruiter
           // mentioned by their saved key, so feedback saves on the first call.
           let feedbackArgsError: string | undefined;
+          if (name === "recruiting_feedback")
+            args = await citeRecruiterMessages(deps.prisma, thread.id, args);
           const feedbackRoleId =
             name === "recruiting_feedback" && args.target !== "preference"
               ? await recruitingFeedbackRole(deps.prisma, {
