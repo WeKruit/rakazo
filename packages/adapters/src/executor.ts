@@ -8959,18 +8959,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (researchInput.data.operation === "calibration_round") {
                 if (!applied || !claimedEffect) throw new IsolationError();
                 // The agent gives only the number asked; where the request started is data.
-                const roundAsked = researchInput.data.asked;
                 let roundTargetMemo: Promise<number | undefined> | undefined;
                 const roundTargetAt = (roleId: string, counted: number) =>
-                  (roundTargetMemo ??= roundAsked
-                    ? requestTarget(
-                        deps.prisma,
-                        { roleId, userId: run.userId, spaceId: run.spaceId },
-                        thread.id,
-                        roundAsked,
-                        counted,
-                      )
-                    : Promise.resolve(undefined));
+                  (roundTargetMemo ??= requestTarget(
+                    deps.prisma,
+                    { roleId, userId: run.userId, spaceId: run.spaceId },
+                    counted,
+                  ));
                 // Internal record keeping: the round and this native effect complete together.
                 const round = await saveRecruitingCalibrationRound(
                   deps.prisma,

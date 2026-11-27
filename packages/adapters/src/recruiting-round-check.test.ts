@@ -58,128 +58,107 @@ vi.mock("@rakazo/db", async (original) => ({
 
 describe("requestTarget", () => {
   const role = { roleId: "role", userId: "u", spaceId: "s" };
-  const at = (minute: number) => new Date(Date.UTC(2026, 10, 27, 12, minute));
-  // Each round: the minute it was shown, the number its request asked for, the people in it.
-  const db = (rounds: Array<[number, number, string[]]>, wrote: number[] = []) =>
+  // Each round: the number it asked for (undefined when none), the people in it.
+  const db = (rounds: Array<[number | undefined, string[]]>) =>
     ({
       recruitingCalibrationRound: {
         findMany: async () =>
-          rounds.map(([minute, , candidateKeys], index) => ({
-            effectId: `e${index}`,
-            candidateKeys,
-            createdAt: at(minute),
-          })),
+          rounds.map(([, candidateKeys], index) => ({ effectId: `e${index}`, candidateKeys })),
       },
       externalEffect: {
         findMany: async () =>
-          rounds.map(([, asked], index) => ({
+          rounds.map(([asked], index) => ({
             id: `e${index}`,
-            request: { asked },
+            request: asked === undefined ? {} : { asked },
           })),
-      },
-      message: {
-        findMany: async () => wrote.map((minute) => ({ createdAt: at(minute) })),
       },
     }) as unknown as PrismaClient;
   const people = (prefix: string, n: number) =>
     Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+  const notAFit = (...keys: string[]) =>
+    marks.mockResolvedValue(keys.map((candidateKey) => ({ candidateKey, mark: "not a fit" })));
 
   it("starts a request where the count stood when the recruiter asked", async () => {
-    marks.mockResolvedValue([]);
+    notAFit();
     // Nine counted before, "3 more", first round of the request shows one: met at twelve.
     await expect(
       requestTarget(
         db([
-          [0, 10, people("a", 9)],
-          [5, 3, ["b"]],
+          [10, people("a", 9)],
+          [3, ["b"]],
         ]),
         role,
-        "t",
-        3,
         10,
       ),
     ).resolves.toBe(12);
     // Someone delivered in this request and turned down since no longer counts either way.
-    marks.mockResolvedValue([{ candidateKey: "b", mark: "not a fit" }]);
+    notAFit("b");
     await expect(
       requestTarget(
         db([
-          [0, 10, people("a", 9)],
-          [5, 3, ["b"]],
-          [6, 3, ["c"]],
+          [10, people("a", 9)],
+          [3, ["b"]],
+          [undefined, ["c"]],
         ]),
         role,
-        "t",
-        3,
         10,
       ),
     ).resolves.toBe(12);
+    // No round has asked for a number: there is no target.
+    await expect(requestTarget(db([[undefined, ["a"]]]), role, 1)).resolves.toBeUndefined();
   });
 
-  it("keeps the target when the recruiter writes before the request is met", async () => {
-    marks.mockResolvedValue([]);
-    // Find 100: 52 shown, "进度？" at minute 7, two more rounds: still 100.
-    const rounds: Array<[number, number, string[]]> = [
-      [0, 100, people("a", 10)],
-      [3, 100, people("b", 42)],
-      [8, 100, people("c", 10)],
+  it("keeps the target through later rounds, given the number again or not", async () => {
+    notAFit();
+    // Find 100: rounds after "进度？" give no number or 100 again: still 100.
+    const rounds: Array<[number | undefined, string[]]> = [
+      [100, people("a", 10)],
+      [undefined, people("b", 42)],
+      [100, people("c", 10)],
     ];
-    await expect(requestTarget(db(rounds, [7]), role, "t", 100, 62)).resolves.toBe(100);
+    await expect(requestTarget(db(rounds), role, 62)).resolves.toBe(100);
   });
 
-  it("starts a new request for a different number or after a met one the recruiter followed up", async () => {
-    marks.mockResolvedValue([]);
+  it("fills turn-downs when feedback names no number", async () => {
+    // fosp s178: ten shown, three turned down, the next round gives no number: fill the three.
+    notAFit("a0", "a1", "a2");
+    await expect(
+      requestTarget(
+        db([
+          [10, people("a", 10)],
+          [undefined, people("b", 3)],
+        ]),
+        role,
+        10,
+      ),
+    ).resolves.toBe(10);
+  });
+
+  it("starts a new request for a new number or the same number after a request was shown", async () => {
+    notAFit();
     // "补足48人" with 52 shown: met at 100.
     await expect(
       requestTarget(
-        db(
-          [
-            [0, 100, people("a", 52)],
-            [9, 48, people("b", 10)],
-          ],
-          [8],
-        ),
+        db([
+          [100, people("a", 52)],
+          [48, people("b", 10)],
+        ]),
         role,
-        "t",
-        48,
         62,
       ),
     ).resolves.toBe(100);
     // Ten shown, three turned down, "再找10个": ten more than the seven counted.
-    marks.mockResolvedValue(
-      ["a0", "a1", "a2"].map((candidateKey) => ({
-        candidateKey,
-        mark: "not a fit",
-      })),
-    );
-    await expect(
-      requestTarget(
-        db(
-          [
-            [0, 10, people("a", 10)],
-            [9, 10, people("b", 10)],
-          ],
-          [8],
-        ),
-        role,
-        "t",
-        10,
-        17,
-      ),
-    ).resolves.toBe(17);
-    // The same three turned down with no new message: the request fills the three.
+    notAFit("a0", "a1", "a2");
     await expect(
       requestTarget(
         db([
-          [0, 10, people("a", 10)],
-          [9, 10, people("b", 3)],
+          [10, people("a", 10)],
+          [10, people("b", 10)],
         ]),
         role,
-        "t",
-        10,
-        10,
+        17,
       ),
-    ).resolves.toBe(10);
+    ).resolves.toBe(17);
   });
 });
 
