@@ -2556,6 +2556,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           userId: run.userId,
           botId: bot.id,
           runId,
+          accountWideConversation: Boolean(thread.groupId?.startsWith("recruiting-global-")),
           screenLeaseId: screenLeaseIdForRun(computerLease, runId, fence),
           signal: runAbortController.signal,
           connectedConnections: connectedPlugins.map((row) => ({

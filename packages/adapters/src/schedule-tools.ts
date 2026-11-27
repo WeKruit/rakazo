@@ -52,7 +52,9 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
         ((tool.name !== "delegate_to_role" && tool.name !== "start_role") || global) &&
         // A booking plan belongs to a role's conversation, so a candidate's booking is handed
         // there (delegate_to_role); offered here, it always failed (branch play 11-27).
-        !(global && tool.name === "recruiting_scheduling"),
+        !(global && tool.name === "recruiting_scheduling") &&
+        // A candidate's reply belongs there too: it answers in the role's own mail thread.
+        !(global && tool.name === "recruiting_reply"),
     );
 }
 
