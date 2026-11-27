@@ -139,6 +139,47 @@ export async function requestCounts(
 }
 
 /**
+ * The count a request for `asked` people is met at: what was counted when the recruiter asked,
+ * plus the number they asked for. The request starts at the newest message written to the
+ * conversation, so rounds recorded since then are its own deliveries and everything before is
+ * where it started. The agent gives only the number asked; branch play 11-27: it added the two
+ * itself, gave 10 where 12 was meant, and a round one person short said nothing was missing.
+ */
+export async function requestTarget(
+  prisma: PrismaClient,
+  role: { roleId: string; userId: string; spaceId: string },
+  threadId: string,
+  asked: number,
+  counted: number,
+): Promise<number> {
+  const newest = await prisma.message.findFirst({
+    where: { threadId, role: "user" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  const [since, marks] = await Promise.all([
+    prisma.recruitingCalibrationRound.findMany({
+      where: {
+        roleId: role.roleId,
+        status: "shown",
+        ...(newest ? { createdAt: { gt: newest.createdAt } } : {}),
+      },
+      select: { candidateKeys: true },
+    }),
+    readRecruitingResultsMarks(
+      prisma,
+      { userId: role.userId, spaceId: role.spaceId, email: "", isDeploymentOwner: false },
+      { roleId: role.roleId },
+    ),
+  ]);
+  const notAFit = new Set(
+    marks.filter((mark) => mark.mark === "not a fit").map((mark) => mark.candidateKey),
+  );
+  const delivered = new Set(since.flatMap((round) => round.candidateKeys));
+  return counted - [...delivered].filter((key) => !notAFit.has(key)).length + asked;
+}
+
+/**
  * The running count under a round's list, in the server's own words, so the number the recruiter
  * reads is the one the request is measured by and nobody retypes it. A role's first list needs no
  * such line: its heading is the count.
@@ -174,7 +215,7 @@ export function roundStillMissing(counted: number, target?: number) {
   return stillMissing
     ? {
         stillMissing,
-        requestOpen: `The recruiter's request is ${stillMissing} short and the list says so: search on in this step and record the next round with the same target. Never end the turn on this list.`,
+        requestOpen: `The recruiter's request is ${stillMissing} short and the list says so: search on in this step and record the next round with the same asked. Never end the turn on this list.`,
       }
     : {};
 }
