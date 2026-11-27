@@ -648,12 +648,12 @@ export const JOURNEYS = [
     waitMs: 25 * 60_000,
     persona: `${AGENCY_RECRUITER} You give Kruit one search and go to a meeting; you only want to hear back when it is done.`,
     facts: () =>
-      "The role: Senior Site Reliability Engineer, Austin TX on site, 6+ years, Kubernetes and Terraform in production, base $170k–$210k. Ask for at most 20 people. Answer Kruit's first question in one message, then leave it alone.",
+      "The role: Senior Site Reliability Engineer, Austin TX on site, 6+ years, Kubernetes and Terraform in production, base $170k–$210k. Ask for 20 people. Answer Kruit's first question in one message, then leave it alone.",
     goals: [
-      "Give Kruit the role and ask it to find up to 20 people and tell you when it is done.",
+      "Give Kruit the role and ask it to find 20 people and tell you when it is done.",
       "Answer what Kruit needs in one message and then wait without nudging.",
       "Check the job finished with people shown (not stopped midway, not a promise), and ask how many it found.",
-      "Open the role's Results page and check the count matches what Kruit said.",
+      "Open the role's Results page and check that the people shown to you there match what Kruit said. The role may save more people than it shows (P5: the count is the people shown); a saved total above 20 is not a fault when Kruit says which number is which.",
     ],
   },
   {
