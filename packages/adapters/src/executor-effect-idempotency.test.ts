@@ -627,11 +627,42 @@ describe("asynchronous mailbox receipt projection", () => {
   );
 });
 
+describe("one booking route", () => {
+  it.each([
+    ["create_booking", "https://mcp.cal.com/mcp?toolsets=bookings"],
+    ["create_event", "https://calendarmcp.googleapis.com/mcp/v1"],
+  ])("refuses a calendar's own %s outside a booking plan, with no card", async (operation, endpoint) => {
+    const f = fixture(`direct-${operation}`);
+    const tool = {
+      name: `mcp__calendar__${operation}`,
+      description: operation,
+      readOnly: false,
+      inputSchema: { type: "object" },
+      route: { connectorId: "mcp", resourceId: "cal-1", resourceRevision: 3, toolName: operation },
+    };
+    Object.assign(f.prisma, {
+      botMcpServer: {
+        findFirst: vi.fn(async () => ({
+          allowAllTools: true,
+          allowedTools: [],
+          server: { id: "cal-1", revision: 3, endpoint },
+        })),
+      },
+    });
+    f.connector.discoverTools.mockResolvedValue([tool]);
+    f.setCalls([{ name: tool.name, args: { start: "2026-10-23T15:00:00Z" }, executionId: "x" }]);
+    await f.run();
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.effects).toHaveLength(0);
+    expect(f.results[0]).toEqual({ error: expect.stringContaining("recruiting_scheduling") });
+  });
+});
+
 describe("native Cal.com booking approvals", () => {
   it.each(
     (["direct", "catalog"] as const).flatMap((mode) =>
       [
-        "create_booking",
         "reschedule_booking",
         "cancel_booking",
         "confirm_booking",
@@ -717,7 +748,7 @@ describe("native Cal.com booking approvals", () => {
       f.effects[0]!.status = "approved";
       f.setCalls([call({ ...original, start: "2026-10-24T15:00:00Z" }, "approved")]);
       await f.run();
-      if (["create_booking", "reschedule_booking", "cancel_booking"].includes(operation)) {
+      if (["reschedule_booking", "cancel_booking"].includes(operation)) {
         expect(f.connector.execute).not.toHaveBeenCalled();
         expect(f.effects[0]).toMatchObject({ status: "approved", request });
         expect(f.results).toContainEqual(
@@ -752,15 +783,15 @@ describe("a role team's card", () => {
     // turn, but only ask_user cards were copied to Kruit's chat, so the recruiter never saw them.
     const f = fixture("team-card-approval");
     const tool = {
-      name: "mcp__cal__create_booking",
-      description: "create_booking",
+      name: "mcp__cal__confirm_booking",
+      description: "confirm_booking",
       readOnly: true,
       inputSchema: { type: "object" },
       route: {
         connectorId: "mcp",
         resourceId: "cal-1",
         resourceRevision: 3,
-        toolName: "create_booking",
+        toolName: "confirm_booking",
       },
     };
     const delegating = vi.fn(async () => null);
@@ -769,7 +800,7 @@ describe("a role team's card", () => {
       botMcpServer: {
         findFirst: vi.fn(async () => ({
           allowAllTools: false,
-          allowedTools: ["create_booking"],
+          allowedTools: ["confirm_booking"],
           server: {
             id: "cal-1",
             revision: 3,
@@ -796,153 +827,6 @@ describe("a role team's card", () => {
         expect.objectContaining({ where: expect.objectContaining({ groupId: { not: null } }) }),
       ),
     );
-  });
-});
-
-describe("simulated scheduling approval chain", () => {
-  it("keeps slot offer, selected booking, and confirmation as separate exact once-only grants", async () => {
-    // Synthetic runtime/provider and persisted grants only: this is not candidate mail
-    // ingestion, the human answer API, provider acceptance, or Interview UI E2E.
-    const f = fixture("simulated-scheduling-chain");
-    const mail = {
-      name: "gmail_send_email",
-      description: "Send email",
-      readOnly: false,
-      inputSchema: { type: "object" },
-      route: { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
-    };
-    const booking = {
-      name: "mcp__cal__create_booking",
-      description: "Create booking",
-      readOnly: true,
-      inputSchema: { type: "object" },
-      route: {
-        connectorId: "mcp",
-        resourceId: "cal-1",
-        resourceRevision: 3,
-        toolName: "create_booking",
-      },
-    };
-    Object.assign(f.prisma, {
-      botMcpServer: {
-        findFirst: vi.fn(async () => ({
-          allowAllTools: false,
-          allowedTools: ["create_booking"],
-          server: {
-            id: "cal-1",
-            revision: 3,
-            endpoint: "https://mcp.cal.com/mcp?toolsets=bookings,availability",
-          },
-        })),
-      },
-    });
-    f.connector.discoverTools.mockResolvedValue([mail, booking]);
-    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-      { effect: "require_approval", matchKind: "tool", matchValue: mail.name },
-      { effect: "always_allow", matchKind: "tool", matchValue: booking.name },
-    ]);
-    f.connector.execute.mockImplementation(async function* (call) {
-      yield {
-        type: "result",
-        data:
-          call.route?.toolName === "create_booking"
-            ? { uid: "synthetic-booking", status: "accepted", ...call.args }
-            : { messageId: `synthetic-mail-${f.connector.execute.mock.calls.length}` },
-      };
-    });
-    const recipient = "candidate@example.test";
-    const timeZone = "America/New_York";
-    const slots = ["2026-10-26T14:00:00Z", "2026-10-26T15:00:00Z", "2026-10-27T14:00:00Z"];
-    // The runtime receives this synthetic selection; no inference/ingestion is claimed.
-    const selected = slots[1]!;
-    const stages = [
-      {
-        tool: mail,
-        args: {
-          to: recipient,
-          subject: "Interview times",
-          body: `Choose one (${timeZone}): ${slots.join(", ")}`,
-        },
-      },
-      {
-        tool: booking,
-        args: {
-          eventTypeId: 42,
-          start: selected,
-          attendee: { name: "Synthetic candidate", email: recipient, timeZone },
-        },
-      },
-      {
-        tool: mail,
-        args: {
-          to: recipient,
-          subject: "Interview confirmed",
-          body: `Confirmed ${selected} (${timeZone}); booking synthetic-booking.`,
-        },
-      },
-    ];
-    for (const [index, stage] of stages.entries()) {
-      const exactArgs = structuredClone(stage.args);
-      f.setCalls([{ name: stage.tool.name, args: exactArgs, executionId: `stage-${index}` }]);
-      await f.run();
-      // Earlier completed grants do not authorize the next outbound action.
-      expect(f.connector.execute).toHaveBeenCalledTimes(index);
-      expect(f.pauseRunForInput).toHaveBeenCalledTimes(index + 1);
-      expect(f.effects).toHaveLength(index + 1);
-      const card = f.pauseRunForInput.mock.calls[index]![0].blocks.at(-1)!;
-      expect(card).toMatchObject({
-        kind: "ask",
-        actions: [
-          { id: "allow", label: "Allow once" },
-          { id: "deny", label: "Deny" },
-        ],
-      });
-      const effect = f.effects[index]!;
-      const frozenRequest = structuredClone(effect.request);
-      expect(JSON.stringify(frozenRequest)).toContain(recipient);
-      expect(JSON.stringify(frozenRequest)).toContain(timeZone);
-      if (index === 1) expect(JSON.stringify(frozenRequest)).toContain(selected);
-      // Simulate the persisted human decision, matching this file's native Cal fixtures.
-      effect.status = "approved";
-      const changed =
-        index === 1
-          ? {
-              ...exactArgs,
-              start: slots[2],
-              attendee: { email: "other@example.test", timeZone: "UTC" },
-            }
-          : { ...exactArgs, to: "other@example.test", body: "Changed after approval" };
-      f.setCalls([{ name: stage.tool.name, args: changed, executionId: `approved-${index}` }]);
-      await f.run();
-      if (index === 1) {
-        expect(f.connector.execute).toHaveBeenCalledTimes(1);
-        expect(effect).toMatchObject({ status: "approved", request: frozenRequest });
-        expect(f.results).toContainEqual(
-          expect.objectContaining({ code: "CALENDAR_PREFLIGHT_UNAVAILABLE" }),
-        );
-        expect(
-          f.connector.execute.mock.calls.some(
-            ([call]) => call.route?.toolName === "create_booking",
-          ),
-        ).toBe(false);
-        return; // No confirmation may follow a booking that was never dispatched.
-      }
-      expect(f.connector.execute).toHaveBeenCalledTimes(index + 1);
-      expect(f.connector.execute).toHaveBeenLastCalledWith(
-        expect.objectContaining({ route: stage.tool.route, args: exactArgs }),
-        expect.anything(),
-      );
-      expect(effect).toMatchObject({ status: "completed", request: frozenRequest });
-      expect(effect.result).toBeDefined();
-      f.setCalls([{ name: stage.tool.name, args: exactArgs, executionId: `retry-${index}` }]);
-      await f.run();
-      expect(f.connector.execute).toHaveBeenCalledTimes(index + 1);
-      expect(f.effects).toHaveLength(index + 1);
-    }
-    expect(f.effects.every((effect) => effect.status === "completed")).toBe(true);
-    expect(
-      f.connector.execute.mock.calls.filter(([call]) => call.route?.toolName === "create_booking"),
-    ).toHaveLength(1);
   });
 });
 

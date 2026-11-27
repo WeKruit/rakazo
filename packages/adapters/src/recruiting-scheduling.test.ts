@@ -190,8 +190,8 @@ it("binds saved requests in review and confirmation while keeping guest booking 
   ).toThrow();
   const route = {
     connectorId: "mcp",
-    resourceId: plan.mailSourceId,
-    resourceRevision: plan.mailSourceRevision,
+    resourceId: plan.mailSourceId!,
+    resourceRevision: plan.mailSourceRevision!,
     toolName: "native_instantly_reply_to_email",
   };
   const args = {

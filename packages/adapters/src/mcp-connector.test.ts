@@ -2573,7 +2573,7 @@ describe("MCP connector session cache", () => {
   });
 
   it("keeps each agent's core work tools direct when the rest moves to the catalog", async () => {
-    const core = ["create_booking", "get_availability", "get_event_types", "cancel_booking"];
+    const core = ["get_availability", "get_event_types", "cancel_booking"];
     const state = {
       failNext: false,
       initializations: 0,
@@ -2582,7 +2582,7 @@ describe("MCP connector session cache", () => {
           name: `tool_${index}`,
           inputSchema: { type: "object" },
         })),
-        ...core.map((name) => ({ name, inputSchema: { type: "object" } })),
+        ...[...core, "create_booking"].map((name) => ({ name, inputSchema: { type: "object" } })),
       ],
     };
     vi.stubGlobal("fetch", mcpFetch(state));
@@ -2615,15 +2615,12 @@ describe("MCP connector session cache", () => {
       "connectors_load_tool",
       "connectors_execute_tool",
     ]);
-    // The catalog index no longer lists them, so a search never finds them twice.
-    expect(tools.find((tool) => tool.name === "connectors_search_tools")?.description).not.toMatch(
-      /create_booking/,
-    );
+    // A booking goes through recruiting_scheduling, so the calendar's own create is not direct.
+    expect(tools.map((tool) => tool.name)).not.toContain("mcp__demo__create_booking");
     // Kruit itself answers candidates and books from the conversation, so it lists those too.
     expect(
       (await discover({ name: "Main", spawnKey: "recruiting:u1:main" })).map((t) => t.name),
     ).toEqual([
-      "mcp__demo__create_booking",
       "mcp__demo__get_availability",
       "mcp__demo__cancel_booking",
       "connectors_search_tools",
