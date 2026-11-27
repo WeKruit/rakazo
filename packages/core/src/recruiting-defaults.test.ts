@@ -2,6 +2,7 @@ import { disabledBuiltinToolSet } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { SKILL_CATALOG_DESCRIPTION_MAX } from "./agent-skill.js";
 import {
+  accountWideSkill,
   creditEstimateNote,
   isChineseText,
   isEnglishText,
@@ -171,5 +172,14 @@ describe("screenLanguage", () => {
     expect(screenLanguage(undefined)).toBeUndefined();
     expect(replyLanguageNote("zh", screenLanguage("en"))).not.toContain("邮件序列");
     expect(replyLanguageNote("en", screenLanguage("zh-CN"))).toContain("邮件序列");
+  });
+});
+
+describe("accountWideSkill", () => {
+  it("lists only the account-wide recruiting skill there, and the user's own skills", () => {
+    // Staging handoff3: "Write an email or template" listed there had Kruit draft in the main chat.
+    const listed = RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name).filter(accountWideSkill);
+    expect(listed).toEqual(["Progress across roles"]);
+    expect(accountWideSkill("My weekly summary")).toBe(true);
   });
 });

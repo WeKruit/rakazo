@@ -83,6 +83,7 @@ import {
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
   ACTIVE_RUN_STATUSES,
+  accountWideSkill,
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
@@ -615,7 +616,12 @@ import {
   withoutShownBefore,
 } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
-import { keepProfileText, lookedUpContacts, mcpObject } from "./recruiting-research.js";
+import {
+  keepProfileText,
+  lookedUpContacts,
+  mcpObject,
+  searchThatFoundNobody,
+} from "./recruiting-research.js";
 import {
   assertSchedulingCall,
   SchedulingApprovalEvidenceSchema,
@@ -8135,6 +8141,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 !roleId
               )
                 return null;
+              const nobody = searchThatFoundNobody(returned, server.endpoint);
+              if (nobody) return nobody;
               // The step's own brief save lands first, so these people are judged on the
               // requirements it holds rather than on the role as it was a moment earlier.
               if (roleSavesInFlight.size)
@@ -11541,7 +11549,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const skillTools = skillAvailabilityFromTools(tools.map((tool) => tool.name));
         const skillSecrets = new Set(agentSecretRows.map((row) => row.name.toLowerCase()));
         const agentSkillsLine = formatSkillsCatalogInstruction(
-          agentSkills.map((skill) => ({
+          (thread.groupId?.startsWith("recruiting-global-")
+            ? agentSkills.filter((skill) => accountWideSkill(skill.name))
+            : agentSkills
+          ).map((skill) => ({
             ...skill,
             unavailable: missingSkillRequirement(skillRequirements(skill.content), {
               ...skillTools,

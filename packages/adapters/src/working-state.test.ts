@@ -5,7 +5,17 @@ import { isRolelessHomeTeam, loadWorkingState } from "./working-state.js";
 
 const now = Date.parse("2026-11-01T04:00:00Z");
 const scope = { spaceId: "s", userId: "u" };
-const globalThread = { id: "tg", groupId: "recruiting-global-abc", activeRecruitingRoleId: null };
+type ThreadFixture = { id: string; groupId: string; activeRecruitingRoleId: string | null };
+const globalThread: ThreadFixture = {
+  id: "tg",
+  groupId: "recruiting-global-abc",
+  activeRecruitingRoleId: null,
+};
+const roleThread: ThreadFixture = {
+  id: "t1",
+  groupId: "role-abc",
+  activeRecruitingRoleId: "role-1",
+};
 
 type Row = Record<string, unknown>;
 
@@ -530,7 +540,7 @@ describe("loadWorkingState", () => {
   // Gate ecebc59b, one-off-email: 「直接发吧」 got a going-ahead line and the Connect Gmail card
   // only 22 s later, so the first line read as if the email were going out.
   it("says the recruiter's own Gmail is not connected on an account that sends from it", async () => {
-    const card = (gmail: Row | null, creditLimit: number | null) =>
+    const card = (gmail: Row | null, creditLimit: number | null, thread = roleThread) =>
       loadWorkingState(
         {
           ...fakePrisma({ groups }),
@@ -538,7 +548,7 @@ describe("loadWorkingState", () => {
           mcpServer: { findFirst: vi.fn(async () => gmail) },
         } as never,
         scope,
-        globalThread,
+        thread,
         (t) => t,
         now,
       ).then((state) => state.text ?? "");
@@ -548,11 +558,15 @@ describe("loadWorkingState", () => {
     // said 「Gmail 尚未连接，邮件无法发出」 and a role run said it had no email connection at all.
     expect(await card(null, null)).not.toContain("Gmail: not connected");
     expect(await card(null, null)).toContain("outreach mailbox");
+    // Replay handoff4 11-27: told in Kruit's own conversation to write the email now, Kruit
+    // drafted there instead of handing it to the role, which says how its mail goes out.
+    expect(await card(null, 10_000, globalThread)).not.toContain("Gmail");
+    expect(await card(null, null, globalThread)).not.toContain("outreach mailbox");
   });
   // team-stuck 11-16: Kruit said "checking" and handed an interview to the team, which found the
   // missing calendar two minutes later; feedback-round 11-16: "34 found" came from an old report.
   it("says when no calendar is connected and reads each team's round from records", async () => {
-    const card = (server: Row | null, linked: Row | null) =>
+    const card = (server: Row | null, linked: Row | null, thread = globalThread) =>
       loadWorkingState(
         {
           ...fakePrisma({
@@ -587,18 +601,22 @@ describe("loadWorkingState", () => {
           connection: { findFirst: vi.fn(async () => linked) },
         } as never,
         scope,
-        globalThread,
+        thread,
         (t) => t,
         now,
       ).then((state) => state.text ?? "");
     const none = await card(null, null);
-    expect(none).toContain("calendar: none connected");
+    // Kruit's own conversation hands bookings over; the role's says what its calendar lacks.
+    expect(none).not.toContain("calendar");
     expect(none).toContain("12 people saved · round 2 shown in the role team's chat 5 min ago");
     expect(none).toContain("(Sourcer, 30 min ago; its counts may be older");
     // Staging 11-26: three people named without their role cost seven reads before the first line.
     expect(none).toContain("People in its latest round: Steven Choi, Wensong Jing");
-    expect(await card({ id: "gcal" }, null)).not.toContain("calendar: none connected");
-    expect(await card(null, { id: "composio-gcal" })).not.toContain("calendar: none connected");
+    expect(await card(null, null, roleThread)).toContain("calendar: none connected");
+    expect(await card({ id: "gcal" }, null, roleThread)).not.toContain("calendar: none connected");
+    expect(await card(null, { id: "composio-gcal" }, roleThread)).not.toContain(
+      "calendar: none connected",
+    );
   });
   // Gate 44c1ad44 team-has-no-email: Kruit answered from its own read with another person than
   // the team it had handed the email to, then said it had asked the team again.
