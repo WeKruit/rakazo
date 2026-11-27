@@ -85,3 +85,57 @@ export async function roleRequestMessage(
       : quoted;
   return input.brief.trim() ? `${quoted}\n\nKruit's brief:\n${input.brief}` : quoted;
 }
+
+/**
+ * The recruiter's newest words in a conversation, as they wrote them: their latest message, the
+ * words a request from Kruit's conversation carried, or their latest answer to a card there,
+ * whichever came last. Read from the records (who wrote it,
+ * when), never from what the words say. Play s165 11-27: a turn-down came as the answer to a
+ * card in the run that opened the role, so the lead's hand-off quoted the opening "找10人" as
+ * the request and the team searched for ten more.
+ */
+export async function newestRecruiterWords(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<string> {
+  const recent = await prisma.message.findMany({
+    where: { threadId },
+    orderBy: { seq: "desc" },
+    take: 30,
+    select: { role: true, blocks: true, createdAt: true, updatedAt: true },
+  });
+  let newest: { at: number; text: string } | undefined;
+  const consider = (at: Date, text: string | undefined) => {
+    const words = text?.trim();
+    if (words && (!newest || at.getTime() > newest.at)) newest = { at: at.getTime(), text: words };
+  };
+  for (const message of recent) {
+    const blocks = Array.isArray(message.blocks)
+      ? (message.blocks as Array<Record<string, unknown>>)
+      : [];
+    if (message.role === "user")
+      consider(
+        message.createdAt,
+        blocks
+          .map((block) =>
+            block?.kind === "text" && typeof block.text === "string"
+              ? block.text
+              : // A request handed over from Kruit's conversation carries the recruiter's words.
+                block?.kind === "bot_message_received" && typeof block.recruiterWords === "string"
+                ? block.recruiterWords
+                : "",
+          )
+          .filter(Boolean)
+          .join("\n"),
+      );
+    else
+      for (const block of blocks)
+        if (
+          block?.kind === "ask" &&
+          block.status === "answered" &&
+          typeof block.answer === "string"
+        )
+          consider(message.updatedAt, block.answer);
+  }
+  return newest?.text ?? "";
+}
