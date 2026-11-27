@@ -290,6 +290,38 @@ export function seenEmailIds(calls: readonly SavedCall[]): Set<string> {
   );
 }
 
+/**
+ * The names the recruiter gave the people this conversation emailed, by address, from the
+ * recipients of its own send calls ("Ada Lin <ada@…>" or a lead's first and last name): a reply
+ * is reported under the name on our record, never one the agent guesses.
+ */
+export function recipientNames(calls: readonly SavedCall[]): Map<string, string> {
+  const names = new Map<string, string>();
+  const add = (email: unknown, name: unknown) => {
+    if (typeof email !== "string" || typeof name !== "string" || !name.trim()) return;
+    const key = email.trim().toLowerCase();
+    if (!names.has(key)) names.set(key, name.trim());
+  };
+  // Calls come newest first, so a later correction of a name wins.
+  for (const call of calls)
+    for (const field of ["recipients", "to", "leads"]) {
+      const value = call.args[field];
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (typeof item === "string")
+          for (const parsed of addressparser(item)) add(parsed.address, parsed.name);
+        const lead = record(item);
+        if (lead)
+          add(
+            lead.email,
+            [lead.first_name ?? lead.firstName, lead.last_name ?? lead.lastName]
+              .filter((part) => typeof part === "string" && part.trim())
+              .join(" "),
+          );
+      }
+    }
+  return names;
+}
+
 /** The emails this conversation sent from the recruiter's own Gmail, by their saved receipts. */
 export async function gmailSends(
   prisma: PrismaClient,

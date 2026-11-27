@@ -597,3 +597,19 @@ describe("check-in queries", () => {
     }
   });
 });
+
+describe("recipientNames", () => {
+  it("names a reply's sender from the recipients this conversation emailed, newest send first", async () => {
+    const { recipientNames } = await import("./recruiting-checkin-mail.js");
+    const call = (args: Record<string, unknown>) =>
+      ({ route: { toolName: "native_instantly_ensure_role_campaign" }, args }) as never;
+    const names = recipientNames([
+      call({ recipients: ["Ada Lin <Ada@x.test>"] }),
+      call({ recipients: ["Ada Park <ada@x.test>", "ethan@x.test"] }),
+      call({ leads: [{ email: "mia@x.test", first_name: "Mia", last_name: "Chen" }] }),
+    ]);
+    expect(names.get("ada@x.test")).toBe("Ada Lin");
+    expect(names.has("ethan@x.test")).toBe(false);
+    expect(names.get("mia@x.test")).toBe("Mia Chen");
+  });
+});

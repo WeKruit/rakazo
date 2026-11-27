@@ -18,6 +18,7 @@ import {
   gmailRepliesSince,
   gmailSends,
   recentGmailSenders,
+  recipientNames,
   seenEmailIds,
 } from "./recruiting-checkin-mail.js";
 import type { RecruitingThreadTarget } from "./recruiting-reads.js";
@@ -432,7 +433,13 @@ export async function startRecruitingCheckin(
     complete: read.complete,
   });
   if (!left.length) return skipped("only automatic replies");
-  const prompt = recruitingCheckinPrompt(left, automatic.length);
+  const named = recipientNames(calls);
+  const prompt = recruitingCheckinPrompt(
+    left.map((reply) =>
+      reply.name ? reply : { ...reply, name: named.get(reply.email?.toLowerCase() ?? "") ?? null },
+    ),
+    automatic.length,
+  );
   const batch = createHash("sha256")
     .update(left.map((reply) => reply.id).join("\n"))
     .digest("hex")
