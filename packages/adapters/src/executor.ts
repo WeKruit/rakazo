@@ -7029,7 +7029,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 tool: name,
                 operation: args.operation,
                 error: error.name,
-                message: error.message,
+                // The server's own wording of the failed check (a place in the definition and a
+                // source id), and a schema refusal's place and code; never the model's values.
+                ...(error instanceof RecruitingPlaybookValidationError
+                  ? { check: error.message }
+                  : {}),
+                ...(error.name === "ZodError"
+                  ? {
+                      issues: (
+                        error as unknown as {
+                          issues: Array<{ code: string; path: PropertyKey[]; keys?: string[] }>;
+                        }
+                      ).issues
+                        .slice(0, 5)
+                        .map((issue) => ({ code: issue.code, path: issue.path, keys: issue.keys })),
+                    }
+                  : {}),
                 at: error.stack?.split("\n").slice(1, 4).join(" | "),
               });
             const retry =
