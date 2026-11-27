@@ -776,8 +776,10 @@ const DELEGATED_ANSWER_POLL_MS = 3_000;
  * message is taken here and its queued turn cancelled, so Kruit answers once, with the result,
  * instead of "已交给岗位" now and a relayed retelling later. fosp/fr 11-23 (s25, s26): 6 of 20
  * runs were failed for deferrals or relay talk while the round was being prepared. Ends early when
- * the recruiter writes, or when the team's round is posted here; after the timeout the answer
- * still comes back as a new message.
+ * the recruiter writes, when the team's round is posted here, or when the team's card is shown here
+ * for the recruiter to answer: the team then waits on them, as a subagent hands control back when
+ * it needs the person (branch play 11-27: Kruit sat 3 minutes behind a card shown at 49 s). After
+ * the timeout the answer still comes back as a new message.
  */
 export async function waitForDelegatedAnswer(
   prisma: PrismaClient,
@@ -791,10 +793,10 @@ export async function waitForDelegatedAnswer(
     pollMs?: number;
     userMessageWaiting?: () => Promise<boolean>;
   },
-): Promise<{ answer?: string; roundShown?: string } | undefined> {
+): Promise<{ answer?: string; roundShown?: string; cardShown?: true } | undefined> {
   const deadline = Date.now() + (input.timeoutMs ?? DELEGATED_ANSWER_WAIT_MS);
   for (;;) {
-    const [returned, round] = await Promise.all([
+    const [returned, round, card] = await Promise.all([
       prisma.message.findFirst({
         where: {
           threadId: input.threadId,
@@ -822,6 +824,15 @@ export async function waitForDelegatedAnswer(
           clientNonce: { startsWith: "delegated-round:" },
         },
         orderBy: { seq: "desc" },
+        select: { blocks: true },
+      }),
+      prisma.message.findFirst({
+        where: {
+          threadId: input.threadId,
+          role: "bot",
+          createdAt: { gte: input.since },
+          blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+        },
         select: { blocks: true },
       }),
     ]);
@@ -853,6 +864,12 @@ export async function waitForDelegatedAnswer(
       )?.text;
       if (taken && answer) return { answer, ...(round ? { roundShown: shownText(round) } : {}) };
     } else if (round) return { roundShown: shownText(round) };
+    else if (
+      (Array.isArray(card?.blocks) ? (card.blocks as MessageBlock[]) : []).some(
+        (block) => block.kind === "ask" && block.answerTarget,
+      )
+    )
+      return { cardShown: true };
     if (
       Date.now() >= deadline ||
       input.signal.aborted ||
@@ -868,7 +885,7 @@ export async function waitForDelegatedAnswer(
 
 /** Model-facing fields for delegate_to_role once its wait ends. */
 export function delegatedAnswerResult(
-  waited: { answer?: string; roundShown?: string } | undefined,
+  waited: { answer?: string; roundShown?: string; cardShown?: true } | undefined,
 ) {
   if (waited?.answer)
     return {
@@ -884,6 +901,10 @@ export function delegatedAnswerResult(
       // fosp 11-25 (s101): with nothing here on where the request stood, Kruit read its memory notes
       // and told the recruiter about "work.md" and its search tally.
       note: `${ROUND_SHOWN_ABOVE} The team is still on the request: when this round is fewer than the recruiter asked for, the team shows the rest as its next round or says itself what is missing, so promise no number. Answer whatever else the recruiter asked in this message, such as what changed in the search, in one line from this result and this conversation only, never from memory notes; what neither shows, the team answers in its own next message.`,
+    };
+  if (waited?.cardShown)
+    return {
+      note: "The team's card is shown above for the recruiter to answer; the team goes on once they do. Say nothing more about it.",
     };
   return {
     note: "The team is still working on it; its answer comes back here as a new message. Tell the recruiter in one line what the team is doing now, without promising a time.",

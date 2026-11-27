@@ -1587,4 +1587,23 @@ describe("waitForDelegatedAnswer", () => {
     } as unknown as PrismaClient;
     expect(await wait(round)).toEqual({ roundShown: "本轮 1 人：…" });
   });
+
+  // Branch play 11-27: the team's Connect card was shown here at 49 s and Kruit waited 3 more minutes.
+  it("ends when the team's card is shown here for the recruiter to answer", async () => {
+    const card = (answerTarget?: object) =>
+      ({
+        message: {
+          findFirst: vi.fn(async ({ where }: { where: { role: string; blocks?: unknown } }) =>
+            where.role === "bot" && where.blocks
+              ? { blocks: [{ kind: "ask", text: "Connect", status: "pending", answerTarget }] }
+              : null,
+          ),
+        },
+      }) as unknown as PrismaClient;
+    expect(await wait(card({ runId: "r", threadId: "t", messageId: "m" }))).toEqual({
+      cardShown: true,
+    });
+    // Kruit's own card is not the team's.
+    expect(await wait(card())).toBeUndefined();
+  });
 });

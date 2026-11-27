@@ -212,13 +212,8 @@ export function searchCatalog(
       description: entry.tool.description.slice(0, MAX_DESCRIPTION_LENGTH),
       readOnly: entry.tool.readOnly === true,
     }));
-  // team-stuck-tell-me 11-16: nothing connected could book the interview, and the turn asked
-  // the recruiter for times and emails instead of offering to connect the calendar.
-  return tools.length ? { tools } : { tools, hint: NOTHING_CONNECTED_HINT };
+  return { tools };
 }
-
-const NOTHING_CONNECTED_HINT =
-  "Nothing connected does this. If a service the user can connect would (their calendar, mailbox or CRM), call request_connection with that provider now; otherwise say plainly that it cannot be done here and what the user can do instead.";
 
 export function loadCatalogEntry(
   entries: CatalogEntry[],
