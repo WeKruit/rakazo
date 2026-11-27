@@ -49,6 +49,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   17: "8ad735f3f6ffe33efafa8105aacef93cbb5454fe0665ee9330fe2848507d24b8",
   // 18: optional openQuestions on a mail reply (the candidate's questions the recruiter never answered).
   18: "d5daefd350a8246a8171fef7019e2cf4b3aeab6107ce8458788bc980d01eea32",
+  // 19: a saved email read may carry no message (a read a candidate's reply woke).
+  19: "c6e572a87498808a1b0ef672441c29019e8ec7c7709093945e56d0a828eb0401",
 };
 
 const OLD_ROWS: unknown[] = [

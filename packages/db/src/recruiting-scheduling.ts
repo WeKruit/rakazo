@@ -781,7 +781,9 @@ export async function prepareRecruitingSchedulingPlan(
       const native = call(row.request);
       if (
         !mail &&
-        row.run.sourceMessageId &&
+        // A read the recruiter's message started, or one a candidate's reply woke (the
+        // recruiter's choice, 11-27): the booking card still confirms what goes out.
+        (row.run.sourceMessageId || row.run.trigger === "recruiting_checkin") &&
         ["get_email", "native_instantly_get_email"].includes(native.route.toolName) &&
         native.args.id === input.emailId
       ) {
@@ -826,7 +828,7 @@ export async function prepareRecruitingSchedulingPlan(
       campaignId: text(email.campaign_id),
       eaccount: text(email.eaccount),
       savedRead: {
-        messageId: mail.run.sourceMessageId!,
+        messageId: mail.run.sourceMessageId,
         linkedRunId: mail.runId,
         effectId: mail.id,
       },

@@ -1529,7 +1529,12 @@ const CorrespondenceOriginFields = {
   sourceId: Id.max(200),
   providerMessageId: Id.max(1600),
   savedRead: z
-    .strictObject({ messageId: Id.max(200), linkedRunId: Id.max(200), effectId: Id.max(200) })
+    // No message for a read a candidate's reply woke: nobody wrote one.
+    .strictObject({
+      messageId: Id.max(200).nullable(),
+      linkedRunId: Id.max(200),
+      effectId: Id.max(200),
+    })
     .nullable(),
 };
 const CorrespondenceCrmContext = z
