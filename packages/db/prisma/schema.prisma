@@ -658,6 +658,7 @@ model Message {
   @@index([threadId, seq])
   @@index([replyToMessageId])
   @@index([createdAt])
+  @@index([runId, role, seq])
   @@map("messages")
 }
 
@@ -707,6 +708,7 @@ model Event {
   @@id([threadId, seq])
   @@index([spaceId, createdAt])
   @@index([runId, type, seq])
+  @@index([spaceId, type, createdAt])
   @@map("events")
 }
 
@@ -790,6 +792,7 @@ model Run {
   @@index([sourceMessageId])
   @@index([threadId, status, createdAt])
   @@index([routineId])
+  @@index([spaceId, userId, createdAt])
   @@map("runs")
 }
 
