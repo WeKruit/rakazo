@@ -85,6 +85,7 @@ import { addressTypedInConversation } from "./named-address.js";
 import { ownMailboxSendRefusal, recordOwnMailboxSend } from "./own-mailbox-sends.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
+  agentRunSchemaForAgent,
   excludeFoundPeople,
   limitPeopleSearch,
   lookedUpContacts,
@@ -1148,7 +1149,11 @@ export class McpConnector implements ConnectorProvider {
               inputSchema:
                 tool.name === "reply_to_email" && assignment.server.endpoint === INSTANTLY_MCP
                   ? withOpenQuestions(tool.inputSchema as Record<string, unknown>)
-                  : (tool.inputSchema as Record<string, unknown>),
+                  : agentRunSchemaForAgent(
+                      assignment.server,
+                      tool.name,
+                      tool.inputSchema as Record<string, unknown>,
+                    ),
               route: {
                 connectorId: "mcp",
                 resourceId: assignment.serverId,

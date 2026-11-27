@@ -5,6 +5,7 @@ import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   AGENT_RUN_FIND_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
+  agentRunSchemaForAgent,
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
@@ -261,12 +262,35 @@ describe("people-search agent runs", () => {
     ).resolves.toBe(company);
   });
 
-  it("refuses people given to grade: a run finds and grades in one go", async () => {
-    const db = fixture();
+  it("offers the agent only the options a run keeps: no own format, no people to grade, no ultra", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        effort: { type: "string", enum: ["low", "auto", "ultra"] },
+        outputSchema: { type: "object" },
+        input: {
+          type: "object",
+          properties: { data: { type: "array" }, exclusion: { type: "array" } },
+          required: ["data"],
+        },
+      },
+      required: ["query", "outputSchema"],
+    };
+    expect(agentRunSchemaForAgent(server, "agent_run", schema)).toEqual({
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        effort: { type: "string", enum: ["low", "auto"] },
+        input: { type: "object", properties: { exclusion: { type: "array" } }, required: [] },
+      },
+      required: ["query"],
+    });
+    expect(agentRunSchemaForAgent(server, "web_search_exa", schema)).toBe(schema);
+    // People sent to be graded anyway are left out: a run finds and grades in one go.
     const people = [{ name: "Saved", linkedin_url: "https://www.linkedin.com/in/saved-person" }];
-    await expect(prepare(db, { query: "Grade", input: { data: people } })).rejects.toThrow(
-      /does not grade people given in input\.data/,
-    );
+    const prepared = await prepare(fixture(null), { query: "Find", input: { data: people } });
+    expect(prepared).toEqual({ query: "Find", input: {}, outputSchema: AGENT_RUN_PEOPLE_SCHEMA });
   });
 
   it("reads a finished grading run's rows as a page", () => {
