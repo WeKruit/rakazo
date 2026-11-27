@@ -163,12 +163,6 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
 } as const;
 /** Most one deeper search for people may spend; observed deeper runs cost $0.3 to $1.4. */
 export const AGENT_RUN_FIND_MAX_COST_USD = 2;
-/**
- * People one quick people search may return. Ten is what the search's base price covers (each
- * result beyond ten is billed extra), and it keeps every search a small try, the recruiter's rule.
- */
-export const PEOPLE_SEARCH_MAX_RESULTS = 10;
-
 /** The conversation and role a run works in. */
 async function runRole(
   prisma: PrismaClient,
@@ -199,12 +193,9 @@ export async function requireRoleForPeopleSearch(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<void> {
-  const people =
-    (toolName === "web_search_advanced_exa" && args.category === "people") ||
-    (toolName === "web_search_exa" && /\bcategory:\s*people\b/i.test(String(args.query ?? ""))) ||
-    (toolName === "agent_run" && args.runId === undefined);
   if (
-    !people ||
+    toolName !== "agent_run" ||
+    args.runId !== undefined ||
     !actor.runId ||
     server.transport !== "streamable_http" ||
     !server.endpoint ||
@@ -220,83 +211,20 @@ export async function requireRoleForPeopleSearch(
     throw new IsolationError(PEOPLE_SEARCH_NEEDS_SAVED_ROLE);
 }
 
-/** The profile text a people search returns with each person. */
-export const PROFILE_TEXT_CHARS = 6_000;
-
-/** A quick people search asks for at most ten people, however the agent or a plan sized it. */
-export function limitPeopleSearch(
+/**
+ * One person's profile lookup: the search asked for a LinkedIn profile link reads the people
+ * index. Finding people is the agent run's job alone, so the agent is not offered that index
+ * (searchSchemaForAgent) and the server picks it for a lookup.
+ */
+export function profileLookupArgs(
   server: Pick<McpServer, "transport" | "endpoint">,
   toolName: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> {
-  const plain = toolName === "web_search_exa";
-  if (
-    !(plain || (toolName === "web_search_advanced_exa" && args.category === "people")) ||
-    server.transport !== "streamable_http" ||
-    !server.endpoint ||
-    new URL(server.endpoint).host !== "mcp.exa.ai"
-  )
-    return args;
-  const asked = Number(args.numResults);
-  const wanted = Math.min(
-    Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : PEOPLE_SEARCH_MAX_RESULTS,
-    PEOPLE_SEARCH_MAX_RESULTS,
-  );
-  if (plain) return args;
-  // A search for people also returns each profile's full text (dated jobs with their own
-  // descriptions), which the requirement check reads; one person's lookup keeps its own size.
-  const text = Number(args.textMaxCharacters);
-  return {
-    ...args,
-    numResults: wanted,
-    ...(linkedinPersonKey(args.query)
-      ? {}
-      : { textMaxCharacters: Math.max(Number.isFinite(text) ? text : 0, PROFILE_TEXT_CHARS) }),
-  };
-}
-
-/** The search API's excludeText takes at most fifty strings: the newest saved people's names. */
-const QUICK_SEARCH_EXCLUSION_LIMIT = 50;
-
-/**
- * A quick people search leaves out the people already saved in the conversation's role, as an
- * agent run does. The people index refuses URL filters and accepts a text filter, so they are
- * named. Plays of 11-25: 50–80% of each later search's rows were people an earlier one had saved.
- */
-export async function excludeFoundPeople(
-  prisma: PrismaClient,
-  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
-  server: Pick<McpServer, "transport" | "endpoint">,
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  if (
-    toolName !== "web_search_advanced_exa" ||
-    args.category !== "people" ||
-    server.transport !== "streamable_http" ||
-    !server.endpoint ||
-    new URL(server.endpoint).host !== "mcp.exa.ai"
-  )
-    return args;
-  const roleId = (await runRole(prisma, actor))?.thread.activeRecruitingRoleId;
-  if (!roleId) return args;
-  const saved = await prisma.recruitingCandidateOccurrence.findMany({
-    where: {
-      roleId,
-      name: { not: null },
-      candidate: { role: { spaceId: actor.spaceId, userId: actor.userId } },
-    },
-    select: { name: true },
-    distinct: ["candidateKey"],
-    orderBy: { page: { observedAt: "desc" } },
-    take: QUICK_SEARCH_EXCLUSION_LIMIT,
-  });
-  const given = Array.isArray(args.excludeText) ? args.excludeText.map(String) : [];
-  const names = [
-    ...new Set([...given, ...saved.flatMap(({ name }) => (name?.trim() ? [name.trim()] : []))]),
-  ];
-  return names.length
-    ? { ...args, excludeText: names.slice(0, QUICK_SEARCH_EXCLUSION_LIMIT) }
+  return toolName === "web_search_advanced_exa" &&
+    isPeopleSearchServer(server) &&
+    linkedinPersonKey(args.query)
+    ? { ...args, category: "people" }
     : args;
 }
 
@@ -363,19 +291,28 @@ export async function keepProfileText(
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
 /**
- * The people search's agent_run as the agent sees it: without the options prepareAgentRun sets or
- * leaves out itself (its own return format, its own system prompt for the search, people to grade
- * in input.data, the ultra effort).
+ * The people search's tools as the agent sees them. agent_run comes without the options
+ * prepareAgentRun sets or leaves out itself (its own return format, its own system prompt for the
+ * search, people to grade in input.data, the ultra effort). The web search comes without its
+ * people index: staging 9be9b522 found the first ten with agent_run, then ten more through that
+ * index, and those ten reached Results with no grade.
  * What the server would override is not offered, as Anthropic's tool guide advises ("poka-yoke
  * your tools"); plays 11-27 saw four of seven runs carry the agent's own format.
  */
-export function agentRunSchemaForAgent(
+export function searchSchemaForAgent(
   server: Pick<McpServer, "transport" | "endpoint">,
   toolName: string,
   schema: Record<string, unknown>,
 ): Record<string, unknown> {
   const properties = record(schema.properties);
-  if (!properties || !isAgentRunTool(server, toolName)) return schema;
+  if (!properties || !isPeopleSearchServer(server)) return schema;
+  if (toolName === "web_search_advanced_exa") {
+    const category = record(properties.category);
+    if (!category || !Array.isArray(category.enum)) return schema;
+    const kinds = category.enum.filter((value) => value !== "people");
+    return { ...schema, properties: { ...properties, category: { ...category, enum: kinds } } };
+  }
+  if (toolName !== "agent_run") return schema;
   const { outputSchema: _format, systemPrompt: _steer, ...offered } = properties;
   const input = record(offered.input);
   const inputProperties = record(input?.properties);
@@ -389,13 +326,16 @@ export function agentRunSchemaForAgent(
   return { ...schema, properties: offered, ...withoutRequired(schema.required, "outputSchema") };
 }
 
-function isAgentRunTool(server: Pick<McpServer, "transport" | "endpoint">, toolName: string) {
+function isPeopleSearchServer(server: Pick<McpServer, "transport" | "endpoint">) {
   return (
-    toolName === "agent_run" &&
     server.transport === "streamable_http" &&
     !!server.endpoint &&
     new URL(server.endpoint).host === "mcp.exa.ai"
   );
+}
+
+function isAgentRunTool(server: Pick<McpServer, "transport" | "endpoint">, toolName: string) {
+  return toolName === "agent_run" && isPeopleSearchServer(server);
 }
 
 function withoutRequired(required: unknown, name: string): { required?: unknown } {
@@ -443,7 +383,7 @@ export async function prepareAgentRun(
   // (2026-11-27) returned all ten people without a score, and what the recruiter wants is the query.
   const { budget: _budget, systemPrompt: _steer, ...rest } = args;
   // One people search (decided 2026-11-27): a run finds and grades people in one go, so people
-  // already saved are never sent back to be graded a second way (agentRunSchemaForAgent).
+  // already saved are never sent back to be graded a second way (searchSchemaForAgent).
   const { data: _toGrade, ...input } = record(args.input) ?? {};
   const prepared: Record<string, unknown> = {
     ...rest,

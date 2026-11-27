@@ -597,8 +597,6 @@ import {
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
-  linkedinPersonKey,
-  peopleFromSearch,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
@@ -8104,17 +8102,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               !deps.artifacts ||
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
-              // Staging 83c32eba: a plain web search for people found two, held its share of the
-              // recruiter's number until a save that never came, and none reached Results. Its
-              // profiles are saved as it returns like the people search's; pages save no one.
-              !["web_search_advanced_exa", "web_search_exa", "agent_run"].includes(
-                route.toolName,
-              ) ||
-              // A search by one person's profile link is a profile lookup, not new people.
-              linkedinPersonKey(connectorCall.args?.query) ||
+              // Only the agent run finds people: it alone returns them graded.
+              route.toolName !== "agent_run" ||
               (returned !== null && typeof returned === "object" && "error" in returned) ||
               // A run still working has returned no people yet; it is saved when it finishes.
-              (route.toolName === "agent_run" && runningAgentRunId(returned))
+              runningAgentRunId(returned)
             )
               return null;
             try {
@@ -8136,9 +8128,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (
                 !server?.endpoint ||
                 !isPeopleSearchEndpoint(server.endpoint) ||
-                !roleId ||
-                (route.toolName === "web_search_exa" &&
-                  !peopleFromSearch(returned, server.endpoint).length)
+                !roleId
               )
                 return null;
               // The step's own brief save lands first, so these people are judged on the
