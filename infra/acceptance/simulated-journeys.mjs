@@ -765,7 +765,7 @@ export const JOURNEYS = [
   {
     name: "team-has-no-email",
     mechanisms: ["state-claims", "guard-dead-end"],
-    title: "让岗位给一个没存邮箱的人发信：主对话要说清做不了、为什么、能怎么办",
+    title: "让岗位给一个没存邮箱的人发信：岗位对话要说清做不了、为什么、能怎么办",
     area: "reliability",
     source:
       "11-16 user: more varied plays; 11-16 reliability inventory: role teams blocked without the main chat being told",
@@ -777,7 +777,7 @@ export const JOURNEYS = [
       "Looking up new email addresses is off on this test account. Never approve any send card: deny it. Pick any role you see except one whose name mentions Dyna.",
     goals: [
       "In the main Kruit chat, ask it to email one named person from one of your roles who has no email saved (ask Kruit who that is if you need to).",
-      "Met only when, within about two minutes, the main chat says plainly that this person has no saved email and nothing was sent, and offers a next step, without claiming a send or a queued email.",
+      "Met only when, within about two minutes, the role's conversation that the main chat opens for you (the main chat only hands work to it, the 11-27 decision) says plainly that this person has no saved email and nothing was sent, and offers a next step, without claiming a send or a queued email.",
       "If Kruit went quiet or only said the team is on it, ask once where it stands.",
     ],
   },

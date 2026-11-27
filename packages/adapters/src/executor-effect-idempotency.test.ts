@@ -1337,15 +1337,17 @@ describe("one request handed to a role", () => {
     expect(message).not.toContain("note");
 
     vi.mocked(messageBot).mockClear();
-    queryRaw.mockResolvedValueOnce([]);
     const g = await roleFixture("delegate-unknown-person");
-    Object.assign(g.prisma, { $queryRaw: queryRaw });
+    Object.assign(g.prisma, { $queryRaw: vi.fn(async () => []) });
     g.setCalls([
       { name: "delegate_to_role", args: { role_id: "role-1", people: ["Ada"] }, executionId: "d" },
     ]);
     await g.run();
-    expect(messageBot).not.toHaveBeenCalled();
-    expect(g.results[0]).toEqual({ error: 'Not handed off: "Ada" is not a saved person of that role.' });
+    // Play s179: a name the model wrote still hands off; the recruiter's words name the person.
+    const unmatched = String(vi.mocked(messageBot).mock.calls[0]?.[3].message);
+    expect(unmatched).toMatch(/^The recruiter wrote, word for word:\n"/);
+    expect(unmatched).not.toContain("People they refer to");
+    expect(g.results[0]).toMatchObject({ details: { ok: true, notSavedPeople: ["Ada"] } });
   });
 });
 
