@@ -604,6 +604,7 @@ import {
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import {
+  inGroupOrder,
   requestCounts,
   requestTarget,
   searchRowForAgent,
@@ -5028,7 +5029,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return {
                 error: `Not recorded: all ${fresh.shownBefore} were already shown to the recruiter in an earlier round, so nothing was listed again. Record only people no round has shown, or say that nobody new fits yet.`,
               };
-            args = { ...args, candidateKeys: fresh.keys };
+            // Recorded in the order the list prints them (grouped by heading).
+            const groups =
+              args.groupOf && typeof args.groupOf === "object"
+                ? (args.groupOf as Record<string, unknown>)
+                : undefined;
+            args = {
+              ...args,
+              candidateKeys: inGroupOrder(
+                fresh.keys,
+                groups &&
+                  Object.fromEntries(
+                    Object.entries(groups).map(([key, value]) => [
+                      savedCandidateKeyForm(key),
+                      String(value),
+                    ]),
+                  ),
+              ),
+            };
           }
           // The server fills what it knows about the thread's role and names a person the recruiter
           // mentioned by their saved key, so feedback saves on the first call.
@@ -9089,7 +9107,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchInput.data,
                   context,
                 );
-                return saved;
+                // The same rows the search's own save handed over, in the same form: a save the
+                // agent asks for again returned them with the search's prose still on them.
+                const savedRows = (saved as { candidateRows?: unknown }).candidateRows;
+                return Array.isArray(savedRows)
+                  ? { ...(saved as object), candidateRows: savedRows.map(searchRowForAgent) }
+                  : saved;
               }
               if (!applied || !claimedEffect) throw new IsolationError();
               // Internal record keeping: page, rows and effect commit together.

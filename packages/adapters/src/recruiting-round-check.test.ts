@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
+  inGroupOrder,
   listedBeforeRound,
   requestTarget,
   roundCountLine,
@@ -293,5 +294,17 @@ describe("searchRowForAgent", () => {
       reason: "All requirements shown",
       snippet: "x".repeat(160),
     });
+  });
+});
+
+describe("inGroupOrder", () => {
+  it("puts a group's people together, groups in the order they first appear", () => {
+    // Recorded as a, b, c with c in a's group: printed and recorded as a, c, b.
+    expect(inGroupOrder(["a", "b", "c"], { a: "Met", b: "To check", c: " Met " })).toEqual([
+      "a",
+      "c",
+      "b",
+    ]);
+    expect(inGroupOrder(["a", "b"], undefined)).toEqual(["a", "b"]);
   });
 });

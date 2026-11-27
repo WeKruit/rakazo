@@ -27,6 +27,7 @@ const round = (approvedAt: string | null = null): RecruitingCalibrationRound => 
   createdAt: "2026-10-23T16:00:00.000Z",
   approvedAt,
   candidates: Array.from({ length: 10 }, (_, index) => ({
+    number: index + 1,
     candidateKey: `person-${index}`,
     name: `Person ${index}`,
     title: "Warehouse operations manager",
