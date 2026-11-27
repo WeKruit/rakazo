@@ -5467,6 +5467,48 @@ describe("native recruiting turn delivery", () => {
     );
   });
 
+  it("takes back a streamed round list when the round is not recorded", async () => {
+    const f = fixture("round-preview-refused");
+    f.thread.activeRecruitingRoleId = "role-1";
+    const key = "linkedin:/in/ana-ruiz";
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
+    Object.assign(f.prisma.message, { deleteMany });
+    Object.assign(f.prisma, {
+      recruitingRole: {
+        findUnique: vi.fn(async () => ({ revision: 1 })),
+        findFirst: vi.fn(async () => null),
+      },
+      recruitingCandidate: { findMany: vi.fn(async () => [{ candidateKey: key }]) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: key, name: "Ana Ruiz", matchFields: null }]),
+      },
+      // Everyone named was shown in an earlier round, so the server refuses the call.
+      recruitingCalibrationRound: { findMany: vi.fn(async () => [{ candidateKeys: [key] }]) },
+    });
+    const args = { operation: "calibration_round", candidateKeys: [key, "linkedin:/in/x"] };
+    f.runtimeRun.mockImplementationOnce(async function* (request: AgentRunRequest) {
+      request.onToolCallDelta?.({ id: "round-1", name: "recruiting_research", args });
+      await vi.waitFor(() =>
+        expect(f.published.some((message) => JSON.stringify(message).includes("Ana Ruiz"))).toBe(
+          true,
+        ),
+      );
+      f.results.push(
+        await request.executeTool!(
+          "recruiting_research",
+          { operation: "calibration_round", candidateKeys: [key] },
+          JSON.stringify(["pi-tool", "main", "round-1"]),
+        ),
+      );
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+    expect(JSON.stringify(f.results[0])).toContain("Not recorded");
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: "message-1", runId: "round-preview-refused" },
+    });
+  });
+
   it("reads a JD attached in Kruit's conversation once, before the model's first step", async () => {
     const f = fixture("kruit-attached-jd");
     vi.mocked(executeRecruitingRoleTool).mockClear();
