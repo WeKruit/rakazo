@@ -153,9 +153,13 @@ async function grant(
     throw new IsolationError();
   return native;
 }
-/** The free times a Google Calendar suggest_time read returned, as plan slots. */
+/**
+ * The free times a Google Calendar suggest_time read returned, as plan slots. Only a read for one
+ * interview length counts, as Cal.com's range read does: its slots are that length.
+ */
 function googleSlots(row: Awaited<ReturnType<typeof effect>>) {
   const { route, args } = call(row.request);
+  if (typeof args.durationMinutes !== "number") return [];
   const body = successful(row);
   const times = Array.isArray(body.timeSlots) ? body.timeSlots : [];
   return times.flatMap((value) => {
@@ -171,7 +175,9 @@ function googleSlots(row: Awaited<ReturnType<typeof effect>>) {
       end: new Date(end).toISOString(),
       lengthInMinutes: (Date.parse(end) - Date.parse(start)) / 60_000,
     });
-    return parsed.success && typeof args.startTime === "string" ? [parsed.data] : [];
+    return parsed.success && parsed.data.lengthInMinutes === args.durationMinutes
+      ? [parsed.data]
+      : [];
   });
 }
 /** The calendar tools a plan's own calendar must grant, read by the plan's provider. */
@@ -799,7 +805,7 @@ export async function prepareRecruitingSchedulingPlan(
     );
   if (!slot)
     throw new IsolationError(
-      "No calendar read in this conversation offers that start and length; read the calendar's free times first (get_availability with format range and duration, or suggest_time)",
+      "No calendar read in this conversation offers that start and length; read the calendar's free times first (get_availability with format range and duration, or suggest_time with durationMinutes)",
     );
   const native = call(mail.request);
   const email = successful(mail);

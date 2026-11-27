@@ -327,6 +327,9 @@ export function externalTextTriggerToolRefusal(
 
 /** Triggers whose prompt itself carries external text: a webhook payload or an inbound message. */
 const EXTERNAL_PROMPT_TRIGGERS = new Set(["webhook", "messaging"]);
+// Runs that answer in the recruiter's own conversation, where a card is seen: a candidate's reply
+// woke it there. Background work (research, routines) has nobody at its card, so it is refused.
+const CONVERSATION_TRIGGERS = new Set(["recruiting_checkin"]);
 // Built-ins whose results can carry email, page, file, provider or screen text. Every connector
 // tool counts as well, since its results come from outside.
 const EXTERNAL_TEXT_BUILTIN_TOOLS = new Set([
@@ -368,9 +371,9 @@ export function toolReadsExternalText(toolName: string, viaConnector: boolean): 
 /**
  * A run no person started (routine, webhook, tickets, research wake, reply check-in, peer message
  * or external message) must not save memory, preferences or skills on its own once it has read
- * external text: that text could otherwise instruct every later run. After such a read the save
- * waits for the user's own confirmation on its card (the user's choice, 11-27); a run whose very
- * prompt is outside text (webhook, messaging) is refused. Business records stay autonomous.
+ * external text: that text could otherwise instruct every later run. After such a read a run in the
+ * recruiter's conversation saves only on the user's own card (the user's choice, 11-27); any other
+ * unattended run, and a run whose very prompt is outside text (webhook, messaging), is refused. Business records stay autonomous.
  * `readExternalText` is only consulted for an unattended durable-memory write.
  */
 export async function unattendedMemoryWrite(input: {
@@ -387,8 +390,10 @@ export async function unattendedMemoryWrite(input: {
   if (!input.preference && !DURABLE_MEMORY_TOOLS.has(input.toolName)) return undefined;
   if (EXTERNAL_PROMPT_TRIGGERS.has(input.trigger))
     return { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL };
-  if (await input.readExternalText()) return { confirm: true };
-  return undefined;
+  if (!(await input.readExternalText())) return undefined;
+  return CONVERSATION_TRIGGERS.has(input.trigger)
+    ? { confirm: true }
+    : { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL };
 }
 
 function categoryMatches(

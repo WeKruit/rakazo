@@ -31,9 +31,9 @@ import type {
   WebProvider,
 } from "@rakazo/adapter-kit";
 import {
-  ByteLimitError,
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
+  ByteLimitError,
   MemoryRevisionConflictError,
   notificationRetryJob,
   pollCloseJob,
@@ -108,7 +108,6 @@ import {
   createStreamingRedactor,
   createVendorNameStream,
   creditEstimateNote,
-  EMAIL_SEND_TOOLS,
   endsSentence,
   expandSkillReferencesInPrompt,
   externalTextTriggerToolRefusal,
@@ -148,14 +147,14 @@ import {
   planActionGate,
   pollResultLines,
   RateWindow,
+  EMAIL_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
-  RECRUITING_GLOBAL_AGENT_NAME,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
+  RECRUITING_GLOBAL_AGENT_NAME,
   REPLY_LANGUAGE_NAME,
   RETIRED_APPROVAL_KINDS,
   RecruitingPlaybookValidationError,
-  ROLE_OPENED_NOTE,
   RUN_EGRESS_PER_MINUTE,
   RUN_EGRESS_RATE_LIMITED,
   recruiterConnectBlock,
@@ -166,6 +165,7 @@ import {
   renderBotDirectory,
   replyLanguageNote,
   resolveActionApprovalDetail,
+  ROLE_OPENED_NOTE,
   runBudgetExceeded,
   runBudgetStopText,
   sandboxCommandTimeoutMs,
@@ -238,10 +238,10 @@ import {
   findWaitingCampaignSend,
   getRecruitingCrmTarget,
   hasUnclaimedSteering,
+  isRetryableTransactionConflict,
   InvalidSpaceNameError,
   IsolationError,
   isNativeHumanMessage,
-  isRetryableTransactionConflict,
   isTooManyDatabaseConnections,
   loadMessageThinking,
   loadRunHistoryMessages,
@@ -289,7 +289,12 @@ import {
   formatAgentEnvironmentInstruction,
   redactShellStreams,
 } from "./agent-environment.js";
+import {
+  desktopProtectionGuardMessage,
+  protectedComputerLifecycleRefusal,
+} from "./computer-lifecycle-guard.js";
 import { buildApprovalAskBlock } from "./approval-ask.js";
+import { approvalKeyAfterDenial } from "./approval-key-after-denial.js";
 import {
   approvalPausedToolResult,
   approvalReplayPathError,
@@ -318,8 +323,11 @@ import {
   settleUncertainEffect,
   uncertainEffectResult,
 } from "./approval-effect.js";
-import { approvalKeyAfterDenial } from "./approval-key-after-denial.js";
-import { artifactReadFromTool, InternalArtifactError, readActorArtifact } from "./artifact-read.js";
+import {
+  artifactReadFromTool,
+  InternalArtifactError,
+  readActorArtifact,
+} from "./artifact-read.js";
 import {
   autoReviewTimeoutMs,
   deploymentAutoReviewDefault,
@@ -386,6 +394,12 @@ import {
   readCalBookingSnapshot,
 } from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
+import {
+  GOOGLE_CALENDAR_EVENT_WRITES,
+  googleCalendarApprovalFacts,
+} from "./google-calendar-approval.js";
+import { roleLinkBlocks } from "./role-links.js";
+import { schedulingNextStep } from "./scheduling-next-step.js";
 import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
@@ -419,10 +433,6 @@ import {
   renewComputerExecutionLease,
   screenLeaseIdForRun,
 } from "./computer-lifecycle.js";
-import {
-  desktopProtectionGuardMessage,
-  protectedComputerLifecycleRefusal,
-} from "./computer-lifecycle-guard.js";
 import {
   applyComputerNetworkPolicy,
   EGRESS_ALL_SITES,
@@ -465,10 +475,6 @@ import {
   otherRoleWriteRefusal,
   roleRequestMessage,
 } from "./global-role-writes.js";
-import {
-  GOOGLE_CALENDAR_EVENT_WRITES,
-  googleCalendarApprovalFacts,
-} from "./google-calendar-approval.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -571,6 +577,7 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
+import { oneLineNote } from "./reply-line.js";
 import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import type { RecruiterListItem } from "./recruiting-candidates-tool.js";
@@ -584,7 +591,6 @@ import {
   loadRecruitingRunContext,
   RECRUITING_PRESENTATION_INSTRUCTION,
 } from "./recruiting-context.js";
-import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import type { RecruitingFeedbackResult } from "./recruiting-feedback.js";
 import {
   executeRecruitingFeedback,
@@ -599,9 +605,14 @@ import {
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
+import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
+import {
+  requestCounts,
+  roundCountLine,
+  withoutShownBefore,
+} from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { keepProfileText, lookedUpContacts, mcpObject } from "./recruiting-research.js";
-import { requestCounts, roundCountLine, withoutShownBefore } from "./recruiting-round-check.js";
 import {
   assertSchedulingCall,
   SchedulingApprovalEvidenceSchema,
@@ -622,7 +633,6 @@ import {
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
-import { oneLineNote } from "./reply-line.js";
 import {
   openQuestionsAnsweredNote,
   openQuestionsForEmail,
@@ -632,11 +642,10 @@ import {
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
-import { roleLinkBlocks } from "./role-links.js";
 import {
   openRoleGroup,
-  roleAlreadyOpenNote,
   roleOpenedFromLatestMessage,
+  roleAlreadyOpenNote,
   startRoleFromRecruiterMessage,
 } from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
@@ -663,7 +672,6 @@ import {
   RoutineUpdateError,
   updateScheduleFromTool,
 } from "./schedule-tools.js";
-import { schedulingNextStep } from "./scheduling-next-step.js";
 import { loadAgentScratchpadContext } from "./scratchpad-context.js";
 import {
   addScratchpadItemFromTool,
@@ -725,7 +733,11 @@ import { textContentArg } from "./tool-text.js";
 import { recruitingRoundListText } from "./turn-end-guard.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
-import { readsOnly, TurnReportLedger, turnReportText } from "./turn-report.js";
+import {
+  readsOnly,
+  TurnReportLedger,
+  turnReportText,
+} from "./turn-report.js";
 import {
   botMessageOutcomeFromMidTurn,
   clampUserProgressMessage,
@@ -6162,8 +6174,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             const refusal = await ownMailboxSendRefusal(deps.prisma, context, {
               to: args.to[0],
-              replyThreadId:
-                typeof args.replyThreadId === "string" ? args.replyThreadId : undefined,
+              replyThreadId: typeof args.replyThreadId === "string" ? args.replyThreadId : undefined,
               resend: args.resend === true,
             });
             if (refusal) return { error: refusal };
@@ -6196,11 +6207,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
             ).some((resolved) => resolved.source === "require_approval");
           const requiresExplicitApproval = toolRequiresExplicitApproval(
-            policyToolName,
-            connectorCall.route,
-            args,
-            nativeMcpWriteServer?.endpoint,
-          );
+              policyToolName,
+              connectorCall.route,
+              args,
+              nativeMcpWriteServer?.endpoint,
+            );
           const senderConfirmation =
             connectorCall.route?.connectorId === "mcp" &&
             connectorCall.route.toolName === "native_instantly_ensure_sender" &&
@@ -6315,7 +6326,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const requiresApprovalByDefault =
             !verifiedInternalWrite &&
             (requiresUnattendedApproval ||
-              toolRequiresApproval(policyToolName, viaConnector, declaredReadOnly));
+              toolRequiresApproval(
+                policyToolName,
+                viaConnector,
+                declaredReadOnly,
+              ));
           const requiresMandatoryApproval =
             requiresUnattendedApproval || requiresExplicitApproval || memoryNeedsConfirmation;
           const connectorKind = connectorKindFromToolName(
@@ -6397,11 +6412,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const plan = requiresMandatoryApproval
             ? "ask"
             : planActionGate({
-                resolved: approvalResolved,
-                consequential: requiresApprovalByDefault,
-                autoReviewEnabled: autoReviewPref,
-                checkerConfigured,
-              });
+                  resolved: approvalResolved,
+                  consequential: requiresApprovalByDefault,
+                  autoReviewEnabled: autoReviewPref,
+                  checkerConfigured,
+                });
           let reviewReason: string | undefined;
           let gateDecision: "ask" | "allow" = plan === "ask" ? "ask" : "allow";
           const needsApprovalEarly = plan === "ask" || plan === "judge";
@@ -7571,9 +7586,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           r.firstEmail,
                           ...(r.followUps ?? []),
                         ]),
-                      ].some(
-                        (email) => email && unfilledPlaceholder(`${email.subject}\n${email.body}`),
-                      )
+                      ].some((email) => email && unfilledPlaceholder(`${email.subject}\n${email.body}`))
                     ? `${PLACEHOLDER_NOTE} Save the corrected email with ensure_role_campaign steps, then activate again.`
                     : instantlyActivation?.recipientCount === 0
                       ? "This campaign has no recipients yet. Add the people the recruiter named (recruiting_candidates) with add_shortlist_leads, then activate again."
@@ -8958,7 +8971,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       error: String(error),
                     }),
                   );
-                  await showRoundWhereAskedNow(deps, run, text, applied.effect.id).catch((error) =>
+                  await showRoundWhereAskedNow(
+                    deps,
+                    run,
+                    text,
+                    applied.effect.id,
+                  ).catch((error) =>
                     getLogger().warn("round not shown where asked", { error: String(error) }),
                   );
                   // The recorded round's list is final. A later round in the same run gets its own
@@ -9171,18 +9189,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
               const shown = await showGlobalRolePeople(callArgs, result);
               // Asked about earlier roles, Kruit shows each one's card, which opens it in the drawer.
-              if (
+              // A card that could not be posted is said in the result, never a failed read.
+              const roleCards =
                 args.operation === "roles" &&
                 Array.isArray(args.show) &&
-                thread.groupId?.startsWith("recruiting-global-")
-              ) {
-                const links = await roleLinkBlocks(
-                  deps.prisma,
-                  { spaceId: run.spaceId, userId: run.userId },
-                  args.show.filter((id): id is string => typeof id === "string"),
-                );
-                if (links.length) await publishMessage(deps, run, "bot", links);
-              }
+                thread.groupId?.startsWith("recruiting-global-") &&
+                run.trigger !== "bot_message"
+                  ? await roleLinkBlocks(deps.prisma, { spaceId: run.spaceId, userId: run.userId }, [
+                      ...new Set(args.show.filter((id): id is string => typeof id === "string")),
+                    ])
+                      .then(async (links) => {
+                        if (links.length) await publishMessage(deps, run, "bot", links);
+                        return {};
+                      })
+                      .catch(() => ({ roleCards: "not shown" }))
+                  : {};
               // Asked whether the next round is ready, Kruit sees what the team is doing right now.
               const progress =
                 !shown &&
@@ -9211,7 +9232,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   shown ??
                     (progress
                       ? { ...(result as object), teamWorking: progress.note }
-                      : { ...(result as object), ...counts }),
+                      : { ...(result as object), ...counts, ...roleCards }),
                   runSecrets,
                 ),
               );
@@ -10677,10 +10698,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               deliveryKey: roleKey,
               title,
               earlier: request,
-              earlierMessages: Math.min(
-                10,
-                Math.max(0, Math.trunc(Number(args.earlier_messages) || 0)),
-              ),
+              earlierMessages: Math.min(10, Math.max(0, Math.trunc(Number(args.earlier_messages) || 0))),
               askedMessageId,
             });
             if (!started) {
@@ -11255,7 +11273,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             handedOff = false;
           const outOfCredits = credits.refusal(name);
           const applied = (
-            outOfCredits ? Promise.resolve<unknown>(outOfCredits) : applyToolNow(...call)
+            outOfCredits
+              ? Promise.resolve<unknown>(outOfCredits)
+              : applyToolNow(...call)
           ).then(
             async (result) => {
               const failure = toolResultError(result);
@@ -11610,33 +11630,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return false;
         };
-        const [intake, replyContext, waitingCards, attached] = await ownTime(
-          "turnNotes",
-          Promise.all([
-            intakeTurnNote().catch((error) => {
-              getLogger().warn("saved job page not loaded", {
-                error: String(error),
-              });
-              return undefined;
-            }),
-            loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
-            run.trigger === "user" && currentTurnMessage?.role === "user"
-              ? waitingCardBlocks(deps.prisma, thread.id)
-                  .then(waitingApprovalCards)
-                  .catch(() => [])
-              : [],
-            attachedFileReads().catch((error) => {
-              getLogger().warn("attached file not read before the turn", {
-                error: String(error),
-              });
-              return [];
-            }),
-          ]),
-        );
+        const [intake, replyContext, waitingCards, attached] =
+          await ownTime(
+            "turnNotes",
+            Promise.all([
+              intakeTurnNote().catch((error) => {
+                getLogger().warn("saved job page not loaded", {
+                  error: String(error),
+                });
+                return undefined;
+              }),
+              loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
+              run.trigger === "user" && currentTurnMessage?.role === "user"
+                ? waitingCardBlocks(deps.prisma, thread.id)
+                    .then(waitingApprovalCards)
+                    .catch(() => [])
+                : [],
+              attachedFileReads().catch((error) => {
+                getLogger().warn("attached file not read before the turn", {
+                  error: String(error),
+                });
+                return [];
+              }),
+            ]),
+          );
         const waitingCardsNote = waitingApprovalNote(waitingCards);
         const fileNote =
           attached
-            .filter(({ read }) => typeof read?.text === "string" && read.text.trim())
+            .filter(
+              ({ read }) => typeof read?.text === "string" && read.text.trim(),
+            )
             .map(
               ({ file, read }) =>
                 `The recruiter's attached file (${file.name}) is already read for this turn with artifact_read, and that read is your file read; never read it again.${read.hasMore === true ? " Only its first part is below; read on from offset 16000 only if your next step needs the rest." : ""} Its text:\n\n${String(read.text)}`,
@@ -11850,7 +11873,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           redactedRecruitingContext: messagingChannelRun
             ? undefined
             : (initialRecruitingContext?.text ??
-              [noRoleContext(thread.groupId), memoryContext.text].filter(Boolean).join("\n\n")),
+              [
+                noRoleContext(thread.groupId),
+                memoryContext.text,
+              ]
+                .filter(Boolean)
+                .join("\n\n")),
           redactedMemoryContext: memoryContext.text,
           redactedScratchpadContext: scratchpadContext
             ? redactSecrets(scratchpadContext, runSecrets)
@@ -15442,7 +15470,9 @@ async function threadLaneBusy(
       threadId: run.threadId,
       botId: run.botId,
       id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
-      ...(delegated ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } } : {}),
+      ...(delegated
+        ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } }
+        : {}),
       OR: [
         { status: { in: ["leased", "running"] } },
         // A delegated child inherits an active ancestor turn; queued work cannot preempt that turn.

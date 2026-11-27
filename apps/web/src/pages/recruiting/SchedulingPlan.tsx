@@ -315,6 +315,7 @@ export function SchedulingPlanForm({
   const slot = slots.find((value) => JSON.stringify(value) === slotKey);
   const calendar = slot
     ? {
+        provider: slot.provider,
         sourceId: slot.sourceId,
         sourceRevision: slot.sourceRevision,
         eventTypeId: slot.eventTypeId,

@@ -604,6 +604,8 @@ describe("recipientNames", () => {
     const call = (args: Record<string, unknown>) =>
       ({ route: { toolName: "native_instantly_ensure_role_campaign" }, args }) as never;
     const names = recipientNames([
+      // A draft that was never sent names nobody.
+      { route: { toolName: "create_draft" }, args: { to: "Ada Park <ada@x.test>" } } as never,
       call({ recipients: ["Ada Lin <Ada@x.test>"] }),
       call({ recipients: ["Ada Park <ada@x.test>", "ethan@x.test"] }),
       call({ leads: [{ email: "mia@x.test", first_name: "Mia", last_name: "Chen" }] }),

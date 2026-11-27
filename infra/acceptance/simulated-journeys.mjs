@@ -43,7 +43,7 @@ export const JOURNEYS = [
   {
     name: "send-at-night",
     // Roles earlier plays of this journey left on the reused account; archived before a play.
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
@@ -75,7 +75,7 @@ export const JOURNEYS = [
   },
   {
     name: "send-through-blip",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference"],
     title: "网络刚断过一下，马上要发邮件：发送卡照样要出来",
     area: "reliability",
@@ -368,7 +368,7 @@ export const JOURNEYS = [
   {
     name: "schedule-interview",
     // Roles earlier plays of this journey left on the reused account; archived before a play.
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference"],
     title: "候选人同意面试：约时间、发邀请、改期、在 Interview 页看",
     area: "sending",
@@ -390,7 +390,7 @@ export const JOURNEYS = [
   },
   {
     name: "candidate-conversation",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference", "email-content"],
     title: "整段候选人沟通：发信、回信进来、跟进、不想被联系、约面试",
     area: "sending",
@@ -440,7 +440,7 @@ export const JOURNEYS = [
   },
   {
     name: "candidate-question-memory",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "reference", "email-content"],
     title: "候选人问到没告诉过的事：卡上回答后记住，下一个候选人直接答",
     area: "sending",
@@ -487,7 +487,7 @@ export const JOURNEYS = [
   {
     name: "feedback-on-some-people",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
-    leftover: /^测试固定 · 数据工程师 6 · \d{4,5}/,
+    leftover: /^测试固定 · 数据工程师 6 · \d{4,}/,
     mechanisms: ["reference", "long-task"],
     paid: true,
     title: "对几个人给反馈，看下一轮真的改了",
@@ -512,7 +512,7 @@ export const JOURNEYS = [
   {
     name: "stressed-point-few-meet",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
-    leftover: /^测试固定 · 数据工程师 8 · \d{4,5}/,
+    leftover: /^测试固定 · 数据工程师 8 · \d{4,}/,
     mechanisms: ["reference", "long-task"],
     paid: true,
     title: "强调的要求很少人写明：全部给出来并分开说明，不扣人",
@@ -536,7 +536,7 @@ export const JOURNEYS = [
   {
     name: "five-asks-one-role",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
-    leftover: /^测试固定 · 数据工程师 7 · \d{4,5}/,
+    leftover: /^测试固定 · 数据工程师 7 · \d{4,}/,
     mechanisms: ["long-task"],
     paid: true,
     title: "一个岗位连着要五次人，每次都要真的给到",
@@ -561,7 +561,7 @@ export const JOURNEYS = [
   {
     name: "industry-and-what-they-built",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
-    leftover: /^测试固定 · 支付风控数据 · \d{4,5}/,
+    leftover: /^测试固定 · 支付风控数据 · \d{4,}/,
     mechanisms: ["reference", "long-task"],
     paid: true,
     title: "看行业和做过什么，不只是关键词",
@@ -661,7 +661,7 @@ export const JOURNEYS = [
   },
   {
     name: "stop-after-approve",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["state-claims", "guard-dead-end"],
     title: "刚批准发送马上说别发了：要真停下，并说清谁已发、谁没发",
     area: "sending",
@@ -688,7 +688,7 @@ export const JOURNEYS = [
   },
   {
     name: "deny-then-change-and-send",
-    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    leftover: /^Senior Data Engineer\b.*\b\d{4,}\b/i,
     mechanisms: ["email-content", "reference", "guard-dead-end"],
     title: "先拒绝发送卡，改一句再发：不用重说一遍，新卡要带改动",
     area: "sending",

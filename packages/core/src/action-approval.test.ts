@@ -522,9 +522,15 @@ describe("unattendedMemoryWrite", () => {
     expect(await refusal("bot_message", "recruiting_feedback", true, true)).toBeUndefined();
   });
 
-  it.each(["routine", "tickets", "recruiting_research", "recruiting_checkin", "cloud_agent"])(
-    "asks the user to confirm memory, preference and skill writes in a %s run after external text",
-    async (trigger) => {
+  it.each([
+    ["recruiting_checkin", { confirm: true }],
+    ["routine", { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL }],
+    ["tickets", { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL }],
+    ["recruiting_research", { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL }],
+    ["cloud_agent", { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL }],
+  ])(
+    "holds memory, preference and skill writes in a %s run after external text",
+    async (trigger, held) => {
       for (const name of [
         "remember",
         "save_shared_memory",
@@ -533,8 +539,8 @@ describe("unattendedMemoryWrite", () => {
         "skill_update",
         "skill_delete",
       ])
-        expect(await refusal(trigger, name, true)).toEqual({ confirm: true });
-      expect(await refusal(trigger, "recruiting_feedback", true, true)).toEqual({ confirm: true });
+        expect(await refusal(trigger, name, true)).toEqual(held);
+      expect(await refusal(trigger, "recruiting_feedback", true, true)).toEqual(held);
       expect(await refusal(trigger, "remember", false)).toBeUndefined();
     },
   );

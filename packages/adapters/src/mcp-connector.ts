@@ -734,15 +734,15 @@ const OUTREACH_CORE = [
  */
 export const CORE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   // Kruit answers candidates and books calls from the conversation itself (a reply wake runs it,
-  // not a specialist), so those tools need no catalog search and load first either. A booking is
-  // made through recruiting_scheduling on either calendar, so the calendars' own create tools stay
-  // in the catalog.
+  // not a specialist), so those tools need no catalog search and load first either.
   main: [
     ...OUTREACH_CORE,
     "get_availability",
+    "create_booking",
     "reschedule_booking",
     "cancel_booking",
     "list_events",
+    "create_event",
     "update_event",
     "delete_event",
     "suggest_time",
@@ -752,12 +752,14 @@ export const CORE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "get_event_types",
     "get_event_type",
     "get_availability",
+    "create_booking",
     "reschedule_booking",
     "cancel_booking",
     "get_booking",
     "get_bookings",
     "suggest_time",
     "list_events",
+    "create_event",
     "update_event",
     "delete_event",
   ],
@@ -1407,7 +1409,10 @@ export class McpConnector implements ConnectorProvider {
       } catch (error) {
         // Simulated 11-16: "was it sent?" read this as a failure and Kruit could not say. An
         // account with no campaign has sent nothing, so its mail list is an empty answer.
-        if (call.route.toolName !== "list_emails" || !(error instanceof NoOutreachCampaignError))
+        if (
+          call.route.toolName !== "list_emails" ||
+          !(error instanceof NoOutreachCampaignError)
+        )
           throw error;
         yield {
           type: "result",
