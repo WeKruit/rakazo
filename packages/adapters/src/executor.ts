@@ -6268,20 +6268,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             nativeMcpUrl &&
             `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
               GOOGLE_CALENDAR_ENDPOINT;
-          // One booking route: a calendar's own create runs only as a reviewed plan's booking.
-          if (
+          // One booking route: a calendar's own create runs only as a reviewed plan's booking,
+          // or as that booking's approved call coming back after its card (checked at its effect).
+          const directCalendarCreate =
             !schedulingSelection &&
             connectorCall.route?.connectorId === "mcp" &&
             nativeMcpUrl &&
             ((connectorCall.route.toolName === "create_booking" &&
               `${nativeMcpUrl.origin}${nativeMcpUrl.pathname.replace(/\/$/, "")}` ===
                 "https://mcp.cal.com/mcp") ||
-              (connectorCall.route.toolName === "create_event" && googleCalendarWrite))
-          )
-            return {
-              error:
-                "Book with recruiting_scheduling: prepare (emailId when the candidate wrote, else candidate.email), then book with its planId.",
-            };
+              (connectorCall.route.toolName === "create_event" && googleCalendarWrite));
           const authorizeCalendar = async (route: NonNullable<typeof connectorCall.route>) => {
             const { server } = await requireMcpToolAssignment(
               deps.prisma,
@@ -6671,6 +6667,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   recruitingSourceMessageId,
                 )
               : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
+          if (directCalendarCreate) {
+            const booking = await deps.prisma.externalEffect.findFirst({
+              where: { spaceId: run.spaceId, runId, idempotencyKey: effectKey },
+              select: { result: true },
+            });
+            const result = booking?.result;
+            if (
+              !result ||
+              typeof result !== "object" ||
+              Array.isArray(result) ||
+              !result.schedulingApprovalEvidence
+            )
+              return {
+                error:
+                  "Book with recruiting_scheduling: prepare (emailId when the candidate wrote, else candidate.email), then book with its planId.",
+              };
+          }
           // Connector read-only hints must not bypass approval, review, or replay decisions.
           const domainEffect =
             replyAdmission?.effect ?? crmImportAdmission?.effect ?? approvedReplyEffect;
