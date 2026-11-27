@@ -6679,6 +6679,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 schedulingApprovalHash = calendarEvidenceHash(evidence);
               }
               if (schedulingSelection) {
+                // The same call in the same run is the same effect, so a booking the recruiter
+                // declined comes back declined; a bare "not found" was retried six times (play 11-27).
+                if (!stored && applied.effect.status === "denied")
+                  throw new IsolationError(
+                    "The recruiter declined this exact booking on its card. Ask what to change (time, guests) before booking again.",
+                  );
                 if (!stored && applied.effect.status !== "intended") throw new IsolationError();
                 if (!connectorCall.route) throw new IsolationError();
                 assertSchedulingCall(
