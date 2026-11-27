@@ -439,6 +439,52 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "candidate-question-memory",
+    leftover: /^Senior Data Engineer\b.*\b\d{4,5}\b/i,
+    mechanisms: ["state-claims", "reference", "email-content"],
+    title: "候选人问到没告诉过的事：卡上回答后记住，下一个候选人直接答",
+    area: "sending",
+    source:
+      "11-27 user: has the whole loop run (unknown candidate question → recruiter answers on the card → same-thread reply → saved to the role → next candidate answered from it)?",
+    account: "mailbox",
+    sends: true,
+    chinese: true,
+    maxTurns: 12,
+    persona: `${AGENCY_RECRUITER} You emailed two candidates for a client role and want Kruit to handle their answers.`,
+    facts: (recipients, tag) =>
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), hybrid 3 days in office, 6+ years, Spark and Kafka in production, base $180k–$220k. You also know, but do not volunteer until Kruit asks you or a card shows the question: the client pays up to $10k relocation, and it cannot sponsor or transfer visas.\nTwo candidates you found yourself:\n${twoInboxes(
+        recipients,
+        tag,
+      )
+        .map((address, i) => `${["Ethan Park", "Mia Chen"][i]} <${address}>`)
+        .join(
+          "\n",
+        )}\nYou never see their mailbox yourself: their answers reach the role's sending mailbox, so you learn of them only from Kruit or the app's pages.`,
+    candidates: (recipients, tag) => {
+      const [ethan, mia] = twoInboxes(recipients, tag);
+      return [
+        {
+          name: "Ethan Park",
+          address: ethan,
+          persona:
+            "Ethan Park, a senior data engineer in Portland, on an H-1B visa. In your first answer you say you are interested and ask whether they help with relocation to Seattle and whether they can transfer your H-1B. Once both are answered, thank them briefly.",
+        },
+        {
+          name: "Mia Chen",
+          address: mia,
+          persona:
+            "Mia Chen, a data engineer in Denver on an H-1B visa. Your first answer only says you are interested and asks what the team works on. In your next answer you ask whether they help with relocation to Seattle and whether they can sponsor or transfer a visa. Once both are answered, thank them briefly.",
+        },
+      ];
+    },
+    goals: [
+      "Give Kruit the role and the two candidates with their emails, and ask it to write and send the first email to both; approve the send card once it names both and the email.",
+      "Step away (wait) until a candidate replies. When Kruit shows Ethan's reply, answer his relocation and visa questions with what you know (on the card, edit the reply so it carries your answers, then Send). Met only when that reply goes out in Ethan's own thread with your answers.",
+      "Ask Kruit, in a few words, to answer Mia's first email. Approve a reply that only states facts you gave it.",
+      "When Mia asks about relocation and visa, ask Kruit in a few words to answer her. Never repeat the answers yourself. Met only when Kruit's reply to Mia answers relocation and visa with what you told it for Ethan, without asking you again or listing them as open questions, and the reply goes out after you approve it.",
+    ],
+  },
+  {
     name: "feedback-on-some-people",
     // Each play opens its own role, so one play's rejects and passes never seed the next.
     leftover: /^测试固定 · 数据工程师 6 · \d{4,5}/,
