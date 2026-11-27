@@ -1,78 +1,43 @@
 import { createHash, randomUUID } from "node:crypto";
-import type {
-  AdapterContext,
-  ArtifactStore,
-  ConnectorCall,
-  ConnectorProvider,
-  JobPublisher,
-} from "@rakazo/adapter-kit";
-import { recruitingResearchPollJob } from "@rakazo/adapter-kit";
+import type { AdapterContext, ArtifactStore, ConnectorProvider } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingResearchToolInput } from "@rakazo/contracts";
 import {
   RecruitingCrmCandidatesReadSchema,
   RecruitingCrmRoleMailReadSchema,
-  RecruitingResearchReadArtifactSchema,
-  RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
-import {
-  ACTIVE_RUN_STATUSES,
-  boundDirectApprovalDetails,
-  catalogApprovalDetails,
-  parseCsv,
-} from "@rakazo/core";
+import { parseCsv } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type {
-  Prisma,
   PrismaClient,
-  RecruitingResearchArtifactInput,
   RecruitingRoleMaterialContext,
   RecruitingRoleMutationContext,
   RecruitingRoleToolResult,
 } from "@rakazo/db";
 import {
-  bindRecruitingResearchReadEffect,
   executeRecruitingRoleMutation,
   getRecruitingWorkspace,
   IsolationError,
   listRecruitingCandidates,
   listRunToolResults,
-  listUnmappedRecruitingResearchReads,
-  RecruitingConflictError,
-  RecruitingIntentQuoteError,
-  RecruitingSourceValidationError,
-  readNativeRecruitingCandidatePage,
-  readRecruitingResearchContext,
-  recordRecruitingResearchObservation,
   recruitingCsvImportReceipt,
-  recruitingGradesReceipt,
   recruitingPeopleSearchReceipt,
-  recruitingResearchSnapshot,
-  saveNativeRecruitingCandidatePage,
   saveRecruitingCandidateCsvImport,
-  saveRecruitingCandidateGrades,
   saveRecruitingCandidatePeopleSearch,
   scoped,
+  withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
 import { completeExternalEffect } from "./approval-effect.js";
 import { readActorArtifact } from "./artifact-read.js";
+import { productEmailSends, productSendsNote } from "./product-sends.js";
 import {
   isPeopleSearchEndpoint,
   peopleFromSearch,
   prepareRecruitingProfileRows,
 } from "./recruiting-profiles.js";
-import {
-  bestLookedUpEmail,
-  classifyRecruitingResearchResult,
-  lookedUpContactEmails,
-} from "./recruiting-research.js";
-import {
-  RECRUITING_RESEARCH_BACKGROUND_NOTICE,
-  RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS,
-  recruitingResearchPollDelay,
-} from "./recruiting-research-poll.js";
+import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
 
 const BRIEF_KEYS = ["fields", "searchFilters", "questions", "rules"] as const;
 const ROLE_KEYS = [
@@ -109,8 +74,7 @@ function repairSourceRef(
   if (!object(value)) return undefined;
   const anchor = object(value.anchor) ? value.anchor : {};
   const file = object(anchor.artifact) ? anchor.artifact : {};
-  const artifactId =
-    text(file.artifactId) ?? text(anchor.artifactId) ?? text(value.artifactId);
+  const artifactId = text(file.artifactId) ?? text(anchor.artifactId) ?? text(value.artifactId);
   const messageId = text(anchor.messageId) ?? text(value.messageId);
   const locator = text(anchor.locator) ?? text(value.locator);
   const sha256 = text(file.sha256) ?? text(anchor.sha256);
@@ -131,24 +95,15 @@ function repairSourceRef(
   const readState = READ_STATES.includes(String(value.readState))
     ? String(value.readState)
     : "read";
-  const time = text(value.readAt)
-    ? Date.parse(String(value.readAt))
-    : Number.NaN;
+  const time = text(value.readAt) ? Date.parse(String(value.readAt)) : Number.NaN;
   const quote = readState === "read" ? text(value.quote) : undefined;
   const url = text(value.url);
   return {
     id: text(value.id) ?? `source-${index + 1}`,
-    kind: SOURCE_KINDS.includes(String(value.kind))
-      ? value.kind
-      : "original_material",
+    kind: SOURCE_KINDS.includes(String(value.kind)) ? value.kind : "original_material",
     anchor: fixedAnchor,
     readState,
-    readAt:
-      readState === "unread"
-        ? null
-        : Number.isNaN(time)
-          ? now
-          : new Date(time).toISOString(),
+    readAt: readState === "unread" ? null : Number.isNaN(time) ? now : new Date(time).toISOString(),
     ...(url && /^https?:\/\//.test(url) ? { url } : {}),
     ...(quote ? { quote } : {}),
   };
@@ -185,15 +140,12 @@ export function normalizeRecruitingRoleArgs(
       Object.entries(value).map(([key, item]) => [key, visit(item)]),
     );
     const anchor = record.anchor as { kind?: unknown } | undefined;
-    return anchor?.kind === "message" &&
-      record.readState === "read" &&
-      record.readAt == null
+    return anchor?.kind === "message" && record.readState === "read" && record.readAt == null
       ? { ...record, readAt: now }
       : record;
   };
   let visited = visit(args) as Record<string, unknown>;
-  if (!["create", "update", "revise"].includes(String(visited.operation)))
-    return visited;
+  if (!["create", "update", "revise"].includes(String(visited.operation))) return visited;
   const object = (value: unknown): value is Record<string, unknown> =>
     !!value && typeof value === "object" && !Array.isArray(value);
   // Every citation is put into the schema's shape; a criterion keeps at least the role's first one.
@@ -217,14 +169,9 @@ export function normalizeRecruitingRoleArgs(
           const questions = {
             definitionQuestions: criterion.definitionQuestions ?? [],
           };
-          if (criterion.sourceRefs === undefined)
-            return { ...criterion, ...questions };
+          if (criterion.sourceRefs === undefined) return { ...criterion, ...questions };
           const refs = repairSourceRefs(criterion.sourceRefs, now) ?? [];
-          const fallback = roleRefs?.length
-            ? roleRefs.slice(0, 1)
-            : turnRef
-              ? [turnRef]
-              : [];
+          const fallback = roleRefs?.length ? roleRefs.slice(0, 1) : turnRef ? [turnRef] : [];
           return {
             ...criterion,
             ...questions,
@@ -242,6 +189,14 @@ export function normalizeRecruitingRoleArgs(
         upsert: repairCriteria(visited.criteria.upsert),
       },
     };
+  // A create takes plain lists: criteria written in the update's shape become the list, and a
+  // list left out is empty.
+  if (visited.operation === "create") {
+    if (object(visited.criteria) && Array.isArray(visited.criteria.upsert))
+      visited = { ...visited, criteria: visited.criteria.upsert };
+    for (const key of ["sourceRefs", "criteria", "preferences", "definitionQuestions"])
+      if (visited[key] === undefined) visited = { ...visited, [key]: [] };
+  }
   // An update's criteria hold only upsert/remove; other keys written there belong to the call.
   if (visited.operation === "update" && object(visited.criteria)) {
     const { upsert, remove, ...stray } = visited.criteria;
@@ -258,9 +213,7 @@ export function normalizeRecruitingRoleArgs(
   }
   const outside = BRIEF_KEYS.filter((key) => Object.hasOwn(visited, key));
   if (!object(visited.brief) && !outside.length) return visited;
-  const brief: Record<string, unknown> = object(visited.brief)
-    ? { ...visited.brief }
-    : {};
+  const brief: Record<string, unknown> = object(visited.brief) ? { ...visited.brief } : {};
   const result: Record<string, unknown> = { ...visited };
   for (const key of outside) {
     if (!Object.hasOwn(brief, key)) brief[key] = result[key];
@@ -271,7 +224,6 @@ export function normalizeRecruitingRoleArgs(
     if (!Object.hasOwn(result, key)) result[key] = brief[key];
     delete brief[key];
   }
-  delete brief.confirmation;
   return { ...result, brief };
 }
 
@@ -290,12 +242,11 @@ export async function executeRecruitingRoleTool(
   const { actor, runId, sourceMessageId } = context;
   if (input.operation !== "read") {
     if (!context.mutation) throw new IsolationError();
-    return executeRecruitingRoleMutation(
-      prisma,
-      actor,
-      { ...context.mutation, runId, sourceMessageId },
-      input,
-      material,
+    const mutation = { ...context.mutation, runId, sourceMessageId };
+    // Searches saving into a new role lock it as they save. A deadlock with one rolls the role
+    // save back whole (staging branch play), so it runs again instead of failing the agent.
+    return withTransactionRetry(() =>
+      executeRecruitingRoleMutation(prisma, actor, mutation, input, material),
     );
   }
   const run = scoped(
@@ -317,502 +268,15 @@ export async function executeRecruitingRoleTool(
   return { status: "current", workspace, source: null, changed: false };
 }
 
-type ResearchContext = Awaited<
-  ReturnType<typeof readRecruitingResearchContext>
->;
 type ResearchDeps = {
   prisma: PrismaClient;
   artifacts: ArtifactStore;
-  /** When present, a task still working after a call is polled in the background. */
-  jobs?: Pick<JobPublisher, "enqueue">;
 };
 type ResearchActor = {
   actor: Actor;
   runId: string;
   sourceMessageId: string | null;
 };
-
-export async function resolveRecruitingResearchTool(
-  deps: ResearchDeps,
-  trusted: ResearchActor,
-  untrusted: Extract<
-    RecruitingResearchToolInput,
-    { operation: "status" | "rows" }
-  >,
-  context: AdapterContext,
-) {
-  const input = RecruitingResearchToolInputSchema.parse(untrusted);
-  if (input.operation !== "status" && input.operation !== "rows")
-    throw new IsolationError();
-  const saved = await readRecruitingResearchContext(
-    deps.prisma,
-    trusted.actor,
-    {
-      runId: trusted.runId,
-      historical: true,
-      taskId: input.taskId,
-      toolName: input.operation === "status" ? "get_task" : "get_rows",
-    },
-  );
-  if (!saved.task || !saved.server) throw new IsolationError();
-  if (!saved.task.providerTaskId) throw new RecruitingConflictError();
-  const call = {
-    route: {
-      connectorId: "mcp",
-      resourceId: saved.server.id,
-      resourceRevision: saved.task.serverRevision,
-      toolName: input.operation === "status" ? "get_task" : "get_rows",
-    },
-    args:
-      input.operation === "status"
-        ? {
-            task_id: saved.task.providerTaskId,
-            wait_seconds: RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS,
-          }
-        : {
-            task_id: saved.task.providerTaskId,
-            ...(input.limit === undefined ? {} : { limit: input.limit }),
-            ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
-          },
-    taskId: saved.task.id,
-    operation: input.operation,
-  };
-  const recoveredResult = await recoverRecruitingResearchReads(
-    deps,
-    trusted,
-    saved.task.id,
-    call,
-    context,
-  );
-  if (!recoveredResult)
-    await readRecruitingResearchContext(deps.prisma, trusted.actor, {
-      runId: trusted.runId,
-      taskId: saved.task.id,
-      toolName: input.operation === "status" ? "get_task" : "get_rows",
-    });
-  return { ...call, recoveredResult };
-}
-
-type ResearchDispatchActor = ResearchActor & {
-  leaseOwner: string;
-  leaseFence: number;
-};
-type ResearchReadAdmission = {
-  kind: "read";
-  operation: "status" | "rows";
-  saved: ResearchContext;
-  call: ConnectorCall;
-  recoveredResult?: object;
-};
-export type RecruitingResearchCallAdmission = ResearchReadAdmission;
-
-export async function bindRecruitingResearchReadCall(
-  deps: Pick<ResearchDeps, "prisma">,
-  trusted: ResearchDispatchActor,
-  admitted: ResearchReadAdmission,
-  effect: { id: string; request: unknown },
-): Promise<ResearchReadAdmission> {
-  if (!admitted.saved.action) throw new IsolationError();
-  const bound = await bindRecruitingResearchReadEffect(
-    deps.prisma,
-    trusted.actor,
-    {
-      runId: trusted.runId,
-      leaseOwner: trusted.leaseOwner,
-      leaseFence: trusted.leaseFence,
-      actionId: admitted.saved.action.id,
-      effectId: effect.id,
-      request: effect.request as Prisma.InputJsonValue,
-    },
-  );
-  const direct = boundDirectApprovalDetails(
-    effect.request,
-    "__rakazoCatalogTool",
-  );
-  const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
-  const route = direct?.route ?? catalog?.route;
-  const args = direct?.args ?? catalog?.args.arguments;
-  if (!route || !args || typeof args !== "object" || Array.isArray(args))
-    throw new IsolationError();
-  return {
-    ...admitted,
-    saved: bound.saved,
-    operation: route.toolName === "get_task" ? "status" : "rows",
-    call: { ...admitted.call, route, args: args as Record<string, unknown> },
-  };
-}
-
-async function recoverRecruitingResearchReads(
-  deps: ResearchDeps,
-  trusted: ResearchActor,
-  taskId: string,
-  requested: Pick<ConnectorCall, "route" | "args">,
-  context: AdapterContext,
-) {
-  const pending = await listUnmappedRecruitingResearchReads(
-    deps.prisma,
-    trusted.actor,
-    {
-      runId: trusted.runId,
-      taskId,
-    },
-  );
-  const receipts = [];
-  for (const read of pending) {
-    const result = await completeRecruitingResearchCall(
-      deps,
-      trusted,
-      {
-        kind: "read",
-        operation: read.toolName === "get_task" ? "status" : "rows",
-        saved: read.saved,
-        call: {
-          tool: read.effect.kind,
-          executionId: read.effect.id,
-          route: read.route,
-          args: read.args,
-        },
-      },
-      read.effect.result,
-      context,
-      {
-        effectId: read.effect.id,
-        request: read.effect.request,
-        historicalBackfill: true,
-        ...("outputArtifact" in read
-          ? { outputArtifact: read.outputArtifact }
-          : {}),
-      },
-    );
-    if (
-      stableJsonValue(read.route) === stableJsonValue(requested.route) &&
-      stableJsonValue(read.args) === stableJsonValue(requested.args)
-    )
-      receipts.push(result);
-  }
-  return receipts.length
-    ? { status: "recovered" as const, receipts }
-    : undefined;
-}
-
-export async function admitRecruitingResearchCall(
-  deps: { prisma: PrismaClient; artifacts?: ArtifactStore },
-  trusted: ResearchDispatchActor,
-  call: ConnectorCall,
-  context: AdapterContext,
-  options: { taskId?: string },
-): Promise<RecruitingResearchCallAdmission | undefined> {
-  const route = call.route;
-  // Only status and row reads of an older saved research action are recorded here; everything
-  // else, including new research, uses the harness's own permissions, effects and recovery.
-  if (
-    route?.connectorId !== "mcp" ||
-    !route.resourceId ||
-    (route.toolName !== "get_task" && route.toolName !== "get_rows")
-  )
-    return undefined;
-  const run = await deps.prisma.run.findFirst({
-    where: {
-      id: trusted.runId,
-      spaceId: trusted.actor.spaceId,
-      userId: trusted.actor.userId,
-    },
-    select: { thread: { select: { activeRecruitingRoleId: true } } },
-  });
-  if (!run) throw new IsolationError();
-  const task = options.taskId
-    ? { id: options.taskId }
-    : await deps.prisma.recruitingResearchTask.findFirst({
-        where: {
-          role: {
-            spaceId: trusted.actor.spaceId,
-            userId: trusted.actor.userId,
-          },
-          mcpServerId: route.resourceId,
-          serverRevision: Number(route.resourceRevision),
-          providerTaskId: String(call.args.task_id ?? ""),
-          // Research started directly on the provider is only followed in the background;
-          // its reads stay ordinary native reads.
-          actions: { some: {} },
-        },
-        select: { id: true },
-      });
-  if (!task) return undefined;
-  if (!deps.artifacts)
-    throw new Error("Recruiting research requires artifact storage");
-  const researchDeps = { prisma: deps.prisma, artifacts: deps.artifacts };
-  const historical = await readRecruitingResearchContext(
-    deps.prisma,
-    trusted.actor,
-    {
-      runId: trusted.runId,
-      taskId: task.id,
-      historical: true,
-    },
-  );
-  if (
-    !historical.action ||
-    !historical.task ||
-    historical.task.providerTaskId !== call.args.task_id ||
-    historical.task.mcpServerId !== route.resourceId ||
-    historical.task.serverRevision !== route.resourceRevision
-  )
-    throw new IsolationError();
-  const recoveredResult = await recoverRecruitingResearchReads(
-    researchDeps,
-    trusted,
-    task.id,
-    call,
-    context,
-  );
-  const saved = recoveredResult
-    ? historical
-    : await readRecruitingResearchContext(deps.prisma, trusted.actor, {
-        runId: trusted.runId,
-        taskId: task.id,
-        toolName: route.toolName,
-      });
-  return {
-    kind: "read",
-    operation: route.toolName === "get_task" ? "status" : "rows",
-    saved,
-    call,
-    recoveredResult,
-  };
-}
-
-async function uploadResearchReceipt(
-  deps: ResearchDeps,
-  context: AdapterContext,
-  value: unknown,
-  prefix: string,
-  readEffectId?: string,
-): Promise<RecruitingResearchArtifactInput> {
-  const bytes = Buffer.from(
-    readEffectId ? stableJsonValue(value) : JSON.stringify(value),
-    "utf8",
-  );
-  const hash = createHash("sha256").update(bytes).digest("hex");
-  const name = `${prefix}-${hash}.json`;
-  const stored = await deps.artifacts.put(
-    { name, mimeType: "application/json", bytes },
-    context,
-  );
-  // ponytail: retain duplicate uploads; the existing ArtifactStore can share content-addressed blobs.
-  // Remove them only through an exclusive-put or native garbage-collection contract.
-  return {
-    name,
-    mimeType: "application/json",
-    size: bytes.byteLength,
-    hash,
-    storageKey: stored.id,
-    clientNonce: readEffectId
-      ? `recruiting-observation:${readEffectId}`
-      : `${prefix}:${context.runId}:${hash}`,
-  };
-}
-
-export class RecruitingCandidateOutputError extends Error {}
-
-/** Optional local projection after native MCP; it does not prepare or dispatch research. */
-export async function saveNativeRecruitingCandidateResults(
-  deps: ResearchDeps,
-  trusted: ResearchActor & {
-    leaseOwner: string;
-    leaseFence: number;
-    effectId: string;
-    effectRequest: unknown;
-  },
-  input: Extract<RecruitingResearchToolInput, { operation: "save_results" }>,
-  context: AdapterContext,
-) {
-  const started = performance.now();
-  const wallMs = { readTX: 0, serializeArtifactPut: 0, atomicWriteTX: 0 };
-  let phase: keyof typeof wallMs | "validation" = "validation";
-  let phaseStarted = started;
-  let succeeded = false;
-  let rowCount: number | null = null;
-  let bytes: number | null = null;
-  try {
-    if (
-      context.runId !== trusted.runId ||
-      context.spaceId !== trusted.actor.spaceId ||
-      context.userId !== trusted.actor.userId
-    )
-      throw new IsolationError();
-    phase = "readTX";
-    phaseStarted = performance.now();
-    const source = await readNativeRecruitingCandidatePage(
-      deps.prisma,
-      trusted.actor,
-      trusted.runId,
-      input,
-    );
-    wallMs.readTX = performance.now() - phaseStarted;
-    phase = "validation";
-    const observation = classifyRecruitingResearchResult(source.effect.result, {
-      operation: "rows",
-      providerTaskId: input.providerTaskId,
-    });
-    rowCount = observation.rows?.length ?? null;
-    if (
-      observation.rows === undefined ||
-      (observation.rows.length > 0 &&
-        !observation.rows.some(
-          (row) =>
-            row !== null &&
-            typeof row === "object" &&
-            !Array.isArray(row) &&
-            Object.hasOwn(row, "name") &&
-            Object.hasOwn(row, "linkedin_url"),
-        ))
-    )
-      throw new RecruitingCandidateOutputError(
-        "Candidate results need name and linkedin_url columns. Company/JD evidence and unstructured results are not candidate pages. Preserve missing values as null; reread an existing candidate page rather than starting new research.",
-      );
-    phase = "serializeArtifactPut";
-    phaseStarted = performance.now();
-    const profileRows = prepareRecruitingProfileRows(observation.rows);
-    const outputArtifact = await uploadResearchReceipt(
-      deps,
-      context,
-      source.snapshot,
-      "recruiting-candidates",
-      source.effect.id,
-    );
-    wallMs.serializeArtifactPut = performance.now() - phaseStarted;
-    bytes = outputArtifact.size;
-    phase = "atomicWriteTX";
-    phaseStarted = performance.now();
-    const result = await saveNativeRecruitingCandidatePage(
-      deps.prisma,
-      trusted.actor,
-      trusted,
-      input,
-      {
-        sourceEffectId: source.effect.id,
-        rows: profileRows,
-        outputId: observation.outputId,
-        outputArtifact,
-      },
-    );
-    succeeded = true;
-    return withoutProfileMetadata(
-      await withCandidatePageSummary(deps.prisma, result, observation.rows),
-    );
-  } finally {
-    const finished = performance.now();
-    if (phase !== "validation") wallMs[phase] = finished - phaseStarted;
-    getLogger().info("recruiting.candidates.save.timing", {
-      outcome: succeeded ? "succeeded" : "error",
-      failedPhase: succeeded ? null : phase,
-      durationMs: Math.round(finished - started),
-      readTXWallMs: Math.round(wallMs.readTX),
-      serializeArtifactPutWallMs: Math.round(wallMs.serializeArtifactPut),
-      atomicWriteTXWallMs: Math.round(wallMs.atomicWriteTX),
-      rowCount,
-      bytes,
-    });
-  }
-}
-
-const SUMMARY_PEOPLE = 20;
-const GRADE_COLUMNS = ["grade", "match_tier", "tier"];
-
-/** How many returned rows carry each grade, from the first grade column the rows have. */
-function gradeCounts(
-  rows: readonly unknown[],
-): Record<string, number> | undefined {
-  const cell = (row: unknown, key: string) => {
-    if (row === null || typeof row !== "object" || Array.isArray(row))
-      return undefined;
-    const value = (row as Record<string, unknown>)[key];
-    const plain =
-      value !== null && typeof value === "object" && "value" in value
-        ? (value as { value: unknown }).value
-        : value;
-    return typeof plain === "string" && plain.trim() ? plain.trim() : undefined;
-  };
-  const column = GRADE_COLUMNS.find((key) =>
-    rows.some((row) => cell(row, key) !== undefined),
-  );
-  if (!column) return undefined;
-  const counts: Record<string, number> = {};
-  for (const row of rows) {
-    const grade = cell(row, column) ?? "unknown";
-    counts[grade] = (counts[grade] ?? 0) + 1;
-  }
-  return counts;
-}
-
-/**
- * Adds who was saved to a save_results receipt, so the agent relays the page from this summary
- * instead of paging through the complete output artifact. A summary failure keeps the receipt.
- */
-export async function withCandidatePageSummary(
-  prisma: PrismaClient,
-  result: unknown,
-  returned: readonly unknown[] = [],
-) {
-  if (result === null || typeof result !== "object" || Array.isArray(result))
-    return result;
-  const { roleId, sourceEffectId } = result as {
-    roleId?: unknown;
-    sourceEffectId?: unknown;
-  };
-  if (typeof roleId !== "string" || typeof sourceEffectId !== "string")
-    return result;
-  try {
-    const rows = await prisma.recruitingCandidateOccurrence.findMany({
-      where: { pageId: sourceEffectId, roleId },
-      orderBy: { rowIndex: "asc" },
-      select: {
-        candidateKey: true,
-        name: true,
-        title: true,
-        company: true,
-        location: true,
-        linkedinUrl: true,
-        matchFields: true,
-      },
-    });
-    const earlier = await prisma.recruitingCandidateOccurrence.findMany({
-      where: {
-        roleId,
-        pageId: { not: sourceEffectId },
-        candidateKey: { in: rows.map((row) => row.candidateKey) },
-      },
-      distinct: ["candidateKey"],
-      select: { candidateKey: true },
-    });
-    const seen = new Set(earlier.map((row) => row.candidateKey));
-    const grades = gradeCounts(returned);
-    const fresh = rows.filter((row) => !seen.has(row.candidateKey));
-    return {
-      ...result,
-      summary: {
-        saved: rows.length,
-        newToRole: new Set(fresh.map((row) => row.candidateKey)).size,
-        ...(grades ? { grades } : {}),
-        people: fresh
-          .slice(0, SUMMARY_PEOPLE)
-          .map(({ candidateKey: _key, matchFields, ...person }) =>
-            matchFields &&
-            typeof matchFields === "object" &&
-            Object.keys(matchFields).length
-              ? { ...person, match: matchFields }
-              : person,
-          ),
-        note: "Relay results from this summary (counts, grades, people) and the role's Results; the people are saved. Never copy the output into files or count it with a shell; read outputArtifact only for one named person's evidence, with a small limit.",
-      },
-    };
-  } catch (error) {
-    getLogger().warn("recruiting.candidates.summary.failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return result;
-  }
-}
 
 export class RecruitingCsvImportError extends Error {}
 
@@ -855,23 +319,15 @@ export async function importRecruitingCandidateCsv(
     });
   } catch (error) {
     if (error instanceof IsolationError) throw error;
-    throw new RecruitingCsvImportError(
-      "Saved artifact could not be read or verified.",
-    );
+    throw new RecruitingCsvImportError("Saved artifact could not be read or verified.");
   }
   if (saved.row.mimeType.split(";", 1)[0]?.trim().toLowerCase() !== "text/csv")
-    throw new RecruitingCsvImportError(
-      "import_csv requires a text/csv artifact.",
-    );
+    throw new RecruitingCsvImportError("import_csv requires a text/csv artifact.");
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-      saved.bytes,
-    );
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(saved.bytes);
   } catch {
-    throw new RecruitingCsvImportError(
-      "This artifact is not valid UTF-8 text.",
-    );
+    throw new RecruitingCsvImportError("This artifact is not valid UTF-8 text.");
   }
   const csv = parseCsv(text);
   const columns: Array<[string, number]> = [];
@@ -882,10 +338,7 @@ export async function importRecruitingCandidateCsv(
       throw new RecruitingCsvImportError(
         `Column "${column}" is not in the CSV header: ${JSON.stringify(csv.header)}.`,
       );
-    columns.push([
-      CSV_IMPORT_FIELDS[field as keyof typeof CSV_IMPORT_FIELDS],
-      index,
-    ]);
+    columns.push([CSV_IMPORT_FIELDS[field as keyof typeof CSV_IMPORT_FIELDS], index]);
   }
   const rows: Array<{
     rowIndex: number;
@@ -912,33 +365,21 @@ export async function importRecruitingCandidateCsv(
     skipped,
     truncated: csv.truncated,
   };
-  const bytes = Buffer.from(
-    stableJsonValue(recruitingCsvImportReceipt(input, captured)),
-    "utf8",
-  );
+  const bytes = Buffer.from(stableJsonValue(recruitingCsvImportReceipt(input, captured)), "utf8");
   const hash = createHash("sha256").update(bytes).digest("hex");
   const name = `recruiting-csv-import-${hash}.json`;
-  const stored = await deps.artifacts.put(
-    { name, mimeType: "application/json", bytes },
-    context,
-  );
-  return saveRecruitingCandidateCsvImport(
-    deps.prisma,
-    trusted.actor,
-    trusted,
-    input,
-    {
-      ...captured,
-      outputArtifact: {
-        name,
-        mimeType: "application/json",
-        size: bytes.byteLength,
-        hash,
-        storageKey: stored.id,
-        clientNonce: `recruiting-csv-import:${trusted.effectId}`,
-      },
+  const stored = await deps.artifacts.put({ name, mimeType: "application/json", bytes }, context);
+  return saveRecruitingCandidateCsvImport(deps.prisma, trusted.actor, trusted, input, {
+    ...captured,
+    outputArtifact: {
+      name,
+      mimeType: "application/json",
+      size: bytes.byteLength,
+      hash,
+      storageKey: stored.id,
+      clientNonce: `recruiting-csv-import:${trusted.effectId}`,
     },
-  );
+  });
 }
 
 export class RecruitingPeopleSearchError extends Error {}
@@ -960,17 +401,12 @@ function withoutProfileMetadata(result: unknown) {
   return {
     ...result,
     candidateRows: result.candidateRows.map((row: Record<string, unknown>) =>
-      Object.fromEntries(
-        Object.entries(row).filter(([key]) => !key.startsWith("_profile")),
-      ),
+      Object.fromEntries(Object.entries(row).filter(([key]) => !key.startsWith("_profile"))),
     ),
   };
 }
 
-type SavedSearchRow = { candidateKey: string; alreadyInPool: boolean } & Record<
-  string,
-  unknown
->;
+type SavedSearchRow = { candidateKey: string; alreadyInPool: boolean } & Record<string, unknown>;
 
 function savedRows(result: unknown): SavedSearchRow[] {
   const rows =
@@ -980,8 +416,7 @@ function savedRows(result: unknown): SavedSearchRow[] {
   return Array.isArray(rows)
     ? rows.filter(
         (row): row is SavedSearchRow =>
-          Boolean(row) &&
-          typeof (row as { candidateKey?: unknown }).candidateKey === "string",
+          Boolean(row) && typeof (row as { candidateKey?: unknown }).candidateKey === "string",
       )
     : [];
 }
@@ -1002,6 +437,8 @@ export async function saveRecruitingPeopleSearch(
   input: Extract<RecruitingResearchToolInput, { operation: "save_search" }>,
   context: AdapterContext,
   onlyEffectId?: string,
+  /** Judges the rows about to be saved, writing each person's check beside their row. */
+  checkRows?: (rows: Array<{ row: Record<string, unknown> }>) => Promise<void>,
 ) {
   if (
     context.runId !== trusted.runId ||
@@ -1009,8 +446,7 @@ export async function saveRecruitingPeopleSearch(
     context.userId !== trusted.actor.userId
   )
     throw new IsolationError();
-  const sources: Array<{ effectId: string; toolName: string; host: string }> =
-    [];
+  const sources: Array<{ effectId: string; toolName: string; host: string }> = [];
   const rows: Array<{
     rowIndex: number;
     sourceEffectId: string;
@@ -1035,9 +471,7 @@ export async function saveRecruitingPeopleSearch(
   // A run that searches in waves saves each wave once: calls an earlier save already took are
   // skipped, and searches the server saved as they returned are reused instead of saved again.
   const previous = saves
-    .filter(
-      (save) => !save.idempotencyKey.startsWith(PEOPLE_SEARCH_AUTOSAVE_KEY),
-    )
+    .filter((save) => !save.idempotencyKey.startsWith(PEOPLE_SEARCH_AUTOSAVE_KEY))
     .at(-1);
   const autoSaved = saves.filter(
     (save) =>
@@ -1047,28 +481,16 @@ export async function saveRecruitingPeopleSearch(
   const autoSavedCalls = new Set(
     autoSaved
       .filter((save) => savedRows(save.result).length)
-      .map(
-        (save) =>
-          save.idempotencyKey
-            .slice(PEOPLE_SEARCH_AUTOSAVE_KEY.length)
-            .split(":")[0],
-      ),
+      .map((save) => save.idempotencyKey.slice(PEOPLE_SEARCH_AUTOSAVE_KEY.length).split(":")[0]),
   );
   const reused = new Map<string, SavedSearchRow>();
   for (const save of autoSaved)
     for (const row of savedRows(save.result))
       if (!reused.has(row.candidateKey)) reused.set(row.candidateKey, row);
   // Oldest call first, so the page keeps the order the searches returned people in.
-  const calls = (
-    await listRunToolResults(deps.prisma, trusted.actor, trusted.runId)
-  ).reverse();
+  const calls = (await listRunToolResults(deps.prisma, trusted.actor, trusted.runId)).reverse();
   for (const call of calls) {
-    if (
-      onlyEffectId
-        ? call.effectId !== onlyEffectId
-        : autoSavedCalls.has(call.effectId)
-    )
-      continue;
+    if (onlyEffectId ? call.effectId !== onlyEffectId : autoSavedCalls.has(call.effectId)) continue;
     if (!isPeopleSearchEndpoint(call.endpoint)) continue;
     if (previous && call.createdAt <= previous.createdAt) continue;
     const people = peopleFromSearch(call.result, call.endpoint);
@@ -1100,12 +522,7 @@ export async function saveRecruitingPeopleSearch(
       candidateRows,
     };
     if (
-      !(await completeExternalEffect(
-        deps.prisma,
-        trusted.effectId,
-        "executing",
-        result as never,
-      ))
+      !(await completeExternalEffect(deps.prisma, trusted.effectId, "executing", result as never))
     )
       throw new IsolationError();
     return withoutProfileMetadata(result);
@@ -1114,11 +531,10 @@ export async function saveRecruitingPeopleSearch(
     throw new RecruitingPeopleSearchError(
       "No people with a name and LinkedIn profile came back from a profile-data search in this run. Run the people search with the connected profile-data connector first, then save.",
     );
-  const normalized = prepareRecruitingProfileRows(
-    rows.map((entry) => entry.row),
-  );
+  const normalized = prepareRecruitingProfileRows(rows.map((entry) => entry.row));
   for (const [index, row] of normalized.entries())
     rows[index]!.row = row as Record<string, unknown>;
+  await checkRows?.(rows);
   const captured = { sources, rows, truncated };
   const bytes = Buffer.from(
     stableJsonValue(recruitingPeopleSearchReceipt(input, captured)),
@@ -1126,10 +542,7 @@ export async function saveRecruitingPeopleSearch(
   );
   const hash = createHash("sha256").update(bytes).digest("hex");
   const name = `recruiting-people-search-${hash}.json`;
-  const stored = await deps.artifacts.put(
-    { name, mimeType: "application/json", bytes },
-    context,
-  );
+  const stored = await deps.artifacts.put({ name, mimeType: "application/json", bytes }, context);
   const saved = await saveRecruitingCandidatePeopleSearch(
     deps.prisma,
     trusted.actor,
@@ -1157,132 +570,11 @@ export async function saveRecruitingPeopleSearch(
   });
 }
 
-export async function completeRecruitingResearchCall(
-  deps: ResearchDeps,
-  trusted: ResearchActor,
-  admitted: RecruitingResearchCallAdmission,
-  result: unknown,
-  context: AdapterContext,
-  receiptIdentity?: {
-    effectId: string;
-    request: unknown;
-    historicalBackfill?: boolean;
-    outputArtifact?: RecruitingResearchArtifactInput;
-  },
-) {
-  if (
-    context.runId !== trusted.runId ||
-    context.spaceId !== trusted.actor.spaceId ||
-    context.userId !== trusted.actor.userId
-  )
-    throw new IsolationError();
-  const { task, action } = admitted.saved;
-  if (!task || !action || !receiptIdentity) throw new IsolationError();
-  const raw = result;
-  const observation = classifyRecruitingResearchResult(raw, {
-    operation: admitted.operation,
-    ...(task.providerTaskId ? { providerTaskId: task.providerTaskId } : {}),
-  });
-  const snapshot = {
-    version: 1,
-    taskId: task.id,
-    actionId: action.id,
-    operation: admitted.operation,
-    effectId: receiptIdentity.effectId,
-    request: admitted.call.args,
-    providerResult: raw,
-    observation,
-  };
-  const file =
-    receiptIdentity.outputArtifact ??
-    (await uploadResearchReceipt(
-      deps,
-      context,
-      RecruitingResearchReadArtifactSchema.parse(snapshot),
-      `recruiting-observation-${action.id}`,
-      receiptIdentity.effectId,
-    ));
-  const taskState =
-    observation.observedProviderState === "completed" &&
-    observation.done === true
-      ? ("completed" as const)
-      : observation.deliveryState === "accepted" && observation.done === false
-        ? ("active" as const)
-        : undefined;
-  const persisted = await recordRecruitingResearchObservation(
-    deps.prisma,
-    trusted.actor,
-    {
-      runId: trusted.runId,
-      actionId: action.id,
-      effectId: receiptIdentity.effectId,
-      request: receiptIdentity.request as Prisma.InputJsonValue,
-      rawResult: raw as Prisma.InputJsonValue,
-      ...(receiptIdentity.historicalBackfill
-        ? { historicalBackfill: true }
-        : {}),
-      toolName: admitted.operation === "status" ? "get_task" : "get_rows",
-      outputArtifact: file,
-      ...(observation.rows === undefined ? {} : { rows: observation.rows }),
-      ...(observation.outputId === undefined
-        ? {}
-        : { outputId: observation.outputId }),
-      ...(observation.observedProviderState === null
-        ? {}
-        : { observedProviderState: observation.observedProviderState }),
-      ...(observation.usage === null || !action.receiptArtifactId
-        ? {}
-        : { usage: observation.usage }),
-      ...(taskState ? { taskState } : {}),
-      ...(observation.nextCursor === undefined
-        ? {}
-        : { cursor: observation.nextCursor }),
-    },
-  );
-  // The provider is still working after the foreground wait: hand off to the poll job, which
-  // wakes this thread once, and tell the model not to spin on status. A stopped run never arms it.
-  const background =
-    taskState === "active" &&
-    admitted.operation !== "rows" &&
-    deps.jobs &&
-    !receiptIdentity?.historicalBackfill &&
-    (await deps.prisma.run.count({
-      where: { id: trusted.runId, status: { in: [...ACTIVE_RUN_STATUSES] } },
-    })) > 0;
-  if (background)
-    await deps.jobs!.enqueue(
-      recruitingResearchPollJob(
-        { taskId: task.id },
-        recruitingResearchPollDelay(0),
-      ),
-    );
-  return {
-    status: observation.deliveryState,
-    ...recruitingResearchSnapshot(persisted.task, persisted.action),
-    ...("candidateRows" in persisted
-      ? { candidateRows: persisted.candidateRows }
-      : {}),
-    observation,
-    providerResult: raw,
-    ...(background
-      ? { background: RECRUITING_RESEARCH_BACKGROUND_NOTICE }
-      : {}),
-  };
-}
-
 const fold = (text: string) =>
-  text
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+  text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
 
 /** Case/diacritics-insensitive partial match: every query word appears in the stored name. */
-export function personNameMatches(
-  name: string | null | undefined,
-  query: string,
-) {
+export function personNameMatches(name: string | null | undefined, query: string) {
   const words = fold(query).split(" ").filter(Boolean);
   const stored = fold(name ?? "");
   return words.length > 0 && words.every((word) => stored.includes(word));
@@ -1305,9 +597,7 @@ export type ResolvedRecruitingContact = {
   stage: string | null;
   outreachStatus: string | null;
 };
-type CrmRow = ReturnType<
-  typeof RecruitingCrmCandidatesReadSchema.parse
->["rows"][number];
+type CrmRow = ReturnType<typeof RecruitingCrmCandidatesReadSchema.parse>["rows"][number];
 type PoolRow = {
   candidateKey: string;
   name: string | null;
@@ -1315,17 +605,11 @@ type PoolRow = {
 };
 
 /** The role's own records for one person: CRM contacts first, then the saved pool. */
-export function matchRecruitingContacts(
-  nameOrEmail: string,
-  crmRows: CrmRow[],
-  pool: PoolRow[],
-) {
+export function matchRecruitingContacts(nameOrEmail: string, crmRows: CrmRow[], pool: PoolRow[]) {
   const email = nameOrEmail.includes("@") ? fold(nameOrEmail) : null;
   const matches: ResolvedRecruitingContact[] = crmRows
     .filter((row) =>
-      email
-        ? fold(row.email ?? "") === email
-        : personNameMatches(row.full_name, nameOrEmail),
+      email ? fold(row.email ?? "") === email : personNameMatches(row.full_name, nameOrEmail),
     )
     .map((row) => ({
       name: row.full_name,
@@ -1338,14 +622,10 @@ export function matchRecruitingContacts(
       outreachStatus: row.outreach_status,
     }));
   // The pool stores no email, so an email query resolves through CRM contacts only.
-  for (const row of email
-    ? []
-    : pool.filter((row) => personNameMatches(row.name, nameOrEmail))) {
+  for (const row of email ? [] : pool.filter((row) => personNameMatches(row.name, nameOrEmail))) {
     // Merge only on the same LinkedIn profile, never by name.
     const same = matches.find(
-      (match) =>
-        match.linkedinUrl &&
-        sameUrl(match.linkedinUrl) === sameUrl(row.linkedinUrl),
+      (match) => match.linkedinUrl && sameUrl(match.linkedinUrl) === sameUrl(row.linkedinUrl),
     );
     if (same) {
       same.sources.push("saved_pool");
@@ -1374,113 +654,24 @@ export function matchRecruitingContacts(
 
 // ponytail: per-process, per-run memory of resolved stored emails; a restarted run re-resolves.
 const resolvedEmails = new Map<string, Map<string, string | null>>();
-export function rememberResolvedContactEmails(
-  runId: string,
-  matches: ResolvedRecruitingContact[],
-) {
+export function rememberResolvedContactEmails(runId: string, matches: ResolvedRecruitingContact[]) {
   const emails = resolvedEmails.get(runId) ?? new Map<string, string | null>();
-  for (const match of matches)
-    if (match.email) emails.set(fold(match.email), match.name);
+  for (const match of matches) if (match.email) emails.set(fold(match.email), match.name);
   resolvedEmails.delete(runId);
   resolvedEmails.set(runId, emails);
-  if (resolvedEmails.size > 500)
-    resolvedEmails.delete(resolvedEmails.keys().next().value!);
+  if (resolvedEmails.size > 500) resolvedEmails.delete(resolvedEmails.keys().next().value!);
 }
 
 /** Correspondence lookups use only an address stored for that person in this run's resolution. */
-export function unresolvedContactEmailError(
-  runId: string,
-  email: string,
-  name?: string,
-) {
+export function unresolvedContactEmailError(runId: string, email: string, name?: string) {
   const stored = resolvedEmails.get(runId)?.get(fold(email));
-  return stored === undefined ||
-    (name && stored && !personNameMatches(stored, name))
+  return stored === undefined || (name && stored && !personNameMatches(stored, name))
     ? `No stored email for ${name ?? email}; resolve the contact first, never guess an address`
     : null;
 }
 
-const TYPED_ADDRESS =
-  /[^\s\p{Script=Han}@<>()[\]{}"'`，,;；:：「」『』（）]+@[^\s\p{Script=Han}@<>()[\]{}"'`，,;；:：「」『』（）]+\.[a-z]{2,}/giu;
-
-/**
- * An address a person wrote in this run's conversation is theirs, not a guess: their own recent
- * message, or a teammate's brief that hands their words over. Delegated work also looks at the
- * conversation it came from, where the recruiter typed it, since a brief may paraphrase the
- * address away. Its mail can be read without a saved contact.
- */
-export async function addressTypedInConversation(
-  prisma: Pick<PrismaClient, "message">,
-  runId: string,
-  email: string,
-) {
-  const wanted = fold(email);
-  const texts = (blocks: unknown) =>
-    Array.isArray(blocks)
-      ? blocks.filter(
-          (
-            block,
-          ): block is {
-            text: string;
-            kind?: unknown;
-            returnThreadId?: unknown;
-          } =>
-            block &&
-            typeof block === "object" &&
-            "text" in block &&
-            typeof block.text === "string",
-        )
-      : [];
-  let where: Parameters<typeof prisma.message.findMany>[0] = {
-    where: { role: "user", thread: { runs: { some: { id: runId } } } },
-  };
-  let spaceId: string | undefined;
-  const seen = new Set<string>();
-  // The run's own conversation, then up to two conversations that delegated to it.
-  for (let hop = 0; hop < 3; hop += 1) {
-    const rows = await prisma.message.findMany({
-      ...where,
-      orderBy: { seq: "desc" },
-      take: 20,
-      select: {
-        blocks: true,
-        threadId: true,
-        thread: { select: { spaceId: true } },
-      },
-    });
-    const from = new Set<string>();
-    for (const row of rows) {
-      seen.add(row.threadId);
-      spaceId ??= row.thread.spaceId;
-      for (const block of texts(row.blocks)) {
-        if (
-          (block.text.match(TYPED_ADDRESS) ?? []).some(
-            (address) => fold(address) === wanted,
-          )
-        )
-          return true;
-        if (
-          block.kind === "bot_message_received" &&
-          typeof block.returnThreadId === "string" &&
-          !seen.has(block.returnThreadId)
-        )
-          from.add(block.returnThreadId);
-      }
-    }
-    if (!from.size || !spaceId) return false;
-    where = {
-      where: { role: "user", threadId: { in: [...from] }, thread: { spaceId } },
-    };
-  }
-  return false;
-}
-
 /** candidate_key -> lead email recorded when people were added to the role's outreach campaign. */
-async function roleCampaignLeadEmails(
-  prisma: PrismaClient,
-  actor: Actor,
-  roleId: string,
-) {
+async function roleCampaignLeadEmails(prisma: PrismaClient, actor: Actor, roleId: string) {
   const emails = new Map<string, string>();
   const bindings = await prisma.externalEffect.findMany({
     where: {
@@ -1491,9 +682,7 @@ async function roleCampaignLeadEmails(
     select: { result: true },
   });
   for (const { result } of bindings) {
-    const leads = (
-      result as { leads?: Record<string, { email?: unknown }> } | null
-    )?.leads;
+    const leads = (result as { leads?: Record<string, { email?: unknown }> } | null)?.leads;
     for (const [key, lead] of Object.entries(leads ?? {}))
       if (typeof lead?.email === "string") emails.set(key, lead.email);
   }
@@ -1511,9 +700,7 @@ export async function resolveRecruitingContact(
   context: AdapterContext,
 ) {
   const pool: PoolRow[] = [];
-  let crmTarget: Awaited<
-    ReturnType<typeof listRecruitingCandidates>
-  >["crmTarget"] = null;
+  let crmTarget: Awaited<ReturnType<typeof listRecruitingCandidates>>["crmTarget"] = null;
   // ponytail: scans at most 1,000 saved people and 1,000 CRM contacts per role; add a folded-name index past that.
   for (let cursor: string | undefined, page = 0; page < 5; page++) {
     const result = await listRecruitingCandidates(deps.prisma, actor, {
@@ -1528,16 +715,12 @@ export async function resolveRecruitingContact(
     cursor = result.nextCursor;
   }
   const crmRows: CrmRow[] = [];
-  let crm: "read" | "not_bound" | "unavailable" = crmTarget
-    ? "read"
-    : "not_bound";
+  let crm: "read" | "not_bound" | "unavailable" = crmTarget ? "read" : "not_bound";
   const target = crmTarget?.target;
   if (target && !deps.connector) crm = "unavailable";
   else if (target)
     try {
-      crmRows.push(
-        ...(await readCrmRoleContacts(deps.connector!, target, context)),
-      );
+      crmRows.push(...(await readCrmRoleContacts(deps.connector!, target, context)));
     } catch (error) {
       context.signal.throwIfAborted();
       getLogger().warn("recruiting.contact.resolve.crm_unavailable", {
@@ -1547,11 +730,7 @@ export async function resolveRecruitingContact(
     }
   const result = matchRecruitingContacts(input.nameOrEmail, crmRows, pool);
   // A saved person enrolled in this role's outreach campaign has that lead address stored.
-  const leadEmails = await roleCampaignLeadEmails(
-    deps.prisma,
-    actor,
-    input.roleId,
-  );
+  const leadEmails = await roleCampaignLeadEmails(deps.prisma, actor, input.roleId);
   // Otherwise the email an earlier contact lookup saved for the same LinkedIn profile.
   const found = result.matches.some((match) => !match.email)
     ? await lookedUpContactEmails(deps.prisma, actor)
@@ -1560,32 +739,20 @@ export async function resolveRecruitingContact(
     if (!match.email)
       match.email =
         (match.candidateKey ? leadEmails.get(match.candidateKey) : undefined) ??
-        bestLookedUpEmail(found, match.linkedinUrl, match.candidateKey)
-          ?.address ??
+        bestLookedUpEmail(found, match.linkedinUrl, match.candidateKey)?.address ??
         null;
-  if (context.runId)
-    rememberResolvedContactEmails(context.runId, result.matches);
+  if (context.runId) rememberResolvedContactEmails(context.runId, result.matches);
   const contacts = result.matches.filter((match) => match.crmCandidateId);
   if (!target || crm !== "read" || !contacts.length) return { ...result, crm };
   // The Inbox's source: the role's stored correspondence is the primary "latest mail" answer.
-  let messages: ReturnType<
-    typeof RecruitingCrmRoleMailReadSchema.parse
-  >["messages"] = [];
+  let messages: ReturnType<typeof RecruitingCrmRoleMailReadSchema.parse>["messages"] = [];
   let correspondence: "read" | "unavailable" = "read";
   try {
-    for (const candidateId of new Set(
-      contacts.map((contact) => contact.crmCandidateId!),
-    )) {
+    for (const candidateId of new Set(contacts.map((contact) => contact.crmCandidateId!))) {
       // Pages are newest first: once the latest incoming message is present, both requested answers are known.
-      const read = await readCrmRoleCorrespondence(
-        deps.connector!,
-        target,
-        context,
-        candidateId,
-        {
-          stopAtReceived: true,
-        },
-      );
+      const read = await readCrmRoleCorrespondence(deps.connector!, target, context, candidateId, {
+        stopAtReceived: true,
+      });
       messages.push(...read.messages);
     }
   } catch (error) {
@@ -1604,9 +771,7 @@ export async function resolveRecruitingContact(
       const mine = messages
         .filter((m) => m.candidate_id === match.crmCandidateId)
         .toSorted((a, b) =>
-          String(b.timestamp_email ?? "").localeCompare(
-            String(a.timestamp_email ?? ""),
-          ),
+          String(b.timestamp_email ?? "").localeCompare(String(a.timestamp_email ?? "")),
         );
       return {
         ...match,
@@ -1614,9 +779,7 @@ export async function resolveRecruitingContact(
           source: "crm_role_correspondence" as const,
           status: correspondence,
           latest: mailSummary(mine[0]),
-          latestReceived: mailSummary(
-            mine.find((m) => m.direction === "received"),
-          ),
+          latestReceived: mailSummary(mine.find((m) => m.direction === "received")),
         },
       };
     }),
@@ -1647,15 +810,13 @@ async function crmData(
   )) {
     if (event.type === "error") throw new Error(event.message);
     if (event.type === "result")
-      data = (event.data as { structuredContent?: { data?: unknown } } | null)
-        ?.structuredContent?.data;
+      data = (event.data as { structuredContent?: { data?: unknown } } | null)?.structuredContent
+        ?.data;
   }
   return data;
 }
 
-type CrmRoleMail = ReturnType<
-  typeof RecruitingCrmRoleMailReadSchema.parse
->["messages"][number];
+type CrmRoleMail = ReturnType<typeof RecruitingCrmRoleMailReadSchema.parse>["messages"][number];
 export type CrmReadTarget = {
   mcpServerId: string;
   serverRevision: number;
@@ -1685,7 +846,7 @@ async function readCrmRoleContacts(
   context: AdapterContext,
 ) {
   const rows: CrmRow[] = [];
-  for (let offset = 0; offset < 1000;) {
+  for (let offset = 0; offset < 1000; ) {
     // list_crm_candidates filters by client/role LABELS, not role_spec_id; unreviewed-only is its default.
     const page = RecruitingCrmCandidatesReadSchema.parse(
       await crmData(connector, target, context, "list_crm_candidates", {
@@ -1728,32 +889,20 @@ async function readCrmRoleCorrespondence(
   const messages: CrmRoleMail[] = [];
   const seen = new Set<string>();
   let offset: number | null = 0;
-  for (
-    let page = 0;
-    offset !== null && page < (options.maxPages ?? 1000);
-    page++
-  ) {
+  for (let page = 0; offset !== null && page < (options.maxPages ?? 1000); page++) {
     const read = RecruitingCrmRoleMailReadSchema.parse(
-      await crmData(
-        connector,
-        target,
-        context,
-        "list_crm_role_correspondence",
-        {
-          p_org: target.organizationId,
-          p_role: target.crmRoleId,
-          ...(candidateId ? { p_candidate: candidateId } : {}),
-          p_limit: 50,
-          p_offset: offset,
-        },
-      ),
+      await crmData(connector, target, context, "list_crm_role_correspondence", {
+        p_org: target.organizationId,
+        p_role: target.crmRoleId,
+        ...(candidateId ? { p_candidate: candidateId } : {}),
+        p_limit: 50,
+        p_offset: offset,
+      }),
     );
     if (
       read.organization_id !== target.organizationId ||
       read.role_id !== target.crmRoleId ||
-      (candidateId
-        ? read.candidate_id !== candidateId
-        : read.candidate_id != null) ||
+      (candidateId ? read.candidate_id !== candidateId : read.candidate_id != null) ||
       read.messages.length > 50 ||
       read.messages.some(
         (message) =>
@@ -1761,31 +910,22 @@ async function readCrmRoleCorrespondence(
           (candidateId !== null && message.candidate_id !== candidateId) ||
           seen.has(message.id),
       ) ||
-      new Set(read.messages.map((message) => message.id)).size !==
-        read.messages.length ||
+      new Set(read.messages.map((message) => message.id)).size !== read.messages.length ||
       (read.next_offset !== null &&
-        (!read.messages.length ||
-          read.next_offset !== offset + read.messages.length))
+        (!read.messages.length || read.next_offset !== offset + read.messages.length))
     )
-      throw new IsolationError(
-        "CRM correspondence scope or pagination changed",
-      );
+      throw new IsolationError("CRM correspondence scope or pagination changed");
     for (const message of read.messages) {
       seen.add(message.id);
       messages.push(message);
     }
-    if (
-      options.stopAtReceived &&
-      read.messages.some((message) => message.direction === "received")
-    )
+    if (options.stopAtReceived && read.messages.some((message) => message.direction === "received"))
       return { messages, complete: true };
     // Newest first, so a page reaching past the window has read everything inside it.
     if (
       options.stopBefore &&
       read.messages.some(
-        (message) =>
-          Date.parse(message.timestamp_email ?? "") <
-          Date.parse(options.stopBefore!),
+        (message) => Date.parse(message.timestamp_email ?? "") < Date.parse(options.stopBefore!),
       )
     )
       return { messages, complete: true };
@@ -1822,16 +962,10 @@ export async function readRecruitingRoleRepliesSince(
   since: string,
   maxPages = 4,
 ): Promise<{ replies: RecruitingRoleReply[]; complete: boolean }> {
-  const read = await readCrmRoleCorrespondence(
-    connector,
-    target,
-    context,
-    null,
-    {
-      maxPages,
-      stopBefore: since,
-    },
-  );
+  const read = await readCrmRoleCorrespondence(connector, target, context, null, {
+    maxPages,
+    stopBefore: since,
+  });
   const received = read.messages.filter(
     (message) =>
       message.direction === "received" &&
@@ -1873,15 +1007,23 @@ export async function resolveRecruitingContactAcrossRoles(
     roleId: string;
     roleTitle: string;
   })[] = [];
-  const crm: { roleId: string; crm: "read" | "not_bound" | "unavailable" }[] =
-    [];
+  const crm: { roleId: string; crm: "read" | "not_bound" | "unavailable" }[] = [];
   for (const role of roles) {
+    // One role whose conversation or agent was removed must not fail the lookup in every other
+    // role (simulated 2026-11-16, team-has-no-email).
     const result = await resolveRecruitingContact(
       deps,
       actor,
       { roleId: role.id, nameOrEmail },
       context,
-    );
+    ).catch((error: unknown) => {
+      if (!(error instanceof IsolationError)) throw error;
+      getLogger().warn("recruiting.role_read.skipped", {
+        "recruiting.role_id": role.id,
+      });
+      return undefined;
+    });
+    if (!result) continue;
     crm.push({ roleId: role.id, crm: result.crm });
     matches.push(
       ...result.matches.map((match) => ({
@@ -1891,22 +1033,33 @@ export async function resolveRecruitingContactAcrossRoles(
       })),
     );
   }
+  const status = !matches.length
+    ? ("not_found" as const)
+    : matches.length === 1
+      ? ("resolved" as const)
+      : ("ambiguous" as const);
+  if (status !== "not_found")
+    return {
+      scope: "all_user_roles" as const,
+      status,
+      matches,
+      crm,
+    };
+  const sends = await productEmailSends(deps.prisma, actor);
   return {
     scope: "all_user_roles" as const,
-    status: !matches.length
-      ? ("not_found" as const)
-      : matches.length === 1
-        ? ("resolved" as const)
-        : ("ambiguous" as const),
+    status,
     matches,
     crm,
+    sends,
+    note: productSendsNote(sends),
   };
 }
 
 /**
  * The arguments for the server's one repeat of a refused role save: every citation becomes a plain
- * locator (no quote to match), and a mistyped intent quote becomes the recruiter's own words. The
- * repeat passes the same ownership checks; undefined when it would change nothing.
+ * locator (no quote, so no read receipt is asked of it). The repeat passes the same ownership checks; undefined when it
+ * would change nothing.
  */
 export function repairedRoleSave(
   args: Record<string, unknown>,
@@ -1915,7 +1068,6 @@ export function repairedRoleSave(
   if (args.operation === "read" || !(error instanceof Error)) return undefined;
   if (
     !(error instanceof IsolationError) &&
-    !(error instanceof RecruitingSourceValidationError) &&
     error.name !== "RecruitingPlaybookValidationError" &&
     error.name !== "ZodError"
   )
@@ -1934,85 +1086,6 @@ export function repairedRoleSave(
   };
   const { intent, ...rest } = args;
   const repaired = strip(rest) as Record<string, unknown>;
-  const quote =
-    error instanceof RecruitingIntentQuoteError ? error.quote : undefined;
-  const intentRecord =
-    intent && typeof intent === "object"
-      ? (intent as Record<string, unknown>)
-      : {};
-  if (quote && quote !== intentRecord.quote) changed = true;
   if (!changed) return undefined;
-  return {
-    ...repaired,
-    ...(intent === undefined && !quote
-      ? {}
-      : { intent: { ...intentRecord, ...(quote ? { quote } : {}) } }),
-  };
-}
-
-/** The quality check's own grades for saved people: one receipt artifact, then one role page. */
-export async function saveRecruitingGrades(
-  deps: ResearchDeps,
-  trusted: ResearchActor & {
-    leaseOwner: string;
-    leaseFence: number;
-    effectId: string;
-    effectRequest: unknown;
-  },
-  input: Extract<RecruitingResearchToolInput, { operation: "save_grades" }>,
-  context: AdapterContext,
-) {
-  if (
-    context.runId !== trusted.runId ||
-    context.spaceId !== trusted.actor.spaceId ||
-    context.userId !== trusted.actor.userId
-  )
-    throw new IsolationError();
-  const bytes = Buffer.from(
-    stableJsonValue(recruitingGradesReceipt(input)),
-    "utf8",
-  );
-  const hash = createHash("sha256").update(bytes).digest("hex");
-  const name = `recruiting-grades-${hash}.json`;
-  const stored = await deps.artifacts.put(
-    { name, mimeType: "application/json", bytes },
-    context,
-  );
-  return saveRecruitingCandidateGrades(
-    deps.prisma,
-    trusted.actor,
-    trusted,
-    input,
-    {
-      outputArtifact: {
-        name,
-        mimeType: "application/json",
-        size: bytes.byteLength,
-        hash,
-        storageKey: stored.id,
-        clientNonce: `recruiting-grades:${trusted.effectId}`,
-      },
-    },
-  );
-}
-
-/**
- * A role create sent after this thread's role was already saved, as an update of that role: its
- * title, brief, citations and lists are written to the saved role, and its criteria are upserted
- * so the criteria already saved there (the recruiter's stated must-haves) stay.
- */
-export function createAsUpdate(
-  args: Record<string, unknown>,
-  role: { id: string; revision: number },
-): Record<string, unknown> {
-  const { operation: _operation, criteria, ...rest } = args;
-  return {
-    ...rest,
-    operation: "update",
-    roleId: role.id,
-    expectedRevision: role.revision,
-    ...(Array.isArray(criteria) && criteria.length
-      ? { criteria: { upsert: criteria } }
-      : {}),
-  };
+  return { ...repaired, ...(intent === undefined ? {} : { intent }) };
 }

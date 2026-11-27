@@ -15,7 +15,6 @@ import { createWorkerSecretStore } from "./secret-store.js";
 if (process.env.RAKAZO_RELEASE_PROFILE !== "staging") loadRootEnv();
 
 import {
-  AutumnFileConnector,
   artifactStorageOptionsFromEnv,
   assertHomeStorageConfiguration,
   ChatSdkMessagingSurface,
@@ -35,7 +34,6 @@ import {
   createSessionAdmissionRuntime,
   createTicketChangeNotifier,
   createWebProvider,
-  DISCOVERY_PREWARM_REFRESH_MS,
   databaseCapacityBackoffMs,
   ExpoPushProvider,
   firstPartyMcpUrl,
@@ -93,6 +91,7 @@ import { MarkdownMemoryStore } from "@rakazo/memory";
 
 // Recent messages get meaning vectors for history search; about US$0.10 a day at most.
 const EMBED_INTERVAL_MS = 60_000;
+const EMBED_LATE_TEXT_MS = 24 * 60 * 60_000;
 const EMBED_MAX_TOKENS_PER_DAY = 5_000_000;
 
 const staging = hostedStagingConfig(process.env);
@@ -255,17 +254,13 @@ async function main() {
     new InstalledConnectorProvider(prisma, secrets, {}, allowPrivateEndpoint),
     ...integrationSettings.providers(),
     mcp,
-    new AutumnFileConnector(prisma, secrets, artifacts),
   ]);
   const connector = stack.destination;
   await connector.start();
   integrationSettings.warmDirectories();
-  const prewarm = () =>
-    void prewarmToolDiscovery(prisma, stack.connector, shutdown.signal).catch((error) =>
-      logger.warn("discovery.prewarm failed", { error: String(error) }),
-    );
-  prewarm();
-  setInterval(prewarm, DISCOVERY_PREWARM_REFRESH_MS).unref();
+  void prewarmToolDiscovery(prisma, stack.connector, shutdown.signal).catch((error) =>
+    logger.warn("discovery.prewarm failed", { error: String(error) }),
+  );
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
   await assertHomeStorageConfiguration(prisma, artifactStorage);
   const home = createAgentHomeStore(dataDir, artifactStorage, prisma);
@@ -301,7 +296,6 @@ async function main() {
     // Live per-account Codex catalog; never refreshes or writes credentials.
     codexCatalog: new CodexCatalogCache(),
     replySuggestions: true,
-    quickReplies: true,
     sandbox,
     memory: new MarkdownMemoryStore(prisma),
     memoryProviders,
@@ -364,6 +358,7 @@ async function main() {
     notifications,
     cloudAgent,
     connector: stack.connector,
+    artifacts,
     shutdownSignal: shutdown.signal,
     // Keep at least two in five slots for conversations.
     scheduledRunSlots: Math.max(1, Math.floor((workerConcurrency * 3) / 5)),
@@ -402,15 +397,24 @@ async function main() {
   reconciler.start();
   if (embedder) {
     let embedding = false;
+    // After one full sweep a pass reads only messages since it, less a day for a bot reply
+    // whose text lands after it was created: a message with no text is never embedded, so a full
+    // sweep each minute re-read every recent message.
+    let sweptAt: Date | undefined;
     setInterval(() => {
       if (embedding || shutdown.signal.aborted) return;
       embedding = true;
+      const startedAt = new Date();
       void embedRecentMessages(prisma, embedder, {
         maxTokensPerDay: EMBED_MAX_TOKENS_PER_DAY,
+        since: sweptAt && new Date(sweptAt.getTime() - EMBED_LATE_TEXT_MS),
         signal: shutdown.signal,
         onError: (error) => logger.warn("history.embed failed", { reason: String(error) }),
       })
-        .then((result) => result.embedded && logger.info("history.embed", result))
+        .then((result) => {
+          if (result.swept) sweptAt = startedAt;
+          if (result.embedded) logger.info("history.embed", result);
+        })
         .catch((error) => logger.warn("history.embed failed", { reason: String(error) }))
         .finally(() => {
           embedding = false;
@@ -498,11 +502,11 @@ async function main() {
 
   logger.info("boot.phase", { phase: "ready", "boot.elapsed_ms": Math.round(performance.now()) });
   logger.info("worker ready", { degraded: secrets.describe().capabilities.degraded ?? false });
-  // Every account with a recruiting crew gets the current defaults (its Reviewer in every
-  // conversation, the tools it grades with) on each release, not only when the person signs in.
+  // Every account with a recruiting crew gets the current defaults on each release, not only
+  // when the person signs in.
   void backfillRecruitingCrews(
     prisma,
-    { sandboxKind: sandboxProvider, firstPartyMcpUrl: trustedMcpEndpoint },
+    { sandboxKind: sandboxProvider, firstPartyMcpUrl: trustedMcpEndpoint, signal: shutdown.signal },
     (error) => logger.error("recruiting crew backfill", error),
   )
     .then((accounts) => logger.info("recruiting crew backfill done", { accounts }))

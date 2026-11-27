@@ -89,7 +89,7 @@ export function ActivityTab({
   const instantly = useInstantlyStatus();
 
   const profileKeys = [
-    ...(candidateKey ? [`autumn:${candidateKey}`] : []),
+    ...(candidateKey ? [`sourced:${candidateKey}`] : []),
     ...(hasCrm ? [`crm:${person.candidateId}`] : []),
   ];
   const profileViews = useKeyedRead(

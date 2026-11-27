@@ -1,9 +1,10 @@
+import { i18n } from "@lingui/core";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { AskAnswer, Bot, ThreadSnapshot } from "@rakazo/contracts";
 import {
   answerableAskMessageIds,
+  reopenedAskMessageIds,
   threadTailPhase,
-  timedOutAskMessageId,
   userVisibleMessages,
 } from "@rakazo/core";
 import { Button, cn, Textarea } from "@rakazo/ui-web";
@@ -142,10 +143,7 @@ export function StackedConversation({
     return () => window.removeEventListener("keydown", onKey);
   }, [onBack, docked]);
 
-  const timedOut = timedOutAskMessageId(snapshot);
-  const answerable = timedOut
-    ? [...answerableAskMessageIds(snapshot), timedOut]
-    : answerableAskMessageIds(snapshot);
+  const answerable = [...answerableAskMessageIds(snapshot), ...reopenedAskMessageIds(snapshot)];
   const pending = pendingSince !== null && Date.now() - pendingSince < PENDING_MS;
   const phase = snapshot ? threadTailPhase(snapshot, { sending: sending || pending }) : null;
   const workingLabel =
@@ -175,7 +173,7 @@ export function StackedConversation({
     setActionError(null);
     try {
       await answering.current;
-      await rpc.threads.send({ groupId, text });
+      await rpc.threads.send({ groupId, text, uiLocale: i18n.locale || undefined });
       if (editRevision.current === revision) setDraft("");
       jumpToLatest();
       setPendingSince(Date.now());

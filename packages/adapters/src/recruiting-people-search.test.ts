@@ -45,17 +45,49 @@ type Save = { createdAt: Date; idempotencyKey: string; result: unknown };
 
 const updateMany = vi.fn(async (..._args: unknown[]) => ({ count: 1 }));
 
-function deps(previousSave: Date | null, autoSaves: Save[] = []) {
+function deps(
+  previousSave: Date | null,
+  autoSaves: Save[] = [],
+  role?: { asked: string; held: string[] },
+) {
   const saves: Save[] = [
     ...(previousSave ? [{ createdAt: previousSave, idempotencyKey: "explicit", result: {} }] : []),
     ...autoSaves,
   ];
+  const held = role?.held.map((name) => `linkedin:/in/${name}`) ?? [];
   return {
     prisma: {
       externalEffect: {
         findMany: vi.fn(async () => saves),
         updateMany,
       },
+      run: {
+        findFirst: vi.fn(async () =>
+          role ? { threadId: "thread-1", thread: { activeRecruitingRoleId: "role-1" } } : null,
+        ),
+      },
+      message: {
+        findMany: vi.fn(async () => [
+          { createdAt: new Date(2026, 9, 26, 3, 0), blocks: [{ kind: "text", text: role?.asked }] },
+        ]),
+      },
+      recruitingCandidate: {
+        count: vi.fn(async () => held.length),
+        findMany: vi.fn(async ({ where }: { where: { candidateKey: { in: string[] } } }) =>
+          where.candidateKey.in
+            .filter((key) => held.includes(key))
+            .map((candidateKey) => ({
+              candidateKey,
+            })),
+        ),
+      },
+      // Everyone held was saved after the ask, by this search.
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async ({ where }: { where: { page: { observedAt: { lt?: Date } } } }) =>
+          where.page.observedAt.lt ? [] : held.map((candidateKey) => ({ candidateKey })),
+        ),
+      },
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
     },
     artifacts: { put: vi.fn(async () => ({ id: "artifact-1" })) },
   } as never;

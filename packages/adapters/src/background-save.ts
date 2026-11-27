@@ -13,8 +13,8 @@ export const FEEDBACK_SAVING = {
 /** How long the agent waits for a quick save before carrying on. */
 export const FEEDBACK_SAVE_WAIT_MS = 1_500;
 /**
- * How long the agent waits for a preference's first attempt. A refusal (the exact quote, a role
- * requirement) must reach the agent so it can fix and resend; only retries run in the background.
+ * How long the agent waits for a preference's first attempt. A refusal (a role requirement)
+ * must reach the agent so it can fix and resend; only retries run in the background.
  */
 export const PREFERENCE_SAVE_WAIT_MS = 15_000;
 /** How long a call naming a role revision waits for this run's own role saves still running. */
@@ -145,10 +145,12 @@ function outageError(error: unknown): boolean {
   return OUTAGE.test(text) && !INVALID_INPUT.test(text);
 }
 
-/** A failed save that a retry can fix: a revision race or a passing outage, not bad input. */
-export function transientSaveError(error: unknown): boolean {
-  const text = errorText(error);
-  return /conflict|revision/i.test(text) ? !INVALID_INPUT.test(text) : outageError(text);
+/**
+ * A failed save that a retry can fix: a conflict the save itself reported by its code, or a
+ * passing outage, not bad input.
+ */
+export function transientSaveError(result: unknown, error: unknown): boolean {
+  return savedPayload(result)?.code === "CONFLICT" || outageError(error);
 }
 
 /**
@@ -166,7 +168,12 @@ export function ownRoleRevisions() {
       role.latest = Math.max(role.latest, to);
       roles.set(roleId, role);
     },
-    current(roleId: string | undefined, expected: unknown): unknown {
+    /**
+     * `saved` is the role's revision now: a newer one named is the agent taking a refused save of
+     * its own for done, not someone else's change, so the call acts on the saved revision.
+     */
+    current(roleId: string | undefined, expected: unknown, saved?: number): unknown {
+      if (typeof expected === "number" && saved !== undefined && expected > saved) return saved;
       const role = roleId ? roles.get(roleId) : undefined;
       return role &&
         typeof expected === "number" &&

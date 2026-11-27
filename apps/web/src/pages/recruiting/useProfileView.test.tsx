@@ -11,7 +11,7 @@ import { useProfileView } from "./useProfileView";
 let root: ReturnType<typeof createRoot>;
 let element: HTMLDivElement;
 function Fixture({
-  candidateKey = "autumn:a",
+  candidateKey = "sourced:a",
   visible = true,
   refresh = 0,
 }: {
@@ -104,10 +104,10 @@ it("ignores an old person's delayed write result", async () => {
       }),
   );
   await render();
-  await render({ candidateKey: "autumn:b" });
+  await render({ candidateKey: "sourced:b" });
   await act(async () => reject());
   expect(element.textContent).toBe("recorded");
-  expect(recordView.mock.calls[1]![0].candidateKey).toBe("autumn:b");
+  expect(recordView.mock.calls[1]![0].candidateKey).toBe("sourced:b");
 });
 it("does not record a profile that has not actually been opened", async () => {
   await render({ visible: false });

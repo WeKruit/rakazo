@@ -19,10 +19,13 @@ import {
   claimIntendedEffect,
   completeExternalEffect,
   createApprovedEffectReplayQueue,
+  deniedCardsSince,
+  deniedEarlierThisTurn,
   inputPausedToolResult,
   isApprovalPausedResult,
   isToolPauseResult,
   replaceCompletedExternalEffectResult,
+  deniedContinuationNote,
   resolveDuplicateEffectGate,
   settleUncertainEffect,
 } from "./approval-effect.js";
@@ -285,12 +288,61 @@ describe("resolveDuplicateEffectGate", () => {
     });
   });
 
+  it("names a cancelled send card's subject and reads a new title as the email's", () => {
+    const gate = resolveDuplicateEffectGate(
+      {
+        status: "denied",
+        result: {
+          instantlyActivationShown: {
+            firstEmail: null,
+            recipients: [{ firstEmail: { subject: "Old subject", body: "Hi" } }],
+          },
+        },
+      },
+      "connectors_execute_tool",
+    );
+    expect(gate).toMatchObject({
+      action: "return",
+      result: { error: expect.stringContaining('subject was "Old subject"') },
+    });
+    expect(JSON.stringify(gate)).toContain("never the role's name");
+  });
+
+  it("tells a resumed run which of its cards were denied", () => {
+    const note = deniedContinuationNote([
+      { kind: "instantly__x__activate_campaign", status: "denied", result: null },
+      { kind: "destination.write", status: "approved" },
+    ]);
+    expect(note).toContain("Card answered for instantly__x__activate_campaign: The user denied");
+    expect(note).toContain("never the role's name");
+    expect(note).not.toContain("destination.write");
+    expect(deniedContinuationNote([{ kind: "destination.write", status: "approved" }])).toBe(
+      undefined,
+    );
+    expect(
+      deniedContinuationNote([
+        { kind: "instantly__x__activate_campaign", status: "denied", result: null },
+        { kind: "instantly__x__activate_campaign", status: "approved" },
+      ]),
+    ).toBe(undefined);
+  });
+
+  it("tells a run about another run's cancelled card only before it has acted on it", () => {
+    // deny 11-21: after the new card was approved, the resumed run was told again about the card
+    // cancelled before it started, saved the email again and asked a needless question.
+    const lastWord = new Date("2026-11-21T10:03:30Z");
+    const started = new Date("2026-11-21T10:04:35Z");
+    expect(deniedCardsSince(lastWord, started, false)).toEqual(lastWord);
+    expect(deniedCardsSince(lastWord, started, true)).toEqual(started);
+    expect(deniedCardsSince(undefined, started, true)).toEqual(started);
+    expect(deniedCardsSince(undefined, undefined, false)).toEqual(new Date(0));
+  });
+
   it("returns denial without executing", () => {
     expect(resolveDuplicateEffectGate({ status: "denied" }, "destination.write")).toEqual({
       action: "return",
       result: {
-        error:
-          "The user denied this action. Do not retry or rephrase it; tell the user and ask what they want instead.",
+        error: expect.stringContaining("The user denied this action. Do not retry"),
       },
     });
   });
@@ -566,5 +618,37 @@ describe("catalog wrapper names", () => {
         { connectorId: "mcp", resourceId: "server-1", toolName: "send_message" },
       ),
     ).toBe(true);
+  });
+});
+
+// send-through-blip 11-16: denied, the same turn rewrote the email and asked again on a new card.
+describe("a denial holds for the rest of the turn", () => {
+  function store(denied: { updatedAt: Date } | null, spokeSince: boolean) {
+    return {
+      externalEffect: { findFirst: vi.fn(async () => denied) },
+      message: { findFirst: vi.fn(async () => (spokeSince ? { id: "m" } : null)) },
+    };
+  }
+  const effect = { id: "e2", runId: "run", kind: "instantly__activate_campaign" };
+
+  it("refuses another card of the same kind after a denial in this turn", async () => {
+    const prisma = store({ updatedAt: new Date() }, false);
+    await expect(deniedEarlierThisTurn(prisma, { threadId: "t", effect })).resolves.toBe(true);
+    expect(prisma.externalEffect.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ runId: "run", kind: effect.kind, status: "denied" }),
+      }),
+    );
+  });
+
+  it("asks again once the person has written since the denial", async () => {
+    const prisma = store({ updatedAt: new Date() }, true);
+    await expect(deniedEarlierThisTurn(prisma, { threadId: "t", effect })).resolves.toBe(false);
+  });
+
+  it("asks when nothing was denied", async () => {
+    await expect(
+      deniedEarlierThisTurn(store(null, false), { threadId: "t", effect }),
+    ).resolves.toBe(false);
   });
 });

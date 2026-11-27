@@ -17,7 +17,7 @@ const event = (extra: Partial<InterviewCalendarEvent> = {}): InterviewCalendarEv
   end: "2026-10-20T10:00:00Z",
   timeZone: "UTC",
   attendees: [],
-  status: "confirmed",
+  status: "booked",
   location: null,
   url: null,
   ...extra,

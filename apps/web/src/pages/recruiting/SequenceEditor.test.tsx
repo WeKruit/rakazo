@@ -121,6 +121,30 @@ it("ignores an earlier role read that resolves after changing role", async () =>
   await act(async () => root.unmount());
 });
 
+it("starts a new draft from the role's email saved before a mailbox existed", async () => {
+  // Staging 11-14: the email was saved three times and the page still showed nothing.
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const savedEmail = [{ subject: "Staff Frontend role", body: "Saved body", delay_days: 0 }];
+  await act(async () =>
+    root.render(
+      <SequenceEditor
+        roleId="role"
+        serverId="server"
+        execute={async () => ({ ...campaign, campaign: null, savedEmail })}
+      />,
+    ),
+  );
+  expect(
+    [...host.querySelectorAll("input, textarea")].some(
+      (field) => (field as HTMLInputElement).value === "Staff Frontend role",
+    ),
+  ).toBe(true);
+  await act(async () => root.unmount());
+});
+
 it("uses the browser timezone for a new draft", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const resolved = vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions");

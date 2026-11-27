@@ -6,11 +6,18 @@ import type {
   JobPublisher,
 } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
-import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
+import { RecruitingCorrespondenceSchema, recruitingInterviewStatus } from "@rakazo/contracts";
+import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
-import { IsolationError, listRecruitingSchedulingPlans } from "@rakazo/db";
+import {
+  confirmedSendRecipients,
+  IsolationError,
+  listRecruitingSchedulingPlans,
+  otherCampaignsThatEmailed,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import addressparser from "nodemailer/lib/addressparser";
 import { saveEmailAttachments } from "./email-attachments.js";
 import { readInstantlyEmail } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
@@ -50,6 +57,65 @@ type CalendarEntry = {
   refreshing?: boolean;
 };
 const calendarCache = new Map<string, CalendarEntry>();
+/** Other campaigns of the account read for a role's replies, at most; more marks the read partial. */
+const OTHER_CAMPAIGNS = 10;
+
+/** One Instantly email as an Inbox row; a list read keeps at most 50,000 characters of its body. */
+export function instantlyInboxRow(
+  source: { id: string; name: string },
+  email: NonNullable<ReturnType<typeof readInstantlyEmail>>,
+  campaignId: string,
+  full: boolean,
+): RecruitingCorrespondence["emails"][number] {
+  const text =
+    email.body.text ||
+    (email.body.html ? htmlToPlainText(email.body.html) : (email.content_preview ?? ""));
+  const row = RecruitingCorrespondenceSchema.shape.emails.element.parse({
+    id: `${source.id}:${email.id}`,
+    sourceId: source.id,
+    sourceName: source.name,
+    providerMessageId: email.id,
+    providerThreadId: email.thread_id ?? null,
+    campaignId,
+    eaccount: email.eaccount,
+    savedRead: null,
+    direction: email.ue_type === 2 ? "received" : email.ue_type === 1 ? "sent" : null,
+    sender: email.from_address_email ?? null,
+    recipients: [email.to_address_email_list],
+    subject: email.subject,
+    body: text,
+    snippet:
+      !!email.body_fallback_reason ||
+      !(email.body.text || email.body.html) ||
+      (!full && text.length > 50000),
+    date: email.timestamp_email,
+    url: null,
+  });
+  if (!full) row.body = row.body.slice(0, 50000);
+  return row;
+}
+/** The calendar writes that put an interview on a calendar, Google's and Cal.com's. */
+const CALENDAR_BOOKINGS = ["create_event", "update_event", "create_booking", "reschedule_booking"];
+/** The event a completed calendar write made, by the id the calendar read gives it. */
+function calendarBooking(effect: { request: unknown; result: unknown }) {
+  const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
+  const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
+  const route = direct?.route ?? catalog?.route;
+  const args = record(direct?.args ?? record(catalog?.args)?.arguments) ?? {};
+  if (
+    route?.connectorId !== "mcp" ||
+    !route.resourceId ||
+    !CALENDAR_BOOKINGS.includes(route.toolName)
+  )
+    return undefined;
+  const body = mcpObject(effect.result);
+  if (route.toolName.endsWith("_event")) {
+    const id = body?.id ?? args.eventId;
+    return typeof id === "string" && id ? `${route.resourceId}:${id}` : undefined;
+  }
+  const uid = record(body?.data)?.uid;
+  return typeof uid === "string" && uid ? `${route.resourceId}:booking:${uid}` : undefined;
+}
 
 export async function refreshRecruitingCorrespondence(
   deps: {
@@ -113,6 +179,16 @@ export async function refreshRecruitingCorrespondence(
     if (saved.length < email.attachment_json.files.length)
       void saveEmailAttachments(store, owner, email, { download: true }).catch(() => undefined);
     return saved;
+  };
+  const mailRow = async (
+    source: Source,
+    email: NonNullable<ReturnType<typeof readInstantlyEmail>>,
+    campaignId: string,
+  ) => {
+    const row = instantlyInboxRow(source, email, campaignId, !!scope.message);
+    const attachments = await inboxAttachments(source, email);
+    if (attachments.length) row.attachments = attachments;
+    return row;
   };
   const execute = async (
     source: Source,
@@ -237,6 +313,39 @@ export async function refreshRecruitingCorrespondence(
     await fence();
     return result;
   };
+  /** Only a page's verified rows are durable input; publishing never holds the role read. */
+  const store = (
+    source: Source,
+    campaignId: string,
+    checked: { observedAt: string; botId: string; operationId: string } | undefined,
+    observed: RecruitingCorrespondence["emails"],
+  ) => {
+    if (!deps.jobs || !checked) return;
+    for (let offset = 0; offset < observed.length; offset += 100)
+      void deps.jobs
+        .enqueue({
+          name: "recruiting_inbox.project",
+          payload: {
+            observation: {
+              threadId: scope.threadId,
+              roleId: scope.roleId,
+              sourceId: source.id,
+              sourceRevision: source.revision,
+              botId: checked.botId,
+              campaignId,
+              observedAt: checked.observedAt,
+              emails: observed.slice(offset, offset + 100),
+            },
+          },
+          replaceKey: `recruiting_inbox.project:${checked.operationId}:${offset}`,
+          keepExisting: true,
+        })
+        .catch((error) =>
+          getLogger().warn("recruiting.inbox_observation_enqueue_failed", {
+            error: error instanceof Error ? error.name : "Unknown error",
+          }),
+        );
+  };
   const emails = new Map(output.emails.map((email) => [email.id, email]));
   const events = new Map(output.events.map((event) => [event.id, event]));
   const contactEmails = new Set(
@@ -247,19 +356,22 @@ export async function refreshRecruitingCorrespondence(
       ),
     ].map((email) => email.toLowerCase()),
   );
-  // Exact keys use the unique index; a prefix or suffix match reads every effect in the table.
+  // A role's campaigns: its bound one, its history, and drafts cloned or created for it later
+  // (a clone sends a follow-up wave on its own campaign; gate d06ea499, send-at-night: its mail
+  // never reached the Inbox). Read by kind within the account, then matched by exact key.
+  const roleKeys = (source: { id: string }) => {
+    const key = bindingKey(source.id, scope.roleId);
+    return { key, exact: [key, `${key}:history`], associated: `${key}:campaign:` };
+  };
   const campaignBindings = sources.length
     ? await deps.prisma.externalEffect.findMany({
         where: {
           spaceId: actor.spaceId,
+          kind: "instantly_role_campaign",
           status: "completed",
-          idempotencyKey: {
-            in: sources.flatMap((source) => [
-              bindingKey(source.id, scope.roleId),
-              `${bindingKey(source.id, scope.roleId)}:history`,
-            ]),
-          },
+          request: { path: ["roleId"], equals: scope.roleId },
         },
+        orderBy: { createdAt: "asc" },
         select: { idempotencyKey: true, result: true },
       })
     : [];
@@ -298,6 +410,24 @@ export async function refreshRecruitingCorrespondence(
       }
     }
   }
+  // An interview booked from this role's conversation is the role's whoever its guests are, so a
+  // booking for an email the recruiter typed shows here though no saved contact has that email.
+  // It is matched by the event the calendar returned, never by a guest's other events.
+  if (scope.view === "interview")
+    for (const write of await deps.prisma.externalEffect.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        status: "completed",
+        run: { spaceId: actor.spaceId, userId: actor.userId, threadId: scope.threadId },
+        OR: CALENDAR_BOOKINGS.map((tool) => ({ kind: { endsWith: tool } })),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: { request: true, result: true },
+    })) {
+      const booking = calendarBooking(write);
+      if (booking) bookingIds.add(booking);
+    }
   for (const plan of plans.plans) {
     contactEmails.add(plan.candidate.email.toLowerCase());
     const event = RecruitingCorrespondenceSchema.shape.events.element.parse({
@@ -335,27 +465,36 @@ export async function refreshRecruitingCorrespondence(
       !tool ||
       !source.enabled ||
       (!source.secretId && !hasPlatformMcpCredential(source)) ||
+      // An expired sign-in waits for the recruiter to reconnect it.
+      output.connections.find((connection) => connection.name === source.name)?.status ===
+        "needs_connection" ||
       !source.assignments.some((permission) => allows(permission, tool))
     )
       continue;
     // With nobody to match, the calendar cannot hold one of this role's interviews.
-    if (scope.view === "interview" && !contactEmails.size) {
+    if (scope.view === "interview" && !contactEmails.size && !bookingIds.size) {
       output.status = "ready";
       output.checkedAt = new Date().toISOString();
       continue;
     }
     try {
       if (scope.view === "inbox") {
+        const readCampaigns = new Set<string>();
         for (const binding of campaignBindings) {
-          const key = bindingKey(source.id, scope.roleId);
-          if (binding.idempotencyKey !== key && binding.idempotencyKey !== `${key}:history`)
+          const keys = roleKeys(source);
+          if (
+            !keys.exact.includes(binding.idempotencyKey) &&
+            !binding.idempotencyKey.startsWith(keys.associated)
+          )
             continue;
           const campaignId = record(binding.result)?.campaignId;
           if (
             typeof campaignId !== "string" ||
+            readCampaigns.has(campaignId) ||
             (scope.message && campaignId !== scope.message.campaignId)
           )
             continue;
+          readCampaigns.add(campaignId);
           let cursor: string | undefined;
           let fetched = 0;
           const seenCursors = new Set<string>();
@@ -396,66 +535,11 @@ export async function refreshRecruitingCorrespondence(
                 output.partial = true;
                 continue;
               }
-              const text =
-                email.body.text ||
-                (email.body.html
-                  ? htmlToPlainText(email.body.html)
-                  : (email.content_preview ?? ""));
-              const row = RecruitingCorrespondenceSchema.shape.emails.element.parse({
-                id: `${source.id}:${email.id}`,
-                sourceId: source.id,
-                sourceName: source.name,
-                providerMessageId: email.id,
-                providerThreadId: email.thread_id ?? null,
-                campaignId,
-                eaccount: email.eaccount,
-                savedRead: null,
-                direction: email.ue_type === 2 ? "received" : email.ue_type === 1 ? "sent" : null,
-                sender: email.from_address_email ?? null,
-                recipients: [email.to_address_email_list],
-                subject: email.subject,
-                body: text,
-                snippet:
-                  !!email.body_fallback_reason ||
-                  !(email.body.text || email.body.html) ||
-                  (!scope.message && text.length > 50000),
-                date: email.timestamp_email,
-                url: null,
-              });
-              if (!scope.message) row.body = row.body.slice(0, 50000);
-              const attachments = await inboxAttachments(source, email);
-              if (attachments.length) row.attachments = attachments;
+              const row = await mailRow(source, email, campaignId);
               emails.set(row.id, row);
               observed.push(row);
             }
-            const checked = read.value;
-            if (deps.jobs && checked && observed.length) {
-              // Only this page's verified rows are durable input; publishing never holds the role read.
-              for (let offset = 0; offset < observed.length; offset += 100)
-                void deps.jobs
-                  .enqueue({
-                    name: "recruiting_inbox.project",
-                    payload: {
-                      observation: {
-                        threadId: scope.threadId,
-                        roleId: scope.roleId,
-                        sourceId: source.id,
-                        sourceRevision: source.revision,
-                        botId: checked.botId,
-                        campaignId,
-                        observedAt: checked.observedAt,
-                        emails: observed.slice(offset, offset + 100),
-                      },
-                    },
-                    replaceKey: `recruiting_inbox.project:${checked.operationId}:${offset}`,
-                    keepExisting: true,
-                  })
-                  .catch((error) =>
-                    getLogger().warn("recruiting.inbox_observation_enqueue_failed", {
-                      error: error instanceof Error ? error.name : "Unknown error",
-                    }),
-                  );
-            }
+            store(source, campaignId, read.value, observed);
             cursor =
               !scope.message && typeof body?.next_starting_after === "string"
                 ? body.next_starting_after
@@ -468,6 +552,65 @@ export async function refreshRecruitingCorrespondence(
           } while (cursor && fetched <= (scope.pageEnd ?? 200));
           output.partial ||= !!cursor;
           output.status = "ready";
+        }
+        // The mail service files a person's reply under their newest campaign. A reply in another
+        // of this account's own campaigns is the role's when the role emailed that person: the
+        // rule the reply anchor and get_email use. Only campaigns a confirmed send of this account
+        // emailed one of those people from can hold such a reply, so only those are read.
+        if (!scope.message && readCampaigns.size) {
+          const emailed = new Set(contactEmails);
+          for (const row of emails.values())
+            if (row.direction === "sent" && row.campaignId && readCampaigns.has(row.campaignId))
+              for (const to of row.recipients)
+                for (const entry of addressparser(to))
+                  if (entry.address) emailed.add(entry.address.trim().toLowerCase());
+          const others = await otherCampaignsThatEmailed(
+            deps.prisma,
+            actor,
+            [...readCampaigns],
+            [...emailed],
+            OTHER_CAMPAIGNS,
+          );
+          output.partial ||= others.length > OTHER_CAMPAIGNS;
+          for (const campaignId of others.slice(0, OTHER_CAMPAIGNS)) {
+            const read: { value?: { observedAt: string; botId: string; operationId: string } } = {};
+            const body = record(
+              await execute(
+                source,
+                tool,
+                { campaign_id: campaignId, limit: 100 },
+                (observedAt, botId, operationId) => {
+                  read.value = { observedAt, botId, operationId };
+                },
+              ),
+            );
+            if (!Array.isArray(body?.items)) throw new Error("Invalid mail page");
+            output.partial ||= typeof body.next_starting_after === "string";
+            const found: RecruitingCorrespondence["emails"] = [];
+            for (const value of body.items) {
+              const email = readInstantlyEmail(value);
+              const from = (email?.lead ?? email?.from_address_email)?.trim().toLowerCase();
+              if (email?.campaign_id !== campaignId || email.ue_type !== 2 || !from) continue;
+              if (!emailed.has(from)) continue;
+              const row = await mailRow(source, email, campaignId);
+              emails.set(row.id, row);
+              found.push(row);
+            }
+            // Stored for the account Inbox when the role's own confirmed send emailed the sender,
+            // the fact the storage job checks again.
+            const sent = await confirmedSendRecipients(
+              deps.prisma,
+              actor,
+              [...readCampaigns],
+              found.flatMap((row) => (row.sender ? [row.sender] : [])),
+            );
+            store(
+              source,
+              campaignId,
+              read.value,
+              found.filter((row) => row.sender && sent.has(row.sender.trim().toLowerCase())),
+            );
+          }
         }
         // Instantly was checked: a role without a campaign has no replies, not an unknown count.
         if (output.status === "not_checked") output.status = "ready";
@@ -514,19 +657,23 @@ export async function refreshRecruitingCorrespondence(
                   typeof record(value)?.email === "string" ? [record(value)!.email as string] : [],
                 )
               : [];
-            if (!attendees.some((email) => contactEmails.has(email.toLowerCase()))) continue;
+            if (
+              !bookingIds.has(id) &&
+              !attendees.some((email) => contactEmails.has(email.toLowerCase()))
+            )
+              continue;
             const start = google ? record(row.start)?.dateTime : row.start;
             const end = google ? record(row.end)?.dateTime : row.end;
             const event = RecruitingCorrespondenceSchema.shape.events.element.safeParse({
               id,
-              roleAssociation: !google && bookingIds.has(id) ? "booking" : "contact",
+              roleAssociation: bookingIds.has(id) ? "booking" : "contact",
               kind: "event",
               title: google ? (row.summary ?? null) : (row.title ?? null),
               start,
               end: end ?? null,
               timeZone: google ? (record(row.start)?.timeZone ?? null) : null,
               attendees,
-              status: row.status ?? null,
+              status: recruitingInterviewStatus(row.status),
               location: typeof row.location === "string" ? row.location : null,
               url: google ? (row.htmlLink ?? null) : null,
             });

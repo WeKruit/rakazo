@@ -1,5 +1,5 @@
 import type { BackgroundWorkTiming, MessageBlock } from "@rakazo/contracts";
-import { isChineseText, recruitingBotKey } from "./recruiting-defaults.js";
+import { recruiterLanguage, recruitingBotKey } from "./recruiting-defaults.js";
 import { hideVendorNames } from "./vendor-names.js";
 
 /**
@@ -107,7 +107,6 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   recruiting_role: "role",
   recruiting_candidates: "candidates",
   recruiting_shortlist: "candidates",
-  recruiting_assess: "candidates",
   recruiting_research: "research",
   recruiting_feedback: "feedback",
   recruiting_profiles: "candidates",
@@ -117,7 +116,6 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   recruiting_reply: "drafting",
   recruiting_crm_target: "crm",
   recruiting_crm_import: "crm",
-  recruiting_request_approval: "question",
   ask_user: "question",
   run_subagent: "specialist",
   wait_for_work: "waiting",
@@ -150,7 +148,6 @@ const OPERATION_ACTIVITIES: Record<string, Record<string, WorkActivity>> = {
     replies: "replies",
     resolve: "candidate_lookup",
   },
-  recruiting_assess: { ask: "question" },
   recruiting_profiles: { save: "profiles_save", save_many: "profiles_save" },
 };
 
@@ -790,7 +787,7 @@ export function workTimeline(
 }
 
 /** What a handed-off stage is for, in closed words clients translate; never a member's name. */
-export type WorkStageKind = "sourcing" | "quality" | "outreach" | "scheduling" | "other";
+export type WorkStageKind = "sourcing" | "outreach" | "scheduling" | "other";
 
 export function workStageKind(
   bot: { name?: string | null; spawnKey?: string | null } | undefined,
@@ -798,16 +795,13 @@ export function workStageKind(
   const key = bot ? recruitingBotKey(bot) : undefined;
   return key === "sourcer"
     ? "sourcing"
-    : key === "reviewer"
-      ? "quality"
-      : key === "outreach" || key === "scheduling"
-        ? key
-        : "other";
+    : key === "outreach" || key === "scheduling"
+      ? key
+      : "other";
 }
 
 const STAGE_LABELS: Record<WorkStageKind, string> = {
   sourcing: "Finding candidates",
-  quality: "Checking candidates",
   outreach: "Preparing outreach",
   scheduling: "Scheduling interviews",
   other: "Delegated task",
@@ -885,21 +879,6 @@ export function formatWorkDuration(ms: number): string {
   return `${minutes}m ${total % 60}s`;
 }
 
-/**
- * A short "how is it going?" sent while an agent works. Like a side question it is answered
- * from the live work itself, so the work is neither interrupted nor told about it.
- */
-export function isStatusQuestion(text: string | undefined): boolean {
-  const trimmed = text?.trim() ?? "";
-  return (
-    trimmed.length > 0 &&
-    trimmed.length <= 40 &&
-    /进度|到哪|怎么样了|好了吗|好了没|还要多久|多久好|做完了吗|how(?:['’]s| is) it going|any (?:update|progress)|status\??$|progress\??$|how long|are you done|done yet|eta\??$/i.test(
-      trimmed,
-    )
-  );
-}
-
 const STATUS_LABELS: Record<WorkActivity, string> = {
   files: "reading files",
   search: "searching the web",
@@ -936,31 +915,6 @@ const STATUS_LABELS: Record<WorkActivity, string> = {
   thinking: "deciding the next step",
   working: "running a step",
 };
-
-/** The middle of past durations of the same kind of work, or undefined with fewer than three. */
-export function typicalDurationMs(durations: readonly number[]): number | undefined {
-  if (durations.length < 3) return undefined;
-  const sorted = [...durations].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
-}
-
-/**
- * The reply to a status question: what is running now, for how long, and, when past runs of the
- * same kind give a typical length, roughly how much is left.
- */
-export function statusAnswer(input: {
-  activity: WorkActivity;
-  elapsedMs: number;
-  typicalMs?: number;
-}): string {
-  const now = `Still working: ${STATUS_LABELS[input.activity]}, ${formatWorkDuration(input.elapsedMs)} so far.`;
-  if (input.typicalMs === undefined) return `${now} The result will appear here when it's ready.`;
-  const left = input.typicalMs - input.elapsedMs;
-  if (left <= 0)
-    return `${now} This is taking longer than usual; the result will appear here when it's ready.`;
-  const minutes = Math.ceil(left / 60_000);
-  return `${now} Usually done in ${left < 60_000 ? "under a minute" : `about ${minutes} min`}.`;
-}
 
 /** Closed role words: runtime names and task text stay in diagnostics. */
 export function specialistWorkLabel(status: "running" | "completed" | "failed"): string {
@@ -1055,7 +1009,6 @@ export const WORK_LABELS_ZH: {
   },
   stage: {
     sourcing: "寻找候选人",
-    quality: "核查候选人",
     outreach: "准备联系候选人",
     scheduling: "安排面试",
     other: "交办的任务",
@@ -1063,16 +1016,17 @@ export const WORK_LABELS_ZH: {
   progress: { thinking: "思考中…", retrying: "重试中…", compacting: "整理上下文…" },
 };
 
-/** Whether the recruiter's own latest message is mostly Chinese. */
+/** Whether the recruiter writes in Chinese: the same decision every reply of a turn follows. */
 export function writesChinese(
   messages: readonly { role?: string; internal?: boolean; blocks: readonly MessageBlock[] }[],
 ): boolean {
-  const latest = messages.findLast((message) => message.role === "user" && !message.internal);
-  const text = latest?.blocks
-    .map((block) => (block.kind === "text" ? block.text : ""))
-    .join("")
-    .trim();
-  return !!text && isChineseText(text);
+  const texts = messages
+    .filter((message) => message.role === "user" && !message.internal)
+    .map((message) =>
+      message.blocks.map((block) => (block.kind === "text" ? block.text : "")).join(""),
+    )
+    .reverse();
+  return recruiterLanguage(texts) === "zh";
 }
 
 /**

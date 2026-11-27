@@ -1,8 +1,6 @@
 export const DEFAULT_FAST_MODEL = "gpt-6-luna";
 /** A user message at or above this length is treated as real work, not a light turn. */
 export const FAST_TURN_MAX_CHARS = 300;
-const ASKS_WHY_OR_HOW_MANY =
-  /为什么|为啥|怎么回事|怎么会|什么情况|多少|几个|几位|几封|\bwhy\b|how many|how much|what happened|what went wrong/i;
 
 export interface TurnModelInput {
   configured: { provider: string; id: string };
@@ -26,8 +24,6 @@ export interface TurnModelChoice {
   model: { provider: string; id: string };
   routed: "fast" | "configured";
   reason: string;
-  /** Overrides the bot's thinking level for this turn. */
-  thinkingLevel?: "low" | "off";
 }
 
 /**
@@ -44,26 +40,20 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
   if (!fastId) return { ...configured, reason: "fast_model_disabled" };
   const fastProvider = env.RAKAZO_FAST_MODEL_PROVIDER?.trim() || input.configured.provider;
   if (fastProvider === input.configured.provider && fastId === input.configured.id)
-    // A bot already on the fast model still opens a role without reasoning.
-    return input.recruitingIntake && !input.pendingToolLoop
-      ? { ...configured, reason: "recruiting_intake", thinkingLevel: "off" }
-      : { ...configured, reason: "already_fast" };
+    return { ...configured, reason: "already_fast" };
   const fast = { model: { provider: fastProvider, id: fastId }, routed: "fast" as const };
 
   if (input.pendingToolLoop) return { ...configured, reason: "pending_tool_loop" };
-  // An answer turn picks the people, so it keeps the bot's thinking level.
+  // The turn that opens a role produces the first round (searches, checks, picking the ten), so
+  // it is real work however short the message: at low thinking it ran one search and one check
+  // and recorded whoever came back.
+  if (input.recruitingIntake) return { ...configured, reason: "recruiting_intake" };
   if (input.answersQuestion) return { ...fast, reason: "clarifying_answer" };
-  // The turn that opens a role only reads the JD and asks the first question, so it skips
-  // reasoning: the question is the first thing the recruiter waits for.
-  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake", thinkingLevel: "off" };
   if (input.peerIntent === "status" || input.peerIntent === "fyi")
     return { ...fast, reason: "status_turn" };
   if (input.trigger !== "user" && input.trigger !== "messaging")
     return { ...configured, reason: `trigger:${input.trigger}` };
   if (input.hasAttachments) return { ...configured, reason: "attachments" };
-  // A short "why did nothing send?" or "how many went out?" needs the agent to check and reason,
-  // so it keeps the configured model; other short messages stay on the fast one.
-  if (ASKS_WHY_OR_HOW_MANY.test(input.userText)) return { ...configured, reason: "why_question" };
   if (input.userText.trim().length < FAST_TURN_MAX_CHARS)
     return { ...fast, reason: "short_user_message" };
   return { ...configured, reason: "long_message" };
@@ -73,8 +63,9 @@ export type EffortMode = "fast" | "balanced" | "deep";
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
- * A chat's effort mode applied to the turn's thinking level. Fast (the default) caps thinking at
- * low and keeps lower levels; balanced keeps the routed level; deep thinks at high.
+ * A chat's effort mode applied to the turn's thinking level. Fast (the default) thinks at low:
+ * with thinking off or minimal the model wrote its planning into the reply the recruiter sees.
+ * Balanced keeps the routed level; deep thinks at high.
  */
 export function effortThinkingLevel(
   mode: EffortMode,
@@ -82,7 +73,7 @@ export function effortThinkingLevel(
 ): ThinkingLevel | null | undefined {
   if (mode === "deep") return "high";
   if (mode === "balanced") return level;
-  return level === "off" || level === "minimal" || level === "low" ? level : "low";
+  return "low";
 }
 
 /**

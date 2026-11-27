@@ -1,3 +1,4 @@
+import { i18n } from "@lingui/core";
 import type { CallOptions, CallState } from "./call-session-state.js";
 import {
   ECHO_GUARD_MS,
@@ -353,7 +354,7 @@ async function handleTranscript(text: string) {
         })
       : runActive(thread)
         ? rpc.threads.followUp({ botId, text, clientNonce })
-        : rpc.threads.send({ botId, clientNonce, text });
+        : rpc.threads.send({ botId, clientNonce, text, uiLocale: i18n.locale || undefined });
     releasePendingSend = trackPendingCallSend(turnCallId, sendRequest);
     await sendRequest;
   } catch (error) {

@@ -34,13 +34,6 @@ export const ReadRecruitingSourceInput = z.discriminatedUnion("kind", [
     roleRevisionId: RecruitingId,
     sourceRefId: RecruitingId,
   }),
-  z.strictObject({
-    kind: z.literal("assessment"),
-    roleId: RecruitingId,
-    candidateKey: RecruitingId,
-    version: z.number().int().positive(),
-    sourceRefId: RecruitingId,
-  }),
 ]);
 export type ReadRecruitingSourceInput = z.infer<typeof ReadRecruitingSourceInput>;
 
@@ -56,7 +49,7 @@ export const RecruitingArtifactRefSchema = z
   .readonly();
 export type RecruitingArtifactRef = z.infer<typeof RecruitingArtifactRefSchema>;
 
-/** ACLs and the authenticity of the locator/quote are checked by the reading handler. */
+/** ACLs, the file fingerprint and the read receipt are checked on save; the quote is not matched to text. */
 export const RecruitingSourceRefSchema = z
   .strictObject({
     id: RecruitingId.describe(
@@ -243,22 +236,15 @@ export const RecruitingBriefDraftSchema = z.strictObject({
     ),
 });
 export type RecruitingBriefDraft = z.infer<typeof RecruitingBriefDraftSchema>;
-export const RecruitingBriefSchema = RecruitingBriefDraftSchema.extend({
-  confirmation: z
-    .strictObject({
-      revision: Revision,
-      userId: RecruitingId,
-      messageId: RecruitingId,
-      confirmedAt: IsoDate,
-    })
-    .nullable(),
-});
-export type RecruitingBrief = z.infer<typeof RecruitingBriefSchema>;
-export const ConfirmRecruitingBriefInput = z.strictObject({
-  threadId: RecruitingId,
-  roleId: RecruitingId,
-  expectedRevision: Revision,
-});
+/**
+ * A saved brief. Briefs saved while a confirmation step existed carry a `confirmation` field;
+ * it is dropped on read so those roles still load.
+ */
+const SavedRecruitingBriefSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const { confirmation: _, ...brief } = value as Record<string, unknown>;
+  return brief;
+}, RecruitingBriefDraftSchema);
 
 export const EditRecruitingCriteriaInput = z
   .strictObject({
@@ -326,8 +312,6 @@ export const RecruitingRoleSchema = z.strictObject({
   title: Text,
   revision: Revision,
   currentRevisionId: RecruitingId,
-  /** Playbook stage (intake | calibration_10 | feedback | scale | enrichment | outreach | replies | screening | submission | interview | closed). */
-  playbookStage: z.string().optional(),
 });
 export type RecruitingRole = z.infer<typeof RecruitingRoleSchema>;
 
@@ -337,7 +321,7 @@ export const RecruitingRoleRevisionSchema = z
     roleId: RecruitingId,
     revision: Revision,
     ...RoleDefinition,
-    brief: RecruitingBriefSchema.nullable().optional(),
+    brief: SavedRecruitingBriefSchema.nullable().optional(),
     createdAt: IsoDate,
   })
   .readonly();
@@ -346,10 +330,6 @@ export type RecruitingRoleRevision = z.infer<typeof RecruitingRoleRevisionSchema
 export const RecruitingResearchPurposeSchema = z.enum(["calibration", "scale"]);
 export type RecruitingResearchPurpose = z.infer<typeof RecruitingResearchPurposeSchema>;
 
-const RecruitingApprovalScope = {
-  roleId: RecruitingId,
-  expectedRoleRevision: Revision,
-};
 const RecruitingCandidateEvidenceReference = {
   providerTaskId: RecruitingId,
   roleRevisionId: RecruitingId,
@@ -357,81 +337,8 @@ const RecruitingCandidateEvidenceReference = {
   rowIndex: z.number().int().nonnegative(),
   artifactRef: RecruitingArtifactRefSchema,
 };
-const RecruitingApprovalProfile = {
-  candidateKey: RecruitingId,
-  linkedinUrl: z.httpUrl().refine((url) => new URL(url).protocol === "https:"),
-  evidenceUrl: z.httpUrl(),
-};
-const RecruitingDocumentsApprovalInputSchema = z.strictObject({
-  ...RecruitingApprovalScope,
-  stage: z.literal("documents"),
-  documents: z.strictObject({
-    jdText: RecruitingArtifactRefSchema,
-    namedPdf: RecruitingArtifactRefSchema,
-    anonymousPdf: RecruitingArtifactRefSchema.nullable(),
-    deck: RecruitingArtifactRefSchema.nullable(),
-  }),
-});
-const RecruitingCalibrationApproval = {
-  ...RecruitingApprovalScope,
-  stage: z.literal("calibration"),
-  documentsApprovalEffectId: RecruitingId,
-  ruleChanges: z.array(Text).readonly(),
-};
 /** A calibration round shows ten people, or every fitting person the searches found when fewer fit. */
 export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
-export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
-  z.strictObject({ ...RecruitingApprovalScope, stage: z.literal("brief") }),
-  RecruitingDocumentsApprovalInputSchema,
-  z.strictObject({
-    ...RecruitingCalibrationApproval,
-    profiles: z
-      .array(
-        z.strictObject({
-          ...RecruitingApprovalProfile,
-          source: z.strictObject(RecruitingCandidateEvidenceReference),
-        }),
-      )
-      .min(1)
-      .max(RECRUITING_CALIBRATION_ROUND_SIZE),
-  }),
-]);
-export type RecruitingApprovalToolInput = z.infer<typeof RecruitingApprovalToolInputSchema>;
-/**
- * What the agent sends. A calibration request may omit the documents approval, the profiles and
- * the rule changes: the server fills in this revision's approved documents and the recorded
- * calibration round before the request is saved, so the stored request always matches
- * RecruitingApprovalToolInputSchema.
- */
-export const RecruitingApprovalToolCallSchema = z.discriminatedUnion("stage", [
-  RecruitingApprovalToolInputSchema.options[0],
-  RecruitingApprovalToolInputSchema.options[1],
-  RecruitingApprovalToolInputSchema.options[2].extend({
-    documentsApprovalEffectId: RecruitingId.optional(),
-    profiles: RecruitingApprovalToolInputSchema.options[2].shape.profiles.optional(),
-    ruleChanges: RecruitingCalibrationApproval.ruleChanges.default([]),
-  }),
-]);
-
-/** Decode exact retained requests only; historical assessments are never new native evidence. */
-export const RetainedRecruitingApprovalRequestSchema = z.union([
-  RecruitingApprovalToolInputSchema,
-  z.strictObject({
-    ...RecruitingCalibrationApproval,
-    profiles: z
-      .array(
-        z.strictObject({
-          ...RecruitingApprovalProfile,
-          assessmentVersion: Revision,
-        }),
-      )
-      .min(1)
-      .max(RECRUITING_CALIBRATION_ROUND_SIZE),
-  }),
-]);
-export type RetainedRecruitingApprovalRequest = z.infer<
-  typeof RetainedRecruitingApprovalRequestSchema
->;
 
 export const RecruitingResearchTaskSchema = z.strictObject({
   id: RecruitingId,
@@ -630,7 +537,7 @@ export const RecruitingAssessmentSourceRefSchema = RecruitingSourceRefSchema.unw
       if (source.quote === undefined || source.selection === undefined) {
         ctx.addIssue({
           code: "custom",
-          message: "Read assessment evidence requires an exact quote and selection",
+          message: "Read assessment evidence requires a quote and selection",
         });
       } else if (
         (source.anchor.kind === "message") !==
@@ -843,9 +750,7 @@ export type ReviseRecruitingRoleInput = z.infer<typeof ReviseRecruitingRoleInput
 
 export const RecruitingHumanIntentSchema = z.strictObject({
   basis: z.enum(["direct", "inferred"]),
-  quote: Text.describe(
-    "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
-  ),
+  quote: Text.describe("What the human said, in their words."),
 });
 export type RecruitingHumanIntent = z.infer<typeof RecruitingHumanIntentSchema>;
 
@@ -1074,17 +979,33 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
 export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSchema>;
 
 const ResearchText = z.string().regex(/\S/, "Text must not be blank");
-/** People one save_grades call may grade. */
-export const RECRUITING_GRADE_PAGE_LIMIT = 20;
 const GradeText = (max: number) => ResearchText.max(max);
-/** One person's grade from the quality check: the same columns a search's grading returns. */
-export const RecruitingGradeRowSchema = z.object({
+/**
+ * One degree as "School | Degree | dates". A degree given as an object is joined into that text:
+ * fr 11-21 (8ef94139) Reviewer saves were refused for education objects, and the round waited for
+ * the batch to be graded again.
+ */
+const GradeEducation = z
+  .union([z.string(), z.record(z.string(), z.unknown())])
+  .transform((degree) =>
+    typeof degree === "string"
+      ? degree
+      : Object.values(degree)
+          .filter((value) => typeof value === "string" || typeof value === "number")
+          .map(String)
+          .filter((value) => value.trim())
+          .join(" | ")
+          .slice(0, 500),
+  )
+  .pipe(GradeText(500));
+/** One person's grade as the retired quality check saved it; kept to read those stored pages. */
+const RecruitingGradeRowSchema = z.object({
   name: GradeText(300),
   linkedin_url: GradeText(500),
   current_title: GradeText(300).nullish(),
   current_company: GradeText(300).nullish(),
   location: GradeText(300).nullish(),
-  education: z.array(GradeText(500)).max(10).nullish(),
+  education: z.array(GradeEducation).max(10).nullish(),
   match_score: z.number().int().min(0).max(100),
   match_tier: z.enum(["Strong", "Promising", "Partial", "Uncertain"]),
   fit_reasons: GradeText(2000),
@@ -1100,7 +1021,15 @@ export const RecruitingGradeRowSchema = z.object({
     .min(1)
     .max(20),
 });
-export type RecruitingGradeRow = z.infer<typeof RecruitingGradeRowSchema>;
+/**
+ * The request stored with a grade page the retired quality check saved. Nothing writes one any
+ * more; roles that hold such pages still read them.
+ */
+export const RecruitingStoredGradesRequestSchema = z.strictObject({
+  operation: z.literal("save_grades"),
+  expectedRoleRevision: z.number().int().positive(),
+  rows: z.array(RecruitingGradeRowSchema).min(1).max(20),
+});
 export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
   // Marks the exact ten saved people this calibration round shows the recruiter.
   z.strictObject({
@@ -1118,48 +1047,26 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
             message: `Each person appears once in a round. Repeated: ${[...new Set(repeated)].join(", ")}. Replace each repeat with another saved person's exact candidateKey.`,
           });
       }),
-    unverified: z
-      .record(
-        RecruitingId,
-        // A long note keeps its start instead of refusing the round.
-        z
-          .string()
-          .trim()
-          .min(1)
-          .transform((text) => (text.length > 160 ? `${text.slice(0, 159).trimEnd()}…` : text)),
-      )
+    groupOf: z
+      .record(RecruitingId, z.string().trim().min(1).max(80))
       .optional()
       .describe(
-        "candidateKey → the must-haves this person's row does not show, in English (for example 'startup experience, former Metrology Engineer'). Shown under that person in chat.",
+        "Optional. candidateKey → the heading of the group you put this person in, in the recruiter's language and your own words, from how their profile was judged against what the recruiter asked (for example 'Meet everything asked', 'Years on streaming not stated'). People are listed in candidateKeys order and a heading is printed where it changes, so give each group's people together.",
       ),
-  }),
-  // Shows the round's first good fits in chat while more searches run; records nothing.
-  z.strictObject({
-    operation: z.literal("show_picks"),
-    candidateKeys: z
-      .array(RecruitingId)
-      .min(1)
-      .max(RECRUITING_CALIBRATION_ROUND_SIZE - 1)
-      .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
-  }),
-  z.strictObject({
-    operation: z.literal("save_results"),
-    expectedRoleRevision: Revision,
-    mcpServerId: RecruitingId.optional(),
-    providerTaskId: RecruitingId,
-    cursor: z.string().min(1).nullable().default(null),
+    asked: z
+      .number()
+      .int()
+      .positive()
+      .max(10_000)
+      .optional()
+      .describe(
+        "The number of people the recruiter's current request asked for, exactly as they said it (\"3 more\": 3; a role's first ten: 10). Give it with every round of that request and never add to it or subtract from it yourself: the server works out where the request started, says under the list how many are still to come and returns stillMissing.",
+      ),
   }),
   // People returned by a people-search connector call in this same run, saved as one unassessed page.
   z.strictObject({
     operation: z.literal("save_search"),
     expectedRoleRevision: Revision,
-  }),
-  // The quality check's own grades for people already saved in the role, judged from their
-  // full public profiles; saved as one page on the role like a search's grades.
-  z.strictObject({
-    operation: z.literal("save_grades"),
-    expectedRoleRevision: Revision,
-    rows: z.array(RecruitingGradeRowSchema).min(1).max(RECRUITING_GRADE_PAGE_LIMIT),
   }),
   // Recruiter-supplied text/csv artifact saved as one unassessed candidate page; values are column names.
   z.strictObject({
@@ -1178,60 +1085,8 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       email: ResearchText.optional(),
     }),
   }),
-  z.strictObject({ operation: z.literal("status"), taskId: RecruitingId }),
-  z.strictObject({
-    operation: z.literal("rows"),
-    taskId: RecruitingId,
-    limit: z.number().int().positive().optional(),
-    cursor: z.string().min(1).optional(),
-  }),
 ]);
 export type RecruitingResearchToolInput = z.infer<typeof RecruitingResearchToolInputSchema>;
-
-export const SaveRecruitingAssessmentInput = z
-  .strictObject({
-    ...AssessmentContent,
-    atomJudgments: z.array(RecruitingAtomJudgmentSchema).readonly(),
-    employmentEvaluations: z.array(RecruitingEmploymentEvaluationSchema).readonly(),
-    /** Expected candidate assessment version; zero creates its first snapshot. */
-    expectedRevision: z.number().int().nonnegative(),
-  })
-  .superRefine((assessment, ctx) => {
-    assessmentDependencies(
-      assessment,
-      [
-        ...assessment.atomJudgments,
-        ...assessment.employmentEvaluations.map((evaluation) => ({
-          factIds: [
-            ...evaluation.intervals.map((interval) => interval.factId),
-            ...(evaluation.historyCompletenessFactId === null
-              ? []
-              : [evaluation.historyCompletenessFactId]),
-          ],
-          evidence: evaluation.evidence,
-        })),
-        ...assessment.employmentEvaluations.flatMap((evaluation) =>
-          evaluation.intervals.map((interval) => ({
-            factIds: [interval.factId],
-            evidence: interval.evidence,
-          })),
-        ),
-      ],
-      ctx,
-    );
-    const ids = [...assessment.atomJudgments, ...assessment.employmentEvaluations].map(
-      (judgment) => judgment.atomId,
-    );
-    if (new Set(ids).size !== ids.length)
-      ctx.addIssue({ code: "custom", message: "An atom must have exactly one judgment input" });
-  });
-export type SaveRecruitingAssessmentInput = z.infer<typeof SaveRecruitingAssessmentInput>;
-
-/** Full next facts and sources, with only affected semantic inputs supplied again. */
-export const ReassessRecruitingAssessmentInput = SaveRecruitingAssessmentInput.safeExtend({
-  expectedRevision: Revision,
-});
-export type ReassessRecruitingAssessmentInput = z.infer<typeof ReassessRecruitingAssessmentInput>;
 
 export const RecruitingAssessmentAskTargetSchema = z.discriminatedUnion("kind", [
   z
@@ -1247,37 +1102,6 @@ export const RecruitingAssessmentAskTargetSchema = z.discriminatedUnion("kind", 
     .readonly(),
 ]);
 export type RecruitingAssessmentAskTarget = z.infer<typeof RecruitingAssessmentAskTargetSchema>;
-
-export const RecruitingAssessmentAskInputSchema = z.strictObject({
-  operation: z.literal("ask"),
-  roleId: RecruitingId,
-  roleRevisionId: RecruitingId,
-  target: RecruitingAssessmentAskTargetSchema,
-  question: z.string().min(1).max(240).regex(/\S/, "Question must not be blank"),
-  options: z
-    .array(z.string().min(1).max(80).regex(/\S/, "Option must not be blank"))
-    .min(2)
-    .max(4)
-    .refine((options) => new Set(options).size === options.length, {
-      message: "Ask options must be unique",
-    })
-    .readonly(),
-  multiple: z
-    .boolean()
-    .optional()
-    .describe(
-      "true when the recruiter may pick more than one option; leave out for a single choice.",
-    ),
-});
-export type RecruitingAssessmentAskInput = z.infer<typeof RecruitingAssessmentAskInputSchema>;
-
-export const RecruitingAssessmentToolInputSchema = z.discriminatedUnion("operation", [
-  z.strictObject({ operation: z.literal("read"), candidateKey: RecruitingId }),
-  SaveRecruitingAssessmentInput.safeExtend({ operation: z.literal("save") }),
-  ReassessRecruitingAssessmentInput.safeExtend({ operation: z.literal("reassess") }),
-  RecruitingAssessmentAskInputSchema,
-]);
-export type RecruitingAssessmentToolInput = z.infer<typeof RecruitingAssessmentToolInputSchema>;
 
 /** One display read followed by a fresh thread binding check; not a serializable DB snapshot. */
 export const ReadRecruitingViewInput = z.discriminatedUnion("kind", [
@@ -1432,21 +1256,14 @@ export const RecruitingCandidateSchema = z.strictObject({
     })
     .optional(),
   decision: z.enum(["hold", "pass", "resume"]).nullable(),
+  /** The recruiter's latest good example or not a fit on this person for this role. */
+  recruiterVerdict: z.enum(["good_example", "not_fit"]).nullable().optional(),
   decisionReason: RecruitingCandidateConsiderationSchema.shape.source.shape.quote.nullable(),
   decisionAt: RecruitingCandidateConsiderationSchema.shape.source.shape.createdAt.nullable(),
   revision: z.number().int().nonnegative(),
   discoveryCount: z.number().int().nonnegative(),
   firstDiscoveredAt: IsoDate.nullable(),
   lastDiscoveredAt: IsoDate.nullable(),
-  latestAssessment: z
-    .strictObject({
-      version: Revision,
-      roleRevisionId: RecruitingId,
-      createdAt: IsoDate,
-      isCurrent: z.boolean(),
-      hardGate: VerdictSchema,
-    })
-    .nullable(),
 });
 export type RecruitingCandidate = z.infer<typeof RecruitingCandidateSchema>;
 export const ListRecruitingCandidatesOutput = z.strictObject({
@@ -1463,13 +1280,11 @@ export const ListRecruitingCandidatesOutput = z.strictObject({
     sourceRows: z.number().int().nonnegative(),
     candidates: z.number().int().nonnegative(),
     identifiedCandidates: z.number().int().nonnegative(),
-    unassessed: z.number().int().nonnegative(),
-    assessed: z.number().int().nonnegative(),
     shortlisted: z.number().int().nonnegative(),
   }),
 });
 export type ListRecruitingCandidatesOutput = z.infer<typeof ListRecruitingCandidatesOutput>;
-/** One merged person per row: Autumn search result and/or the role's CRM contact. */
+/** One merged person per row: search result and/or the role's CRM contact. */
 export const RecruitingRoleCandidatesInputFields = {
   threadId: RecruitingId,
   limit: z.number().int().min(1).max(100).optional(),
@@ -1500,7 +1315,7 @@ export const RecruitingRoleCandidateSchema = z.strictObject({
   location: z.string().nullable(),
   email: z.string().nullable(),
   linkedinUrl: z.string().nullable(),
-  autumn: z
+  sourced: z
     .strictObject({
       candidateKey: RecruitingId,
       ranking: RecruitingCandidateRankingSchema.optional(),
@@ -1543,7 +1358,7 @@ export const RecruitingRoleCandidatesOutputSchema = z.strictObject({
   items: z.array(RecruitingRoleCandidateSchema),
   nextCursor: Text.nullable(),
   total: z.number().int().nonnegative(),
-  /** `shortlisted` (Autumn) and `replied` always; plus one count per CRM outreachStatus. */
+  /** `shortlisted` (search results) and `replied` always; plus one count per CRM outreachStatus. */
   counts: z
     .object({
       shortlisted: z.number().int().nonnegative(),
@@ -1602,27 +1417,73 @@ const RecruitingAccountToolReadSchema = z.strictObject({
   limit: z.number().int().min(1).max(100).optional(),
 });
 export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operation", [
-  // The web list pages up to 200 rows; an agent reads bounded pages of at most 100.
   ListRecruitingCandidatesInput.pick({ query: true, cursor: true, sort: true }).extend({
     operation: z.literal("list"),
-    limit: z.number().int().min(1).max(100).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    /** One short line per person (key, name, grade, what the recruiter saw), 200 a page. */
+    brief: z.boolean().optional(),
     /** A numbered page of `limit` people (default 10), for jumping back and forth. */
     page: z.number().int().min(1).max(600).optional(),
+    /** In Kruit's conversation: post this page to the recruiter in the round's list lines. */
+    show: z.boolean().optional(),
     // A role conversation always reads its own role; elsewhere the agent names one.
     roleId: RecruitingId.optional(),
   }),
   ListRecruitingCandidateSourcesInput.extend({
     operation: z.literal("sources"),
+    /** Several people in one read, in place of candidateKey. */
+    candidateKey: RecruitingId.optional(),
+    candidateKeys: z.array(RecruitingId).min(1).max(20).optional(),
     // As for list: a role conversation always reads its own role.
     roleId: RecruitingId.optional(),
   }),
-  z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
-  z.strictObject({ operation: z.literal("round") }),
+  // A role conversation always resolves in its own role; a roleId the agent adds is ignored
+  // (staging 11-16: two resolves of named people were refused for carrying one). A limit is
+  // ignored the same way (staging 11-27: refused for one, and the retry cost 34 s).
+  z.strictObject({
+    operation: z.literal("resolve"),
+    nameOrEmail: Text.max(240),
+    roleId: RecruitingId.optional(),
+    limit: z.number().optional(),
+  }),
+  // As for list: a role conversation always reads its own role.
+  // An earlier round by number: "are the people I turned down marked?" is about round 1.
+  z.strictObject({
+    operation: z.literal("round"),
+    round: z.number().int().min(1).optional(),
+    roleId: RecruitingId.optional(),
+  }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("replies") }),
-  RecruitingAccountToolReadSchema.extend({ operation: z.literal("roles") }),
+  RecruitingAccountToolReadSchema.extend({
+    operation: z.literal("roles"),
+    /** In Kruit's conversation: the roles your answer is about, each shown as its card that opens it. */
+    show: z.array(RecruitingId).min(1).max(10).optional(),
+    // Every active role comes back with its title, so a query is ignored like resolve's limit
+    // (staging 11-27: a read for one role by its number was refused for carrying one).
+    query: Text.max(240).optional(),
+  }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("shortlist") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("sequences") }),
+  // What changed on each role in a window ("what's new since yesterday"), read live each time.
+  z.strictObject({
+    operation: z.literal("activity"),
+    since: z.iso.datetime({ offset: true }),
+    until: z.iso.datetime({ offset: true }).optional(),
+    roleId: RecruitingId.optional(),
+  }),
+  // The Contacts page's people, across roles: who was never emailed, or never replied.
+  z.strictObject({
+    operation: z.literal("contacts"),
+    roleId: RecruitingId.optional(),
+    contacted: z.boolean().optional(),
+    replied: z.boolean().optional(),
+    cursor: z
+      .string()
+      .regex(/^\d{1,7}$/)
+      .optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+  }),
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 
@@ -1673,7 +1534,12 @@ const CorrespondenceOriginFields = {
   sourceId: Id.max(200),
   providerMessageId: Id.max(1600),
   savedRead: z
-    .strictObject({ messageId: Id.max(200), linkedRunId: Id.max(200), effectId: Id.max(200) })
+    // No message for a read a candidate's reply woke: nobody wrote one.
+    .strictObject({
+      messageId: Id.max(200).nullable(),
+      linkedRunId: Id.max(200),
+      effectId: Id.max(200),
+    })
     .nullable(),
 };
 const CorrespondenceCrmContext = z
@@ -1845,59 +1711,10 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
   ),
   /** When people waiting in a sending campaign get their first email: "now" or e.g. "Fri 09:00 America/Chicago". */
   queuedFirstEmail: z.string().max(100).optional(),
+  /** Why the mail service is not sending people still waiting, in its own words. */
+  notSendingBecause: z.string().max(300).optional(),
 });
 export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema>;
-
-/** Role setup checklist: what a role still needs before its first outreach works out of the box. */
-export const RecruitingRoleSetupSchema = z.strictObject({
-  ready: z.boolean(),
-  /** A run in this role's conversation is waiting for the human (e.g. the send confirmation). */
-  attention: z
-    .strictObject({
-      kind: z.enum(["approval", "question"]),
-      threadId: Id,
-      cardId: Id.nullable(),
-      createdAt: IsoDate,
-    })
-    .nullable(),
-  /** Where the role is in the recruiting playbook; label and next step are display text. */
-  playbookStage: z
-    .strictObject({
-      stage: z.enum([
-        "intake",
-        "calibration_10",
-        "feedback",
-        "scale",
-        "enrichment",
-        "outreach",
-        "replies",
-        "screening",
-        "submission",
-        "interview",
-        "closed",
-      ]),
-      label: z.string(),
-      nextStep: z.string().nullable().optional(),
-    })
-    .optional(),
-  items: z.array(
-    z.strictObject({
-      key: z.enum(["campaign", "sender", "crm", "leads"]),
-      state: z.enum(["ready", "missing", "unavailable"]),
-      label: z.string().optional(),
-      detail: z.record(z.string(), z.unknown()).optional(),
-      action: z
-        .strictObject({
-          kind: z.enum(["ask_agent", "connect", "bind"]),
-          prompt: z.string().optional(),
-          serverId: z.string().optional(),
-          options: z.array(z.strictObject({ orgId: z.string(), roleLabel: z.string() })).optional(),
-        })
-        .optional(),
-    }),
-  ),
-});
-export type RecruitingRoleSetup = z.infer<typeof RecruitingRoleSetupSchema>;
 
 export const RecruitingCandidateHistorySchema = z.strictObject({
   id: Id,
@@ -1907,6 +1724,41 @@ export const RecruitingCandidateHistorySchema = z.strictObject({
   before: z.string().nullable(),
   after: z.string().nullable(),
 });
+
+/**
+ * An interview's state as the recruiter sees it, whichever calendar holds it: a saved plan not yet
+ * booked, a booking waiting on the host, booked, moved to another time, cancelled, or a booking
+ * whose outcome failed or is unknown.
+ */
+export const RecruitingInterviewStatusSchema = z.enum([
+  "planned",
+  "pending",
+  "booked",
+  "rescheduled",
+  "cancelled",
+  "failed",
+  "uncertain",
+]);
+export type RecruitingInterviewStatus = z.infer<typeof RecruitingInterviewStatusSchema>;
+const PROVIDER_INTERVIEW_STATUS: Record<string, RecruitingInterviewStatus> = {
+  // Google Calendar event status
+  confirmed: "booked",
+  tentative: "booked",
+  cancelled: "cancelled",
+  // Cal.com booking status
+  accepted: "booked",
+  pending: "pending",
+  awaiting_host: "pending",
+  rejected: "cancelled",
+  canceled: "cancelled",
+};
+/** A calendar's own status code for an event or booking, in the product's interview states. */
+export function recruitingInterviewStatus(value: unknown): RecruitingInterviewStatus | null {
+  if (typeof value !== "string") return null;
+  const status = value.toLowerCase();
+  const known = RecruitingInterviewStatusSchema.safeParse(status);
+  return known.success ? known.data : (PROVIDER_INTERVIEW_STATUS[status] ?? null);
+}
 
 export const RecruitingCorrespondenceSchema = z.strictObject({
   history: z.array(RecruitingCandidateHistorySchema).optional(),
@@ -1932,6 +1784,8 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
     z.strictObject({
       name: z.string(),
       status: z.enum(["configured", "needs_connection", "needs_access", "disabled", "unavailable"]),
+      /** The account was connected before and its sign-in expired. */
+      reconnect: z.literal(true).optional(),
       checkIssue: z
         .strictObject({ status: z.enum(["failed", "unsupported"]), checkedAt: IsoDate })
         .nullable(),
@@ -1993,7 +1847,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       end: IsoDate.nullable(),
       timeZone: z.string().nullable(),
       attendees: z.array(z.string()),
-      status: z.string().nullable(),
+      status: RecruitingInterviewStatusSchema.nullable(),
       location: z.string().nullable(),
       url: z.httpUrl().nullable(),
     }),
@@ -2763,10 +2617,19 @@ export const RecruitingCrmRoleCampaignsReadSchema = z.object({
 
 // Owner-scoped follow-up reminders (role and/or candidate), shared by RPC and the agent tool.
 export const RecruitingReminderStatusSchema = z.enum(["open", "done", "dismissed"]);
-const ReminderCandidateKey = Text.max(300).regex(
-  /^(autumn|crm):\S+$/,
-  'Use "autumn:<key>" or "crm:<id>"',
-);
+// Keys written before the rename, in old conversations and saved links, keep working. A key given
+// as lists and Results show it (linkedin:/in/x) names a saved person: the agent was refused for
+// leaving the prefix out and then saved the reminder attached to nobody (branch play, 11-26).
+const ReminderCandidateKey = z
+  .string()
+  .transform((value) =>
+    /^(sourced|crm):/.test(value)
+      ? value
+      : /^[a-z]+:\S/.test(value)
+        ? `sourced:${value.replace(/^autumn:/, "")}`
+        : value,
+  )
+  .pipe(Text.max(300).regex(/^(sourced|crm):\S+$/, 'Use "sourced:<key>" or "crm:<id>"'));
 /** Actual profile opens, retained in the existing native event history. */
 export const RecruitingProfileActivityInput = z.strictObject({
   roleId: RecruitingId,
@@ -2995,12 +2858,18 @@ export const RecruitingCalibrationRoundSchema = z.strictObject({
   approvedAt: IsoDate.nullable(),
   candidates: z.array(
     z.strictObject({
+      /** The number this person carries in the round's list, so "number 6" is read, not counted. */
+      number: z.number().int().positive(),
       candidateKey: RecruitingId,
       name: z.string().nullable(),
       title: z.string().nullable(),
       company: z.string().nullable(),
       location: z.string().nullable(),
       linkedinUrl: z.string().nullable(),
+      /** The recruiter's saved decision on this person, when one stands. */
+      decision: z.enum(["hold", "pass"]).optional(),
+      /** What the recruiter said of this person, when it is saved. */
+      recruiterVerdict: z.enum(["good_example", "not_fit"]).optional(),
     }),
   ),
 });

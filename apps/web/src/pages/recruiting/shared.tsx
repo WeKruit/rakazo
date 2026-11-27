@@ -39,6 +39,30 @@ export type RecruitingTabProps = {
   readCacheScope?: string;
 };
 
+/** Opens the connections panel; the Shell provides it so every page can offer the fix. */
+export const OpenConnectionsContext = createContext<(() => void) | undefined>(undefined);
+
+/** One service connection's state, as an action when the recruiter can fix it. */
+export function ConnectionState({
+  connection,
+}: {
+  connection: Pick<RecruitingCorrespondence["connections"][number], "status" | "reconnect">;
+}) {
+  const openConnections = useContext(OpenConnectionsContext);
+  if (connection.status === "configured") return <Trans>Configured</Trans>;
+  if (connection.status === "needs_access") return <Trans>Enable for this role</Trans>;
+  if (connection.status === "disabled") return <Trans>Disabled</Trans>;
+  if (connection.status === "unavailable") return <Trans>Temporarily unavailable</Trans>;
+  const label = connection.reconnect ? <Trans>Reconnect</Trans> : <Trans>Connect account</Trans>;
+  return openConnections ? (
+    <button type="button" className="underline underline-offset-2" onClick={openConnections}>
+      {label}
+    </button>
+  ) : (
+    label
+  );
+}
+
 type CacheSlot = { cache?: RecruitingReadCache; key?: string };
 
 /**

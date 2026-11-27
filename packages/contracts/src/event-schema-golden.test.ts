@@ -35,6 +35,24 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   11: "35e16c8b9433b4281e05b4bc11349c3453f5057fe109fa0281e63a1dcdcd21b0",
   // 12: optional card flag on thread.suggestion (a suggested answer to the waiting card).
   12: "66a18eb346137eef4e42ede4c285d884685f41eab8857b9aaa55807cdc2b70ba",
+  // 13: optional interface language on user text blocks (menu names as the sender sees them).
+  13: "e90ed4b7750f6a67737fc8ce1899e683947209f2f0e06c770eecc851f32a7e66",
+  // 14: optional answerTarget on ask blocks (a role team's card shown in the delegating chat).
+  14: "0080544f7957fff29512ddc4b5c0dd244ba91a53c0c6a5a3f2b738c4398375b7",
+  // 15: a profile view's candidateKey is "sourced:<key>"; views stored as "autumn:<key>" still read.
+  15: "0e016fa898d6d612cf71d65112dcaee5daadeac3f73aefbdfc774e04fb42d36a",
+  // 16: a file card's source preview no longer names a local assessment (previews are added on
+  // read, never stored).
+  16: "cc984f209987fa0fd463736cc20ce7f0acbb57c842c17aacbaac987fc7b3d8b5",
+  // 17: optional server-set facts on text blocks (a round list and its record, a card answer) and
+  // on ask blocks (answered by a message typed in the chat).
+  17: "8ad735f3f6ffe33efafa8105aacef93cbb5454fe0665ee9330fe2848507d24b8",
+  // 18: optional openQuestions on a mail reply (the candidate's questions the recruiter never answered).
+  18: "d5daefd350a8246a8171fef7019e2cf4b3aeab6107ce8458788bc980d01eea32",
+  // 19: a saved email read may carry no message (a read a candidate's reply woke).
+  19: "c6e572a87498808a1b0ef672441c29019e8ec7c7709093945e56d0a828eb0401",
+  // 20: optional recruiterWords on bot_message_received (the words a role request hands over).
+  20: "fa320ad45ca8b85a2b59a1d312749024bf16dfebcc16706647d6c5737f9ebaa5",
 };
 
 const OLD_ROWS: unknown[] = [

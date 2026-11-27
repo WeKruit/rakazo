@@ -83,7 +83,12 @@ export function SequenceEditor({
     setDraft({
       name: campaign?.name ?? result.roleTitle,
       eaccount: campaign?.eaccount ?? result.mailboxes[0] ?? "",
-      steps: campaign?.steps.length ? campaign.steps : [emptyStep()],
+      // A new draft starts from the role's email saved before a mailbox existed.
+      steps: campaign?.steps.length
+        ? campaign.steps
+        : result.savedEmail?.length
+          ? result.savedEmail
+          : [emptyStep()],
       timezone: campaign?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
       send_hours: campaign?.send_hours ?? "weekdays_9_to_5",
     });

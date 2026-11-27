@@ -1,6 +1,7 @@
-import { INSTANTLY_MCP_ENDPOINT } from "@rakazo/core";
+import { INSTANTLY_MCP_ENDPOINT, isVendorService, sendRecipients } from "@rakazo/core";
 import {
   connectAskBlock,
+  findAccountConnectAsk,
   findPendingConnectAsk,
   loadConnectServer,
   type PrismaClient,
@@ -34,7 +35,6 @@ const CONNECTOR_CATALOG = [
     endpoint: "https://mcp.fullenrich.com/mcp",
     aliases: [],
   },
-  { slug: "autumn", name: "Autumn", endpoint: "https://api.autumn.ai/mcp", aliases: [] },
 ];
 
 const key = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -102,12 +102,27 @@ async function resolveProvider(prisma: PrismaClient, scope: Scope, provider: str
   }
 }
 
+/**
+ * A mail connect card keeps the agent's own reason and adds any address the recruiter typed that
+ * the reason leaves out (gate 9fd9c2ff: the card never showed the address). A fixed line here
+ * replaced the agent's "not sent yet" and claimed a kept draft even when none existed.
+ */
+function mailReason(reason: string, recruiterText: string) {
+  const missing = sendRecipients({ text: recruiterText }).filter(
+    (address) => !reason.toLowerCase().includes(address),
+  );
+  return missing.length ? `${reason} (${missing.join(", ")})` : reason;
+}
+
 /** request_connection: connected → result; otherwise one pending connect card per server and thread. */
 export async function requestConnection(
   prisma: PrismaClient,
   scope: Scope,
   args: Record<string, unknown>,
   pause: (block: ConnectBlock) => Promise<void>,
+  recruiterText = "",
+  /** A recruiter connects only their own accounts (Gmail, calendar), never a product service. */
+  recruiter = false,
 ) {
   let serverId = typeof args.serverId === "string" ? args.serverId.trim() : "";
   const provider = typeof args.provider === "string" ? args.provider.trim() : "";
@@ -128,12 +143,41 @@ export async function requestConnection(
       status: "connected" as const,
       message: `${server.name} is already connected and assigned to you: use its tools now (connectors_search_tools group "${server.slug}"). Never tell the user it is not connected.`,
     };
+  // One-off-email on 7c5c1c30: a card for the product's email sending sat beside the Gmail card,
+  // so the recruiter saw two Connect buttons and an English reason.
+  if (recruiter && isVendorService(server))
+    return {
+      error: `Not shown: ${server.name} is run for the recruiter by the product, never theirs to connect. They connect only their own Gmail and calendar: for an email from them, use provider gmail; otherwise carry on without it.`,
+    };
   if (!server.assigned)
     return {
       error: `${server.name} is not assigned to you. In a team chat, hand the request to the teammate who has it with handoff_to_bot, quoting the user's words; otherwise ask the user to add it to this agent's MCP servers.`,
     };
   const pending = await findPendingConnectAsk(prisma, { threadId: scope.threadId, serverId });
-  if (pending) return { status: "pending" as const, askId: pending.askId };
-  await pause(connectAskBlock({ serverId, name: server.name.slice(0, 80), reason }));
+  if (pending)
+    return {
+      status: "pending" as const,
+      askId: pending.askId,
+      message: `The ${server.name} card is still showing above, waiting for the recruiter. Do not show another: do now what needs no ${server.name} (an email is written and shown in your reply without any mailbox), and say in one line that only the step through ${server.name} waits on Connect on that card.`,
+    };
+  const elsewhere = await findAccountConnectAsk(prisma, {
+    spaceId: scope.spaceId,
+    userId: scope.userId,
+    serverId,
+  });
+  if (elsewhere && elsewhere.threadId !== scope.threadId)
+    return {
+      status: "pending" as const,
+      askId: elsewhere.askId,
+      message: `The recruiter already has a ${server.name} Connect card open in another conversation, waiting for them. Do not show another: finish without it, and report that this step waits on ${server.name} being connected and what can be done meanwhile.`,
+    };
+  const mail = key(server.slug ?? "") === "gmail" || key(server.name) === "gmail";
+  await pause(
+    connectAskBlock({
+      serverId,
+      name: server.name.slice(0, 80),
+      reason: mail ? mailReason(reason, recruiterText) : reason,
+    }),
+  );
   return undefined;
 }

@@ -7,7 +7,6 @@ import {
   RecruitingCrmImportArgsSchema,
   RecruitingCrmTargetSchema,
   RecruitingPreferenceFeedbackSchema,
-  RetainedRecruitingApprovalRequestSchema,
 } from "@rakazo/contracts";
 import { formatCron, humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
@@ -26,12 +25,6 @@ type CrmApprovalOperation =
   | "crm_update_candidate_stage"
   | "crm_append_candidate_note";
 
-type RecruitingApprovalDisplay = {
-  roleTitle: string;
-  requirements?: string;
-  profiles?: { name: string; linkedinUrl: string; evidenceUrl: string }[];
-};
-
 export function buildApprovalAskBlock(
   effectId: string,
   toolName: string,
@@ -40,10 +33,9 @@ export function buildApprovalAskBlock(
   options?: {
     reviewReason?: string;
     oneTimeOnly?: boolean;
-    /** An email send: offer the recruiter's "send when I say send" preference. */
-    sendPreference?: boolean;
+    /** An email send: confirmed on its card each time. */
+    emailSend?: boolean;
     crmOperation?: CrmApprovalOperation;
-    recruiting?: RecruitingApprovalDisplay;
     crmImportTarget?: RecruitingCrmTarget;
     instantlyActivation?: InstantlyActivationDisplay;
     instantlyReply?: InstantlyReplyDisplay;
@@ -102,7 +94,6 @@ export function buildApprovalAskBlock(
     throw new Error("CRM import approval requires verified candidate facts and destination.");
   const crmOperation = options?.crmOperation;
   const oneTimeOnly = Boolean(crmTarget || crmImport || crmOperation || options?.oneTimeOnly);
-  const recruitingApproval = !crmOperation && toolName === "recruiting_request_approval";
   const parsedPreference = RecruitingPreferenceFeedbackSchema.safeParse(
     toolName === "recruiting_feedback"
       ? args
@@ -135,7 +126,6 @@ export function buildApprovalAskBlock(
             nativeMemory,
             crmOperation,
             considerationOperation,
-            options?.recruiting,
             options?.crmImportTarget,
           );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
@@ -170,11 +160,9 @@ export function buildApprovalAskBlock(
                             ? "Review CRM stage change"
                             : crmOperation === "crm_append_candidate_note"
                               ? "Review CRM note"
-                              : recruitingApproval
-                                ? summary
-                                : toolName === "create_space"
-                                  ? `${summary}?`
-                                  : `Review before ${summary}`,
+                              : toolName === "create_space"
+                                ? `${summary}?`
+                                : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -183,7 +171,6 @@ export function buildApprovalAskBlock(
       safeDetail &&
       !scheduleUpdate &&
       !considerationOperation &&
-      !recruitingApproval &&
       !preference &&
       !nativeMemory &&
       !oneTimeOnly
@@ -200,44 +187,64 @@ export function buildApprovalAskBlock(
           },
           { id: "deny", label: "Change the address", outcome: "cancelled" },
         ]
-      : options?.sendPreference
+      : options?.emailSend || options?.instantlyActivation || options?.instantlyReply
         ? [
             { id: "allow", label: "Confirm and send" },
-            { id: "always", label: "Send when I say send" },
             { id: "deny", label: "Cancel" },
           ]
-        : options?.instantlyActivation || options?.instantlyReply
+        : !crmOperation && toolName === "create_space"
           ? [
-              { id: "allow", label: "Confirm and send" },
-              { id: "deny", label: "Cancel" },
+              { id: "allow", label: "Create space", outcome: "created" },
+              { id: "deny", label: "Cancel", outcome: "cancelled" },
             ]
-          : !crmOperation && toolName === "create_space"
-            ? [
-                { id: "allow", label: "Create space", outcome: "created" },
-                { id: "deny", label: "Cancel", outcome: "cancelled" },
-              ]
-            : recruitingApproval
-              ? [
-                  {
-                    id: "allow",
-                    label:
-                      args.stage === "brief"
-                        ? "Looks good, start searching"
-                        : args.stage === "documents"
-                          ? "Approve documents"
-                          : "Approve calibration",
-                  },
-                  { id: "deny", label: args.stage === "brief" ? "Needs changes" : "Deny" },
-                ]
-              : [
-                  { id: "allow", label: "Allow once" },
-                  ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
-                  { id: "deny", label: "Deny" },
-                ],
+          : [
+              { id: "allow", label: "Allow once" },
+              ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
+              { id: "deny", label: "Deny" },
+            ],
   };
 }
 
 const MAX_RECIPIENT_LINES = 20;
+/** Plain words for the sending address, the campaign and its warmup, never the stored states. */
+const SENDER_WORDS: Record<string, string> = {
+  active: "ready to send",
+  provisioning: "still being set up, cannot send yet",
+  setup_pending: "still being set up, cannot send yet",
+  unavailable: "cannot send right now",
+};
+const WARMUP_WORDS: Record<string, string> = {
+  active: "warming up",
+  starting: "starting to warm up",
+  paused: "not warming up",
+};
+const CAMPAIGN_WORDS: Record<string, string> = {
+  Active: "already sending to others",
+  Paused: "paused; this send resumes it",
+  Completed: "finished earlier; this send starts it again",
+};
+/** One email as the card shows it: subject (or the thread it replies in) and full body. */
+function emailLines(
+  email: { subject: string; body: string },
+  indent: string,
+  heading?: string,
+): string[] {
+  return [
+    ...(heading ? [`${indent}${heading}`] : []),
+    `${indent}Subject: ${email.subject || "(a reply in the same thread)"}`,
+    `${indent}Body:`,
+    ...htmlToPlainText(email.body)
+      .split("\n")
+      .map((line) => (line && indent ? `${indent}${line}` : line)),
+  ];
+}
+const followUpLines = (
+  followUps: readonly { after: string; subject: string; body: string }[],
+  indent: string,
+) =>
+  followUps.flatMap((step, index) =>
+    emailLines(step, indent, `Follow-up ${index + 1}, ${step.after}:`),
+  );
 /** The send-confirmation card body: no ids, only what the human is approving. */
 function formatInstantlyActivation(display: InstantlyActivationDisplay) {
   const unknown = (value: string | number | null) => (value === null ? "unknown" : String(value));
@@ -252,38 +259,43 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     `Role: ${display.campaignName ?? "this role"}`,
     `From: ${unknown(display.mailbox)}`,
     ...(display.senderState
-      ? [`Sending address: ${display.senderState.state}`, `Warmup: ${display.senderState.warmup}`]
+      ? [
+          `Sending address: ${SENDER_WORDS[display.senderState.state] ?? "not known"}`,
+          `Warmup: ${WARMUP_WORDS[display.senderState.warmup] ?? "not known"}`,
+        ]
       : []),
     `To (${count}):`,
     ...shown.flatMap((r) => [
       `- ${r.name ? `${r.name} <${r.email}>` : r.email}${r.emailType ? ` (${r.emailType} email)` : ""}`,
       ...(r.personalization ? [`  Opening: ${r.personalization}`] : []),
-      ...(r.firstEmail
+      ...(r.alreadyEmailedAt
         ? [
-            `  Subject: ${r.firstEmail.subject}`,
-            "  Body:",
-            ...htmlToPlainText(r.firstEmail.body)
-              .split("\n")
-              .map((line) => (line ? `  ${line}` : "")),
+            `  First email already confirmed: ${r.alreadyEmailedAt.slice(0, 16).replace("T", " ")} UTC`,
           ]
         : []),
+      ...(r.firstEmail ? emailLines(r.firstEmail, "  ") : []),
+      ...(r.followUps ? followUpLines(r.followUps, "  ") : []),
     ]),
     ...(display.recipients.length > shown.length
       ? [`- and ${display.recipients.length - shown.length} more`]
+      : []),
+    ...(display.takenOut?.length
+      ? [`Taken out of the queue, not emailed: ${display.takenOut.join(", ")}`]
       : []),
     `Send time: ${unknown(display.schedule)}`,
     ...(display.firstEmail === undefined
       ? []
       : display.firstEmail
-        ? [
-            `Subject: ${display.firstEmail.subject}`,
-            "Body:",
-            htmlToPlainText(display.firstEmail.body),
-          ]
+        ? emailLines(display.firstEmail, "")
         : ["Body: no email content yet"]),
-    ...(display.status && display.status !== "Draft" ? [`Status: ${display.status}`] : []),
+    ...(display.followUps ? followUpLines(display.followUps, "") : []),
+    ...(display.status && CAMPAIGN_WORDS[display.status]
+      ? [`Campaign: ${CAMPAIGN_WORDS[display.status]}`]
+      : []),
     "",
-    "Confirm sending the first email to these recipients",
+    display.followUps?.length || display.recipients.some((r) => r.followUps?.length)
+      ? "Confirm sending these emails to these recipients"
+      : "Confirm sending the first email to these recipients",
   ].join("\n");
 }
 
@@ -326,6 +338,7 @@ function outboundTitle(toolName: string): string | undefined {
 function formatInstantlyReply(display: InstantlyReplyDisplay) {
   return [
     `To: ${display.to ?? "unknown"}`,
+    ...(display.cc?.length ? [`Cc: ${display.cc.join(", ")}`] : []),
     `From: ${display.from ?? "unknown"}`,
     `Subject: ${display.subject}`,
     `In reply to: ${display.inReplyTo ?? "unknown"}`,
@@ -341,13 +354,6 @@ function describeApprovalAction(
   args: Record<string, unknown>,
   displayToolName: string,
 ): string {
-  if (toolName === "recruiting_request_approval") {
-    return args.stage === "brief"
-      ? "Role requirements"
-      : args.stage === "documents"
-        ? "Approve documents"
-        : "Approve calibration";
-  }
   if (toolName === "destination.write") {
     const collection = args.collection ? String(args.collection) : "records";
     const title = args.title ? ` "${String(args.title)}"` : "";
@@ -381,7 +387,6 @@ function formatApprovalDetail(
   nativeMemory = false,
   crmOperation?: CrmApprovalOperation,
   considerationOperation?: "hold" | "pass" | "resume",
-  recruiting?: RecruitingApprovalDisplay,
   crmImportTarget?: RecruitingCrmTarget,
 ): string | undefined {
   const booking = formatBooking(toolName, args) ?? formatBookingChange(toolName, args);
@@ -413,10 +418,7 @@ function formatApprovalDetail(
       "Save these supplied facts and add this person to the CRM role pool",
     ].join("\n");
   const lines: string[] = [];
-  if (
-    reviewReason?.trim() &&
-    !(toolName === "recruiting_request_approval" && args.stage === "brief")
-  ) {
+  if (reviewReason?.trim()) {
     lines.push(reviewReason.trim().replace(/\u2014|\u2013/g, "-"));
   }
   if (toolName === "schedule_update") {
@@ -484,52 +486,6 @@ function formatApprovalDetail(
     );
     return lines.join("\n\n");
   }
-  if (toolName === "recruiting_request_approval") {
-    const request = RetainedRecruitingApprovalRequestSchema.parse(args);
-    if (recruiting) lines.push(`Role: ${recruiting.roleTitle}`);
-    if (request.stage !== "brief") lines.push(`Role version: ${request.expectedRoleRevision}`);
-    if (request.stage === "brief") {
-      if (!recruiting?.roleTitle.trim() || !recruiting.requirements?.trim())
-        throw new Error("Requirements confirmation requires verified role requirements.");
-      lines.push(recruiting.requirements);
-    } else if (request.stage === "documents") {
-      lines.push(
-        "Job description: attached",
-        "Named JD PDF: attached",
-        `Anonymous JD PDF: ${request.documents.anonymousPdf ? "attached" : "not provided"}`,
-        `Deck: ${request.documents.deck ? "attached" : "not provided"}`,
-      );
-    } else {
-      for (const [index, profile] of request.profiles.entries()) {
-        if ("source" in profile) {
-          const verified = recruiting?.profiles?.[index];
-          if (
-            !recruiting?.roleTitle.trim() ||
-            recruiting.profiles?.length !== request.profiles.length ||
-            !verified?.name.trim() ||
-            verified.linkedinUrl !== profile.linkedinUrl ||
-            verified.evidenceUrl !== profile.evidenceUrl
-          )
-            throw new Error("Calibration approval requires verified role and candidate evidence.");
-          lines.push(
-            `${index + 1}. ${verified.name}`,
-            verified.linkedinUrl,
-            `Evidence: ${verified.evidenceUrl}`,
-          );
-        } else
-          lines.push(
-            `${index + 1}. ${profile.linkedinUrl}`,
-            `Evidence: ${profile.evidenceUrl}`,
-            `Assessment version: ${profile.assessmentVersion}`,
-          );
-      }
-      lines.push(
-        request.ruleChanges.length ? "Rule changes:" : "Rule changes: none",
-        ...request.ruleChanges,
-      );
-    }
-    return lines.join("\n");
-  }
   if (toolName === "create_space") {
     lines.push(
       "Bots, groups, chats, files, memory, and integrations in this space stay separate from other spaces.",
@@ -577,20 +533,20 @@ function formatGmailSend(toolName: string, args: Record<string, unknown>) {
 type BookingAttendee = { name?: string; email?: string; timeZone?: string };
 
 /** The invitee of a calendar booking request, or of the booking a change or cancellation targets. */
-function bookingAttendee(toolName: string, args: Record<string, unknown>) {
+function bookingAttendee(
+  toolName: string,
+  args: Record<string, unknown>,
+): BookingAttendee | undefined {
   const original = args.originalBooking as { attendees?: unknown } | undefined;
-  if (calendarEvent(toolName) && Array.isArray(args.attendees)) {
-    const guest = args.attendees.find(
-      (item): item is Record<string, unknown> =>
-        Boolean(item) && typeof item === "object" && !(item as { organizer?: unknown }).organizer,
+  // A move or cancellation names the event's own guests before any it adds.
+  if (calendarEvent(toolName)) {
+    const guests = calendarGuests(
+      args.attendees,
+      args.attendeeEmails,
+      (args.originalEvent as { attendees?: unknown } | null | undefined)?.attendees,
+      args.addedAttendees,
     );
-    if (!guest && typeof args.attendees[0] === "string") return { email: args.attendees[0] };
-    if (!guest) return undefined;
-    const name = guest.displayName ?? guest.name;
-    return {
-      ...(typeof name === "string" ? { name } : {}),
-      ...(typeof guest.email === "string" ? { email: guest.email } : {}),
-    } satisfies BookingAttendee;
+    return guests.find((guest) => guest.name) ?? guests[0];
   }
   const attendee = /create_booking$/i.test(toolName)
     ? args.attendee
@@ -668,9 +624,9 @@ function formatBookingChange(toolName: string, args: Record<string, unknown>) {
  * A booking card in the recruiter's terms: who is invited, when in their time zone, and what the
  * invite says. Every other field is still listed, so the card shows all that will be sent.
  */
-/** A calendar app's own event create or update tool, as opposed to a booking page's. */
+/** A calendar app's own event create, update or delete tool, as opposed to a booking page's. */
 function calendarEvent(toolName: string) {
-  return /calendar.*__(create|update|patch)_event$|^googlecalendar_(create|update|patch)_event$/i.test(
+  return /calendar.*__(create|update|patch|delete)_event$|^googlecalendar_(create|update|patch|delete)_event$/i.test(
     toolName,
   );
 }
@@ -726,34 +682,127 @@ function wallTimeIn(wall: string, zone: string): string | undefined {
   }
 }
 
-/** A calendar event the recruiter confirms: who, when and what, without the calendar's name or ids. */
+type CalendarGuest = { email: string; name?: string };
+
+/** The guests of a calendar request or event: plain addresses or attendee rows, organizer left out. */
+function calendarGuests(...values: unknown[]): CalendarGuest[] {
+  return values.flatMap((value) =>
+    Array.isArray(value)
+      ? value.flatMap((item): CalendarGuest[] => {
+          if (typeof item === "string") return [{ email: item }];
+          const guest = item as Record<string, unknown> | null;
+          if (!guest || typeof guest.email !== "string" || guest.organizer === true) return [];
+          const name = guest.displayName ?? guest.name;
+          return [{ email: guest.email, ...(typeof name === "string" && name ? { name } : {}) }];
+        })
+      : [],
+  );
+}
+
+const guestLabel = (guest: CalendarGuest) =>
+  guest.name ? `${guest.name} <${guest.email}>` : guest.email;
+
+/**
+ * A calendar event the recruiter confirms, without the calendar's name or ids: every guest who
+ * gets the invitation, the time (a move shows the current time and the new one, a cancellation
+ * what is cancelled), what the invite says and what the calendar already holds then.
+ */
 function formatCalendarEvent(toolName: string, args: Record<string, unknown>) {
   if (!calendarEvent(toolName)) return undefined;
-  const argZone = typeof args.timeZone === "string" ? args.timeZone : undefined;
+  const operation = /delete_event$/i.test(toolName)
+    ? "delete"
+    : /(update|patch)_event$/i.test(toolName)
+      ? "update"
+      : "create";
+  // The current event, read before the card; null when it could not be read.
+  const original =
+    args.originalEvent && typeof args.originalEvent === "object"
+      ? (args.originalEvent as {
+          summary?: unknown;
+          start?: unknown;
+          end?: unknown;
+          timeZone?: unknown;
+          attendees?: unknown;
+        })
+      : undefined;
+  const originalZone = typeof original?.timeZone === "string" ? original.timeZone : undefined;
+  const argZone = typeof args.timeZone === "string" ? args.timeZone : originalZone;
   const start = eventTime(args.start ?? args.startTime, argZone);
-  if (!start) return undefined;
-  const end = eventTime(args.end ?? args.endTime, start.zone);
-  const zone = start.zone ?? "UTC";
-  const attendee = bookingAttendee(toolName, args);
-  const title = args.summary ?? args.title;
-  const length = end ? Math.round((Date.parse(end.at) - Date.parse(start.at)) / 60_000) : undefined;
-  const update = /(update|patch)_event$/i.test(toolName);
+  if (operation === "create" && !start) return undefined;
+  const end = eventTime(args.end ?? args.endTime, start?.zone ?? argZone);
+  const zone = start?.zone ?? argZone ?? "UTC";
+  const was = eventTime(original?.start, originalZone);
+  const removed = new Set(
+    (Array.isArray(args.removedAttendeeEmails) ? args.removedAttendeeEmails : []).map((email) =>
+      String(email).toLowerCase(),
+    ),
+  );
+  const added =
+    operation === "create"
+      ? calendarGuests(args.attendees, args.attendeeEmails)
+      : calendarGuests(args.addedAttendees, args.addedAttendeeEmails);
+  const kept = calendarGuests(original?.attendees).filter(
+    (guest) => !removed.has(guest.email.toLowerCase()),
+  );
+  const guests = [
+    ...kept,
+    ...added.filter(
+      (guest) => !kept.some((known) => known.email.toLowerCase() === guest.email.toLowerCase()),
+    ),
+  ];
+  const title = args.summary ?? args.title ?? original?.summary;
+  const length =
+    start && end ? Math.round((Date.parse(end.at) - Date.parse(start.at)) / 60_000) : undefined;
+  const conflicts = args.calendarConflicts as Array<{ start: string; end: string }> | null;
+  const unread = operation !== "create" && !original;
+  const busy = (span: { start: string; end: string }) =>
+    `${bookingTime(span.start, zone)} – ${bookingTime(span.end, zone)}`;
   return [
-    ...(attendee
+    ...(operation === "delete"
       ? [
-          `Candidate: ${attendee.name ?? attendee.email ?? "unknown"}${attendee.name && attendee.email ? ` <${attendee.email}>` : ""}`,
+          unread
+            ? "Cancel: this event could not be read; check it in your calendar before you confirm"
+            : `Cancel: ${typeof title === "string" && title ? `${title}, ` : ""}${was ? bookingTime(was.at, originalZone ?? "UTC") : "time unknown"}`,
         ]
       : []),
-    `${update ? "New time" : "When"}: ${bookingTime(start.at, zone)}`,
+    unread && operation === "update"
+      ? "Guests: the current guests could not be read"
+      : `Guests: ${guests.map(guestLabel).join(", ") || "none"}`,
+    ...(operation === "update" && added.length
+      ? [`Adding: ${added.map(guestLabel).join(", ")}`]
+      : []),
+    ...(operation === "update" && removed.size ? [`Removing: ${[...removed].join(", ")}`] : []),
+    ...(operation === "create" && start ? [`When: ${bookingTime(start.at, zone)}`] : []),
+    ...(operation === "update"
+      ? start
+        ? [
+            `From: ${was ? bookingTime(was.at, originalZone ?? zone) : "could not be read"}`,
+            `To: ${bookingTime(start.at, zone)}`,
+          ]
+        : [`When: unchanged${was ? `, ${bookingTime(was.at, originalZone ?? zone)}` : ""}`]
+      : []),
     ...(length && length > 0 ? [`Length: ${length} min`] : []),
-    ...(typeof title === "string" && title ? [`Title: ${title}`] : []),
+    ...(operation !== "delete" && typeof title === "string" && title ? [`Title: ${title}`] : []),
     ...(typeof args.description === "string" && args.description
       ? [`Notes: ${args.description}`]
       : []),
+    ...(typeof args.location === "string" && args.location ? [`Where: ${args.location}`] : []),
+    ...(args.addGoogleMeetUrl === true ? ["Meeting: Video call"] : []),
+    ...(conflicts === null
+      ? ["Your calendar could not be checked for other events at this time."]
+      : Array.isArray(conflicts)
+        ? conflicts.length
+          ? [`Already busy then: ${conflicts.map(busy).join("; ")}`]
+          : ["Your calendar is free then."]
+        : []),
     "",
-    update
-      ? "The candidate gets the new time once you confirm."
-      : "The candidate gets a calendar invitation once you confirm.",
+    args.notificationLevel === "NONE"
+      ? "Guests are not notified."
+      : operation === "delete"
+        ? "Every guest is told it is cancelled once you confirm."
+        : operation === "update"
+          ? "Every guest gets the change once you confirm."
+          : "Every guest gets a calendar invitation once you confirm.",
   ].join("\n");
 }
 

@@ -60,7 +60,7 @@ test("a recruiting reply draft shows its exact scope and one-time approval", asy
   await captureScreenshot(page, testInfo, "recruiting-reply-draft");
 });
 
-test("recruiting dashboard includes unassessed saved candidates and their source rounds", async ({
+test("recruiting dashboard includes saved candidates and their source rounds", async ({
   page,
 }, testInfo) => {
   await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
@@ -73,9 +73,6 @@ test("recruiting dashboard includes unassessed saved candidates and their source
   await expect(
     totals.getByText("Candidates", { exact: true }).locator("..").locator("dd"),
   ).toHaveText("3");
-  await expect(
-    totals.getByText("Unassessed", { exact: true }).locator("..").locator("dd"),
-  ).toHaveText("2");
   await captureScreenshot(page, testInfo, "recruiting-candidate-dashboard");
   await page.getByRole("tab", { name: "Evidence", exact: true }).click();
   await page.getByRole("button", { name: "Table", exact: true }).click();
@@ -85,31 +82,6 @@ test("recruiting dashboard includes unassessed saved candidates and their source
   await page.getByRole("button", { name: "Load more", exact: true }).click();
   await expect(page.getByRole("cell", { name: "No CRM receipt", exact: true })).toBeVisible();
   await captureScreenshot(page, testInfo, "recruiting-candidate-crm-status");
-  await page.getByRole("button", { name: "Cards", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "Assessment state", exact: true })
-    .selectOption("unassessed");
-  await expect(page.getByRole("button", { name: /^Synthetic unassessed/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Synthetic candidate/ })).toHaveCount(0);
-  await page.getByRole("button", { name: /^Synthetic unassessed/ }).click();
-  await expect(page.getByLabel("Saved candidate sources", { exact: true })).toContainText(
-    "provider_report",
-  );
-  await captureScreenshot(page, testInfo, "recruiting-unassessed-candidate-source");
-});
-
-test("recruiting evidence opens retained text at the exact saved selection", async ({
-  page,
-}, testInfo) => {
-  await page.goto("/e2e/fixtures/marketing-shots.html?view=recruiting");
-  await page.getByRole("tab", { name: "Evidence", exact: true }).click();
-  await page.getByRole("button", { name: /^Synthetic candidate/ }).click();
-  await page.getByText("profile.summary", { exact: true }).first().click();
-  const original = page.getByLabel("Source text", { exact: true }).first();
-  await expect(original).toContainText("Candidate note");
-  await expect(original.locator("mark")).toHaveText("Designed coordinate transforms 🧭 in Python.");
-  await expect(original).toContainText("Employment type and dates are not provided.");
-  await captureScreenshot(page, testInfo, "recruiting-original-source-selection");
 });
 
 test("agent-attached files appear as downloadable cards", async ({ page }, testInfo) => {

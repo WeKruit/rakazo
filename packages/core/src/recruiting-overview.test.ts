@@ -144,7 +144,7 @@ describe("streamRecruitingOverview", () => {
       roleId,
       status: "ready",
       partial: false,
-      events: [{ id: "e", kind: "event", status: "confirmed", start }],
+      events: [{ id: "e", kind: "event", status: "booked", start }],
     }) as RecruitingCorrespondence;
   const reads = (patch: Partial<OverviewReads> = {}): OverviewReads => ({
     roleId: async (group) => (group.id === "g3" ? null : `role-${group.id}`),

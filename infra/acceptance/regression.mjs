@@ -51,7 +51,6 @@ import { verifyGlobalRecruiting } from "./global-recruiting.mjs";
 import { verifyGlobalRecruitingChat } from "./global-recruiting-chat.mjs";
 import { checkNotificationPolicy } from "./notification-policy.mjs";
 import { restartTestApp } from "./restart-test-app.mjs";
-import { checkReviewerGrading } from "./reviewer-grading.mjs";
 import { assertSlowToolPromotion } from "./slow-tool.mjs";
 import { checkBackgroundTiming, checkToolTiming } from "./tool-timing.mjs";
 import {
@@ -822,8 +821,6 @@ try {
       scaleReportChecks(messages, failures, report.milestones?.scale_sent);
       checkToolTiming(messages);
       checkBackgroundTiming(await rpc("threads/get", { groupId: report.groupId }));
-      const grading = await checkReviewerGrading(rpc, report.groupId, readEvents);
-      fs.writeFileSync(path.join(OUT, "progress-reviewer.json"), JSON.stringify(grading));
       const events = await readEvents(report.groupId);
       const event = events.find(
         (event) => event.type === "thread.message.created" && event.payload?.role === "bot",
@@ -1512,6 +1509,34 @@ try {
     const fixture = await fixtureChat();
     if (!fixture) return failures.push("memory needs <cases>/t5.json for the recall chat");
     const team = `Aurora-${Math.random().toString(36).slice(2, 6)}`;
+    // Every earlier run's test name leaves memory first and again at the end, even when a check
+    // fails part way (gate edfa2b9e: a leftover Aurora-u0o5 line was rewritten into a second copy
+    // of the new name, and the role chat first recalled another leftover).
+    const TEST_NAME = /Aurora-[a-z0-9]{4}/;
+    const removeTestNames = async () => {
+      for (const doc of await memoryDocs())
+        if (TEST_NAME.test(doc.content))
+          await rpc("memory/update", {
+            documentId: doc.id,
+            expectedRevision: doc.revision,
+            content: doc.content
+              .split("\n")
+              .filter((line) => !TEST_NAME.test(line))
+              .join("\n"),
+          }).catch((error) => log(`memory: could not remove a test preference: ${error.message}`));
+    };
+    await removeTestNames();
+    try {
+      await memoryCase(team, kruit, fixture, failures);
+    } finally {
+      await removeTestNames();
+    }
+  });
+
+  async function memoryCase(team, kruit, fixture, failures) {
+    // An earlier check's card still waiting in Kruit would take the preference as its answer
+    // (gate 4250713f: it answered a city card and the resumed run stopped on a mail confirm).
+    await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
     const told = await say(
       kruit.id,
       `记住一个长期偏好：以后给我汇报时，把我的团队叫做「${team}」组。`,
@@ -1547,18 +1572,7 @@ try {
       failures.push(
         `a role chat did not recall the team name: "${recalled.map(botText).join(" ").slice(0, 160)}"`,
       );
-    // The test preference leaves memory again, so later runs and recruiters never see it.
-    for (const doc of await memoryDocs())
-      if (doc.content.includes(team))
-        await rpc("memory/update", {
-          documentId: doc.id,
-          expectedRevision: doc.revision,
-          content: doc.content
-            .split("\n")
-            .filter((line) => !line.includes(team))
-            .join("\n"),
-        }).catch((error) => log(`memory: could not remove the test preference: ${error.message}`));
-  });
+  }
 
   define("approval", async (failures) => {
     // A booking card waits for the recruiter: a new message while it waits is answered on its own

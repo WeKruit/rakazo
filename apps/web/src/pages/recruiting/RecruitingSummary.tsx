@@ -177,7 +177,9 @@ export function RecruitingSummary({ model }: { model: ReturnType<typeof useRecru
                   </span>
                   <ul>
                     {workspace.revision.preferences.map((preference) => (
-                      <li key={preference}>{preference}</li>
+                      <li key={preference} className="whitespace-pre-line break-words">
+                        {preference}
+                      </li>
                     ))}
                   </ul>
                 </div>

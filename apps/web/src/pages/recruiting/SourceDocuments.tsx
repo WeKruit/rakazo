@@ -26,12 +26,7 @@ import { ArtifactFileCard, SourceText } from "../../components/ArtifactFileCard"
 import { decodeArtifactBase64 } from "../../lib/artifact-open";
 import { rpc } from "../../lib/rpc";
 import { CrmDetails } from "../recruiting/CandidatePresentation";
-import type {
-  Props,
-  Snapshot,
-  SourceContent,
-  SourceReadTarget,
-} from "../recruiting/workspace-types";
+import type { Snapshot, SourceContent, SourceReadTarget } from "../recruiting/workspace-types";
 import { CandidateReport } from "./CandidatePresentation";
 
 export function ArtifactReference({
@@ -114,9 +109,12 @@ export function ArtifactReference({
               ? readRecruitingJsonString(bytes, path)
               : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
             const start = selection?.start ?? text.indexOf(source.quote);
-            const end = selection?.end ?? start + source.quote.length;
-            validateRecruitingTextSelection(text, start, end, source.quote);
-            excerpt = { kind: "text", text, start, end };
+            if (!selection && start < 0) excerpt = { kind: "text", text, start: 0, end: 0 };
+            else {
+              const end = selection?.end ?? start + source.quote.length;
+              validateRecruitingTextSelection(text, start, end, source.quote);
+              excerpt = { kind: "text", text, start, end };
+            }
           } catch {
             unavailable = true;
           }
@@ -197,24 +195,17 @@ export function ArtifactReference({
 
 export function Sources({
   sources,
-  messageTargets,
-  onRevealMessage,
   showDiagnostics = false,
   sourceTarget,
 }: {
-  sources: readonly (RecruitingSourceRef | RecruitingAssessmentSourceRef)[];
-  messageTargets?: Snapshot["assessments"][number]["sourceMessageTargets"];
-  onRevealMessage?: Props["onRevealMessage"];
+  sources: readonly RecruitingSourceRef[];
   showDiagnostics?: boolean;
   sourceTarget?: SourceReadTarget;
 }) {
   const { t } = useLingui();
-  const byMessageId = new Map(messageTargets?.map((target) => [target.messageId, target]));
   return (
     <ul className="space-y-2 text-sm">
       {sources.map((source) => {
-        const message =
-          source.anchor.kind === "message" ? byMessageId.get(source.anchor.messageId) : undefined;
         return (
           <li key={source.id} className="space-y-1">
             <p className="text-xs text-muted-foreground">
@@ -245,24 +236,9 @@ export function Sources({
               )}
             </p>
             {source.anchor.kind === "message" ? (
-              <div>
-                {onRevealMessage && message ? (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="h-auto justify-start whitespace-normal p-0 text-left"
-                    onClick={() =>
-                      onRevealMessage({ ...message.target, messageId: message.messageId })
-                    }
-                  >
-                    <Trans>Message</Trans>
-                  </Button>
-                ) : (
-                  <p>
-                    <Trans>Message</Trans>
-                  </p>
-                )}
-              </div>
+              <p>
+                <Trans>Message</Trans>
+              </p>
             ) : (
               <ArtifactReference
                 reference={source.anchor.artifact}

@@ -12,8 +12,9 @@
 //   title      A new role's title replaces "New role" once the JD names the role.
 //   greeting   A greeting in a role team with no role saves no role, asks no role question,
 //              and the next unrelated message starts no people search.
-//   onemail    One request to Kruit for an email reply shows one Send card, not two. The card
-//              is discarded at the end; nothing is sent.
+//   onemail    One request to Kruit for an email reply shows one Send card, not two, in the
+//              role's chat or Kruit's. The card
+//              and any left by an earlier run are discarded, pass or fail; nothing is sent.
 //   reminder   The corner reminder never covers the composer in a role chat.
 //   twochats   Kruit with no role open shows one chat; a role's chat shows Kruit beside it, and
 //              each pane says which conversation it is. Read-only.
@@ -154,11 +155,26 @@ if (!signedIn) {
 
 const all = await groups();
 const kruit = all.find((group) => group.name === "Kruit");
-// Other checks leave fresh, empty test roles behind, so the people check reads a named role when
-// RAKAZO_PEOPLE_ROLE is set and otherwise the longest-standing one.
-const fixtureRole =
-  all.find((group) => group.name === process.env.RAKAZO_PEOPLE_ROLE) ??
-  all.findLast((group) => group.name.startsWith(FIXTURE_MARK));
+/** How many people a role chat has saved; 0 when it has no saved role. */
+async function savedPeople(group) {
+  const threadId = (await rpc("groups/get", { groupId: group.id }).catch(() => null))?.threadId;
+  if (!threadId) return 0;
+  return (
+    (await rpc("recruiting/roleCandidates", { groupId: group.id, threadId, limit: 1 }).catch(
+      () => null,
+    ))?.total ?? 0
+  );
+}
+// The checks ask for saved people, so the fixture is the test role with the most of them, never one
+// picked by age (gates 81f351ca–fe03590f picked an old email-test role that was never searched).
+let fixtureRole = all.find((group) => group.name === process.env.RAKAZO_PEOPLE_ROLE);
+if (!fixtureRole) {
+  let most = 0;
+  for (const group of all.filter((item) => item.name.startsWith(FIXTURE_MARK))) {
+    const people = await savedPeople(group);
+    if (people > most) [most, fixtureRole] = [people, group];
+  }
+}
 
 try {
   await check("ids", async (page, failures) => {
@@ -234,7 +250,8 @@ try {
       );
     const replies = await ask(
       kruit.id,
-      `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`,
+      // The pass counts LinkedIn links, so the request asks for them (as aftercard, #1801).
+      `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人和他们的 LinkedIn 链接。`,
       (items) => linked(items) >= 3,
     );
     // Kruit reads saved people itself; handing the read to the role team is slow and often silent.
@@ -284,7 +301,9 @@ try {
     const composer = page.locator('fieldset[aria-label="Message composer"] textarea').first();
     await composer.waitFor({ timeout: 20_000 });
     // The request goes in while the card answer's reply is still being written.
-    const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`;
+    // The pass counts LinkedIn links, so the request asks for them (gate 42cc9f8f: three saved
+    // people were listed with grades and no links, and the check failed a correct answer).
+    const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人和他们的 LinkedIn 链接。`;
     // The thread finishes painting first; a click on a card that is re-rendering is lost.
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(2_000);
@@ -361,23 +380,61 @@ try {
     // The only address real test email may go to.
     const to = "noah-scheduling@mail.grokbot.com";
     const mailTag = `${tag}m`;
+    // A role's card is also shown in Kruit's chat as a copy that answers the original
+    // (answerTarget); gate 5eba6751 counted that copy as a second card. Only originals count.
     const tagged = (items) =>
       items.flatMap((message) =>
         (message.blocks ?? []).filter(
-          (block) => block.kind === "ask" && block.mailReply?.body?.includes(mailTag),
+          (block) =>
+            block.kind === "ask" && !block.answerTarget && block.mailReply?.body?.includes(mailTag),
         ),
       );
-    const cards = async () => tagged(await messages(role.id).catch(() => []));
+    // The card may be in the role's chat or in Kruit's, where the recruiter asked: Kruit does the
+    // reply itself when the role team is not needed. One card in either is a pass.
+    const both = async () =>
+      (
+        await Promise.all(
+          [role.id, kruit.id].map(async (groupId) =>
+            (await messages(groupId)).map((message) => ({ ...message, groupId })),
+          ),
+        )
+      ).flat();
+    const cards = async () => tagged(await both().catch(() => []));
     // A read that fails while staging restarts is not zero cards: wait for the chat to answer.
     const recount = async () => {
       for (let end = Date.now() + 3 * 60_000; ; await sleep(10_000)) {
         try {
-          return tagged(await messages(role.id));
+          return tagged(await both());
         } catch (error) {
           if (Date.now() > end) throw new Error(`could not read the role chat: ${error.message}`);
         }
       }
     };
+    // Discards, without sending, every waiting reply card whose body matches: a card left by an
+    // earlier run makes Kruit rightly refuse a second card for the same email.
+    const discard = async (match) => {
+      for (const message of await both().catch(() => []))
+        for (const block of message.blocks ?? [])
+          if (
+            block.kind === "ask" &&
+            (!block.status || block.status === "pending") &&
+            message.runId &&
+            match.test(block.mailReply?.body ?? "")
+          )
+            await rpc("threads/answer", {
+              groupId: message.groupId,
+              runId: message.runId,
+              messageId: message.id,
+              answer: "deny",
+            }).catch(() => {});
+    };
+    await discard(/Regression check \S+m\. Test note/);
+    try {
+      await sendAndCount();
+    } finally {
+      await discard(new RegExp(`Regression check ${mailTag}\\.`));
+    }
+    async function sendAndCount() {
     await rpc("threads/send", {
       groupId: kruit.id,
       addressing: "coordinator",
@@ -414,28 +471,6 @@ try {
     }, mailTag);
     await sleep(1_000);
     await page.screenshot({ path: path.join(OUT, "onemail.png") }).catch(() => {});
-    // Clean up without sending: discard every card this check made.
-    for (let left = found.length; left > 0; left -= 1) {
-      const marked = await page.evaluate((mark) => {
-        for (const old of document.querySelectorAll("[data-onemail-discard]"))
-          old.removeAttribute("data-onemail-discard");
-        for (const area of document.querySelectorAll("textarea")) {
-          if (!area.value.includes(mark)) continue;
-          for (let box = area.parentElement; box; box = box.parentElement) {
-            const discard = [...box.querySelectorAll("button")].find(
-              (button) => button.textContent.trim() === "Discard" && !button.disabled,
-            );
-            if (discard) {
-              discard.setAttribute("data-onemail-discard", "1");
-              return true;
-            }
-          }
-        }
-        return false;
-      }, mailTag);
-      if (!marked) break;
-      await page.locator('[data-onemail-discard="1"]').first().click();
-      await sleep(3_000);
     }
   });
 
@@ -498,15 +533,17 @@ try {
     if (!created) return failures.push("no new role chat appeared within 90 s");
     if (/^new role$/i.test(created.name.trim()))
       failures.push('the new role is still called "New role" after 90 s');
-    // Older untitled roles can still be listed, so look for this role's own title.
+    // Older untitled roles can still be listed, so look for this role's own name. Kruit names the
+    // role from the JD itself (gate 76f64c91 saved "仓库主管" for the pasted first line), so the
+    // sidebar is checked for the name the role was saved with, not the pasted line.
     const navigation = page.getByTestId("recruiting-navigation");
     const named = await navigation
-      .getByText(title)
+      .getByText(created.name.trim())
       .first()
       .waitFor({ timeout: 30_000 })
       .then(() => true)
       .catch(() => false);
-    if (!named) failures.push(`the sidebar does not show "${title}" within 30 s`);
+    if (!named) failures.push(`the sidebar does not show "${created.name.trim()}" within 30 s`);
     // The test role leaves the sidebar again.
     await rpc("threads/stop", { groupId: created.id, scope: "all" }).catch(() => {});
     await rpc("groups/archive", { groupId: created.id }).catch(() => {});

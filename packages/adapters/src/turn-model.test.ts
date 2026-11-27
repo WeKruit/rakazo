@@ -21,37 +21,22 @@ describe("chooseTurnModel", () => {
       reason: "short_user_message",
     });
   });
-  it.each([
-    "你找了这么多人为什么一个邮件都发不出去?",
-    "现在发送了多少人呢",
-    "why did nothing send?",
-  ])("keeps the configured model for a short why or how-many question (%s)", (userText) => {
-    expect(chooseTurnModel({ ...base, userText })).toEqual({
-      model: base.configured,
-      routed: "configured",
-      reason: "why_question",
-    });
-  });
   it("routes a clarifying answer fast regardless of trigger", () => {
     expect(chooseTurnModel({ ...base, trigger: "resume", answersQuestion: true })).toMatchObject({
       routed: "fast",
       reason: "clarifying_answer",
     });
   });
-  it("routes a pasted JD that starts a recruiting role fast", () => {
-    expect(
-      chooseTurnModel({
-        ...base,
-        trigger: "follow_up",
-        userText: "x".repeat(3000),
-        recruitingIntake: true,
-      }),
-    ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "off" });
-  });
-  it("keeps the bot's thinking level for an intake answer, which picks the people", () => {
-    const choice = chooseTurnModel({ ...base, answersQuestion: true, recruitingIntake: true });
-    expect(choice).toMatchObject({ routed: "fast", reason: "clarifying_answer" });
-    expect(choice.thinkingLevel).toBeUndefined();
+  it("keeps the configured model for the turn that produces a role's first round", () => {
+    for (const input of [
+      { ...base, userText: "开个岗位，先找10个", recruitingIntake: true },
+      { ...base, answersQuestion: true, recruitingIntake: true },
+    ])
+      expect(chooseTurnModel(input)).toEqual({
+        model: base.configured,
+        routed: "configured",
+        reason: "recruiting_intake",
+      });
   });
   it("routes status/fyi peer wakes fast", () => {
     expect(
@@ -102,21 +87,14 @@ describe("chooseTurnModel", () => {
   it("does not re-route a bot already on the fast model", () => {
     expect(chooseTurnModel({ ...base, configured: fast }).reason).toBe("already_fast");
   });
-  it("opens a role without reasoning on a bot already on the fast model", () => {
-    expect(chooseTurnModel({ ...base, configured: fast, recruitingIntake: true })).toMatchObject({
-      routed: "configured",
-      reason: "recruiting_intake",
-      thinkingLevel: "off",
-    });
-  });
 });
 
 describe("effort mode", () => {
-  it("caps fast turns at low thinking and keeps lower levels", () => {
+  it("runs fast turns at low thinking, never without it", () => {
     expect(effortThinkingLevel("fast", "medium")).toBe("low");
     expect(effortThinkingLevel("fast", null)).toBe("low");
-    expect(effortThinkingLevel("fast", "off")).toBe("off");
-    expect(effortThinkingLevel("fast", "minimal")).toBe("minimal");
+    expect(effortThinkingLevel("fast", "off")).toBe("low");
+    expect(effortThinkingLevel("fast", "minimal")).toBe("low");
   });
 
   it("keeps the routed level when balanced and thinks high when deep", () => {

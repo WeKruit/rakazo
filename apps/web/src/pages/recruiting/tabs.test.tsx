@@ -40,6 +40,7 @@ import { InboxWithReply, replyStatus } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { InboxTab, SequenceTab } from "./index";
 import { RoleCampaignCard } from "./SequenceTab";
+import { OpenConnectionsContext } from "./shared";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const ROLE = "00000000-0000-4000-8000-000000000002";
@@ -1089,6 +1090,21 @@ it("shows the role's Instantly campaign, its stop-on-reply risk and each lead's 
   expect(ben?.textContent).not.toContain("·");
 });
 
+it("shows a live campaign's sent total and never says nothing was sent", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  roleCampaign.mockResolvedValue({
+    status: "ready",
+    campaign: { id: "c1", name: "Staff Engineer outreach", status: 3, stopOnReply: true },
+    leads: [],
+    stats: { sent: 2, opened: 0, replied: 0 },
+  });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(view.textContent).toContain("Sent (all time): 2");
+  expect(view.textContent).toContain("Send times are not available yet.");
+  expect(view.textContent).not.toContain("No emails sent yet.");
+});
+
 it("shows no campaign section when the role has no bound campaign", async () => {
   crmData.mockResolvedValue(candidatesPage);
   roleCampaign.mockResolvedValue({ status: "none", campaign: null, leads: [] });
@@ -1130,6 +1146,29 @@ it("reads the role's Interview stage from the CRM", async () => {
   expect(view.textContent).toContain("Ada");
   expect(view.textContent).toContain("Interview");
   expect(view.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("offers to reconnect an expired calendar from the Interview page", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  correspondence.mockResolvedValue({
+    ...savedCorrespondence,
+    connections: [
+      { name: "Calendar", status: "needs_connection", reconnect: true, checkIssue: null },
+    ],
+  });
+  const open = vi.fn();
+  const view = await mount(
+    <OpenConnectionsContext.Provider value={open}>
+      <InterviewTab {...props} />
+    </OpenConnectionsContext.Provider>,
+  );
+  await settle();
+  expect(view.textContent).not.toContain("Needs connection");
+  const reconnect = [...view.querySelectorAll("button")].find(
+    (button) => button.textContent === "Reconnect",
+  )!;
+  await act(async () => reconnect.click());
+  expect(open).toHaveBeenCalledOnce();
 });
 
 it("falls back to this role's interview workflow rows without the stage filter", async () => {
@@ -1267,7 +1306,7 @@ it("keeps Sequence status chips from the loaded rows when totalling fails", asyn
   expect(view.textContent).not.toContain("[role");
 });
 
-function autumnRead(overrides: Record<string, unknown> = {}) {
+function sourcedRead(overrides: Record<string, unknown> = {}) {
   return {
     items: [] as never[],
     loading: false,
@@ -1285,8 +1324,8 @@ function autumnRead(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-const autumnAda = {
-  candidateKey: "autumn-ada",
+const sourcedAda = {
+  candidateKey: "sourced-ada",
   name: "Ada",
   title: "Staff Engineer",
   company: "Acme",
@@ -1311,10 +1350,10 @@ it("renders each source as it loads, with skeleton rows only while one is still 
     <ContactsTab
       {...props}
       crmTarget={target}
-      autumn={autumnRead({ items: [autumnAda], total: 1 })}
+      sourced={sourcedRead({ items: [sourcedAda], total: 1 })}
     />,
   );
-  // Autumn's row is already on screen while the CRM read is still pending.
+  // the search's row is already on screen while the CRM read is still pending.
   expect(view.querySelector("tbody")?.textContent).toContain("Ada");
   expect(view.querySelector("tbody")?.textContent).toContain("92");
   expect(view.querySelector('[role="status"]')).not.toBeNull();
@@ -1336,7 +1375,7 @@ it("shows a failed source as a compact Retry that re-reads only that source", as
     <ContactsTab
       {...props}
       crmTarget={target}
-      autumn={autumnRead({ items: [autumnAda], total: 1 })}
+      sourced={sourcedRead({ items: [sourcedAda], total: 1 })}
     />,
   );
   const alert = view.querySelector('[role="alert"]');
@@ -1372,7 +1411,7 @@ it.each([
         id: "exact-event",
         title: "Candidate-specific appointment",
         kind: "event",
-        status: "confirmed",
+        status: "booked",
         // Upcoming and in the current week whenever the test runs (tomorrow is next week on Sundays).
         start: new Date(Date.now() + 60_000).toISOString(),
         end: null,

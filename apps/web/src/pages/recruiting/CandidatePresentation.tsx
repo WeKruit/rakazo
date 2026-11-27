@@ -8,7 +8,7 @@ import type {
   RecruitingCrmTarget,
   RecruitingResearchAction,
 } from "@rakazo/contracts";
-import { isVendorUrl, recruitingGateLabels } from "@rakazo/core";
+import { isVendorUrl } from "@rakazo/core";
 import { Badge, Checkbox } from "@rakazo/ui-web";
 import { ArrowRight, Bookmark, BriefcaseBusiness, Building2, MapPin, Sparkles } from "lucide-react";
 import type { Ref } from "react";
@@ -151,6 +151,15 @@ export function CandidateProfile({
     </div>
   );
 }
+
+// Plain words for the approval codes that older saved reports still carry in their text.
+const recruitingGateLabels = {
+  G0: "Recruiting brief",
+  G1: "Job description and company materials",
+  G2: "Review of the ten candidates",
+  G3: "Campaign and lead list",
+  G4: "Individual message or scheduling action",
+} as const;
 
 export function recruitingMatchSummaryText(value: string): string {
   // ponytail: ambiguous codes may name companies/products; translate only explicit gate expressions.
@@ -499,19 +508,6 @@ export function SourcingCandidateCard({
   );
 }
 
-export function CandidateAssessment({ candidate }: { candidate: RecruitingCandidate }) {
-  const assessment = candidate.latestAssessment;
-  return assessment ? (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="text-muted-foreground">
-        <Trans>Internal assessment</Trans> · <Trans>Version {assessment.version}</Trans> ·{" "}
-        {assessment.isCurrent ? <Trans>Current</Trans> : <Trans>Outdated</Trans>}
-      </span>
-      <VerdictLabel verdict={assessment.hardGate} />
-    </div>
-  ) : null;
-}
-
 export function ResearchActionStatus({ action }: { action: RecruitingResearchAction }) {
   return (
     <>
@@ -683,7 +679,7 @@ export const CONTACT_STATUS_LABELS = [
   "verification status",
 ];
 
-/** Autumn's own per-criterion states with their raw evidence and sources, never re-judged. */
+/** The search's own per-criterion states with their raw evidence and sources, never re-judged. */
 export function CandidateCriteria({ candidate }: { candidate: RecruitingCandidate }) {
   const fields = candidate.latestSource?.report?.fields.filter((field) => field.providerStatus);
   return fields?.length ? (

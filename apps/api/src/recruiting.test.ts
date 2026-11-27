@@ -4,20 +4,13 @@ import type { AdapterContext, ArtifactStore, ConnectorCall } from "@rakazo/adapt
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { readInstantlyEmail } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
-import {
-  RecruitingAssessmentSnapshotSchema,
-  RecruitingCrmCandidatesReadSchema,
-} from "@rakazo/contracts";
+import { RecruitingCrmCandidatesReadSchema } from "@rakazo/contracts";
 import { catalogApprovalRequest } from "@rakazo/core";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
 import type * as DbExports from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import * as db from "@rakazo/db";
-import {
-  IsolationError,
-  RecruitingConflictError,
-  RecruitingSourceValidationError,
-} from "@rakazo/db";
+import { IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./recruiting.js";
 import type { RouterDeps } from "./router.js";
@@ -31,7 +24,6 @@ vi.mock("@rakazo/db", async (importOriginal) => {
   const actual = await importOriginal<typeof DbExports>();
   return {
     ...actual,
-    confirmRecruitingBrief: vi.fn(),
     editRecruitingCriteria: vi.fn(),
     createRecruitingRole: vi.fn(),
     bindRecruitingRole: vi.fn(),
@@ -45,9 +37,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     readRecruitingNativeCorrespondence: vi.fn(async () => null),
     readRecruitingImportedCorrespondence: vi.fn(async () => null),
     reviseRecruitingRole: vi.fn(),
-    listRecruitingAssessments: vi.fn(),
     listRecruitingFeedback: vi.fn(),
-    getRecruitingAssessment: vi.fn(),
     listRecruitingResearch: vi.fn(),
     listRecruitingCandidates: vi.fn(),
     listRecruitingCandidateSources: vi.fn(),
@@ -695,7 +685,7 @@ describe("saved recruiting correspondence", () => {
     return { ...state, membership, membershipCall: call, membershipResult, row };
   }
   it.each(["direct", "catalog", "text"])(
-    "projects a legacy CRM member's full mail from a %s receipt without an Autumn import",
+    "projects a legacy CRM member's full mail from a %s receipt without a search import",
     async (format) => {
       const state = crmMembershipFixture();
       if (format === "catalog")
@@ -2639,7 +2629,7 @@ describe("saved recruiting correspondence", () => {
       [rescheduleProof("booking-two", "booking-three"), rescheduleProof(), calBookingProof()],
     );
     expect(result.events).toEqual([
-      expect.objectContaining({ id: "calendar:booking:booking-three", status: "accepted" }),
+      expect.objectContaining({ id: "calendar:booking:booking-three", status: "booked" }),
     ]);
   });
   it("marks only verified replaced bookings as superseded across a multi-hop chain", async () => {
@@ -2657,9 +2647,9 @@ describe("saved recruiting correspondence", () => {
       [rescheduleProof("booking-two", "booking-three"), rescheduleProof(), calBookingProof()],
     );
     expect(result.events.map(({ id, status }) => ({ id, status }))).toEqual([
-      { id: "calendar:booking:booking-one", status: "superseded" },
-      { id: "calendar:booking:booking-two", status: "superseded" },
-      { id: "calendar:booking:booking-three", status: "accepted" },
+      { id: "calendar:booking:booking-one", status: "rescheduled" },
+      { id: "calendar:booking:booking-two", status: "rescheduled" },
+      { id: "calendar:booking:booking-three", status: "booked" },
     ]);
   });
   it("does not retire an owned original from an uncertain replacement receipt", async () => {
@@ -2673,7 +2663,7 @@ describe("saved recruiting correspondence", () => {
       [proof, calBookingProof()],
     );
     expect(result.events).toEqual([
-      expect.objectContaining({ id: "calendar:booking:booking-one", status: "accepted" }),
+      expect.objectContaining({ id: "calendar:booking:booking-one", status: "booked" }),
     ]);
   });
   it.each([
@@ -3007,7 +2997,7 @@ describe("saved recruiting correspondence", () => {
           start: "2026-10-23T13:00:00Z",
           end: "2026-10-23T13:30:00Z",
           attendees: ["person@example.test"],
-          status: "accepted",
+          status: "booked",
           location: "https://meet.example.test/interview",
           url: "https://meet.example.test/interview",
         },
@@ -3133,88 +3123,108 @@ describe("saved recruiting correspondence", () => {
       work_emails: [{ email: "person@example.test", status: "HIGH_PROBABILITY" }],
     },
   };
-  it("associates a live calendar event using saved Contacts without requiring a campaign or another lookup", async () => {
-    const f = contactFixture({ status: "FINISHED", results: [contactRow] });
-    const fullenrich = {
-      id: "mail",
-      name: "FullEnrich",
-      endpoint: "https://mcp.fullenrich.com/mcp",
-      transport: "streamable_http",
-      secretId: "saved-reference",
-      revision: 1,
-      enabled: true,
-      assignments: [
-        { botId: "main", allowAllTools: false, allowedTools: ["get_enrichment_results"] },
-      ],
-    };
-    const calendar = {
-      id: "calendar-saved-contact",
-      name: "Calendar",
-      endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
-      transport: "streamable_http",
-      secretId: "saved-reference",
-      revision: 1,
-      enabled: true,
-      assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["list_events"] }],
-    };
-    f.client.mcpServer.findMany.mockReset().mockResolvedValue([fullenrich, calendar]);
-    f.client.externalEffect.findMany.mockReset().mockImplementation(async (input: any) => {
-      if (input.select?.request && JSON.stringify(input.where).includes("get_enrichment_results"))
-        return [f.retained];
-      if (input.select?.result && input.where?.id?.in?.includes("effect"))
-        return [{ id: "effect", result: f.result }];
-      return [];
-    });
-    Object.assign(f.client, {
-      botMcpServer: { findFirst: vi.fn(async () => calendar.assignments[0]) },
-    });
-    const plans = vi
-      .spyOn(db, "listRecruitingSchedulingPlans")
-      .mockResolvedValue({ plans: [], slots: [], partial: false });
-    const execute = vi.fn(async function* (_call: ConnectorCall) {
-      yield {
-        type: "result",
-        data: {
-          structuredContent: {
-            events: [
-              {
-                id: "saved-contact-interview",
-                summary: "Interview",
-                start: { dateTime: "2026-10-31T12:00:00Z" },
-                end: { dateTime: "2026-10-31T13:00:00Z" },
-                attendees: [{ email: "person@example.test" }],
-              },
-            ],
+  it.each(["connected", "reconnect"] as const)(
+    "associates a live calendar event using saved Contacts without requiring a campaign or another lookup (calendar sign-in %s)",
+    async (signIn) => {
+      const f = contactFixture({ status: "FINISHED", results: [contactRow] });
+      const fullenrich = {
+        id: "mail",
+        name: "FullEnrich",
+        endpoint: "https://mcp.fullenrich.com/mcp",
+        transport: "streamable_http",
+        secretId: "saved-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [
+          { botId: "main", allowAllTools: false, allowedTools: ["get_enrichment_results"] },
+        ],
+      };
+      const calendar = {
+        id: "calendar-saved-contact",
+        name: "Calendar",
+        endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
+        transport: "streamable_http",
+        secretId: "saved-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["list_events"] }],
+      };
+      f.client.mcpServer.findMany.mockReset().mockResolvedValue([fullenrich, calendar]);
+      f.client.externalEffect.findMany.mockReset().mockImplementation(async (input: any) => {
+        if (input.select?.request && JSON.stringify(input.where).includes("get_enrichment_results"))
+          return [f.retained];
+        if (input.select?.result && input.where?.id?.in?.includes("effect"))
+          return [{ id: "effect", result: f.result }];
+        return [];
+      });
+      Object.assign(f.client, {
+        botMcpServer: { findFirst: vi.fn(async () => calendar.assignments[0]) },
+      });
+      const plans = vi
+        .spyOn(db, "listRecruitingSchedulingPlans")
+        .mockResolvedValue({ plans: [], slots: [], partial: false });
+      const execute = vi.fn(async function* (_call: ConnectorCall) {
+        yield {
+          type: "result",
+          data: {
+            structuredContent: {
+              events: [
+                {
+                  id: "saved-contact-interview",
+                  summary: "Interview",
+                  start: { dateTime: "2026-10-31T12:00:00Z" },
+                  end: { dateTime: "2026-10-31T13:00:00Z" },
+                  attendees: [{ email: "person@example.test" }],
+                },
+              ],
+            },
           },
-        },
-      } as const;
-    });
-    try {
-      const result = await api.getRecruitingCorrespondence(
-        f.prisma,
-        actor,
-        target,
-        "interview",
-        undefined,
-        undefined,
-        {},
-        {
-          connectors: { execute },
-          reauthorize: async () => target,
-        },
-      );
-      expect(result.events).toEqual([
-        expect.objectContaining({
-          id: `${calendar.id}:saved-contact-interview`,
-          roleAssociation: "contact",
-        }),
-      ]);
-      expect(execute).toHaveBeenCalledOnce();
-      expect(execute.mock.calls[0]?.[0]).toMatchObject({ tool: "list_events" });
-    } finally {
-      plans.mockRestore();
-    }
-  });
+        } as const;
+      });
+      try {
+        const result = await api.getRecruitingCorrespondence(
+          f.prisma,
+          actor,
+          target,
+          "interview",
+          undefined,
+          {
+            statusFor: vi.fn(async (server: { id: string }) =>
+              server.id === calendar.id ? signIn : "connected",
+            ),
+          },
+          {},
+          {
+            connectors: { execute },
+            reauthorize: async () => target,
+          },
+        );
+        // An expired sign-in asks for a reconnect instead of a read that can only fail.
+        if (signIn === "reconnect") {
+          expect(result.connections).toContainEqual(
+            expect.objectContaining({
+              name: "Calendar",
+              status: "needs_connection",
+              reconnect: true,
+              checkIssue: null,
+            }),
+          );
+          expect(execute).not.toHaveBeenCalled();
+          return;
+        }
+        expect(result.events).toEqual([
+          expect.objectContaining({
+            id: `${calendar.id}:saved-contact-interview`,
+            roleAssociation: "contact",
+          }),
+        ]);
+        expect(execute).toHaveBeenCalledOnce();
+        expect(execute.mock.calls[0]?.[0]).toMatchObject({ tool: "list_events" });
+      } finally {
+        plans.mockRestore();
+      }
+    },
+  );
   it("recognizes exact platform FullEnrich readiness without exposing a credential or inventing a personal connection", async () => {
     vi.stubEnv("FULLENRICH_API_KEY", "platform-service-key");
     try {
@@ -3586,45 +3596,6 @@ describe("readable recruiting sources", () => {
       where: { id: "material", spaceId: actor.spaceId, userId: actor.userId },
     });
   });
-  it("loads the exact stored assessment selection, not a caller-controlled JSON path", async () => {
-    const f = fixture();
-    const start = text.indexOf(quote);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-      assessment: {
-        version: 2,
-        sourceRefs: [
-          {
-            ...source,
-            kind: "original_material",
-            selection: {
-              kind: "artifact_json_string",
-              path: ["nested", "evidence"],
-              start,
-              end: start + quote.length,
-            },
-          },
-        ],
-      },
-    } as never);
-    const input = {
-      kind: "assessment" as const,
-      roleId: "role",
-      candidateKey: "candidate",
-      version: 2,
-      sourceRefId: "source",
-    };
-    expect(await api.readRecruitingSource(f.deps, actor, input)).toEqual({
-      kind: "text",
-      text,
-      start,
-      end: start + quote.length,
-    });
-    expect(db.getRecruitingAssessment).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
-      roleId: "role",
-      candidateKey: "candidate",
-      version: 2,
-    });
-  });
   it("rejects missing, conflicting, unread or revised stored references before reading bytes", async () => {
     const f = fixture();
     for (const revision of [
@@ -3708,36 +3679,16 @@ describe("readable recruiting sources", () => {
     const pdf = Buffer.from("%PDF-1.7\nsynthetic original bytes");
     beforeEach(() => vi.mocked(extractPdfText).mockReset().mockResolvedValue(text));
 
-    it("reads a saved role quote and assessment UTF-16 selection from the same extracted text", async () => {
+    it("reads a saved role quote from the extracted text", async () => {
       const f = fixture(pdf, "application/pdf");
       const start = text.indexOf(quote);
       const expected = { kind: "text", text, start, end: start + quote.length };
       expect(await api.readRecruitingSource(f.deps, actor, roleInput)).toEqual(expected);
-      vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-        assessment: {
-          version: 2,
-          sourceRefs: [
-            {
-              ...f.source,
-              selection: { kind: "artifact_text", start, end: start + quote.length },
-            },
-          ],
-        },
-      } as never);
-      expect(
-        await api.readRecruitingSource(f.deps, actor, {
-          kind: "assessment",
-          roleId: "role",
-          candidateKey: "candidate",
-          version: 2,
-          sourceRefId: "source",
-        }),
-      ).toEqual(expected);
-      expect(extractPdfText).toHaveBeenCalledTimes(2);
+      expect(extractPdfText).toHaveBeenCalledOnce();
       expect(extractPdfText).toHaveBeenLastCalledWith(pdf);
     });
 
-    it.each(["foreign", "hash", "bytes", "json-selection", "message-selection"])(
+    it.each(["foreign", "hash", "bytes"])(
       "rejects %s before invoking the PDF processor",
       async (boundary) => {
         const f = fixture(pdf, "application/pdf");
@@ -3747,12 +3698,6 @@ describe("readable recruiting sources", () => {
           ...f.source,
           ...(boundary === "hash"
             ? { anchor: { ...f.source.anchor, artifact: { artifactId: "material", sha256: hash } } }
-            : {}),
-          ...(boundary === "json-selection"
-            ? { selection: { kind: "artifact_json_string", path: ["text"], start: 0, end: 1 } }
-            : {}),
-          ...(boundary === "message-selection"
-            ? { selection: { kind: "message_text", blockIndex: 0, start: 0, end: 1 } }
             : {}),
         };
         vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
@@ -3767,37 +3712,32 @@ describe("readable recruiting sources", () => {
       },
     );
 
-    it.each(["quote", "offset", "processor"])(
-      "fails closed on a PDF %s error without returning raw bytes or processor details",
-      async (boundary) => {
-        const f = fixture(pdf, "application/pdf");
-        const start = text.indexOf(quote);
-        vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
-          revision: {
-            id: "revision",
-            sourceRefs: [
-              {
-                ...f.source,
-                quote: boundary === "quote" ? "Invented evidence" : quote,
-                selection: {
-                  kind: "artifact_text",
-                  start: boundary === "offset" ? start + 1 : start,
-                  end: start + quote.length,
-                },
-              },
-            ],
-            criteria: [],
-          },
-        } as never);
-        if (boundary === "processor")
-          vi.mocked(extractPdfText).mockRejectedValueOnce(new Error("private processor path"));
-        await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
-          code: "NOT_FOUND",
-          message: "Resource not found",
-        });
-        expect(extractPdfText).toHaveBeenCalledOnce();
-      },
-    );
+    it("shows the file without a highlight when the saved quote is not its wording", async () => {
+      const f = fixture(pdf, "application/pdf");
+      vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+        revision: {
+          id: "revision",
+          sourceRefs: [{ ...f.source, quote: "The agent's own copy" }],
+          criteria: [],
+        },
+      } as never);
+      expect(await api.readRecruitingSource(f.deps, actor, roleInput)).toEqual({
+        kind: "text",
+        text,
+        start: 0,
+        end: 0,
+      });
+    });
+
+    it("fails closed on a PDF processor error without returning raw bytes or processor details", async () => {
+      const f = fixture(pdf, "application/pdf");
+      vi.mocked(extractPdfText).mockRejectedValueOnce(new Error("private processor path"));
+      await expect(api.readRecruitingSource(f.deps, actor, roleInput)).rejects.toMatchObject({
+        code: "NOT_FOUND",
+        message: "Resource not found",
+      });
+      expect(extractPdfText).toHaveBeenCalledOnce();
+    });
   });
 });
 
@@ -3808,8 +3748,6 @@ describe("authenticated recruiting API", () => {
       [db.bindRecruitingRole, api.bindRecruitingRole],
       [db.getRecruitingWorkspace, api.getRecruitingWorkspace],
       [db.reviseRecruitingRole, api.reviseRecruitingRole],
-      [db.listRecruitingAssessments, api.listRecruitingAssessments],
-      [db.getRecruitingAssessment, api.getRecruitingAssessment],
       [db.listRecruitingResearch, api.listRecruitingResearch],
       [db.listRecruitingCandidates, api.listRecruitingCandidates],
       [db.setRecruitingCandidateShortlist, api.setRecruitingCandidateShortlist],
@@ -3837,20 +3775,11 @@ describe("authenticated recruiting API", () => {
       api.getRecruitingWorkspace(prisma, actor, { threadId: "other-thread" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
   });
-  it("maps authorized quote errors to actionable BAD_REQUEST without exposing material", async () => {
-    const error = new RecruitingSourceValidationError("jd", "text");
+  it("maps a role save's refused source to the generic not-found response", async () => {
     for (const [domain, wrapper] of [
       [db.createRecruitingRole, api.createRecruitingRole],
       [db.reviseRecruitingRole, api.reviseRecruitingRole],
     ] as const) {
-      vi.mocked(domain).mockRejectedValueOnce(error);
-      const response = await wrapper(prisma, actor, {} as never).catch((error: unknown) => error);
-      expect(response).toMatchObject({ code: "BAD_REQUEST", message: error.message });
-      expect(JSON.parse(JSON.stringify(response))).toMatchObject({
-        code: "BAD_REQUEST",
-        message:
-          'Source "jd" at "text": quote must be exact contiguous text from the original read receipt; copy one unchanged excerpt without omissions or joined passages.',
-      });
       vi.mocked(domain).mockRejectedValueOnce(new IsolationError("Private source details"));
       await expect(wrapper(prisma, actor, {} as never)).rejects.toMatchObject({
         code: "NOT_FOUND",
@@ -3938,12 +3867,6 @@ describe("native recruiting RPC", () => {
       threadId: "thread",
       roleId: null,
     });
-    vi.mocked(db.listRecruitingAssessments).mockResolvedValueOnce([]);
-    expect(await client.recruiting.listAssessments({ roleId: "role" })).toEqual([]);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValueOnce(null);
-    expect(
-      await client.recruiting.getAssessment({ roleId: "role", candidateKey: "row" }),
-    ).toBeNull();
     const candidatePage = {
       sortAvailability: { rank: false, tier: false, score: false },
       roleId: "role",
@@ -3956,8 +3879,6 @@ describe("native recruiting RPC", () => {
         sourceRows: 15,
         candidates: 10,
         identifiedCandidates: 6,
-        unassessed: 10,
-        assessed: 0,
         shortlisted: 0,
       },
     };
@@ -4072,77 +3993,6 @@ describe("native recruiting RPC", () => {
       }),
     });
   });
-  it("returns the original assessment revision and authorized message targets through both RPC reads", async () => {
-    const source = {
-      id: "source",
-      kind: "original_material" as const,
-      anchor: { kind: "message" as const, messageId: "message", locator: "text:0" },
-      readState: "unread" as const,
-      readAt: null,
-    };
-    const snapshot: DbExports.RecruitingAssessmentSnapshot = {
-      assessment: {
-        roleId: "role",
-        roleRevisionId: "original-revision",
-        candidateKey: "row",
-        version: 1,
-        basedOnVersion: null,
-        createdByRunId: "run",
-        createdAt: "2026-10-16T00:00:00.000Z",
-        facts: [],
-        questions: [],
-        sourceRefs: [source],
-        judgments: { atoms: [], employment: [], criteria: [], hardGate: "unknown" },
-      },
-      roleRevision: {
-        id: "original-revision",
-        roleId: "role",
-        revision: 1,
-        sourceRefs: [source],
-        criteria: [],
-        preferences: [],
-        definitionQuestions: [],
-        createdAt: "2026-10-16T00:00:00.000Z",
-      },
-      isCurrent: false,
-      sourceMessageTargets: [
-        { messageId: "message", threadId: "source-thread", target: { groupId: "source-group" } },
-      ],
-    };
-    const client = createRouterClient(createRouter({ prisma } as RouterDeps), {
-      context: { actor },
-    });
-    vi.mocked(db.listRecruitingAssessments).mockResolvedValueOnce([snapshot]);
-    expect(await client.recruiting.listAssessments({ roleId: "role" })).toEqual([snapshot]);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValueOnce(snapshot);
-    expect(
-      await client.recruiting.getAssessment({ roleId: "role", candidateKey: "row", version: 1 }),
-    ).toEqual(snapshot);
-    expect(
-      RecruitingAssessmentSnapshotSchema.safeParse({
-        ...snapshot,
-        roleRevision: { ...snapshot.roleRevision, id: "current-revision" },
-      }).success,
-    ).toBe(false);
-    expect(
-      RecruitingAssessmentSnapshotSchema.safeParse({
-        ...snapshot,
-        sourceMessageTargets: [
-          {
-            messageId: "message",
-            threadId: "source-thread",
-            target: { botId: "bot", groupId: "group" },
-          },
-        ],
-      }).success,
-    ).toBe(false);
-    vi.mocked(db.getRecruitingAssessment).mockRejectedValueOnce(
-      new IsolationError("Private source-thread and message target"),
-    );
-    await expect(
-      client.recruiting.getAssessment({ roleId: "role", candidateKey: "row" }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
-  });
   it("rejects unauthenticated reads and model-supplied identity before storage", async () => {
     const authenticated = createRouterClient(createRouter({ prisma } as RouterDeps), {
       context: { actor },
@@ -4179,25 +4029,6 @@ describe("native recruiting RPC", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(db.createRecruitingRole).toHaveBeenCalledTimes(writesBefore);
   });
-});
-
-it("uses the existing authenticated wrapper for human confirmation and sanitizes foreign access", async () => {
-  vi.mocked(db.confirmRecruitingBrief).mockRejectedValueOnce(
-    new IsolationError("private source details"),
-  );
-  await expect(
-    api.confirmRecruitingBrief(prisma, actor, {
-      threadId: "thread",
-      roleId: "role",
-      expectedRevision: 1,
-    }),
-  ).rejects.toMatchObject({ code: "NOT_FOUND", message: "Resource not found" });
-  expect(db.confirmRecruitingBrief).toHaveBeenLastCalledWith(
-    prisma,
-    actor,
-    { threadId: "thread", roleId: "role", expectedRevision: 1 },
-    undefined,
-  );
 });
 
 it("uses trusted RPC identity and artifact context for closed human criterion edits", async () => {
@@ -4277,10 +4108,9 @@ it("uses trusted RPC identity and artifact context for closed human criterion ed
   expect(db.editRecruitingCriteria).toHaveBeenCalledTimes(writesBefore);
 });
 
-it("retains the existing safe mappings for criterion conflict, source and input failures", async () => {
+it("retains the existing safe mappings for criterion conflict and input failures", async () => {
   for (const [error, code] of [
     [new RecruitingConflictError(), "CONFLICT"],
-    [new RecruitingSourceValidationError("source", "text"), "BAD_REQUEST"],
     [Object.assign(new Error("Private input"), { name: "ZodError" }), "BAD_REQUEST"],
   ] as const) {
     vi.mocked(db.editRecruitingCriteria).mockRejectedValueOnce(error);
@@ -4469,7 +4299,6 @@ describe("retained candidate report API", () => {
           firstDiscoveredAt: null,
           lastDiscoveredAt: null,
           crm: null,
-          latestAssessment: null,
           ...(latestSource ? { latestSource } : {}),
         }),
       );
@@ -4485,8 +4314,6 @@ describe("retained candidate report API", () => {
           sourceRows: 2,
           candidates: 3,
           identifiedCandidates: 0,
-          unassessed: 3,
-          assessed: 0,
           shortlisted: 0,
         },
       });
@@ -4705,227 +4532,6 @@ describe("retained candidate report API", () => {
     else expect((await result).items).toEqual([f.occurrence]);
     if (["foreign-actor", "missing-occurrence"].includes(boundary))
       expect(f.get).not.toHaveBeenCalled();
-  });
-  it("accepts an exact 550-character incomplete array prefix confined to its saved person", async () => {
-    const f = fixture(false, (snapshot) => {
-      const canonical = structuredClone(rows);
-      Object.assign(canonical[0]!, {
-        infra_evidence: { value: "Supplied project implementation evidence. ".repeat(30) },
-      });
-      snapshot.providerResult.structuredContent.rows = canonical;
-      snapshot.providerResult.content[0].text = JSON.stringify(
-        canonical.map((row) =>
-          Object.fromEntries(
-            Object.entries(row)
-              .filter(([key]) => !key.startsWith("_"))
-              .map(([key, cell]) => [
-                key,
-                typeof cell === "object" && cell !== null && "value" in cell ? cell.value : cell,
-              ]),
-          ),
-        ),
-      );
-    });
-    const quote = f.snapshot.providerResult.content[0]!.text.slice(0, 550);
-    expect(() => JSON.parse(quote)).toThrow();
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-      assessment: {
-        version: 2,
-        sourceRefs: [
-          {
-            id: "source",
-            kind: "provider_report",
-            anchor: {
-              kind: "artifact",
-              artifact: f.occurrence.artifactRef,
-              locator: "providerResult",
-            },
-            readState: "read",
-            readAt: "2026-10-17T00:00:00.000Z",
-            quote,
-            selection: {
-              kind: "artifact_json_string",
-              path: ["providerResult", "content", 0, "text"],
-              start: 0,
-              end: 550,
-            },
-          },
-        ],
-      },
-    } as never);
-    const result = await api.readRecruitingSource(f.deps, actor, {
-      kind: "assessment",
-      ...input,
-      version: 2,
-      sourceRefId: "source",
-    });
-    expect(result).toMatchObject({
-      kind: "report",
-      report: {
-        fields: expect.arrayContaining([
-          expect.objectContaining({ label: "Name", value: "Selected Person" }),
-          expect.objectContaining({
-            label: "Infra evidence",
-            value: "Supplied project implementation evidence. ".repeat(30),
-          }),
-        ]),
-      },
-    });
-    expect(JSON.stringify(result)).not.toMatch(/Neighbor|private-|shard_id|providerResult/);
-  });
-  it.each([
-    "prefix",
-    "pretty-prefix",
-    "neighbor",
-    "cross-row",
-    "values",
-    "sparse-same-title",
-    "missing-gap",
-    "order",
-    "duplicate",
-    "request",
-    "typed-cell",
-  ])("binds the exact assessment selection to its own row at the %s boundary", async (boundary) => {
-    const flatRows = rows.map((row) =>
-      Object.fromEntries(
-        Object.entries(row)
-          .filter(([key]) => !key.startsWith("_") && key !== "shard_id")
-          .map(([key, cell]) => [
-            key,
-            typeof cell === "object" && cell !== null && "value" in cell ? cell.value : cell,
-          ]),
-      ),
-    );
-    if (boundary === "values") flatRows[0]!.name = "Changed person";
-    if (boundary === "sparse-same-title") flatRows[0] = { current_title: "Engineer" };
-    if (boundary === "missing-gap") delete flatRows[0]!.concerns;
-    if (boundary === "order") flatRows.reverse();
-    const f = fixture(false, (snapshot) => {
-      if (boundary === "sparse-same-title") {
-        snapshot.providerResult.structuredContent.rows = structuredClone(rows);
-        snapshot.providerResult.structuredContent.rows[0].current_title = { value: "Engineer" };
-      }
-      snapshot.providerResult.content[0].text = JSON.stringify(
-        flatRows,
-        null,
-        boundary === "pretty-prefix" ? 2 : undefined,
-      );
-    });
-    const text = f.snapshot.providerResult.content[0]!.text;
-    let path: (string | number)[] = ["providerResult", "content", 0, "text"];
-    let start = 0;
-    let end = text.indexOf('"tier"') + 6;
-    if (boundary === "neighbor") {
-      start = text.indexOf("Neighbor Person");
-      end = start + "Neighbor Person".length;
-    }
-    if (boundary === "cross-row") end = text.indexOf("Neighbor Person") + "Neighbor Person".length;
-    if (boundary === "request") {
-      path = ["request", 2, "args", "task_id"];
-      start = 0;
-      end = "provider-task".length;
-    }
-    if (boundary === "typed-cell") {
-      path = ["providerResult", "structuredContent", "rows", 0, "name", "value"];
-      start = 0;
-      end = "Selected Person".length;
-    }
-    const quote =
-      boundary === "request"
-        ? "provider-task"
-        : boundary === "typed-cell"
-          ? "Selected Person"
-          : text.slice(start, end);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-      assessment: {
-        version: 2,
-        sourceRefs: [
-          {
-            id: "source",
-            kind: "provider_report",
-            anchor: {
-              kind: "artifact",
-              artifact: f.occurrence.artifactRef,
-              locator: "providerResult",
-            },
-            readState: "read",
-            readAt: "2026-10-17T00:00:00.000Z",
-            quote,
-            selection: { kind: "artifact_json_string", path, start, end },
-          },
-        ],
-      },
-    } as never);
-    if (boundary === "duplicate") f.page.items.push({ ...f.occurrence });
-    const result = api.readRecruitingSource(f.deps, actor, {
-      kind: "assessment",
-      ...input,
-      version: 2,
-      sourceRefId: "source",
-    });
-    if (["prefix", "pretty-prefix", "typed-cell"].includes(boundary)) {
-      expect(await result).toMatchObject({
-        kind: "report",
-        report: { sourceUrls: ["https://example.test/selected"] },
-      });
-      expect(f.get).toHaveBeenCalledOnce();
-    } else
-      await expect(result).rejects.toMatchObject({
-        code: "NOT_FOUND",
-        message: "Resource not found",
-      });
-  });
-  it("returns the exact person's report after validating an assessment's original quote and scoped saved occurrence", async () => {
-    const f = fixture();
-    const text = f.snapshot.providerResult.content[0]!.text;
-    const quote = "Selected Person";
-    const start = text.indexOf(quote);
-    vi.mocked(db.getRecruitingAssessment).mockResolvedValue({
-      assessment: {
-        version: 2,
-        sourceRefs: [
-          {
-            id: "source",
-            kind: "provider_report",
-            anchor: {
-              kind: "artifact",
-              artifact: f.occurrence.artifactRef,
-              locator: "providerResult",
-            },
-            readState: "read",
-            readAt: "2026-10-17T00:00:00.000Z",
-            quote,
-            selection: {
-              kind: "artifact_json_string",
-              path: ["providerResult", "content", 0, "text"],
-              start,
-              end: start + quote.length,
-            },
-          },
-        ],
-      },
-    } as never);
-    const result = await api.readRecruitingSource(f.deps, actor, {
-      kind: "assessment",
-      ...input,
-      version: 2,
-      sourceRefId: "source",
-    });
-    expect(result).toMatchObject({
-      kind: "report",
-      report: { sourceUrls: ["https://example.test/selected"] },
-    });
-    expect(JSON.stringify(result)).not.toMatch(/Neighbor|private-|task_id|rows|providerResult/);
-    expect(f.get).toHaveBeenCalledOnce();
-    f.page.items = [];
-    await expect(
-      api.readRecruitingSource(f.deps, actor, {
-        kind: "assessment",
-        ...input,
-        version: 2,
-        sourceRefId: "source",
-      }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -5245,19 +4851,6 @@ describe("live CRM browser reads", () => {
       expect(f.execute.mock.calls.some(([call]) => call.route?.resourceId === "instantly")).toBe(
         false,
       );
-      Object.assign(f.mockPrisma, { run: { findFirst: vi.fn(async () => null) } });
-      const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-      expect(setup.items).toContainEqual({
-        key: "campaign",
-        state: "unavailable",
-        label: "Select an existing campaign in Sequence",
-      });
-      expect(
-        setup.items
-          .filter((item) => item.key === "campaign" || item.key === "sender")
-          .every((item) => !item.action),
-      ).toBe(true);
-      expect(JSON.stringify(setup)).not.toContain("not connected");
     } else if (mode === "wrong-selected" || mode === "revoked") {
       await expect(
         api.getRecruitingRoleCampaign(f.deps, actor, target, selection),
@@ -7374,7 +6967,8 @@ describe("role campaign read", () => {
       sourceRevision: 4,
       campaignObservedAt: expect.any(String),
       status: "ready",
-      stats: { sent: null, opened: null, replied: null },
+      // Analytics gave no total, but one lead was contacted: that one was sent.
+      stats: { sent: 1, opened: null, replied: null },
       leadsComplete: true,
       serverId: "instantly",
       campaign: {
@@ -7513,17 +7107,6 @@ describe("role campaign read", () => {
       expect(output.status).toBe("ready");
       expect(output.campaign?.id).toBe(CAMPAIGN);
       expect(output.leadsComplete).toBe(kind === "empty");
-      if (kind !== "empty") {
-        const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-        expect(setup.items.find((item) => item.key === "leads")).toEqual({
-          key: "leads",
-          state: "unavailable",
-          label: "Recipient count unavailable",
-        });
-        expect(setup.items.find((item) => item.key === "campaign")?.detail).not.toHaveProperty(
-          "leadCount",
-        );
-      }
     },
   );
 
@@ -7539,148 +7122,9 @@ describe("role campaign read", () => {
       expect(f.calls).toEqual([]);
     }
   });
-
-  it("role setup reports a bound campaign, its sender and leads as ready", async () => {
-    const f = fixture({
-      spaceId: actor.spaceId,
-      status: "completed",
-      result: {
-        campaignId: CAMPAIGN,
-        campaignName: "Staff [role]",
-        eaccount: "team@example.test",
-        leads: {},
-      },
-    });
-    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-    expect(setup).toEqual({
-      ready: true,
-      playbookStage: { stage: "intake", label: "Role setup", nextStep: null },
-      attention: null,
-      items: [
-        {
-          key: "campaign",
-          state: "ready",
-          label: "Staff [role]",
-          detail: { id: CAMPAIGN, name: "Staff [role]", status: 1, leadCount: 2 },
-        },
-        {
-          key: "sender",
-          state: "ready",
-          label: "team@example.test",
-          detail: { email: "team@example.test" },
-        },
-        {
-          key: "crm",
-          state: "missing",
-          label: "Role record not linked yet",
-          action: { kind: "ask_agent", prompt: expect.any(String) },
-        },
-        { key: "leads", state: "ready", label: "2 recipients", detail: { count: 2 } },
-      ],
-    });
-    for (const item of setup.items)
-      expect(
-        `${item.label} ${item.action?.kind === "ask_agent" ? item.action.prompt : ""}`,
-      ).not.toMatch(/crm|campaign|lead/i);
-  });
-
-  it("role setup without a campaign is not ready and points each gap at the agent", async () => {
-    const f = fixture(null);
-    (
-      f.deps.prisma as unknown as { externalEffect: Record<string, unknown> }
-    ).externalEffect.findFirst = vi.fn(async () => ({ result: { eaccount: "last@example.test" } }));
-    vi.mocked(db.getRecruitingWorkspace).mockResolvedValueOnce({
-      role: { id: "role" },
-      crmTarget: {
-        bindingEffectId: "b1",
-        target: { organizationId: "org-1", clientLabel: "Acme", roleLabel: "Staff Engineer" },
-      },
-    } as never);
-    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-    expect(setup.ready).toBe(false);
-    expect(setup.items.map((item) => [item.key, item.state, item.action?.kind])).toEqual([
-      ["campaign", "missing", "ask_agent"],
-      ["sender", "ready", undefined],
-      ["crm", "ready", undefined],
-      ["leads", "missing", "ask_agent"],
-    ]);
-    for (const item of setup.items)
-      expect(
-        `${item.label} ${item.action?.kind === "ask_agent" ? item.action.prompt : ""}`,
-      ).not.toMatch(/crm|campaign|lead/i);
-    expect(setup.items[1]).toMatchObject({ detail: { email: "last@example.test" } });
-    expect(setup.items[2]).toMatchObject({
-      detail: { orgId: "org-1", roleLabel: "Staff Engineer" },
-    });
-    expect(f.calls).toEqual([]);
-  });
-
-  it.each(["approval", "question"] as const)(
-    "role setup surfaces the waiting %s card of the role's conversation",
-    async (kind) => {
-      const f = fixture(null);
-      const prisma = f.deps.prisma as unknown as Record<string, Record<string, unknown>>;
-      const at = new Date("2026-10-23T10:00:00.000Z");
-      prisma.run.findFirst = vi.fn(async () => ({
-        id: "run-9",
-        threadId: "role-thread",
-        createdAt: at,
-      }));
-      prisma.message.findFirst = vi.fn(async () => ({
-        id: "msg-ask",
-        createdAt: at,
-        blocks: [
-          {
-            kind: "ask",
-            text: "Confirm the role requirements",
-            status: "pending",
-            ...(kind === "approval" ? { approvalEffectId: "approval-effect" } : {}),
-          },
-        ],
-      }));
-      prisma.externalEffect.findFirst = vi.fn(async () => null);
-      const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-      expect(setup.attention).toEqual({
-        kind,
-        threadId: "role-thread",
-        cardId: "msg-ask",
-        createdAt: at.toISOString(),
-      });
-      expect(prisma.run.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            status: "waiting_input",
-            thread: expect.objectContaining({ activeRecruitingRoleId: "role" }),
-          }),
-        }),
-      );
-      expect(prisma.message.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ runId: "run-9", role: "bot" }),
-        }),
-      );
-    },
-  );
-
-  it("role setup marks campaign and sender unavailable when Instantly is not assigned", async () => {
-    const f = fixture(null);
-    const prisma = f.deps.prisma as unknown as Record<string, Record<string, unknown>>;
-    prisma.botMcpServer.findFirst = vi.fn(async () => null);
-    prisma.mcpServer = { findFirst: vi.fn(async () => ({ id: "instantly" })) };
-    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-    expect(setup.ready).toBe(false);
-    expect(setup.items.slice(0, 2)).toEqual([
-      expect.objectContaining({
-        key: "campaign",
-        state: "unavailable",
-        action: { kind: "connect", serverId: "instantly" },
-      }),
-      expect.objectContaining({ key: "sender", state: "unavailable" }),
-    ]);
-  });
 });
 
-describe("role candidates (Autumn + CRM merged list)", () => {
+describe("role candidates (search results + CRM merged list)", () => {
   const org = "10000000-0000-4000-8000-000000000001";
   const uuid = (n: number) => `30000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
   const person = (key: string, linkedinUrl: string | null, extra: Record<string, unknown> = {}) =>
@@ -7705,7 +7149,6 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       discoveryCount: 1,
       firstDiscoveredAt: null,
       lastDiscoveredAt: null,
-      latestAssessment: null,
       ...extra,
     }) as unknown as db.RecruitingCandidate;
   const contact = (n: number, fields: Record<string, unknown>) => ({
@@ -7738,30 +7181,28 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       roleLabel: "Role",
     },
   };
-  // Autumn fake paging its list by an index cursor, like listCandidates' opaque cursor.
+  // Search-result fake paging its list by an index cursor, like listCandidates' opaque cursor.
   const sources = (
-    autumn: db.RecruitingCandidate[],
+    sourced: db.RecruitingCandidate[],
     crm: ReturnType<typeof contact>[] | "unavailable" | "unbound",
   ): api.RoleCandidatesSources => ({
-    async autumn(cursor, limit) {
+    async sourced(cursor, limit) {
       const start = cursor ? Number(cursor) : 0;
-      const items = autumn.slice(start, start + limit);
+      const items = sourced.slice(start, start + limit);
       return {
         items,
-        nextCursor: start + limit < autumn.length ? String(start + limit) : null,
-        total: autumn.length,
+        nextCursor: start + limit < sourced.length ? String(start + limit) : null,
+        total: sourced.length,
         counts: {
-          sourceRows: autumn.length,
-          candidates: autumn.length,
-          identifiedCandidates: autumn.length,
-          unassessed: autumn.length,
-          assessed: 0,
-          shortlisted: autumn.filter((row) => row.shortlisted).length,
+          sourceRows: sourced.length,
+          candidates: sourced.length,
+          identifiedCandidates: sourced.length,
+          shortlisted: sourced.filter((row) => row.shortlisted).length,
         },
         crmTarget: crm === "unbound" ? null : crmTarget,
       };
     },
-    autumnLinkedinUrls: async () => autumn.flatMap((row) => row.linkedinUrl ?? []),
+    sourcedLinkedinUrls: async () => sourced.flatMap((row) => row.linkedinUrl ?? []),
     crm: async () =>
       crm === "unavailable" || crm === "unbound"
         ? { status: "unavailable" }
@@ -7798,9 +7239,9 @@ describe("role candidates (Autumn + CRM merged list)", () => {
     );
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({
-      key: "autumn:ada",
+      key: "sourced:ada",
       email: "ada@x.test",
-      autumn: { candidateKey: "ada", score: 9, rank: 1, tier: "Strong" },
+      sourced: { candidateKey: "ada", score: 9, rank: 1, tier: "Strong" },
       crm: { candidateId: uuid(1), serverId: "crm-server", organizationId: org },
     });
     expect(page.total).toBe(1);
@@ -7821,7 +7262,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
     expect(page.items.map((row) => row.key)).toEqual([`crm:${uuid(1)}`, `crm:${uuid(3)}`]);
   });
 
-  it("puts CRM-only rows after every Autumn row, sorted by score from the Autumn read", async () => {
+  it("puts CRM-only rows after every search row, sorted by score from the search-result read", async () => {
     const pages = await all(
       { limit: 2 },
       sources(
@@ -7830,13 +7271,19 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       ),
     );
     const keys = pages.flatMap((page) => page.items.map((row) => row.key));
-    expect(keys).toEqual(["autumn:a", "autumn:b", "autumn:c", `crm:${uuid(1)}`, `crm:${uuid(2)}`]);
+    expect(keys).toEqual([
+      "sourced:a",
+      "sourced:b",
+      "sourced:c",
+      `crm:${uuid(1)}`,
+      `crm:${uuid(2)}`,
+    ]);
     expect(pages.map((page) => page.items.length)).toEqual([2, 2, 1]);
     expect(pages.every((page) => page.total === 5)).toBe(true);
   });
 
   it("pages without overlap or gaps, and a merged CRM contact never reappears as CRM-only", async () => {
-    const autumn = Array.from({ length: 7 }, (_, n) =>
+    const sourced = Array.from({ length: 7 }, (_, n) =>
       person(`p${n}`, `https://linkedin.com/in/p${n}`),
     );
     const crm = [
@@ -7844,7 +7291,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       ...Array.from({ length: 5 }, (_, n) => contact(10 + n, { email: `c${n}@x.test` })),
     ];
     for (const limit of [1, 3, 4, 100]) {
-      const keys = (await all({ limit }, sources(autumn, crm))).flatMap((page) =>
+      const keys = (await all({ limit }, sources(sourced, crm))).flatMap((page) =>
         page.items.map((row) => row.key),
       );
       expect(new Set(keys).size).toBe(keys.length);
@@ -7857,26 +7304,26 @@ describe("role candidates (Autumn + CRM merged list)", () => {
           threadId: "thread",
           query: "other",
           cursor: (
-            await api.mergeRoleCandidates({ threadId: "thread", limit: 1 }, sources(autumn, crm))
+            await api.mergeRoleCandidates({ threadId: "thread", limit: 1 }, sources(sourced, crm))
           ).nextCursor!,
         },
-        sources(autumn, crm),
+        sources(sourced, crm),
       ),
     ).rejects.toBeInstanceOf(RecruitingConflictError);
   });
 
-  it("shortlistedOnly keeps shortlisted Autumn rows and drops CRM-only rows", async () => {
+  it("shortlistedOnly keeps shortlisted search rows and drops CRM-only rows", async () => {
     const from = sources(
       [person("a", null), person("b", null, { shortlisted: true })],
       [contact(1, { email: "z@x.test" })],
     );
-    const original = from.autumn;
-    from.autumn = async (cursor, limit) => {
+    const original = from.sourced;
+    from.sourced = async (cursor, limit) => {
       const page = await original(cursor, limit);
       return { ...page, items: page.items.filter((row) => row.shortlisted), total: 1 };
     };
     const page = await api.mergeRoleCandidates({ threadId: "thread", shortlistedOnly: true }, from);
-    expect(page.items.map((row) => row.key)).toEqual(["autumn:b"]);
+    expect(page.items.map((row) => row.key)).toEqual(["sourced:b"]);
     expect(page.total).toBe(1);
   });
 
@@ -7913,7 +7360,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
     expect(page.items.map((row) => row.key)).toEqual([`crm:${uuid(1)}`, `crm:${uuid(2)}`]);
   });
 
-  it("returns Autumn-only rows with crm null when the CRM is unbound or unavailable", async () => {
+  it("returns search-only rows with crm null when the CRM is unbound or unavailable", async () => {
     for (const [crm, status] of [
       ["unbound", "not_bound"],
       ["unavailable", "unavailable"],
@@ -7923,14 +7370,14 @@ describe("role candidates (Autumn + CRM merged list)", () => {
         sources([person("a", "https://linkedin.com/in/a")], crm),
       );
       expect(page).toMatchObject({ crmStatus: status, total: 1, nextCursor: null });
-      expect(page.items.map((row) => [row.key, row.crm])).toEqual([["autumn:a", null]]);
+      expect(page.items.map((row) => [row.key, row.crm])).toEqual([["sourced:a", null]]);
     }
   });
 
   it("wires the existing listCandidates read and reports an unbound CRM without CRM calls", async () => {
     vi.mocked(db.getRecruitingWorkspaceRoleId).mockResolvedValue("role");
     vi.mocked(db.listRecruitingCandidates).mockResolvedValue({
-      ...(await sources([person("a", null)], "unbound").autumn(undefined, 25)),
+      ...(await sources([person("a", null)], "unbound").sourced(undefined, 25)),
       sortAvailability: { rank: true, tier: false, score: true },
       roleId: "role",
       roleRevisionId: "revision",

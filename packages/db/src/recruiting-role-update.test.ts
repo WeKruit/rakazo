@@ -91,28 +91,82 @@ describe("partial recruiting role update", () => {
     expect(merged.preferences).toEqual([]);
   });
 
-  it("starts the new revision's saved brief unconfirmed", () => {
-    const confirmed = structuredClone(current) as typeof current;
-    (confirmed.revision as { brief: unknown }).brief = {
-      searchFilters: [],
-      questions: [],
-      fields: [],
-      rules: [],
-      confirmation: {
-        revision: 3,
-        userId: "human",
-        messageId: "m",
-        confirmedAt: "2026-10-22T00:00:00.000Z",
+  // Staging 2026-11-27: an update that only added a requirement was refused for its missing rule.
+  it("keeps a saved brief's rules in step with the criteria the update leaves", () => {
+    const rule = (criterionId: string, effect: "reject" | "flag") => ({
+      criterionId,
+      origin: "jd" as const,
+      effect,
+      sourceRefIds: [`${criterionId}-source`],
+    });
+    const briefed = {
+      ...current,
+      revision: {
+        ...current.revision,
+        brief: {
+          fields: [],
+          searchFilters: [],
+          questions: [],
+          rules: [rule("go", "reject"), rule("kafka", "flag")],
+        },
       },
-    };
-    const merged = mergeRecruitingRoleUpdate(confirmed, {
+    } as unknown as typeof current;
+    const merged = mergeRecruitingRoleUpdate(briefed, {
       operation: "update",
       roleId: "role",
       expectedRevision: 3,
       intent,
-      title: "Staff Backend Engineer",
+      criteria: {
+        upsert: [criterion("pg", "preferred", "Postgres"), criterion("kafka", "hard", "Kafka")],
+        remove: ["go"],
+      },
     });
-    expect(merged.title).toBe("Staff Backend Engineer");
-    expect(merged.brief).not.toHaveProperty("confirmation");
+    expect(merged.brief?.rules).toEqual([
+      rule("kafka", "reject"),
+      { ...rule("pg", "flag"), origin: "user_instruction" },
+    ]);
+  });
+  it("keeps a saved brief citing sources the update still holds", () => {
+    const briefed = {
+      ...current,
+      revision: {
+        ...current.revision,
+        brief: {
+          fields: [
+            {
+              key: "location",
+              state: "known",
+              value: "Seattle",
+              origin: "jd",
+              consequential: false,
+              sourceRefIds: ["go-source"],
+            },
+          ],
+          searchFilters: [],
+          questions: [],
+          rules: [
+            { criterionId: "go", origin: "jd", effect: "reject", sourceRefIds: ["go-source"] },
+            { criterionId: "kafka", origin: "jd", effect: "flag", sourceRefIds: ["kafka-source"] },
+          ],
+        },
+      },
+    } as unknown as typeof current;
+    const said = {
+      ...criterion("kafka", "preferred", "Kafka"),
+      sourceRefs: [source("said", "Kafka")],
+    };
+    const merged = mergeRecruitingRoleUpdate(briefed, {
+      operation: "update",
+      roleId: "role",
+      expectedRevision: 3,
+      intent,
+      criteria: { upsert: [said], remove: ["go"] },
+    });
+    // The changed requirement's rule cites what the requirement now cites.
+    expect(merged.brief?.rules).toEqual([
+      { criterionId: "kafka", origin: "user_instruction", effect: "flag", sourceRefIds: ["said"] },
+    ]);
+    // A kept fact keeps its saved source, though the requirement that carried it is gone.
+    expect(merged.sourceRefs.map((ref) => ref.id)).toEqual(["jd", "go-source"]);
   });
 });

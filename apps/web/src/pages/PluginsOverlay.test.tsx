@@ -589,7 +589,17 @@ it("gives a personal Gmail connection narrow native access to the current coordi
     ["legacy-main", ["get_message", "get_thread", "search_threads"]],
     [
       "managed-scheduling",
-      ["get_message", "get_thread", "search_threads", "list_drafts", "get_draft", "create_draft"],
+      [
+        "get_message",
+        "get_thread",
+        "search_threads",
+        "list_drafts",
+        "get_draft",
+        "create_draft",
+        "send_message",
+        "reply",
+        "forward",
+      ],
     ],
     [
       "managed-outreach",

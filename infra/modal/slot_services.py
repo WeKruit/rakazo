@@ -89,7 +89,7 @@ def define_slot_apps(*, names: dict[str, str], image: Any, secrets: list[Any],
         server = app.server(image=image, secrets=secrets,
                             port=8000 if process == "api" else 3101,
                             min_containers=1, max_containers=2 if process == "api" else 1,
-                            max_concurrency=128 if process == "api" else 1,
+                            max_concurrency=1000 if process == "api" else 1,
                             unauthenticated=process == "api", nonpreemptible=True,
                             compute_region="us-west", startup_timeout=180, exit_grace_period=10)(service_class)
         result[slot] = SlotApp(app, server, slot, generation)

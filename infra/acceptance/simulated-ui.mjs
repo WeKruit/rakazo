@@ -6,9 +6,15 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { sleep } from "./real-user-session.mjs";
+import { edgeDetail, sleep } from "./real-user-session.mjs";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
+/** Clicks, or false when the control never becomes clickable within 10 s. */
+const press = (target) =>
+  target
+    .click({ timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
 let browser;
 let catalog;
 /** A card button's label as the Chinese page shows it (from the web app's own catalog). */
@@ -41,21 +47,37 @@ export const ROLE_PAGES = ["conversation", "results", "brief", "sequence", "inbo
 export const SEND_BUTTON = /^(Confirm and send|确认发送|确认并发送|发送|Send)$/i;
 export const STANDING_BUTTON = /(Send when I say send|always|一律|总是|以后都)/i;
 
-export async function openUi({ origin, email, password, chinese, out }) {
+// `cookie` is the API client's session for the same account: the browser reuses it instead of
+// signing in again (sign-ins are rate limited across every test on the environment).
+export async function openUi({ origin, email, password, cookie, chinese, out, mobile = false }) {
   browser ??= await chromium.launch();
+  // A phone-width journey uses a phone's screen, so layout and touch problems show up too.
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
+    ...(mobile
+      ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+      : { viewport: { width: 1440, height: 900 } }),
     locale: chinese ? "zh-CN" : "en-US",
   });
-  for (let attempt = 0; ; attempt += 1) {
+  if (cookie)
+    await context.addCookies(
+      cookie.split("; ").map((pair) => {
+        const at = pair.indexOf("=");
+        return { name: pair.slice(0, at), value: pair.slice(at + 1), url: origin, secure: origin.startsWith("https:"), httpOnly: true, sameSite: "Lax" };
+      }),
+    );
+  const startedAt = Date.now();
+  for (let attempt = 0; !cookie; attempt += 1) {
     const response = await context.request.post(`${origin}/api/auth/sign-in/email`, {
       headers: { origin },
       data: { email, password },
       failOnStatusCode: false,
     });
     if (response.ok()) break;
-    if (response.status() !== 429 || attempt >= 4)
-      throw new Error(`browser sign-in ${response.status()}`);
+    if (response.status() !== 429 || attempt >= 4) {
+      const headers = new Headers(response.headers());
+      const text = await response.text().catch(() => "");
+      throw new Error(`browser sign-in ${response.status()} ${edgeDetail(headers, text, attempt + 1, startedAt)}`);
+    }
     await sleep(60_000);
   }
   // The page language a Chinese recruiter would pick.
@@ -67,14 +89,62 @@ export async function openUi({ origin, email, password, chinese, out }) {
   }, locale);
   const page = await context.newPage();
   let shots = 0;
+  // How long the last page took to show, for the judge (slow or stuck pages are a UX failure).
+  let loadMs = null;
+  // The slowest server calls of the last page open, so a slow page shows where its time went.
+  let calls = null;
 
+  // The app keeps a live stream open, so the network is never idle: a page has settled when its
+  // text has stopped changing for a second and nothing shows as loading (at most 15 s).
   const settle = async () => {
-    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-    await sleep(1_500);
+    let last = "";
+    let stableSince = Date.now();
+    for (const until = Date.now() + 30_000; Date.now() < until; await sleep(300)) {
+      const text = await page
+        .locator("main")
+        .first()
+        .innerText()
+        .catch(() => "");
+      const busy = await page
+        .locator('[aria-busy="true"]:visible, [role="progressbar"]:visible')
+        .count()
+        .catch(() => 0);
+      // "正在加载邮件序列…", "Loading sequences…": any loading line, not only the bare word.
+      const loading = /加载中|正在加载|\bLoading\b[^\n]*(…|\.\.\.)/.test(text);
+      if (text !== last || busy || loading || text.trim().length < 20) {
+        last = text;
+        stableSince = Date.now();
+      } else if (Date.now() - stableSince >= 1_000) return;
+    }
   };
   const open = async (url) => {
+    const at = Date.now();
+    const seen = [];
+    const record = (request) => {
+      if (!request.url().includes("/rpc/")) return;
+      const kind = (request.postData() ?? "").match(/"kind":"(\w+)"/)?.[1];
+      const path = new URL(request.url()).pathname.replace("/rpc/", "");
+      seen.push(
+        request
+          .response()
+          .then((response) => ({
+            call: kind ? `${path}#${kind}` : path,
+            doneMs: Date.now() - at,
+            serverMs: Number(response?.headers()["x-envoy-upstream-service-time"]) || null,
+          }))
+          .catch(() => null),
+      );
+    };
+    page.on("requestfinished", record);
     await page.goto(`${origin}${url}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await settle();
+    page.off("requestfinished", record);
+    // Time until the page stopped changing, without the second it had to stay still.
+    loadMs = Math.max(0, Date.now() - at - 1_000);
+    calls = (await Promise.all(seen))
+      .filter(Boolean)
+      .sort((a, b) => b.doneMs - a.doneMs)
+      .slice(0, 8);
   };
   const buttons = async () =>
     (
@@ -83,6 +153,21 @@ export async function openUi({ origin, email, password, chinese, out }) {
         .evaluateAll((nodes) =>
           nodes
             .map((node) => (node.getAttribute("aria-label") || node.innerText || "").trim())
+            .filter((name) => name && name.length <= 80),
+        )
+        .catch(() => [])
+    ).filter((name, index, all) => all.indexOf(name) === index);
+  // Gate 8856cf75 (mobile-first-look): page text leaves out input boxes, so a search box on the
+  // screen read as missing and Kruit's true "you can search" was graded a false claim.
+  const fields = async () =>
+    (
+      await page
+        .locator("main input:visible:not([type=checkbox]):not([type=radio]), main textarea:visible")
+        .evaluateAll((nodes) =>
+          nodes
+            .map((node) =>
+              (node.getAttribute("aria-label") || node.getAttribute("placeholder") || "").trim(),
+            )
             .filter((name) => name && name.length <= 80),
         )
         .catch(() => [])
@@ -112,7 +197,13 @@ export async function openUi({ origin, email, password, chinese, out }) {
         .last();
       if (!(await composer.isVisible().catch(() => false))) return false;
       await composer.fill(text);
-      await composer.press("Enter");
+      // On a touch screen Enter adds a new line, as on a phone; the recruiter taps Send there.
+      const sendButton = page
+        .locator("fieldset")
+        .filter({ has: composer })
+        .getByRole("button", { name: /^(Send|发送)$/ })
+        .last();
+      if (!mobile || !(await press(sendButton))) await composer.press("Enter");
       await sleep(1_500);
       // The composer empties once the page has taken the message (it may wait in a queue while
       // Kruit is still working, so the chat itself can show it later).
@@ -125,7 +216,8 @@ export async function openUi({ origin, email, password, chinese, out }) {
         .or(page.getByRole("link", { name, exact: true }))
         .first();
       if (!(await target.isVisible().catch(() => false))) return false;
-      await target.click();
+      // A control that is covered or never becomes clickable is the page's problem, not a crash.
+      if (!(await press(target))) return false;
       await settle();
       return true;
     },
@@ -134,7 +226,7 @@ export async function openUi({ origin, email, password, chinese, out }) {
       for (const name of [label, inChinese(label)].filter(Boolean)) {
         const target = page.getByRole("button", { name, exact: true }).last();
         if (await target.isVisible().catch(() => false)) {
-          await target.click();
+          if (!(await press(target))) return false;
           await settle();
           return true;
         }
@@ -147,10 +239,10 @@ export async function openUi({ origin, email, password, chinese, out }) {
           })
           .last();
         if (await option.isVisible().catch(() => false)) {
-          await option.getByRole("checkbox").first().click();
+          if (!(await press(option.getByRole("checkbox").first()))) return false;
           const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
           if (!(await send.isEnabled().catch(() => false))) return false;
-          await send.click();
+          if (!(await press(send))) return false;
           await settle();
           return true;
         }
@@ -173,7 +265,7 @@ export async function openUi({ origin, email, password, chinese, out }) {
       await box.fill(text);
       const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
       if (!(await send.isEnabled().catch(() => false))) return false;
-      await send.click();
+      if (!(await press(send))) return false;
       await settle();
       return true;
     },
@@ -189,11 +281,17 @@ export async function openUi({ origin, email, password, chinese, out }) {
       )
         .replace(/\n{3,}/g, "\n\n")
         .trim();
-      return {
+      const seen = {
         url: page.url().replace(origin, ""),
         text: text.length > limit ? `${text.slice(0, limit)}\n…` : text,
         buttons: await buttons(),
+        fields: await fields(),
+        ...(loadMs === null ? {} : { loadSeconds: Math.round(loadMs / 100) / 10 }),
+        ...(calls?.length ? { calls } : {}),
       };
+      loadMs = null;
+      calls = null;
+      return seen;
     },
     async shot(label) {
       shots += 1;

@@ -7,9 +7,11 @@ import {
   askFormDefaults,
   askFormOptions,
   closedAskAnswer,
+  closeEndedAsks,
   isOpenAskBlock,
   latestAnswerableAskMessageId,
   pendingInputAttention,
+  reopenedAskMessageIds,
   resolveAskChoice,
   selectedAskActionLabel,
   timedOutAskMessageId,
@@ -121,6 +123,30 @@ it("keeps each waiting agent's latest question answerable in a group", () => {
       ],
     }),
   ).toEqual(["main-ask", "sourcer-ask"]);
+});
+
+it("keeps another conversation's card answerable where it is copied, until it closes", () => {
+  const target = { threadId: "role", runId: "team", messageId: "source" };
+  expect(
+    answerableAskMessageIds({
+      activeRuns: [],
+      messages: [
+        {
+          id: "copy",
+          runId: "team",
+          blocks: [{ kind: "ask", status: "pending", answerTarget: target }],
+        },
+        {
+          id: "closed",
+          runId: "team",
+          blocks: [{ kind: "ask", status: "answered", answerTarget: target }],
+        },
+      ],
+    }),
+  ).toEqual(["copy"]);
+  expect(
+    closeEndedAsks([{ kind: "ask", status: "pending", answerTarget: target }], false)[0]?.status,
+  ).toBe("pending");
 });
 
 describe("latestAnswerableAskMessageId", () => {
@@ -250,7 +276,7 @@ describe("closed cards", () => {
     ).toBeNull();
   });
 
-  it("never replays a stale approval, a secret or a connection as a message", () => {
+  it("never replays a stale approval or a secret as a message", () => {
     expect(
       closedAskAnswer(
         {
@@ -270,19 +296,26 @@ describe("closed cards", () => {
       closedAskAnswer({ kind: "ask", text: "API key", status: "expired", input: "secret" }, "sk"),
     ).toBeNull();
     expect(
-      closedAskAnswer(
-        {
-          kind: "ask",
-          text: "Connect Gmail",
-          status: "expired",
-          connection: { serverId: "server-1", name: "Gmail", reason: "Read replies" },
-        },
-        "connected",
-      ),
-    ).toBeNull();
-    expect(
       closedAskAnswer({ kind: "ask", text: "Which city?", status: "answered" }, "Paris"),
     ).toBeNull();
+  });
+
+  // 11-14 gate: the recruiter asked a question after the Connect Gmail card, and the card died.
+  it("turns a sign-in on an ended connect card into a message, and only a sign-in", () => {
+    const connect = {
+      kind: "ask" as const,
+      text: "Connect Gmail",
+      status: "expired" as const,
+      connection: { serverId: "server-1", name: "Gmail", reason: "Send the email" },
+    };
+    expect(closedAskAnswer(connect, "connected")).toEqual({
+      text: "Connected Gmail.",
+      recorded: "connected",
+    });
+    expect(closedAskAnswer(connect, "not_connected")).toBeNull();
+    const notNow = { ...connect, status: "answered" as const, answer: "not_connected" };
+    expect(closedAskAnswer(notNow, "connected")).toMatchObject({ recorded: "connected" });
+    expect(closedAskAnswer({ ...notNow, answer: "connected" }, "connected")).toBeNull();
   });
 });
 
@@ -371,5 +404,76 @@ describe("timedOutAskMessageId", () => {
         activeRuns: [{ id: "run-w", status: "waiting_input" }],
       }),
     ).toBeNull();
+  });
+});
+
+describe("reopenedAskMessageIds", () => {
+  const connect = (id: string, status = "expired", serverId = "gmail", answer?: string) => ({
+    id,
+    role: "bot",
+    runId: `run-${id}`,
+    blocks: [{ kind: "ask", status, answer, connection: { serverId } }],
+  });
+  const said = { id: "u", role: "user", blocks: [{ kind: "text" }] };
+
+  it("keeps the newest connect card per service pressable after the recruiter writes", () => {
+    expect(reopenedAskMessageIds({ messages: [connect("a"), said, connect("b")] })).toEqual(["b"]);
+    expect(reopenedAskMessageIds({ messages: [connect("a"), said] })).toEqual(["a"]);
+    expect(
+      reopenedAskMessageIds({ messages: [connect("a"), connect("c", "expired", "calendar")] }),
+    ).toEqual(["c", "a"]);
+  });
+
+  it("drops a connect card once signed in, and defers to a card that still waits", () => {
+    expect(
+      reopenedAskMessageIds({
+        messages: [connect("a"), connect("b", "answered", "gmail", "connected")],
+      }),
+    ).toEqual([]);
+    expect(
+      reopenedAskMessageIds({
+        messages: [
+          connect("a"),
+          { id: "w", role: "bot", runId: "run-w", blocks: [{ kind: "ask", status: "pending" }] },
+        ],
+        activeRuns: [{ id: "run-w", status: "waiting_input" }],
+      }),
+    ).toEqual([]);
+  });
+
+  // 11-15 gate: each question the recruiter typed closed the card as not connected, and Kruit
+  // then told them to press a button the card no longer had.
+  it("keeps a connect card pressable after typing or Not now closed it unconnected", () => {
+    expect(
+      reopenedAskMessageIds({
+        messages: [connect("a", "answered", "gmail", "not_connected"), said],
+      }),
+    ).toEqual(["a"]);
+  });
+
+  it("still reopens the newest timed-out question", () => {
+    const question = {
+      id: "q",
+      role: "bot",
+      runId: "run-q",
+      blocks: [{ kind: "ask", status: "expired" }],
+    };
+    expect(reopenedAskMessageIds({ messages: [question] })).toEqual(["q"]);
+  });
+});
+
+// Gate 4e2923f2: history showed the ended Connect Gmail card as expired, so Kruit told the
+// recruiter there was no card to press while the app still showed it.
+describe("closeEndedAsks", () => {
+  const connect = { kind: "ask", status: "expired", connection: { serverId: "s" } };
+  const question = { kind: "ask", status: "pending" };
+  it("closes an ended question but keeps a connect card open", () => {
+    expect(closeEndedAsks([question, connect], false)).toEqual([
+      { ...question, status: "expired" },
+      { ...connect, status: "pending" },
+    ]);
+    expect(closeEndedAsks([question], true)).toEqual([question]);
+    const answered = { ...connect, status: "answered" };
+    expect(closeEndedAsks([answered], false)).toEqual([answered]);
   });
 });

@@ -133,7 +133,7 @@ for (const width of [1440, 390]) {
         education: [],
       },
       status: "shortlisted",
-      noteKey: `autumn:linkedin:/in/${key}`,
+      noteKey: `sourced:linkedin:/in/${key}`,
       roles: [
         {
           id: role.id,

@@ -1454,7 +1454,7 @@ describe("linked offline scheduling receipts", () => {
           start: selected,
           end,
           attendees: [recipient],
-          status: "accepted",
+          status: "booked",
           url: "https://meeting.example.test/synthetic-42",
         },
       ],
@@ -1726,19 +1726,17 @@ describe("linked offline scheduling receipts", () => {
       expect(changedProjection.events).toContainEqual(
         expect.objectContaining({
           id: `cal-1:booking:${changedUid}`,
-          status: cancelling ? "cancelled" : "accepted",
+          status: cancelling ? "cancelled" : "booked",
           start: cancelling ? selected : "2026-10-28T15:00:00Z",
         }),
       );
       if (!cancelling) {
         expect(changedProjection.events).toContainEqual(
-          expect.objectContaining({ id: `cal-1:booking:${returned.uid}`, status: "superseded" }),
+          expect.objectContaining({ id: `cal-1:booking:${returned.uid}`, status: "rescheduled" }),
         );
         expect(
           changedProjection.events.some(
-            (event) =>
-              event.id === `cal-1:booking:${returned.uid}` &&
-              ["accepted", "confirmed"].includes(event.status ?? ""),
+            (event) => event.id === `cal-1:booking:${returned.uid}` && event.status === "booked",
           ),
         ).toBe(false);
       }

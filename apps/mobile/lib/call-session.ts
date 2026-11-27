@@ -718,7 +718,12 @@ async function sendHeard(
   text: string,
   clientNonce: string,
 ): Promise<string | undefined> {
-  const sent = await rpc<{ runId?: string }>("threads/send", { botId, clientNonce, text });
+  const sent = await rpc<{ runId?: string }>("threads/send", {
+    botId,
+    clientNonce,
+    text,
+    uiLocale: getActiveUiLocale(),
+  });
   return sent.runId;
 }
 

@@ -8,6 +8,7 @@ import {
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { Client } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { STOPPED_TURN } from "./cancel-runs.js";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
@@ -87,6 +88,7 @@ function fixture() {
   const prisma = {
     $transaction: vi.fn(async (fn: (db: typeof tx) => Promise<unknown>) => fn(tx)),
     $executeRaw: backfill,
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   return { prisma, tx, role, candidate, backfill };
 }
@@ -116,8 +118,6 @@ describe("candidate listing and shortlist boundaries", () => {
           sourceRows: 500n,
           candidates: 200n,
           identifiedCandidates: 190n,
-          unassessed: 180n,
-          assessed: 20n,
           shortlisted: 10n,
         },
       ]),
@@ -159,8 +159,6 @@ describe("candidate listing and shortlist boundaries", () => {
           sourceRows: 0n,
           candidates: 0n,
           identifiedCandidates: 0n,
-          unassessed: 0n,
-          assessed: 0n,
           shortlisted: 0n,
         },
       ]),
@@ -173,7 +171,7 @@ describe("candidate listing and shortlist boundaries", () => {
     });
     const query = f.tx.$queryRaw.mock.calls[0]![0] as Prisma.Sql;
     expect(query.sql).toContain(`e."request"->>'operation' = 'save_grades'`);
-    expect(query.sql).toContain(`reviewer."roleRevisionId" <>`);
+    expect(query.sql).not.toContain(`reviewer."roleRevisionId" <>`);
     expect(query.sql).toContain(`WHEN 'Promising' THEN 1000`);
     expect(query.sql).toContain(`floor(b."rankingValue" / 1000)`);
     expect(query.sql).toContain(
@@ -201,7 +199,6 @@ describe("candidate listing and shortlist boundaries", () => {
           CREATE TEMP TABLE recruiting_candidate_pages ("effectId" text, "roleId" text, "roleRevisionId" text, "observedAt" timestamptz, "actionId" text);
           CREATE TEMP TABLE runs (id text, "clientNonce" text);
           CREATE TEMP TABLE external_effects (id text, kind text, status text, request jsonb, result jsonb, "runId" text);
-          CREATE TEMP TABLE recruiting_assessments ("roleId" text, "candidateKey" text, version int, "roleRevisionId" text, "createdAt" timestamptz, judgments jsonb);
           CREATE TEMP TABLE recruiting_candidate_occurrences ("roleId" text, "candidateKey" text, "pageId" text, "rowIndex" int, "matchFields" jsonb, name text, title text, company text, location text, "linkedinUrl" text, "resumeUrl" text, "evidenceUrls" jsonb, issues jsonb DEFAULT '[]');
           INSERT INTO recruiting_roles VALUES ('role', 'revision');
           INSERT INTO recruiting_candidate_pages VALUES ('current', 'role', 'revision', '2026-01-03', null), ('old', 'role', 'old-revision', '2026-01-02', null), ('provider', 'role', 'revision', '2026-01-04', null);
@@ -212,12 +209,13 @@ describe("candidate listing and shortlist boundaries", () => {
           INSERT INTO recruiting_candidate_occurrences ("roleId", "candidateKey", "pageId", "rowIndex", issues) VALUES ('role', 'zero', 'facts', 0, '["missing_field:name","missing_field:current_title","missing_field:current_company","missing_field:location","missing_field:linkedin_url","missing_field:resume_url","missing_field:evidence_urls"]');
         `);
         const candidates = [
+          // Graded before the brief changed: the grade still stands and sorts as Strong.
+          ["old-brief", "old", "Strong", 100],
           ["strong", "current", "Strong", 1],
           ["promising-a", "current", "Promising", 98],
           ["promising-b", "current", "Promising", 98],
           ["partial", "current", "Partial", 99],
           ["uncertain", "current", "Uncertain", 100],
-          ["outdated", "old", "Strong", 100],
           ["provider", "provider", "Strong", 7],
           ["zero", "provider", null, 0],
           ["missing", "provider", null, null],
@@ -246,8 +244,6 @@ describe("candidate listing and shortlist boundaries", () => {
                 sourceRows: 0n,
                 candidates: 0n,
                 identifiedCandidates: 0n,
-                unassessed: 0n,
-                assessed: 0n,
                 shortlisted: 0n,
               },
             ]),
@@ -280,8 +276,6 @@ describe("candidate listing and shortlist boundaries", () => {
               rankingProjection: 2,
               rankingGroup: "worth_talking",
               query: "",
-              assessmentState: null,
-              verdict: null,
               shortlisted: null,
               actionId: null,
               sourceEffectId: null,
@@ -311,8 +305,6 @@ describe("candidate listing and shortlist boundaries", () => {
       sourceRows: 0n,
       candidates: 0n,
       identifiedCandidates: 0n,
-      unassessed: 0n,
-      assessed: 0n,
       shortlistedCount: 0n,
       candidateKey: null,
     };
@@ -374,10 +366,6 @@ describe("candidate listing and shortlist boundaries", () => {
         countIdentified: false,
         firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
         lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
-        assessmentVersion: null,
-        assessmentRoleRevisionId: null,
-        assessmentCreatedAt: null,
-        hardGate: null,
         sortValue: key,
       });
       f.tx.$queryRaw.mockResolvedValueOnce(
@@ -391,8 +379,6 @@ describe("candidate listing and shortlist boundaries", () => {
               sourceRows: 30n,
               candidates: 20n,
               identifiedCandidates: 4n,
-              unassessed: 19n,
-              assessed: 1n,
               shortlisted: 2n,
             },
           ],
@@ -441,8 +427,6 @@ describe("candidate listing and shortlist boundaries", () => {
         sourceRows: 30,
         candidates: 20,
         identifiedCandidates: 4,
-        unassessed: 19,
-        assessed: 1,
         shortlisted: 2,
       });
       expect(page.items.map((item) => item.candidateKey)).toEqual(["a"]);
@@ -480,8 +464,6 @@ describe("candidate listing and shortlist boundaries", () => {
             sort: "name",
             sourceProjection: 2,
             query: search,
-            assessmentState: null,
-            verdict: null,
             shortlisted: null,
             actionId: null,
             sourceEffectId: "native-read",
@@ -534,8 +516,6 @@ describe("candidate listing and shortlist boundaries", () => {
             sourceRows: 0n,
             candidates: 0n,
             identifiedCandidates: 0n,
-            unassessed: 0n,
-            assessed: 0n,
             shortlisted: 0n,
           },
         ],
@@ -582,8 +562,6 @@ describe("candidate listing and shortlist boundaries", () => {
               sourceRows: 3n,
               candidates: 2n,
               identifiedCandidates: 2n,
-              unassessed: 2n,
-              assessed: 0n,
               shortlisted: 1n,
             },
           ],
@@ -643,8 +621,6 @@ describe("candidate listing and shortlist boundaries", () => {
             sourceRows: 0n,
             candidates: 0n,
             identifiedCandidates: 0n,
-            unassessed: 0n,
-            assessed: 0n,
             shortlisted: 0n,
           },
         ],
@@ -679,8 +655,6 @@ describe("candidate listing and shortlist boundaries", () => {
             sort,
             ...(sort === "rank" ? { rankProjection: 2 } : {}),
             query: "",
-            assessmentState: null,
-            verdict: null,
             shortlisted: null,
             actionId: null,
             sourceEffectId: "historical-page",
@@ -698,8 +672,6 @@ describe("candidate listing and shortlist boundaries", () => {
               sourceRows: 0n,
               candidates: 0n,
               identifiedCandidates: 0n,
-              unassessed: 0n,
-              assessed: 0n,
               shortlisted: 0n,
             },
           ],
@@ -744,8 +716,6 @@ describe("candidate listing and shortlist boundaries", () => {
             ...(sort === "score" ? { scoreProjection: 1 } : {}),
             ...(sourceEffectId !== undefined ? { sourceProjection: 2 } : {}),
             query: "",
-            assessmentState: null,
-            verdict: null,
             shortlisted: null,
             actionId: null,
             sourceEffectId: sourceEffectId ?? null,
@@ -766,8 +736,6 @@ describe("candidate listing and shortlist boundaries", () => {
               sourceRows: 0n,
               candidates: 0n,
               identifiedCandidates: 0n,
-              unassessed: 0n,
-              assessed: 0n,
               shortlisted: 0n,
             },
           ],
@@ -798,8 +766,6 @@ describe("candidate listing and shortlist boundaries", () => {
             ...(sort === "rank" ? { rankProjection: 2 } : {}),
             sourceProjection: 2,
             query: "",
-            assessmentState: null,
-            verdict: null,
             shortlisted: null,
             actionId: null,
             sourceEffectId: "selected-result",
@@ -845,10 +811,6 @@ describe("candidate listing and shortlist boundaries", () => {
         profileSourcePageIds: [],
         firstDiscoveredAt: null,
         lastDiscoveredAt: null,
-        assessmentVersion: null,
-        assessmentRoleRevisionId: null,
-        assessmentCreatedAt: null,
-        hardGate: null,
         sortValue,
         matchValue: sortValue ? Number(sortValue) : null,
       });
@@ -861,8 +823,6 @@ describe("candidate listing and shortlist boundaries", () => {
           sourceRows: 3n,
           candidates: 3n,
           identifiedCandidates: 0n,
-          unassessed: 3n,
-          assessed: 0n,
           shortlisted: 0n,
         },
       ];
@@ -1057,6 +1017,7 @@ describe("candidate listing and shortlist boundaries", () => {
     f.tx.$queryRaw
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           name: "Synthetic Avery",
@@ -1106,6 +1067,14 @@ describe("candidate listing and shortlist boundaries", () => {
       type: "recruiting.changed",
       payload: { roleId: "role" },
     });
+    // The conversation is locked before the role, the order event appends take (staging 11-26
+    // deadlocks between role writes and live runs).
+    const locks = f.tx.$queryRaw.mock.calls.map(([query]) => (query as { sql: string }).sql);
+    const roleLock = locks.findIndex((sql) =>
+      /^SELECT "id" FROM "recruiting_roles".*FOR UPDATE$/s.test(sql),
+    );
+    expect(roleLock).toBeGreaterThan(0);
+    expect(locks[roleLock - 1]).toMatch(/^SELECT "id" FROM "threads".*FOR NO KEY UPDATE$/s);
     const profileQuery = f.tx.$queryRaw.mock.lastCall![0] as { values: unknown[] };
     expect(profileQuery.values.slice(-2)).toEqual(["role", f.candidate.candidateKey]);
   });
@@ -1113,6 +1082,7 @@ describe("candidate listing and shortlist boundaries", () => {
     const f = fixture();
     Object.assign(f.candidate, { shortlisted: true, revision: 1 });
     f.tx.$queryRaw
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -1349,6 +1319,7 @@ function observationFixture(rows: readonly unknown[] | undefined) {
   const prisma = {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn) => fn(tx)),
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   const input = {
     runId: "run",
@@ -1754,6 +1725,7 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
   const prisma = {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn) => fn(tx)),
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   return {
     prisma,
@@ -1883,6 +1855,26 @@ describe("task-backed candidate page proof reads", () => {
     expect(reads.length).toBeGreaterThan(0);
     for (const where of reads)
       expect(where).toMatchObject({ spaceId: actor.spaceId, runId: { in: ["run"] } });
+  });
+});
+
+describe("saved sources by another key shape", () => {
+  it("reads the role's one person a list row key or bare handle names", async () => {
+    const f = crmFixture();
+    const saved = await f.tx.recruitingCandidate.findUnique();
+    f.tx.recruitingCandidate.findUnique.mockResolvedValueOnce(null as never);
+    const findMany = vi.fn(async (_query: unknown) => [saved]);
+    Object.assign(f.tx.recruitingCandidate, { findMany });
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: f.input.roleId,
+      candidateKey: "sourced:some-handle",
+    });
+    expect(sources.items).toHaveLength(1);
+    expect(findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        OR: [{ candidateKey: "some-handle" }, { candidateKey: { endsWith: "/some-handle" } }],
+      },
+    });
   });
 });
 
@@ -2665,12 +2657,6 @@ async function replyFixture() {
       searchFilters: [],
       questions: [],
       rules: [],
-      confirmation: {
-        revision: 1,
-        userId: actor.userId,
-        messageId: "human",
-        confirmedAt: "2026-10-16T00:00:00Z",
-      },
     },
   });
   const mailRoute = {
@@ -2765,6 +2751,7 @@ async function replyFixture() {
   const prisma = {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn) => fn(tx)),
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   const input = {
     roleId: "role",
@@ -2998,7 +2985,7 @@ describe("durable recruiting reply linkage", () => {
     ).toEqual([]);
   });
   it.each(["direct", "catalog"])(
-    "admits a native canonical CRM member without an Autumn import and freezes proof in the original %s envelope",
+    "admits a native canonical CRM member without a search import and freezes proof in the original %s envelope",
     async (kind) => {
       const f = await nativeReplyFixture();
       if (kind === "catalog") {
@@ -3420,7 +3407,6 @@ describe("durable recruiting reply linkage", () => {
     "lease",
     "email-proof",
     "crm-proof",
-    "brief",
   ])("rejects the invalid %s context before admission", async (boundary) => {
     const f = await replyFixture();
     if (boundary === "role")
@@ -3446,7 +3432,6 @@ describe("durable recruiting reply linkage", () => {
     if (boundary === "lease") f.trusted.leaseFence += 1;
     if (boundary === "email-proof") f.email.status = "uncertain";
     if (boundary === "crm-proof") f.crm.status = "executing";
-    if (boundary === "brief") Object.assign(f.revision, { brief: null });
     await expect(
       recruiting.resolveRecruitingReply(f.prisma, actor, f.trusted, f.input),
     ).rejects.toThrow();
@@ -4273,8 +4258,6 @@ describe("native CRM binding and source import", () => {
             sourceRows: 1n,
             candidates: 1n,
             identifiedCandidates: 1n,
-            unassessed: 1n,
-            assessed: 0n,
             shortlisted: 0n,
           },
         ],
@@ -4289,10 +4272,6 @@ describe("native CRM binding and source import", () => {
             profileSourcePageIds: [],
             firstDiscoveredAt: "2026-10-16T00:00:00.000Z",
             lastDiscoveredAt: "2026-10-16T00:00:00.000Z",
-            assessmentVersion: null,
-            assessmentRoleRevisionId: null,
-            assessmentCreatedAt: null,
-            hardGate: null,
             sortValue: "example",
           },
         ],
@@ -4725,148 +4704,6 @@ describe("recruiting workspace authorization", () => {
   });
 });
 
-describe("native observation indexing", () => {
-  it.each([undefined, []])(
-    "keeps raw-only observations distinct from accepted empty pages: %j",
-    async (rows) => {
-      const f = observationFixture(rows);
-      await recruiting.recordRecruitingResearchObservation(f.prisma, actor, f.input as never);
-      expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ rowCount: rows === undefined ? null : 0 }),
-      });
-      expect(f.tx.recruitingCandidate.createMany).not.toHaveBeenCalled();
-      expect(f.tx.recruitingCandidateOccurrence.createMany).not.toHaveBeenCalled();
-      expect(f.tx.recruitingResearchAction.update).toHaveBeenCalledOnce();
-    },
-  );
-  it("indexes all rows with independent unknown keys and deduplicated canonical profile keys", async () => {
-    const row = {
-      name: { value: "Example", source_id: "source" },
-      linkedin_url: "https://www.linkedin.com/in/Example?trk=source",
-      current_title: "Engineer",
-      current_company: "Company",
-      location: "London",
-      resume_url: null,
-      evidence_urls: [],
-    };
-    const f = observationFixture([
-      row,
-      { ...row, linkedin_url: "https://linkedin.com/in/EXAMPLE/" },
-      null,
-      { full_name: "Never inferred", _sources: { profile: "https://www.linkedin.com/in/no" } },
-    ]);
-    const receipt = await recruiting.recordRecruitingResearchObservation(
-      f.prisma,
-      actor,
-      f.input as never,
-    );
-    expect(receipt).toHaveProperty("candidateRows", [
-      { rowIndex: 0, candidateKey: "linkedin:/in/example" },
-      { rowIndex: 1, candidateKey: "linkedin:/in/example" },
-      { rowIndex: 2, candidateKey: "source-row:read:2" },
-      { rowIndex: 3, candidateKey: "source-row:read:3" },
-    ]);
-    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        rowCount: 4,
-        effectId: "read",
-        artifactId: "observation-artifact",
-        roleRevisionId: "revision",
-      }),
-    });
-    expect(f.tx.recruitingCandidate.createMany).toHaveBeenCalledWith({
-      data: [
-        { roleId: "role", candidateKey: "linkedin:/in/example" },
-        { roleId: "role", candidateKey: "source-row:read:2" },
-        { roleId: "role", candidateKey: "source-row:read:3" },
-      ],
-      skipDuplicates: true,
-    });
-    const occurrences = f.tx.recruitingCandidateOccurrence.createMany.mock
-      .lastCall?.[0] as unknown as {
-      data: Array<{
-        rowIndex: number;
-        candidateKey: string;
-        name: string | null;
-        issues: string[];
-      }>;
-    };
-    expect(occurrences.data.map((item) => item.rowIndex)).toEqual([0, 1, 2, 3]);
-    expect(occurrences.data[0]).toMatchObject({
-      candidateKey: "linkedin:/in/example",
-      name: "Example",
-    });
-    expect(occurrences.data[2]).toMatchObject({ name: null, issues: ["invalid_row"] });
-    expect(occurrences.data[3]?.name).toBeNull();
-  });
-  it("fills a previously recorded native receipt without changing its cursor, state or usage", async () => {
-    const f = observationFixture([{ name: "Example" }]);
-    const output = {
-      ...actor,
-      id: "observation-artifact",
-      hash: f.hash,
-      botId: "bot",
-      groupId: null,
-      runId: "run",
-      storageKey: "observation",
-    };
-    f.artifacts.set(output.id, output);
-    Object.assign(f.action, {
-      outputArtifacts: [{ artifactId: output.id, sha256: output.hash }],
-      cursor: "current-cursor",
-      receiptArtifactId: "context",
-      receiptArtifactHash: f.hash,
-      usage: [{ scope: "task", unit: "credits", amount: 2 }],
-    });
-    f.tx.artifact.findUnique.mockResolvedValue(output as never);
-    const binding = (await f.tx.event.findMany())[0]!;
-    f.tx.event.findMany.mockResolvedValue([
-      binding,
-      {
-        ...binding,
-        id: "recorded",
-        seq: 2,
-        payload: {
-          phase: "recorded",
-          taskId: "task",
-          actionId: "action",
-          effectId: "read",
-          outputArtifact: { artifactId: output.id, sha256: output.hash },
-        },
-      },
-    ] as never);
-    await recruiting.recordRecruitingResearchObservation(f.prisma, actor, {
-      ...f.input,
-      historicalBackfill: true,
-      cursor: "old-cursor",
-      usage: [{ scope: "task", unit: "credits", amount: 0 }],
-    } as never);
-    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledOnce();
-    expect(f.tx.recruitingResearchAction.update).not.toHaveBeenCalled();
-    expect(f.tx.artifact.create).not.toHaveBeenCalled();
-    f.tx.recruitingCandidatePage.findUnique.mockResolvedValue({ effectId: "read" } as never);
-    const replay = await recruiting.recordRecruitingResearchObservation(
-      f.prisma,
-      actor,
-      f.input as never,
-    );
-    expect(replay.candidateRows).toEqual([{ rowIndex: 0, candidateKey: "source-row:read:0" }]);
-    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledOnce();
-    expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledOnce();
-  });
-  it("does not index a result that differs from its completed native effect", async () => {
-    const f = observationFixture([{ name: "Example" }]);
-    await expect(
-      recruiting.recordRecruitingResearchObservation(f.prisma, actor, {
-        ...f.input,
-        rawResult: { changed: true },
-      } as never),
-    ).rejects.toThrow(IsolationError);
-    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
-    expect(f.tx.artifact.create).not.toHaveBeenCalled();
-  });
-});
-
 function nativeCandidateFixture() {
   const row = {
     name: "Example",
@@ -4953,6 +4790,7 @@ function nativeCandidateFixture() {
   const prisma = {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn) => fn(tx)),
+    $queryRaw: vi.fn(async () => []),
   } as unknown as PrismaClient;
   const trusted = {
     runId: "run",
@@ -5251,8 +5089,6 @@ describe("native candidate source provenance", () => {
             sourceRows: 1n,
             candidates: 1n,
             identifiedCandidates: 1n,
-            unassessed: 1n,
-            assessed: 0n,
             shortlisted: 0n,
           },
         ],
@@ -5269,10 +5105,6 @@ describe("native candidate source provenance", () => {
             discoveryCount: 1,
             firstDiscoveredAt: f.page.observedAt.toISOString(),
             lastDiscoveredAt: f.page.observedAt.toISOString(),
-            assessmentVersion: null,
-            assessmentRoleRevisionId: null,
-            assessmentCreatedAt: null,
-            hardGate: null,
             sortValue: "example",
           },
         ],
@@ -5479,6 +5311,7 @@ describe("native candidate source provenance", () => {
         ...base,
         prisma: {
           $executeRaw: vi.fn(async () => 0),
+          $queryRaw: vi.fn(async () => []),
           $transaction: vi.fn(async (fn: (tx: typeof base.tx) => Promise<unknown>) => {
             inTransaction = true;
             try {
@@ -5849,10 +5682,6 @@ describe("native candidate source provenance", () => {
         discoveryCount: 2,
         firstDiscoveredAt: f.page.observedAt.toISOString(),
         lastDiscoveredAt: f.page.observedAt.toISOString(),
-        assessmentVersion: null,
-        assessmentRoleRevisionId: null,
-        assessmentCreatedAt: null,
-        hardGate: null,
         sortValue: "example",
       };
       const queryRaw = f.tx.$queryRaw.getMockImplementation()!;
@@ -5873,8 +5702,6 @@ describe("native candidate source provenance", () => {
                 sourceRows: 2n,
                 candidates: 1n,
                 identifiedCandidates: 1n,
-                unassessed: 1n,
-                assessed: 0n,
                 shortlisted: 0n,
               },
             ],
@@ -5889,6 +5716,7 @@ describe("native candidate source provenance", () => {
       const prisma = {
         $executeRaw: vi.fn(async () => 0),
         $transaction: vi.fn(async (fn) => fn(tx)),
+        $queryRaw: vi.fn(async () => []),
       } as unknown as PrismaClient;
       const result =
         operation === "list"
@@ -5940,6 +5768,7 @@ describe("native candidate source provenance", () => {
     const prisma = {
       $executeRaw: vi.fn(async () => 0),
       $transaction: vi.fn(async (fn) => fn(tx)),
+      $queryRaw: vi.fn(async () => []),
     } as unknown as PrismaClient;
     expect(
       (await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" })).observations,
@@ -6046,6 +5875,7 @@ describe("native candidate source provenance", () => {
     const prisma = {
       $executeRaw: vi.fn(async () => 0),
       $transaction: vi.fn(async (fn) => fn(tx)),
+      $queryRaw: vi.fn(async () => []),
     } as unknown as PrismaClient;
     f.tx.thread.findFirst.mockClear();
     const result = await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" });
@@ -6085,6 +5915,7 @@ describe("native candidate source provenance", () => {
     const prisma = {
       $executeRaw: vi.fn(async () => 0),
       $transaction: vi.fn(async (fn) => fn(tx)),
+      $queryRaw: vi.fn(async () => []),
     } as unknown as PrismaClient;
     const result = await recruiting.listRecruitingResearch(prisma, actor, { roleId: "role" });
     expect(result).toEqual({
@@ -6326,10 +6157,6 @@ describe("native candidate source provenance", () => {
         discoveryCount: 1,
         firstDiscoveredAt: f.page.observedAt.toISOString(),
         lastDiscoveredAt: f.page.observedAt.toISOString(),
-        assessmentVersion: null,
-        assessmentRoleRevisionId: null,
-        assessmentCreatedAt: null,
-        hardGate: null,
         sortValue: "example",
       };
       f.tx.$queryRaw.mockResolvedValueOnce(
@@ -6343,8 +6170,6 @@ describe("native candidate source provenance", () => {
               sourceRows: 1n,
               candidates: 1n,
               identifiedCandidates: 1n,
-              unassessed: 1n,
-              assessed: 0n,
               shortlisted: 0n,
             },
           ],
@@ -6359,6 +6184,7 @@ describe("native candidate source provenance", () => {
       const prisma = {
         $executeRaw: vi.fn(async () => 0),
         $transaction: vi.fn(async (fn) => fn(tx)),
+        $queryRaw: vi.fn(async () => []),
       } as unknown as PrismaClient;
       if (boundary === "artifact-hash") f.artifact.hash = "f".repeat(64);
       const result = recruiting.listRecruitingCandidates(
@@ -6508,503 +6334,6 @@ describe("native candidate source provenance", () => {
     await expect(
       recruiting.resolveRecruitingCrmImport(f.prisma, actor, f.trusted, f.input),
     ).rejects.toThrow();
-  });
-});
-
-describe("native candidate results without domain actions", () => {
-  it.each([20, 100])("reuses complete source rows one-to-one with read limit %s", async (limit) => {
-    const f = nativeCandidateFixture();
-    const anonymous = {
-      ...f.row,
-      name: { value: "Anonymous profile", source_id: "name-source" },
-      linkedin_url: null,
-      signals: { value: ["first", "second"], source_ids: ["a", "b"], reasoning: null },
-    };
-    const route = {
-      connectorId: "mcp" as const,
-      resourceId: "server",
-      resourceRevision: 1,
-      toolName: "get_rows",
-    };
-    const args = { task_id: "provider-task", limit: 20 };
-    const originalQuery = f.tx.$queryRaw.getMockImplementation()!;
-    f.tx.$queryRaw.mockImplementation(async (query: unknown) => {
-      if (!(query as { sql: string }).sql.includes("incoming_source_rows"))
-        return originalQuery(query);
-      return f.effect.id === "read"
-        ? []
-        : [
-            { rowIndex: 0, candidateKey: "source-row:read:1" },
-            { rowIndex: 2, candidateKey: "source-row:read:2" },
-          ];
-    });
-    for (const [effectId, rows] of [
-      ["read", [f.row, anonymous, structuredClone(anonymous)]],
-      [
-        "followup-read",
-        [
-          Object.fromEntries(Object.entries(anonymous).reverse()),
-          { ...f.row, match_score: 2 },
-          structuredClone(anonymous),
-        ],
-      ],
-    ] as const) {
-      const request = boundDirectApprovalRequest(
-        route,
-        { ...args, limit: effectId === "read" ? 20 : limit },
-        "__rakazoCatalogTool",
-      );
-      Object.assign(f.effect, {
-        id: effectId,
-        request,
-        result: { structuredContent: { rows, next_cursor: null } },
-      });
-      Object.assign(f.saveEffect, { status: "executing", result: null });
-      const bytes = Buffer.from(stableJsonValue({ request, providerResult: f.effect.result }));
-      Object.assign(f.file, {
-        hash: createHash("sha256").update(bytes).digest("hex"),
-        size: bytes.length,
-        clientNonce: `recruiting-observation:${effectId}`,
-      });
-      await recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
-        sourceEffectId: effectId,
-        rows,
-        outputArtifact: f.file,
-      });
-    }
-    const writes = f.tx.recruitingCandidateOccurrence.createMany.mock.calls.map(
-      ([input]) => (input as { data: Array<{ candidateKey: string }> }).data,
-    );
-    expect(writes[1]?.map((row) => row.candidateKey)).toEqual([
-      "source-row:read:1",
-      "linkedin:/in/example",
-      "source-row:read:2",
-    ]);
-    expect(new Set(writes.flat().map((row) => row.candidateKey)).size).toBe(3);
-    expect(writes.flat()).toHaveLength(6);
-    const queries = f.tx.$queryRaw.mock.calls
-      .map(([query]) => query as { sql: string; values: unknown[] })
-      .filter((query) => query.sql.includes("incoming_source_rows"));
-    expect(queries).toHaveLength(2);
-    for (const [index, query] of queries.entries()) {
-      expect(query.values).toEqual(
-        expect.arrayContaining([
-          actor.spaceId,
-          actor.userId,
-          "role",
-          JSON.stringify(route),
-          JSON.stringify({ ...args, limit: index === 0 ? 20 : limit }),
-        ]),
-      );
-      expect(query.sql).toContain("row_number()");
-      expect(query.sql).toContain("selected_source_pages");
-      expect(query.sql).toContain("count(*) AS multiplicity");
-      expect(query.sql).toContain("page.args = current.args");
-      expect(query.sql).toContain("NOT (page.args ? 'cursor')");
-      expect(query.sql).toContain("NOT (current.args ? 'cursor')");
-      expect(query.sql).toContain("page.body->'next_cursor' = 'null'::jsonb");
-      expect(query.sql).toContain("current.body->'next_cursor' = 'null'::jsonb");
-      expect(query.sql).toContain('returned.value = incoming."row"');
-      expect(query.sql).not.toMatch(/->\s*'(?:name|source_id|source_ids)'/);
-    }
-  });
-
-  it("reuses the locked run and same source thread without rereading validated artifact metadata", async () => {
-    const f = nativeCandidateFixture();
-    const facts = {
-      headline: null,
-      profileImageUrl: "https://images.example.test/person.png",
-      email: "supplied@example.test",
-      githubUrl: "https://github.com/supplied",
-      websiteUrl: null,
-      stackOverflowUrl: null,
-      experience: [],
-      education: [],
-    };
-    const result = await recruiting.saveNativeRecruitingCandidatePage(
-      f.prisma,
-      actor,
-      f.trusted,
-      f.input,
-      {
-        sourceEffectId: "read",
-        rows: [{ ...f.row, _profile: facts }],
-        outputArtifact: f.file,
-      },
-    );
-    expect(result).toMatchObject({
-      profileFactsVersion: 1,
-      sourceEffectId: "read",
-      candidateRows: [
-        {
-          candidateKey: "linkedin:/in/example",
-          rowIndex: 0,
-          _profile: facts,
-          _profileSourceEffectId: "read",
-        },
-      ],
-    });
-    expect(f.saveEffect.result).toEqual(result);
-    expect(f.tx.run.findFirst).toHaveBeenCalledTimes(1);
-    expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(2);
-    expect(f.tx.artifact.findFirst).toHaveBeenCalledExactlyOnceWith({
-      where: { id: "context", spaceId: actor.spaceId, userId: actor.userId },
-    });
-    expect(f.tx.thread.findFirst).toHaveBeenLastCalledWith({
-      where: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        id: "thread",
-        groupId: null,
-        OR: [{ botId: "bot" }, { externalConversation: { botId: "bot" } }],
-      },
-      select: { id: true },
-    });
-    expect(f.tx.artifact.findUniqueOrThrow).not.toHaveBeenCalled();
-  });
-
-  it.each(["owner", "space", "hash", "run", "anchor", "unrelated-thread"])(
-    "still validates the adopted artifact %s when reusing the locked context",
-    async (boundary) => {
-      const f = nativeCandidateFixture();
-      const artifact = f.artifacts.get("context")!;
-      if (boundary === "owner") artifact.userId = "other";
-      if (boundary === "space") artifact.spaceId = "other";
-      if (boundary === "hash") artifact.hash = "f".repeat(64);
-      if (boundary === "run") {
-        artifact.runId = "other-run";
-        f.tx.run.findFirst.mockResolvedValueOnce(f.run).mockResolvedValueOnce({
-          ...f.run,
-          id: "other-run",
-          userId: "other",
-        });
-      }
-      if (boundary === "anchor" || boundary === "unrelated-thread") {
-        const thread = await f.tx.thread.findFirst();
-        if (boundary === "anchor")
-          f.tx.thread.findFirst.mockResolvedValueOnce(thread).mockResolvedValueOnce(null as never);
-        else {
-          Object.assign(artifact, { runId: null });
-          f.tx.thread.findFirst
-            .mockResolvedValueOnce(thread)
-            .mockResolvedValueOnce({ ...thread, id: "other-thread" })
-            .mockResolvedValueOnce({ ...thread, id: "other-thread", userId: "other" });
-        }
-      }
-      await expect(
-        recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
-          sourceEffectId: "read",
-          rows: [f.row],
-          outputArtifact: f.file,
-        }),
-      ).rejects.toThrow(IsolationError);
-      expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
-      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
-    },
-  );
-
-  it("still authorizes a different role source thread before saving", async () => {
-    const f = nativeCandidateFixture();
-    f.role.sourceThreadId = "source-thread";
-    const thread = await f.tx.thread.findFirst();
-    f.tx.thread.findFirst.mockClear();
-    f.tx.thread.findFirst
-      .mockResolvedValueOnce(thread)
-      .mockResolvedValueOnce({ ...thread, id: "source-thread", userId: "other" });
-    await expect(
-      recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
-        sourceEffectId: "read",
-        rows: [f.row],
-        outputArtifact: f.file,
-      }),
-    ).rejects.toThrow(IsolationError);
-    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
-  });
-
-  it.each(
-    ["direct", "connectors_execute_tool", "mcp_execute_tool"].flatMap((tool) =>
-      [undefined, null, "next-page"].map((cursor) => ({ tool, cursor })),
-    ),
-  )(
-    "filters native $tool receipts by task and cursor $cursor before loading their results",
-    async ({ tool, cursor }) => {
-      const f = nativeCandidateFixture();
-      const route = {
-        connectorId: "mcp",
-        resourceId: "server",
-        resourceRevision: 1,
-        toolName: "get_rows",
-      };
-      const args = { task_id: "provider-task", ...(cursor === undefined ? {} : { cursor }) };
-      f.effect.request = (
-        tool === "direct"
-          ? boundDirectApprovalRequest(route, args, "__rakazoCatalogTool")
-          : catalogApprovalRequest(
-              tool,
-              { id: "server:get_rows", arguments: args },
-              "__rakazoCatalogTool",
-              route,
-            )
-      ) as never;
-      const result = await recruiting.readNativeRecruitingCandidatePage(f.prisma, actor, "run", {
-        ...f.input,
-        cursor: cursor ?? null,
-      });
-      expect(result.effect.id).toBe("read");
-      const argsPath = ["2", tool === "direct" ? "args" : "arguments"];
-      expect(f.tx.externalEffect.findMany).toHaveBeenCalledExactlyOnceWith({
-        where: expect.objectContaining({
-          spaceId: actor.spaceId,
-          runId: "run",
-          status: "completed",
-          request: { path: ["0"], equals: "__rakazoCatalogTool" },
-          OR: expect.arrayContaining([
-            {
-              AND: expect.arrayContaining([
-                { request: { path: ["1"], equals: tool } },
-                { request: { path: [...argsPath, "task_id"], equals: "provider-task" } },
-                { request: { path: [...argsPath, "cursor"], equals: cursor ?? Prisma.AnyNull } },
-              ]),
-            },
-          ]),
-        }),
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      });
-    },
-  );
-
-  it("derives the connection from the completed native receipt when saving without an internal ID", async () => {
-    const f = nativeCandidateFixture();
-    const { mcpServerId: _, ...input } = f.input;
-    Object.assign(f.saveEffect, { request: input });
-    const result = await recruiting.saveNativeRecruitingCandidatePage(
-      f.prisma,
-      actor,
-      { ...f.trusted, effectRequest: input },
-      input,
-      { sourceEffectId: "read", rows: [f.row], outputArtifact: f.file },
-    );
-    expect(result).toMatchObject({ status: "saved", sourceEffectId: "read" });
-    expect(appendEventInTransaction).toHaveBeenCalledWith(
-      f.tx,
-      expect.objectContaining({
-        type: "recruiting.candidates.saved",
-        payload: expect.objectContaining({ mcpServerId: "server" }),
-      }),
-    );
-  });
-
-  it("selects only an owned completed get_rows page on the exact native task and cursor", async () => {
-    const f = nativeCandidateFixture();
-    const result = await recruiting.readNativeRecruitingCandidatePage(
-      f.prisma,
-      actor,
-      "run",
-      f.input,
-    );
-    expect(result.effect.id).toBe("read");
-    expect(result.snapshot).toEqual(f.snapshot);
-    expect(f.tx.recruitingResearchAction.findFirst).not.toHaveBeenCalled();
-    expect(f.tx.recruitingResearchTask.findUnique).not.toHaveBeenCalled();
-    expect(f.tx.event.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ createdAt: { lte: f.effect.createdAt } }),
-      }),
-    );
-    for (const input of [
-      { ...f.input, providerTaskId: "other-task" },
-      { ...f.input, mcpServerId: "other-server" },
-      { ...f.input, cursor: "another-page" },
-    ]) {
-      await expect(
-        recruiting.readNativeRecruitingCandidatePage(f.prisma, actor, "run", input),
-      ).rejects.toThrow();
-    }
-  });
-
-  it("indexes native candidates and completes its save receipt atomically without fake tasks", async () => {
-    const f = nativeCandidateFixture();
-    const candidate = await f.tx.recruitingCandidate.findUnique();
-    const consideration = {
-      operation: "hold",
-      source: {
-        messageId: "human-decision",
-        threadId: "thread",
-        seq: 5,
-        createdAt: "2026-10-18T00:00:00.000Z",
-        quote: "Pause consideration",
-        actor: { userId: actor.userId, spaceId: actor.spaceId },
-      },
-    };
-    Object.assign(candidate, { candidateKey: "linkedin:/in/example", consideration, revision: 5 });
-    const result = await recruiting.saveNativeRecruitingCandidatePage(
-      f.prisma,
-      actor,
-      f.trusted,
-      f.input,
-      { sourceEffectId: "read", rows: [f.row, { ...f.row }, null], outputArtifact: f.file },
-    );
-    expect(result).toMatchObject({
-      status: "saved",
-      roleId: "role",
-      roleRevisionId: "revision",
-      sourceEffectId: "read",
-      candidateRows: [
-        { rowIndex: 0, candidateKey: "linkedin:/in/example" },
-        { rowIndex: 1, candidateKey: "linkedin:/in/example" },
-        { rowIndex: 2, candidateKey: "source-row:read:2" },
-      ],
-    });
-    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        taskId: null,
-        actionId: null,
-        roleId: "role",
-        effectId: "read",
-        rowCount: 3,
-        observedAt: f.effect.updatedAt,
-        artifactHash: f.file.hash,
-      }),
-    });
-    expect(f.tx.recruitingCandidate.createMany).toHaveBeenCalledWith({
-      data: [
-        { roleId: "role", candidateKey: "linkedin:/in/example" },
-        { roleId: "role", candidateKey: "source-row:read:2" },
-      ],
-      skipDuplicates: true,
-    });
-    expect(candidate).toMatchObject({ consideration, revision: 5 });
-    expect(f.tx.recruitingCandidate.updateMany).not.toHaveBeenCalled();
-    expect(f.saveEffect).toMatchObject({ status: "completed", result });
-    expect(appendEventInTransaction).toHaveBeenCalledWith(
-      f.tx,
-      expect.objectContaining({
-        type: "recruiting.candidates.saved",
-        payload: expect.objectContaining({
-          candidateOutputSchema: "candidate_output_v1",
-          providerTaskId: "provider-task",
-          outputArtifact: { artifactId: "observation-artifact", sha256: f.file.hash },
-        }),
-      }),
-    );
-    expect(f.tx.recruitingResearchAction.update).not.toHaveBeenCalled();
-  });
-
-  it("keeps people sharing an article distinct across native source pages", async () => {
-    for (const [effectId, cursor] of [
-      ["first-read", null],
-      ["followup-read", "next-page"],
-    ] as const) {
-      const f = nativeCandidateFixture();
-      const row = {
-        ...f.row,
-        linkedin_url: null,
-        profile_url: { value: "https://example.test/interviews/two-people", source_id: effectId },
-      };
-      const rows = [row, { ...row, name: "Another Example" }, null];
-      const before = JSON.stringify(rows);
-      Object.assign(f.effect, {
-        id: effectId,
-        request: boundDirectApprovalRequest(
-          {
-            connectorId: "mcp",
-            resourceId: "server",
-            resourceRevision: 1,
-            toolName: "get_rows",
-          },
-          { task_id: "provider-task", cursor },
-          "__rakazoCatalogTool",
-        ),
-        result: { structuredContent: { rows } },
-      });
-      Object.assign(f.input, { cursor });
-      const bytes = Buffer.from(
-        stableJsonValue({ request: f.effect.request, providerResult: f.effect.result }),
-      );
-      Object.assign(f.file, {
-        hash: createHash("sha256").update(bytes).digest("hex"),
-        size: bytes.length,
-        clientNonce: `recruiting-observation:${effectId}`,
-      });
-      const result = await recruiting.saveNativeRecruitingCandidatePage(
-        f.prisma,
-        actor,
-        f.trusted,
-        f.input,
-        { sourceEffectId: effectId, rows, outputArtifact: f.file },
-      );
-      const candidateKey = `source-row:${effectId}:0`;
-      const otherKey = `source-row:${effectId}:1`;
-      const unknownKey = `source-row:${effectId}:2`;
-      expect(result).toMatchObject({
-        candidateRows: [
-          { rowIndex: 0, candidateKey },
-          { rowIndex: 1, candidateKey: otherKey },
-          { rowIndex: 2, candidateKey: unknownKey },
-        ],
-      });
-      expect(f.tx.recruitingCandidate.createMany).toHaveBeenCalledWith({
-        data: [
-          { roleId: "role", candidateKey },
-          { roleId: "role", candidateKey: otherKey },
-          { roleId: "role", candidateKey: unknownKey },
-        ],
-        skipDuplicates: true,
-      });
-      expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledWith({
-        data: [
-          expect.objectContaining({ pageId: effectId, rowIndex: 0, candidateKey }),
-          expect.objectContaining({ pageId: effectId, rowIndex: 1, candidateKey: otherKey }),
-          expect.objectContaining({ pageId: effectId, rowIndex: 2, candidateKey: unknownKey }),
-        ],
-      });
-      expect(JSON.stringify(rows)).toBe(before);
-    }
-  });
-
-  it.each(["foreign-run", "wrong-hash", "expired-lease", "stale-role", "changed-receipt"])(
-    "rejects %s without candidate writes",
-    async (failure) => {
-      const f = nativeCandidateFixture();
-      if (failure === "foreign-run") f.effect.runId = "other-run";
-      if (failure === "wrong-hash") f.file.hash = "f".repeat(64);
-      if (failure === "expired-lease") Object.assign(f.run, { leaseExpiresAt: new Date(0) });
-      if (failure === "stale-role") f.input.expectedRoleRevision = 2;
-      if (failure === "changed-receipt")
-        f.saveEffect.request = { ...f.input, providerTaskId: "other" };
-      await expect(
-        recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
-          sourceEffectId: "read",
-          rows: [f.row],
-          outputArtifact: f.file,
-        }),
-      ).rejects.toThrow();
-      expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
-      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
-    },
-  );
-
-  it("replays a completed save after a role revision without recreating projections", async () => {
-    const f = nativeCandidateFixture();
-    const saved = {
-      status: "saved",
-      roleId: "role",
-      roleRevisionId: "revision",
-      sourceEffectId: "read",
-      outputArtifact: { artifactId: "observation-artifact", sha256: f.file.hash },
-      candidateRows: [{ rowIndex: 0, candidateKey: "linkedin:/in/example" }],
-    };
-    Object.assign(f.saveEffect, { status: "completed", result: saved });
-    f.input.expectedRoleRevision = 1;
-    f.tx.recruitingRole.findFirst.mockResolvedValue({ ...f.role, revision: 2 } as never);
-    expect(
-      await recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
-        sourceEffectId: "read",
-        rows: [f.row],
-        outputArtifact: f.file,
-      }),
-    ).toEqual(saved);
-    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
   });
 });
 
@@ -7255,6 +6584,26 @@ describe("people search candidate save", () => {
     expect(result.candidateRows[0]).toMatchObject({ alreadyInPool: true });
   });
 
+  it("keeps the people a paid search returned after the recruiter stopped the turn", async () => {
+    const f = peopleSearchFixture();
+    // Stop clears the lease; the provider still answers the search it already accepted.
+    Object.assign(f.run, {
+      status: "cancelled",
+      error: STOPPED_TURN,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+    await f.save();
+    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledOnce();
+  });
+
+  it("saves nothing after Stop everything or a cancel that is not a stopped turn", async () => {
+    const f = peopleSearchFixture();
+    Object.assign(f.run, { status: "cancelled", error: null, leaseOwner: null });
+    await expect(f.save()).rejects.toThrow(IsolationError);
+    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
+  });
+
   it.each(["foreign-source", "receipt-hash", "stale-role"])("refuses %s", async (boundary) => {
     const f = peopleSearchFixture();
     if (boundary === "foreign-source") f.completedSources.count = 0;
@@ -7262,77 +6611,6 @@ describe("people search candidate save", () => {
     if (boundary === "stale-role") f.role.revision = 2;
     await expect(f.save()).rejects.toThrow(
       boundary === "stale-role" ? recruiting.RecruitingConflictError : IsolationError,
-    );
-    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
-  });
-});
-
-describe("quality check grade save", () => {
-  function gradesFixture() {
-    const f = nativeCandidateFixture();
-    const grade = {
-      name: "Ada Example",
-      linkedin_url: "https://www.linkedin.com/in/example",
-      current_title: "Sort Center Manager",
-      match_score: 88,
-      match_tier: "Strong" as const,
-      fit_reasons: "Runs a parcel sort center in Edison, NJ",
-      concerns: [],
-      requirements_assessment: [
-        { requirement: "Based in New Jersey", status: "met" as const, evidence: "Edison, NJ" },
-      ],
-    };
-    const input = {
-      operation: "save_grades" as const,
-      expectedRoleRevision: 1,
-      rows: [grade],
-    };
-    Object.assign(f.saveEffect, { request: input });
-    const trusted = { ...f.trusted, effectRequest: input };
-    const saved = { count: 1 };
-    Object.assign(f.tx.recruitingCandidate, {
-      count: vi.fn(async () => saved.count),
-      createManyAndReturn: vi.fn(async () => []),
-    });
-    const bytes = Buffer.from(stableJsonValue(recruiting.recruitingGradesReceipt(input)));
-    const outputArtifact = {
-      name: "recruiting-grades.json",
-      mimeType: "application/json",
-      size: bytes.length,
-      hash: createHash("sha256").update(bytes).digest("hex"),
-      storageKey: "receipt",
-      clientNonce: "recruiting-grades:save",
-    };
-    const save = () =>
-      recruiting.saveRecruitingCandidateGrades(f.prisma, actor, trusted, input, { outputArtifact });
-    return { ...f, input, saved, outputArtifact, save };
-  }
-
-  it("saves grades for people already in the role with their score and tier", async () => {
-    const f = gradesFixture();
-    const result = (await f.save()) as Record<string, unknown>;
-    expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledExactlyOnceWith({
-      data: [
-        expect.objectContaining({
-          candidateKey: "linkedin:/in/example",
-          matchFields: { match_score: 88, match_tier: "Strong" },
-        }),
-      ],
-    });
-    expect(result).toMatchObject({
-      status: "saved",
-      source: { kind: "reviewer_grades" },
-      graded: 1,
-    });
-    expect(f.saveEffect).toMatchObject({ status: "completed", result });
-  });
-
-  it.each(["not-in-role", "receipt-hash"])("refuses %s", async (boundary) => {
-    const f = gradesFixture();
-    if (boundary === "not-in-role") f.saved.count = 0;
-    if (boundary === "receipt-hash") f.outputArtifact.hash = "e".repeat(64);
-    await expect(f.save()).rejects.toThrow(
-      boundary === "not-in-role" ? recruiting.RecruitingGradeRowsError : IsolationError,
     );
     expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
   });
@@ -7425,5 +6703,47 @@ describe("people-search page provenance on read", () => {
         candidateKey: f.occurrence.candidateKey,
       }),
     ).rejects.toThrow(IsolationError);
+  });
+});
+
+describe("calibration round view", () => {
+  it("shows each person's saved pass or hold beside the round's list", async () => {
+    const f = fixture();
+    const consideration = (operation: string) => ({
+      operation,
+      source: {
+        messageId: "message",
+        threadId: "thread",
+        seq: 1,
+        createdAt: new Date(0).toISOString(),
+        quote: "Not a fit",
+        actor: { userId: actor.userId, spaceId: actor.spaceId },
+      },
+    });
+    Object.assign(f.tx, {
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async () => ({
+          round: 1,
+          candidateKeys: ["a", "b", "c"],
+          createdAt: new Date(1),
+          approvedAt: null,
+        })),
+      },
+      recruitingCandidateOccurrence: { findMany: vi.fn(async () => []) },
+    });
+    Object.assign(f.tx.recruitingCandidate, {
+      findMany: vi.fn(async () => [
+        { candidateKey: "b", consideration: consideration("pass") },
+        { candidateKey: "c", consideration: consideration("resume") },
+      ]),
+    });
+    const view = await recruiting.readRecruitingCalibrationRound(f.prisma, actor, {
+      threadId: "thread",
+    });
+    expect(view.round?.candidates.map((candidate) => candidate.decision)).toEqual([
+      undefined,
+      "pass",
+      undefined,
+    ]);
   });
 });

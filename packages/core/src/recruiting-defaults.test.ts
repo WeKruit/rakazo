@@ -1,40 +1,23 @@
 import { disabledBuiltinToolSet } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
+import { SKILL_CATALOG_DESCRIPTION_MAX } from "./agent-skill.js";
 import {
+  accountWideSkill,
   creditEstimateNote,
-  greetsByName,
   isChineseText,
   isEnglishText,
   RECRUITER_LANGUAGE,
-  RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
-  RECRUITING_PDF_RENDERING,
-  RECRUITING_ROUND_NEXT_STEP,
-  RECRUITING_SCALE_START,
-  RECRUITING_SEARCH_BRIEF_TEMPLATE,
-  RECRUITING_SEARCH_SAVED_NEXT_STEP,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
+  recruiterLanguage,
   recruiterLanguageText,
-  recruitingBriefConfirmedNextStep,
-  recruitingNextStepCard,
-  roleOpenedNote,
-  signedAsTeam,
+  replyLanguageNote,
+  screenLanguage,
+  textLanguage,
   unfilledPlaceholder,
 } from "./recruiting-defaults.js";
 
-describe("calibration fast path", () => {
-  it("hands the new revision on with the confirmed brief", () => {
-    expect(recruitingBriefConfirmedNextStep(5)).toContain("expectedRoleRevision 5");
-  });
-
-  it("keeps the pick off files and shell", () => {
-    expect(RECRUITING_SEARCH_SAVED_NEXT_STEP).toContain("calibration_round");
-    expect(RECRUITING_SEARCH_SAVED_NEXT_STEP).toContain("no files, shell");
-  });
-});
-
-// Behavior rules that fixed a real bug are pinned in recruiting-rules.test.ts.
 describe("maintained recruiting defaults", () => {
   // Same budget Workloop uses: a longer prompt dilutes every rule in it. Shorten before adding.
   it.each(RECRUITING_DEFAULT_BOTS)("$name instructions stay within 12,000 characters", (bot) => {
@@ -45,101 +28,19 @@ describe("maintained recruiting defaults", () => {
     expect(skill.body.length).toBeLessThanOrEqual(8_000);
   });
 
-  // Each shared rule has one source: the executor adds recruiter language to every recruiting
-  // run and the role context carries the calibration, scale and PDF rules.
-  it.each([
-    RECRUITER_LANGUAGE,
-    RECRUITING_CALIBRATION_QUICK_SEARCH,
-    RECRUITING_ROUND_NEXT_STEP,
-    RECRUITING_SCALE_START,
-    RECRUITING_PDF_RENDERING,
-  ])("keeps a shared rule out of bot instructions and skills (%#)", (rule) => {
-    for (const bot of RECRUITING_DEFAULT_BOTS) expect(bot.instructions).not.toContain(rule);
-    for (const skill of RECRUITING_DEFAULT_SKILLS) expect(skill.body).not.toContain(rule);
-  });
-
-  // Skills ship with the code, so accounts with customized bot text still get the template.
-  it("carries the search brief template in the sourcing skill", () => {
-    const sourcing = RECRUITING_DEFAULT_SKILLS.find(
-      (skill) => skill.name === "Recruitment sourcing continuation",
-    )!;
-    expect(sourcing.body).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
-  });
-
-  it("keeps account reads with Main before specialist work", () => {
-    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain(
-      "Answer read-only interviews, shortlist, replies, sequences and roles questions with recruiting_candidates yourself; do not hand off",
-    );
-    expect(main.instructions).toContain(
-      "Without a linked role default to all active roles and name each role",
-    );
-    expect(main.instructions).toContain("For specialist work beyond those reads");
-    expect(main.instructions.indexOf("do not hand off")).toBeLessThan(
-      main.instructions.indexOf("call handoff_to_bot"),
-    );
-  });
-
-  it("gives Sourcer the scale stage order", () => {
-    const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
-    const order = [
-      "accepted round and every round's feedback",
-      "agent runs (agent_run) toward the target",
-      "previousRunId set",
-      "feedback of any scope",
-      "next wave's query",
-    ].map((step) => sourcer.instructions.indexOf(step));
-    expect(order.every((index) => index >= 0)).toBe(true);
-    expect(order).toEqual([...order].sort((a, b) => a - b));
-  });
-});
-
-describe("recruiter language", () => {
-  it("answers a how-to question with steps, not a question card", () => {
-    // Staging 11-13: "what do I do first" got three question cards in a row and no steps.
-    expect(RECRUITER_LANGUAGE).toContain("two to four short numbered steps");
-    expect(RECRUITER_LANGUAGE).toContain("never answer it with a question card");
-    expect(RECRUITER_LANGUAGE).toContain("never a role");
+  // The catalog cuts a longer description, and the model routes by it.
+  it.each(RECRUITING_DEFAULT_SKILLS)("$name description fits the skill catalog", (skill) => {
+    expect(skill.description.length).toBeLessThanOrEqual(SKILL_CATALOG_DESCRIPTION_MAX);
   });
 });
 
 describe("unfilledPlaceholder", () => {
-  it("finds a bracketed blank left in an email", () => {
-    expect(unfilledPlaceholder("Hi [Candidate Name],\n\nA role.")).toBe("[Candidate Name]");
-    expect(unfilledPlaceholder("<p>Best,</p><p>[Your name]</p>")).toBe("[Your name]");
-    expect(unfilledPlaceholder("您好 [候选人姓名]，")).toBe("[候选人姓名]");
+  it("finds a merge field the sending account does not fill", () => {
     expect(unfilledPlaceholder("Hi {{firstName}},\n\nA role.")).toBeUndefined();
-    expect(unfilledPlaceholder("See [our site](https://example.com) for more.")).toBeUndefined();
-    expect(unfilledPlaceholder("Rated [1] of 5.")).toBeUndefined();
-  });
-});
-
-describe("greetsByName", () => {
-  it("flags a shared email written to one named person", () => {
-    // Staging 11-13: "Hi Noah," made Kruit split Noah and Ada into two campaigns, so the
-    // first card listed only Noah.
-    expect(greetsByName("Hi Noah, I'm reaching out about a role.\n\nBest,\nNoah Liu")).toBe(true);
-    expect(greetsByName("<p>Dear Ada:</p><p>Hello</p>")).toBe(true);
-    expect(greetsByName("Hi {{firstName}},\n\nA role in Seattle.")).toBe(false);
-    expect(greetsByName("Hi there,\n\nA role in Seattle.")).toBe(false);
-    expect(greetsByName("I'm reaching out about a role, Noah.")).toBe(false);
-  });
-});
-
-describe("signedAsTeam", () => {
-  it("refuses an email signed as Kruit", () => {
-    // Staging 11-13: a template written "from my voice" was signed "Kruit".
-    expect(signedAsTeam("Hi {{firstName}},\n\nA role.\n\nBest,\nKruit")).toBe(true);
-    expect(signedAsTeam("Hi {{firstName}},\n\nA role.\n\nBest,\nDavid Chen")).toBe(false);
-  });
-
-  it("finds an email signed by a team instead of a person", () => {
-    expect(signedAsTeam("Hi Noah,\n\nWould you be open to a chat?\n\nBest,\nRecruiting")).toBe(
-      true,
-    );
-    expect(signedAsTeam("Hi Noah,\n\nBest,\nThe Recruiting Team.")).toBe(true);
-    expect(signedAsTeam("Hi Noah,\n\nBest,\nJules Hou")).toBe(false);
-    expect(signedAsTeam("Hi Noah, are you open to recruiting work?")).toBe(false);
+    expect(unfilledPlaceholder("Hi {{ first_name }} at {{companyName}}.")).toBeUndefined();
+    // A merge field nobody fills goes out as written, in any language.
+    expect(unfilledPlaceholder("{{회사명}}에서 진행 중인 역할")).toBe("{{회사명}}");
+    expect(unfilledPlaceholder("Join {{Company}} in Seoul.")).toBe("{{Company}}");
   });
 });
 
@@ -165,7 +66,7 @@ describe("isChineseText", () => {
     expect(isChineseText("仓库运营经理职位的中文要求应如何设定？")).toBe(true);
     expect(isChineseText("以后都用中文回复我")).toBe(true);
     expect(isChineseText("帮我找应届生，USC 的，CS 专业，会做 AI agent")).toBe(true);
-    // Staging 11-13: this brief got "Got it, on it." and English status lines.
+    // Staging 11-13: this brief got English status lines.
     const brief =
       "新role Senior Data Engineer，Seattle，ref 1801，hybrid每周3天，6年+，Spark Kafka生产经验，base 180-220k。两个人：Noah Liu noah-scheduling+noah1801@mail.grokbot.com，Ada Chen noah-scheduling+ada1801@mail.grokbot.com";
     expect(isChineseText(brief)).toBe(true);
@@ -177,6 +78,11 @@ describe("isChineseText", () => {
       false,
     );
     expect(isChineseText("")).toBe(false);
+    // Sim 11-14: a Korean recruiter quoting the 收件箱 menu got a Chinese first line.
+    expect(
+      isChineseText("收件箱는 중국어잖아요. 한국어로 말해주세요. 메뉴 이름이 정확히 뭔가요?"),
+    ).toBe(false);
+    expect(isChineseText("受信箱はどこですか")).toBe(false);
   });
 });
 
@@ -188,6 +94,30 @@ describe("isEnglishText", () => {
     expect(
       isEnglishText("测试固定 · Senior Backend Engineer in New York, 6+ years of Go or Java"),
     ).toBe(true);
+  });
+});
+
+describe("textLanguage", () => {
+  it("names the language a message is clearly in", () => {
+    expect(textLanguage("对了，远程也可以")).toBe("zh");
+    expect(textLanguage("New role from our client Northwind Pay. Please start sourcing")).toBe(
+      "en",
+    );
+    // Sim 11-14: an English spec with the recruiter's own Chinese instruction got English lines.
+    expect(
+      textLanguage(
+        "Staff Backend Engineer, Go, payments infra, NY hybrid, 200-250k, series C fintech. 模板用 Hi {{firstName}}，不是发给某个人的",
+      ),
+    ).toBe("zh");
+    // A Korean recruiter quoting a Chinese menu name got Chinese and English lines.
+    expect(textLanguage("收件箱는 중국어잖아요. 한국어로 말해주세요.")).toBe("ko");
+    expect(textLanguage("テンプレートをお願いします")).toBe("ja");
+    expect(textLanguage("Acme Test Co")).toBeUndefined();
+  });
+
+  it("keeps the recruiter's last clear language through short answers", () => {
+    expect(recruiterLanguage(["200-250k", "영어 버전으로 부탁드립니다"])).toBe("ko");
+    expect(recruiterLanguage(["OK"])).toBe("en");
   });
 });
 
@@ -218,49 +148,6 @@ describe("creditEstimateNote", () => {
   });
 });
 
-describe("recruitingNextStepCard", () => {
-  it("asks in the recruiter's language, so a Chinese chat gets no English card", () => {
-    const card = recruitingNextStepCard(true);
-    expect(`${card.text}${card.options.join("")}`).not.toMatch(/[A-Za-z]/);
-    expect(card.options).toHaveLength(3);
-    expect(recruitingNextStepCard().options[0]).toBe("Find 150 similar people");
-    expect(recruitingNextStepCard(false, true).options[0]).toBe("Search deeper");
-    expect(recruitingNextStepCard(true, true).options[0]).toBe("深挖一次");
-  });
-});
-
-describe("global recruiting overview", () => {
-  // Staging eval 11-11: "email alex… ask if he's free next week" opened a new role to send it.
-  it("hands a one-off email to Outreach without opening a role", () => {
-    const body = RECRUITING_DEFAULT_SKILLS.find(
-      (skill) => skill.name === "Global recruiting overview",
-    )?.body;
-    expect(body).toContain("goes to Outreach in this conversation with handoff_to_bot");
-    expect(body).toContain("never open a role for it");
-    // Staging eval 11-11: after that line a pasted JD opened no role.
-    expect(body).toContain("a new role, a JD or hiring requirements still go to start_role");
-    // Staging eval 11-11: "write me a cold outreach email…" was answered with "who should I address it to?"
-    expect(body).toContain("never ask who it is addressed to first");
-    expect(body).toContain("never a candidate thanking an interviewer");
-    // Staging eval 11-11: the request went to Outreach, which still asked who it was for.
-    const outreach = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "outreach")!;
-    expect(outreach.instructions).toContain(
-      "else the role's first result; else a template with blanks",
-    );
-    // Staging gate 11-11: Kruit handed it to Outreach, which wrote a three-email sequence.
-    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain("an email or template naming no one you write yourself");
-  });
-});
-
-describe("roleOpenedNote", () => {
-  it("gives its example in the language of the recruiter's newest message", () => {
-    expect(roleOpenedNote(true)).toContain("「岗位已经开好");
-    expect(roleOpenedNote(true)).not.toContain("I opened the role");
-    expect(roleOpenedNote(false)).toContain("I opened the role");
-  });
-});
-
 describe("recruiting tool list", () => {
   it("drops only real built-in tools and keeps every tool the playbook names", () => {
     expect(disabledBuiltinToolSet(RECRUITING_UNUSED_BUILTIN_TOOLS).size).toBe(
@@ -268,13 +155,32 @@ describe("recruiting tool list", () => {
     );
     const playbook = [
       RECRUITER_LANGUAGE,
-      RECRUITING_CALIBRATION_QUICK_SEARCH,
-      RECRUITING_SCALE_START,
-      RECRUITING_ROUND_NEXT_STEP,
       ...RECRUITING_DEFAULT_BOTS.map((bot) => bot.instructions),
       ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.body),
     ].join("\n");
     for (const name of RECRUITING_UNUSED_BUILTIN_TOOLS)
       expect(playbook, name).not.toMatch(new RegExp(`\\b${name}\\b`));
+  });
+});
+
+describe("screenLanguage", () => {
+  // Staging 11-14: a Chinese chat was told "Sequence" while the screen showed 邮件序列; the
+  // screen's own locale decides the menu names, and only the Chinese catalog translates them.
+  it("names the menu in the screen's language, not the message's", () => {
+    expect(screenLanguage("zh-CN")).toBe("zh");
+    expect(screenLanguage("ko")).toBe("en");
+    expect(screenLanguage(undefined)).toBeUndefined();
+    expect(replyLanguageNote("zh", screenLanguage("en"))).not.toContain("邮件序列");
+    expect(replyLanguageNote("en", screenLanguage("zh-CN"))).toContain("邮件序列");
+  });
+});
+
+describe("accountWideSkill", () => {
+  it("lists only the user's own skills there", () => {
+    // Staging handoff3: "Write an email or template" listed there had Kruit draft in the main chat.
+    const listed = RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name).filter(accountWideSkill);
+    expect(listed).toEqual([]);
+    expect(accountWideSkill("Progress across roles")).toBe(false);
+    expect(accountWideSkill("My weekly summary")).toBe(true);
   });
 });

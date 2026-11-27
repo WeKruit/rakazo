@@ -76,6 +76,27 @@ it("shows incomplete coverage and unknown metrics, and sends role filtering to t
   }
 });
 
+it("loads once when the parent re-renders with a new loader", async () => {
+  const load = vi.fn(async (_input: RecruitingAnalyticsInput) => output);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const view = () => (
+    <MemoryRouter>
+      <RecruitingAnalytics accountKey="a" load={(input) => load(input)} />
+    </MemoryRouter>
+  );
+  try {
+    await act(async () => root.render(view()));
+    await act(async () => root.render(view()));
+    await act(async () => root.render(view()));
+    expect(load).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
+
 it.each([
   ["2026-10-01", "2026-99-99"],
   ["2026-02-30", "2026-03-31"],

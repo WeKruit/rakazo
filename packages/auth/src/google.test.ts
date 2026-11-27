@@ -168,4 +168,22 @@ describe("Google sign-in", () => {
     expect(response.headers.get("location")).toContain("account_not_linked");
     expect(state.db.account).toHaveLength(1);
   });
+
+  it("signs a verified existing account in with the same verified Google email", async () => {
+    policy = { signupsEnabled: true, signupAllowlist: "" };
+    await request("/sign-up/email", {
+      email: "new@gmail.test",
+      password: "test-password-123",
+      name: "Local",
+    });
+    for (const user of state.db.user ?? []) user.emailVerified = true;
+    cookies = "";
+    const response = await signInWithGoogle();
+    expect(response.headers.get("location")).toBe(`${origin}/app`);
+    expect(state.db.user).toHaveLength(1);
+    expect(state.db.account?.map((account) => account.providerId).sort()).toEqual([
+      "credential",
+      "google",
+    ]);
+  });
 });

@@ -153,26 +153,14 @@ describe("jsonSchemaParameters", () => {
     }
     for (const input of [
       { operation: "list", limit: 0 },
-      { operation: "list", limit: 101 },
+      { operation: "list", limit: 201 },
       { operation: "list", query: "x".repeat(241) },
-      { operation: "sources" },
       { operation: "sources", candidateKey: "candidate", query: "Example" },
     ]) {
       expect(() => parseConnectorToolArgs(tool.inputSchema, input)).toThrow();
       expect(() => RecruitingCandidatesToolInputSchema.parse(input)).toThrow();
     }
   });
-
-  it.each(["recruiting_role", "recruiting_feedback"])(
-    "preserves exact human quote guidance in the %s model schema",
-    (name) => {
-      const tool = builtinAgentTools.find((entry) => entry.name === name)!;
-      const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
-      expect(JSON.stringify(wire)).toContain(
-        "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
-      );
-    },
-  );
 
   it.each(["recruiting_feedback", "remember", "save_shared_memory"])(
     "preserves unique-quote preference edits through the %s native Pi wire",
@@ -227,20 +215,14 @@ describe("jsonSchemaParameters", () => {
     expect(tool.description).toContain(
       "the runtime adds the verified human instruction only as role authorization",
     );
-    expect(tool.description).toContain("Never invent message IDs, artifact IDs or read timestamps");
     expect(tool.description).not.toContain("expectedRevision:0");
     expect(tool.description).toContain("For JD URLs, call web_fetch before creating the role");
     expect(tool.description).toContain("sourceMaterial");
-    expect(tool.description).toContain("before role creation");
     expect(tool.description).toContain("not complete JD coverage");
     for (const guidance of [
       'expression:{kind:"atom",id:',
       'anchor:{kind:"artifact",artifact:sourceMaterial.artifact,locator:',
-      "readAt:sourceMaterial.readAt",
-      "url:sourceMaterial.url",
       "Assign stable local criterion, atom and source IDs",
-      "quote:<one exact contiguous excerpt of returned text>",
-      "Never omit words or join separate passages within a quote; cite separate excerpts with separate sourceRefs.",
       "Correct deterministic schema rejections using the actual validator error and read receipt",
     ])
       expect(tool.description).toContain(guidance);
@@ -321,7 +303,6 @@ describe("jsonSchemaParameters", () => {
       "each criterion gets the rule its priority implies",
     ])
       expect(JSON.stringify(wire)).toContain(guidance);
-    expect(tool.description).toContain("Different quotes require different source IDs");
     expect(
       validateToolArguments(
         { name: tool.name, description: tool.description, parameters: wire },
@@ -368,9 +349,14 @@ describe("jsonSchemaParameters", () => {
     const parameters = parametersFor(tool!);
     const wire = JSON.parse(JSON.stringify(parameters));
     const inputs: ToolCall["arguments"][] = [
-      { operation: "save_results", expectedRoleRevision: 1, providerTaskId: "task", cursor: null },
-      { operation: "status", taskId: "local-task" },
-      { operation: "rows", taskId: "local-task", limit: 7, cursor: "  opaque+/=\r\n " },
+      { operation: "save_search", expectedRoleRevision: 1 },
+      {
+        operation: "import_csv",
+        roleId: "role",
+        expectedRoleRevision: 1,
+        artifactId: "list",
+        mapping: { name: "  Full name\r\n " },
+      },
     ];
     for (const input of inputs) {
       expect(parseConnectorToolArgs(tool!.inputSchema, input)).toEqual(input);
@@ -387,93 +373,6 @@ describe("jsonSchemaParameters", () => {
     }
     expect(wire.type).toBe("object");
     expect(wire).not.toHaveProperty("oneOf");
-  });
-
-  it("explains full reassessment inputs and exact source preservation after validation errors", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess")!;
-    for (const guidance of [
-      "Reassess shape:",
-      "questions:[]",
-      "atomJudgments:[]",
-      "employmentEvaluations:[]",
-      "including quote, selection and readAt",
-      "Correct a deterministic validation rejection",
-    ])
-      expect(tool.description).toContain(guidance);
-  });
-
-  it("preserves typed assessment sources, reassessment and original-card questions through the native Pi validator", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess")!;
-    const parameters = parametersFor(tool);
-    const wire = JSON.parse(JSON.stringify(parameters));
-    const quote = "  Built geometry transforms.\r\n";
-    const save = {
-      operation: "save",
-      roleId: "role-1",
-      roleRevisionId: "role-revision-1",
-      candidateKey: "candidate-1",
-      expectedRevision: 0,
-      facts: [
-        {
-          id: "fact-1",
-          kind: "statement",
-          statement: "Personally implemented transforms",
-          sourceRefIds: ["source-1"],
-        },
-      ],
-      questions: [],
-      sourceRefs: [
-        {
-          id: "source-1",
-          kind: "original_material",
-          anchor: { kind: "message", messageId: "message-1", locator: "text" },
-          readState: "read",
-          readAt: "2026-10-16T00:00:00.000Z",
-          quote,
-          selection: { kind: "message_text", blockIndex: 0, start: 0, end: quote.length },
-        },
-      ],
-      atomJudgments: [
-        {
-          atomId: "geometry",
-          verdict: "met",
-          factIds: ["fact-1"],
-          evidence: ["source-1"],
-          missing: [],
-        },
-      ],
-      employmentEvaluations: [],
-    };
-    const inputs: ToolCall["arguments"][] = [
-      save,
-      { operation: "read", candidateKey: "candidate-1" },
-      { ...save, operation: "reassess", expectedRevision: 1, atomJudgments: [] },
-      {
-        operation: "ask",
-        roleId: save.roleId,
-        roleRevisionId: save.roleRevisionId,
-        target: {
-          kind: "candidate",
-          candidateKey: save.candidateKey,
-          assessmentVersion: 1,
-          criterionIds: ["geometry"],
-        },
-        question: "  What did you implement?  ",
-        options: ["Code", "Library"],
-      },
-    ];
-    for (const input of inputs) {
-      for (const schema of [tool.inputSchema, wire]) {
-        expect(parseConnectorToolArgs(schema, input)).toEqual(input);
-        expect(() => parseConnectorToolArgs(schema, { ...input, hardGate: "met" })).toThrow();
-      }
-      expect(
-        validateToolArguments(
-          { name: tool.name, description: tool.description, parameters },
-          { type: "toolCall", id: "assessment-call", name: tool.name, arguments: input },
-        ),
-      ).toEqual(input);
-    }
   });
 
   it("leaves preference feedback to recruiting_feedback instead of the memory tool schemas", () => {

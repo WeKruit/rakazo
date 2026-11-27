@@ -136,22 +136,22 @@ it("shows a retry when the full transcript fails instead of presenting a partial
   expect(container.textContent).toContain("No messages yet.");
 });
 
-it("stops only the chosen research follow-up and preserves pending cloud cancellation", async () => {
-  const research = { id: "research", kind: "research", status: "running" };
+it("stops only the chosen search follow-up and preserves pending cloud cancellation", async () => {
+  const search = { id: "search", kind: "agent_run", status: "running" };
   const cloud = { id: "cloud", kind: "cloud_agent", status: "running" };
   api.backgroundTasks
-    .mockResolvedValueOnce([research, cloud])
+    .mockResolvedValueOnce([search, cloud])
     .mockResolvedValueOnce([cloud])
     .mockResolvedValueOnce([{ ...cloud, status: "cancelling" }]);
   api.cancelTask.mockResolvedValue({ ok: true });
   await act(async () =>
     root.render(<BackgroundTasks target={{ groupId: "test-group" }} onClose={vi.fn()} />),
   );
-  await act(async () => button("Stop updates").click());
+  await act(async () => button("Stop following").click());
   expect(api.cancelTask).toHaveBeenCalledExactlyOnceWith({
     groupId: "test-group",
-    kind: "research",
-    id: "research",
+    kind: "agent_run",
+    id: "search",
   });
   expect(container.textContent).not.toContain("Finding candidates");
   await act(async () => button("Cancel task").click());

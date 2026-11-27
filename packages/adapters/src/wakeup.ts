@@ -42,6 +42,9 @@ export class GraphileJobPublisher implements JobPublisher {
   }
 
   private async priority(utils: WorkerUtils, job: BackgroundJob): Promise<number> {
+    // Staging 11-16: about 20,000 routine wakeups due in one hour queued ahead of recruiters'
+    // turns at the same priority, and a first reply waited 12 s to start.
+    if (job.name === "routine.wakeup") return BACKGROUND_PRIORITY;
     if (job.name !== "run.continue") return 0;
     const background = await utils.withPgClient(async (client) => {
       const found = await client.query(
@@ -173,6 +176,14 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
     });
     runner.events.on("job:failed", ({ job, error }) => {
       recordHistoryCompactAttemptsExhausted(job, error);
+      // The queue will not try this job again: one error line the deployment owner can alert on.
+      // Runs are not lost with it; the reconciler re-queues any run still waiting.
+      // history.compact already logs its own permanent failure above.
+      if (job.attempts >= job.max_attempts && job.task_identifier !== "history.compact")
+        getLogger().error("job.exhausted", error, {
+          "job.type": job.task_identifier,
+          "job.attempts": job.attempts,
+        });
     });
     if (this.stopping) {
       await runner.stop().catch(() => undefined);
@@ -482,13 +493,19 @@ export function startJobQueueReporter(pool: Pool, slots: number, signal: AbortSi
          coalesce(extract(epoch from now() - min(j.run_at)
            filter (where j.is_available and j.run_at <= now())), 0)::int as "oldestReadySeconds",
          count(*) filter (where j.locked_at is not null) as running,
-         count(*) filter (where j.attempts >= j.max_attempts) as exhausted
+         count(*) filter (where j.attempts >= j.max_attempts and j.last_error is not null)
+           as exhausted
        from graphile_worker._private_jobs j
        join graphile_worker._private_tasks t on t.id = j.task_id`,
       [BACKGROUND_PRIORITY],
     );
     const row = rows[0] ?? {};
+    // Resident size beside the JavaScript heap: a gap that only grows is native memory kept.
+    const memory = process.memoryUsage();
     getLogger().info("jobs.queue", {
+      rssMb: Math.round(memory.rss / 1e6),
+      heapUsedMb: Math.round(memory.heapUsed / 1e6),
+      externalMb: Math.round(memory.external / 1e6),
       slots,
       ready: Number(row.ready ?? 0),
       readyChats: Number(row.readyChats ?? 0),

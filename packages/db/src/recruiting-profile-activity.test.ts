@@ -17,7 +17,7 @@ const actor: Actor = {
   email: "owner@example.test",
   isDeploymentOwner: false,
 };
-const target = { roleId: "role", candidateKey: "autumn:person" };
+const target = { roleId: "role", candidateKey: "sourced:person" };
 const input = { ...target, viewId: "00000000-0000-4000-8000-000000000001" };
 const now = new Date("2026-10-23T12:00:00Z");
 type Event = {
@@ -31,6 +31,7 @@ type Event = {
 let events: Event[];
 let prisma: PrismaClient;
 let tx: ReturnType<typeof fixture>;
+type PayloadIs = { payload: { path: string[]; equals: unknown } };
 function fixture() {
   const owned = (where: Record<string, unknown>) =>
     where.spaceId === "space" && where.userId === "owner";
@@ -41,17 +42,19 @@ function fixture() {
       threadId: string;
       type: string;
       thread: { spaceId: string; userId: string };
-      AND: Array<{ payload: { path: string[]; equals: unknown } }>;
+      AND: Array<PayloadIs | { OR: PayloadIs[] }>;
     },
   ) =>
     owned(where.thread) &&
     event.spaceId === where.spaceId &&
     event.threadId === where.threadId &&
     event.type === where.type &&
-    where.AND.every(
-      ({ payload }) =>
-        event.payload[payload.path[0]!] ===
-        (payload.equals === Prisma.JsonNull ? null : payload.equals),
+    where.AND.every((clause) =>
+      ("OR" in clause ? clause.OR : [clause]).some(
+        ({ payload }) =>
+          event.payload[payload.path[0]!] ===
+          (payload.equals === Prisma.JsonNull ? null : payload.equals),
+      ),
     );
   return {
     $queryRaw: vi.fn(async () => [{ id: "thread" }]),
@@ -146,7 +149,7 @@ it("rejects foreign owner/space/role/person on both paths without inspecting eve
     [{ ...actor, userId: "other" }, target],
     [{ ...actor, spaceId: "other" }, target],
     [actor, { ...target, roleId: "other" }],
-    [actor, { ...target, candidateKey: "autumn:missing" }],
+    [actor, { ...target, candidateKey: "sourced:missing" }],
     [actor, { ...target, candidateKey: "crm:foreign" }],
   ] as const) {
     await expect(listRecruitingProfileActivity(prisma, identity, chosen)).rejects.toBeInstanceOf(
@@ -175,7 +178,7 @@ it("filters every list by actor, candidate, role and binding before returning a 
   const base = events[0]!;
   events.push(
     { ...base, id: "other-actor", payload: { ...base.payload, actorUserId: "other" } },
-    { ...base, id: "other-person", payload: { ...base.payload, candidateKey: "autumn:other" } },
+    { ...base, id: "other-person", payload: { ...base.payload, candidateKey: "sourced:other" } },
     { ...base, id: "other-role", payload: { ...base.payload, roleId: "other" } },
     {
       ...base,
@@ -186,6 +189,16 @@ it("filters every list by actor, candidate, role and binding before returning a 
   expect(
     (await listRecruitingProfileActivity(prisma, actor, target)).items.map((item) => item.id),
   ).toEqual(["event-1"]);
+  // A view recorded before the key rename stays as stored and is still listed.
+  events.push({
+    ...base,
+    id: "before-rename",
+    payload: { ...base.payload, candidateKey: "autumn:person" },
+  });
+  expect(
+    (await listRecruitingProfileActivity(prisma, actor, target)).items.map((item) => item.id),
+  ).toContain("before-rename");
+  events.pop();
   for (let n = 0; n < 51; n++) events.push({ ...base, id: `synthetic-${n}` });
   const page = await listRecruitingProfileActivity(prisma, actor, target);
   expect(page.items).toHaveLength(50);

@@ -5,13 +5,12 @@ export const RecruitingCandidateRankingGroupSchema = z.enum([
   "worth_talking",
   "partial",
   "uncertain",
-  "outdated",
   "unreviewed",
   "unscored",
 ]);
 export const RecruitingCandidateRankingSchema = z.strictObject({
   source: z.enum(["reviewer", "provider", "none"]),
-  state: z.enum(["current", "outdated", "unreviewed"]),
+  state: z.enum(["current", "unreviewed"]),
   roleRevisionId: z.string().nullable(),
   sourceEffectId: z.string().nullable(),
   grade: z.string().nullable(),
@@ -20,7 +19,13 @@ export const RecruitingCandidateRankingSchema = z.strictObject({
 });
 export type RecruitingCandidateRanking = z.infer<typeof RecruitingCandidateRankingSchema>;
 
-/** Presentation of saved grades only: never infer Reviewer authorship from a tier or score. */
+/**
+ * Presentation of saved grades only. Source "reviewer" is a person's newest saved tier, whoever
+ * gave it (the search grades the people it returns); "provider" is a bare score with no tier. A
+ * person keeps their latest grade when the role's requirements change: grades are never
+ * redone or marked stale (big-ask 11-25: one loosened requirement showed all 123 people as
+ * needing a new review and hid the 70 Strong/Promising).
+ */
 export function recruitingCandidateRanking(input: {
   source: RecruitingCandidateRanking["source"];
   grade: string | null;
@@ -30,26 +35,19 @@ export function recruitingCandidateRanking(input: {
   currentRoleRevisionId: string;
 }): RecruitingCandidateRanking {
   const { source, grade, score, roleRevisionId, sourceEffectId } = input;
-  const state =
-    source === "reviewer"
-      ? roleRevisionId === input.currentRoleRevisionId
-        ? "current"
-        : "outdated"
-      : "unreviewed";
+  const state = source === "reviewer" ? "current" : "unreviewed";
   const group =
-    state === "outdated"
-      ? "outdated"
-      : state === "current"
-        ? ((
-            {
-              Strong: "strong_match",
-              Promising: "worth_talking",
-              Partial: "partial",
-              Uncertain: "uncertain",
-            } as const
-          )[grade as "Strong"] ?? "uncertain")
-        : score === null
-          ? "unscored"
-          : "unreviewed";
+    state === "current"
+      ? ((
+          {
+            Strong: "strong_match",
+            Promising: "worth_talking",
+            Partial: "partial",
+            Uncertain: "uncertain",
+          } as const
+        )[grade as "Strong"] ?? "uncertain")
+      : score === null
+        ? "unscored"
+        : "unreviewed";
   return { source, state, roleRevisionId, sourceEffectId, grade, score, group };
 }

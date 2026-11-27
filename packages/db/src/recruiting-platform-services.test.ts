@@ -18,12 +18,13 @@ function fixture(
   options: {
     servers?: Record<string, Server>;
     missing?: Record<string, string[]>;
+    /** False for an account without the recruiting defaults. */
+    installed?: boolean;
     lead?: boolean;
     linked?: number;
     grants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
-    reviewerGrants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
-    /** Recruiting conversations of this crew that lack its Reviewer. */
-    withoutReviewer?: { id: string; members: number }[];
+    /** The crew's retired Reviewer bots that are not archived yet. */
+    reviewers?: { id: string; archivedAt?: Date }[];
     /** Connected Google Calendars and the Scheduling bots of the crew. */
     calendars?: { id: string }[];
     scheduling?: { id: string }[];
@@ -43,6 +44,7 @@ function fixture(
   let current = "";
   const tx = {
     $queryRaw: vi.fn(async () => []),
+    capabilityInstall: { count: vi.fn(async () => (options.installed === false ? 0 : 1)) },
     spaceMember: {
       findUnique: vi.fn(async () => ({ organizationId: "org", space: { deletingAt: null } })),
     },
@@ -65,38 +67,36 @@ function fixture(
       }),
     },
     bot: {
-      count: vi.fn(async () => (options.withoutReviewer ? 1 : 0)),
+      count: vi.fn(async () => 0),
       findFirst: vi.fn(async () => (options.lead === false ? null : { id: "main-bot" })),
       findMany: vi.fn(async ({ where }: { where: unknown }) =>
-        JSON.stringify(where).includes(":scheduling")
-          ? (options.scheduling ?? [])
-          : options.outreach && JSON.stringify(where).includes(":outreach")
-            ? options.outreach
-            : (missing[current] ?? []).map((id) => ({
-                id,
-                name: id.startsWith("outreach") ? "Outreach" : id,
-                spawnKey: null,
-              })),
+        JSON.stringify(where).includes(":reviewer")
+          ? (options.reviewers ?? [])
+          : JSON.stringify(where).includes(":scheduling")
+            ? [
+                ...(options.scheduling ?? []),
+                ...(JSON.stringify(where).includes(":outreach") ? (options.outreach ?? []) : []),
+              ]
+            : options.outreach && JSON.stringify(where).includes(":outreach")
+              ? options.outreach
+              : (missing[current] ?? []).map((id) => ({
+                  id,
+                  name: id.startsWith("outreach") ? "Outreach" : id,
+                  spawnKey: null,
+                })),
       ),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
-    chatGroup: {
-      findMany: vi.fn(async () =>
-        (options.withoutReviewer ?? []).map((group) => ({
-          id: group.id,
-          _count: { members: group.members },
-        })),
-      ),
-    },
-    chatGroupMember: { createMany: vi.fn(async () => ({ count: 1 })) },
+    routine: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    chatGroupMember: { deleteMany: vi.fn(async () => ({ count: 0 })) },
     botMcpServer: {
       count: vi.fn(async () => options.linked ?? 0),
-      // The Reviewer's grants answer only the query for its role.
       findMany: vi.fn(async ({ where }: { where: unknown }) =>
-        JSON.stringify(where).includes(":reviewer")
-          ? (options.reviewerGrants ?? [])
-          : options.gmailGrants && JSON.stringify(where).includes("serverId")
-            ? options.gmailGrants
-            : (options.grants ?? []),
+        options.gmailGrants && JSON.stringify(where).includes("serverId")
+          ? options.gmailGrants.filter((grant) =>
+              JSON.stringify(where).includes(`"${grant.botId}"`),
+            )
+          : (options.grants ?? []),
       ),
       updateMany: vi.fn(async () => ({ count: 1 })),
       createMany: vi.fn(async () => {
@@ -107,51 +107,44 @@ function fixture(
   };
   const prisma = {
     ...tx,
-    $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
+    $transaction: vi.fn(async (work: ((client: typeof tx) => Promise<unknown>) | unknown[]) =>
+      typeof work === "function" ? work(tx) : Promise.all(work),
+    ),
   } as unknown as PrismaClient;
   return { prisma, tx };
 }
 
 describe("ensurePlatformServices", () => {
-  it("adds the Reviewer to every recruiting conversation of the crew that lacks it", async () => {
-    const f = fixture({
-      withoutReviewer: [
-        { id: "copy-1", members: 3 },
-        { id: "full", members: 6 },
-      ],
-    });
+  it("archives the crew's retired Reviewer and leaves an account without one alone", async () => {
+    const f = fixture({ reviewers: [{ id: "reviewer-bot" }] });
     await ensurePlatformServices(f.prisma, actor);
-    // bot.findFirst answers "main-bot" for the Reviewer lookup too.
-    expect(f.tx.chatGroupMember.createMany).toHaveBeenCalledWith({
-      data: [{ groupId: "copy-1", botId: "main-bot" }],
-      skipDuplicates: true,
+    expect(f.tx.bot.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["reviewer-bot"] }, archivedAt: null },
+      data: { archivedAt: expect.any(Date), pinned: false },
     });
+    expect(f.tx.routine.updateMany).toHaveBeenCalledWith({
+      where: { botId: { in: ["reviewer-bot"] } },
+      data: { active: false, nextRunAt: null },
+    });
+    const none = fixture();
+    await ensurePlatformServices(none.prisma, actor);
+    expect(none.tx.bot.updateMany).not.toHaveBeenCalled();
   });
 
-  it("gives the Reviewer the agent run it grades with", async () => {
-    const f = fixture({ reviewerGrants: [{ id: "g", allowAllTools: false, allowedTools: [] }] });
+  // Staging 37245ee8: the Reviewer was archived but stayed a member of the Kruit conversation,
+  // a new role copies that conversation's members, and opening it failed as "not found".
+  it("takes the retired Reviewer out of every conversation, also one archived by an earlier pass", async () => {
+    const f = fixture({ reviewers: [{ id: "reviewer-bot" }] });
     await ensurePlatformServices(f.prisma, actor);
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { allowedTools: ["agent_run"] } }),
-    );
-  });
-
-  it("leaves every grant to the retired research service with no tools", async () => {
-    const f = fixture();
-    await ensurePlatformServices(f.prisma, actor);
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
-      where: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        server: {
-          spaceId: actor.spaceId,
-          userId: actor.userId,
-          endpoint: "https://api.autumn.ai/mcp",
-        },
-        NOT: { allowAllTools: false, allowedTools: { equals: [] } },
-      },
-      data: { allowAllTools: false, allowedTools: [] },
+    expect(f.tx.chatGroupMember.deleteMany).toHaveBeenCalledWith({
+      where: { botId: { in: ["reviewer-bot"] } },
     });
+    const earlier = fixture({ reviewers: [{ id: "reviewer-bot", archivedAt: new Date() }] });
+    await ensurePlatformServices(earlier.prisma, actor);
+    expect(earlier.tx.chatGroupMember.deleteMany).toHaveBeenCalledWith({
+      where: { botId: { in: ["reviewer-bot"] } },
+    });
+    expect(earlier.tx.bot.updateMany).not.toHaveBeenCalled();
   });
 
   it("creates the services and links the crew members that predate them", async () => {
@@ -168,7 +161,7 @@ describe("ensurePlatformServices", () => {
           botId,
           serverId: "people-search",
           allowAllTools: false,
-          allowedTools: ["web_search_exa", "web_search_advanced_exa", "agent_run"],
+          allowedTools: ["web_search_advanced_exa", "agent_run"],
         }),
       ),
       skipDuplicates: true,
@@ -226,10 +219,14 @@ describe("ensurePlatformServices", () => {
       await ensurePlatformServices(f.prisma, actor);
       expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
     }
-    const none = fixture({ lead: false, missing: { fullenrich: ["outreach-bot"] } });
-    await ensurePlatformServices(none.prisma, actor);
-    expect(none.tx.mcpServer.create).not.toHaveBeenCalled();
-    expect(none.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+    for (const none of [
+      fixture({ lead: false, missing: { fullenrich: ["outreach-bot"] } }),
+      fixture({ installed: false, missing: { fullenrich: ["outreach-bot"] } }),
+    ]) {
+      await ensurePlatformServices(none.prisma, actor);
+      expect(none.tx.mcpServer.create).not.toHaveBeenCalled();
+      expect(none.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+    }
   });
 
   it("gives the people search's agent run to crews that already search", async () => {
@@ -249,7 +246,7 @@ describe("ensurePlatformServices", () => {
         server: expect.objectContaining({ endpoint: SEARCH, enabled: true }),
       }),
     });
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(2); // and the retired research grants
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(1);
     expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: "searches" }),
       data: { allowedTools: ["web_search_exa", "web_search_advanced_exa", "agent_run"] },
@@ -276,7 +273,7 @@ describe("ensurePlatformServices", () => {
         server: expect.objectContaining({ endpoint: "https://mcp.cal.com/mcp", enabled: true }),
       }),
     });
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(2); // and the retired research grants
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(1);
     expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
         id: "books",
@@ -288,15 +285,19 @@ describe("ensurePlatformServices", () => {
     });
   });
 
-  it("gives Scheduling a connected Google Calendar it was never granted", async () => {
+  it("gives Scheduling the Google Calendar it was never granted, connected or not yet", async () => {
+    // Simulated 11-16, team-stuck-tell-me: the calendar was added but not connected, so only
+    // Main had it; Scheduling found no calendar, handed the booking back twice, and the connect
+    // card came two minutes late. Scheduling asks for the connection on its own calendar.
     const f = fixture({ calendars: [{ id: "calendar" }], scheduling: [{ id: "scheduling-bot" }] });
     await ensurePlatformServices(f.prisma, actor);
     expect(f.tx.mcpServer.findMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
         endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
         enabled: true,
-        secretId: { not: null },
-      }),
+      },
       select: { id: true },
     });
     expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
@@ -312,7 +313,40 @@ describe("ensurePlatformServices", () => {
     });
   });
 
-  it("adds no calendar grant when no Google Calendar is connected", async () => {
+  it("lets Main book on the calendar itself, adding the booking tools to its read grant", async () => {
+    // Simulated 11-16, calendar-not-connected: Main could only read the calendar, so it handed the
+    // booking to Scheduling, which told the recruiter the calendar was Main's to connect.
+    const reads = ["list_calendars", "list_events", "get_event", "search_events", "suggest_time"];
+    const f = fixture({
+      calendars: [{ id: "calendar" }],
+      scheduling: [{ id: "main-bot" }],
+      gmailGrants: [
+        { botId: "main-bot", serverId: "calendar", allowAllTools: false, allowedTools: reads },
+      ],
+    });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.bot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([{ spawnKey: `recruiting:${actor.userId}:main` }]),
+        }),
+      }),
+    );
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ botId: "main-bot", serverId: "calendar" }),
+      data: {
+        allowedTools: [
+          ...reads,
+          "create_event",
+          "update_event",
+          "delete_event",
+          "respond_to_event",
+        ],
+      },
+    });
+  });
+
+  it("adds no calendar grant when no Google Calendar was added", async () => {
     const f = fixture({ scheduling: [{ id: "scheduling-bot" }] });
     await ensurePlatformServices(f.prisma, actor);
     expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalledWith(
@@ -322,7 +356,7 @@ describe("ensurePlatformServices", () => {
     );
   });
 
-  it("lets Outreach send from a connected Gmail, adding only the send tools to its grant", async () => {
+  it("lets Outreach and Scheduling send from a connected Gmail, adding only the send tools", async () => {
     const drafts = [
       "get_message",
       "get_thread",
@@ -334,15 +368,18 @@ describe("ensurePlatformServices", () => {
     const f = fixture({
       gmail: [{ id: "gmail" }],
       outreach: [{ id: "outreach-bot" }],
+      scheduling: [{ id: "scheduling-bot" }],
       gmailGrants: [
         { botId: "outreach-bot", serverId: "gmail", allowAllTools: false, allowedTools: drafts },
+        { botId: "scheduling-bot", serverId: "gmail", allowAllTools: false, allowedTools: drafts },
       ],
     });
     await ensurePlatformServices(f.prisma, actor);
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({ botId: "outreach-bot", serverId: "gmail" }),
-      data: { allowedTools: [...drafts, "send_message", "reply", "forward"] },
-    });
+    for (const botId of ["outreach-bot", "scheduling-bot"])
+      expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ botId, serverId: "gmail" }),
+        data: { allowedTools: [...drafts, "send_message", "reply", "forward"] },
+      });
   });
 
   it("connects every crew to the product's outreach mail, with no key from the user", async () => {

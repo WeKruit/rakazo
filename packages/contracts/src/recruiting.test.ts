@@ -263,44 +263,6 @@ describe("recruiting contracts", () => {
       }).success,
     ).toBe(false);
   });
-  it("accepts a post-result native candidate save without a custom research action", () => {
-    const input = {
-      operation: "save_results",
-      expectedRoleRevision: 1,
-      mcpServerId: "research-server",
-      providerTaskId: "provider-task",
-    };
-    expect(contracts.RecruitingResearchToolInputSchema.parse(input)).toEqual({
-      ...input,
-      cursor: null,
-    });
-    const { mcpServerId: _, ...withoutInternalId } = input;
-    expect(contracts.RecruitingResearchToolInputSchema.parse(withoutInternalId)).toEqual({
-      ...withoutInternalId,
-      cursor: null,
-    });
-    for (const cursor of [null, "  opaque+/=\r\n "]) {
-      expect(contracts.RecruitingResearchToolInputSchema.parse({ ...input, cursor })).toEqual({
-        ...input,
-        cursor,
-      });
-    }
-    for (const invalid of [
-      { expectedRoleRevision: 0 },
-      { expectedRoleRevision: 1.5 },
-      { mcpServerId: " " },
-      { providerTaskId: "" },
-      { providerTaskId: " " },
-      { roleId: "forged-role" },
-      { actionId: "custom-action" },
-      { sourceEffectId: "forged-effect" },
-      { cursor: "" },
-    ]) {
-      expect(
-        contracts.RecruitingResearchToolInputSchema.safeParse({ ...input, ...invalid }).success,
-      ).toBe(false);
-    }
-  });
 
   it("requires candidate source task/action references to be present or null together", () => {
     const source = {
@@ -470,132 +432,17 @@ describe("recruiting contracts", () => {
         false,
       );
   });
-  const researchInputs = [
-    { operation: "status", taskId: "local-research-task" },
-    { operation: "rows", taskId: "local-research-task", limit: 7, cursor: "  opaque+/=\r\n " },
-  ];
-
-  it.each(researchInputs)(
-    "accepts the closed native research $operation input without changing its bytes",
-    (input) => {
-      expect(contracts.RecruitingResearchToolInputSchema?.parse(input)).toEqual(input);
-      for (const field of [
-        "actor",
-        "ownerId",
-        "spaceId",
-        "userId",
-        "botId",
-        "runId",
-        "threadId",
-        "sourceMessageId",
-        "roleId",
-        "roleRevisionId",
-        "sourceRefs",
-        "effectId",
-        "requestArtifact",
-        "contextArtifact",
-        "receiptArtifact",
-        "outputArtifacts",
-        "providerTaskId",
-        "task_id",
-        "prompt",
-        "message",
-        "arguments",
-      ]) {
-        expect(
-          contracts.RecruitingResearchToolInputSchema?.safeParse({ ...input, [field]: "forged" })
-            .success,
-        ).toBe(false);
-      }
-    },
-  );
-
-  it("rejects invalid research read identifiers and removed operations", () => {
+  it("rejects the removed research task operations", () => {
     for (const input of [
       { operation: "prepare", mcpServerId: "server", clientNonce: "nonce" },
       { operation: "continue", taskId: "task" },
       { operation: "start", actionId: "action" },
-      { operation: "status", taskId: "\n" },
-      { operation: "rows", taskId: "" },
-      { operation: "rows", taskId: "task", limit: 0 },
-      { operation: "rows", taskId: "task", limit: 1.5 },
-      { operation: "rows", taskId: "task", cursor: "" },
-      { operation: "status", taskId: "task", limit: 1 },
-      { operation: "rows", taskId: "task", actionId: "action" },
+      { operation: "status", taskId: "task" },
+      { operation: "rows", taskId: "task" },
+      { operation: "save_results", expectedRoleRevision: 1, providerTaskId: "task", cursor: null },
     ]) {
       expect(contracts.RecruitingResearchToolInputSchema?.safeParse(input).success).toBe(false);
     }
-  });
-
-  it("requires exact stage-specific approval packages without accepting an approval from the model", () => {
-    const documents = {
-      stage: "documents",
-      roleId: role.id,
-      expectedRoleRevision: role.revision,
-      documents: { jdText: artifact, namedPdf: artifact, anonymousPdf: null, deck: null },
-    };
-    const calibration = {
-      stage: "calibration",
-      roleId: role.id,
-      expectedRoleRevision: role.revision,
-      documentsApprovalEffectId: "documents-approval",
-      profiles: Array.from({ length: 10 }, (_, i) => ({
-        candidateKey: `candidate-${i}`,
-        source: {
-          effectId: "source-effect",
-          rowIndex: i,
-          roleRevisionId: "role-revision",
-          providerTaskId: "provider-task",
-          artifactRef: artifact,
-        },
-        linkedinUrl: `https://www.linkedin.com/in/example-${i}`,
-        evidenceUrl: `https://example.com/evidence/${i}`,
-      })),
-      ruleChanges: ["Keep the supplied qualification unchanged."],
-    };
-    const schema = contracts.RecruitingApprovalToolInputSchema;
-    expect(schema.parse(documents)).toEqual(documents);
-    expect(schema.parse(calibration)).toEqual(calibration);
-    const historical = {
-      ...calibration,
-      profiles: calibration.profiles.map(({ source: _source, ...profile }) => ({
-        ...profile,
-        assessmentVersion: 1,
-      })),
-    };
-    expect(schema.safeParse(historical).success).toBe(false);
-    expect(contracts.RetainedRecruitingApprovalRequestSchema.parse(historical)).toEqual(historical);
-    expect(
-      JSON.stringify(contracts.RecruitingApprovalToolInputSchema.toJSONSchema()),
-    ).not.toContain("assessmentVersion");
-    for (const field of [
-      "effectId",
-      "rowIndex",
-      "roleRevisionId",
-      "providerTaskId",
-      "artifactRef",
-    ]) {
-      const source = { ...calibration.profiles[0]!.source };
-      delete source[field as keyof typeof source];
-      expect(
-        schema.safeParse({
-          ...calibration,
-          profiles: [{ ...calibration.profiles[0], source }, ...calibration.profiles.slice(1)],
-        }).success,
-      ).toBe(false);
-    }
-    for (const input of [documents, calibration]) {
-      for (const field of ["approvedByUserId", "approvedAt", "status", "spaceId", "runId"])
-        expect(schema.safeParse({ ...input, [field]: "forged" }).success).toBe(false);
-      expect(schema.safeParse({ ...input, expectedRoleRevision: 0 }).success).toBe(false);
-    }
-    expect(schema.safeParse({ ...documents, documents: { jdText: artifact } }).success).toBe(false);
-    // A round short of ten after the deeper search is approved as it stands; eleven never is.
-    expect(
-      schema.safeParse({ ...calibration, profiles: calibration.profiles.slice(1) }).success,
-    ).toBe(true);
-    for (const profiles of [[], [...calibration.profiles, calibration.profiles[0]]])
-      expect(schema.safeParse({ ...calibration, profiles }).success).toBe(false);
   });
 
   it("closes native ordinary Ask answer provenance to the exact card, block and human message", () => {
@@ -987,6 +834,18 @@ describe("recruiting contracts", () => {
       contracts.RecruitingRoleRevisionSchema.safeParse({ ...revision, recallScope: "local" })
         .success,
     ).toBe(false);
+    // A brief saved while a confirmation step existed still loads; the field is dropped.
+    const brief = { fields: [], questions: [], rules: [], searchFilters: [] };
+    expect(
+      contracts.RecruitingRoleRevisionSchema.parse({
+        ...revision,
+        criteria: [],
+        brief: {
+          ...brief,
+          confirmation: { revision: 1, userId: "human", messageId: "message", confirmedAt: now },
+        },
+      }).brief,
+    ).toEqual(brief);
   });
 
   it("rejects atom IDs reused for different requirements in one role revision", () => {
@@ -1278,20 +1137,6 @@ describe("recruiting contracts", () => {
         schema: contracts.ReviseRecruitingRoleInput,
         value: { roleId: role.id, expectedRevision: 1, title: role.title, ...definition },
       },
-      {
-        schema: contracts.SaveRecruitingAssessmentInput,
-        value: {
-          roleId: role.id,
-          candidateKey: assessment.candidateKey,
-          expectedRevision: 0,
-          roleRevisionId: role.currentRevisionId,
-          facts: assessment.facts,
-          atomJudgments: assessment.judgments.atoms,
-          employmentEvaluations: [],
-          questions: assessment.questions,
-          sourceRefs: assessment.sourceRefs,
-        },
-      },
     ];
     for (const { schema, value } of inputs) {
       expect(schema.safeParse(value).success).toBe(true);
@@ -1409,34 +1254,6 @@ describe("typed recruiting assessment evidence", () => {
     questions: [],
     sourceRefs: assessment.sourceRefs,
   };
-
-  it("accepts only agent atom inputs and rejects supplied aggregate results", () => {
-    expect(contracts.SaveRecruitingAssessmentInput.safeParse(save).success).toBe(true);
-    expect(
-      contracts.RecruitingAssessmentToolInputSchema?.parse({ operation: "save", ...save }),
-    ).toEqual({ operation: "save", ...save });
-    expect(
-      contracts.RecruitingAssessmentToolInputSchema?.parse({
-        operation: "read",
-        candidateKey: "candidate",
-      }),
-    ).toEqual({ operation: "read", candidateKey: "candidate" });
-    expect(
-      contracts.RecruitingAssessmentToolInputSchema?.safeParse({
-        operation: "read",
-        candidateKey: "candidate",
-        roleId: role.id,
-      }).success,
-    ).toBe(false);
-    for (const aggregate of [
-      { judgments: assessment.judgments },
-      { hardGate: "met" },
-      { criteria: [] },
-    ])
-      expect(
-        contracts.SaveRecruitingAssessmentInput.safeParse({ ...save, ...aggregate }).success,
-      ).toBe(false);
-  });
 
   it("preserves exact quote bytes and requires an anchor-compatible typed selection", () => {
     const quote = "  Built it.\r\n";
@@ -1558,101 +1375,6 @@ describe("typed recruiting assessment evidence", () => {
   });
 });
 
-describe("recruiting reassessment and native Ask inputs", () => {
-  const reassess = {
-    roleId: role.id,
-    roleRevisionId: role.currentRevisionId,
-    candidateKey: assessment.candidateKey,
-    expectedRevision: 1,
-    facts: assessment.facts,
-    sourceRefs: assessment.sourceRefs,
-    questions: [],
-    atomJudgments: [],
-    employmentEvaluations: [],
-  };
-  const ask = {
-    operation: "ask",
-    roleId: role.id,
-    roleRevisionId: role.currentRevisionId,
-    target: {
-      kind: "candidate",
-      candidateKey: assessment.candidateKey,
-      assessmentVersion: 1,
-      criterionIds: [criterion.id],
-    },
-    question: "  Which work did you personally implement?\n",
-    options: ["  Implemented it myself", "Used a library  "],
-  };
-
-  it("closes reassessment to a positive prior version and partial agent override sets", () => {
-    expect(contracts.ReassessRecruitingAssessmentInput?.parse(reassess)).toEqual(reassess);
-    expect(
-      contracts.RecruitingAssessmentToolInputSchema.safeParse({
-        operation: "reassess",
-        ...reassess,
-      }).success,
-    ).toBe(true);
-    for (const change of [
-      { expectedRevision: 0 },
-      { expectedRevision: 1.5 },
-      { atomJudgments: undefined },
-      { judgments: assessment.judgments },
-      { hardGate: "met" },
-      { changedFactIds: ["fact-sample"] },
-      { createdByRunId: "forged" },
-    ])
-      expect(
-        contracts.RecruitingAssessmentToolInputSchema.safeParse({
-          operation: "reassess",
-          ...reassess,
-          ...change,
-        }).success,
-      ).toBe(false);
-  });
-
-  it("preserves exact native question and option text for role and candidate targets", () => {
-    expect(contracts.RecruitingAssessmentAskInputSchema?.parse(ask)).toEqual(ask);
-    expect(contracts.RecruitingAssessmentToolInputSchema.parse(ask)).toEqual(ask);
-    const target = { kind: "role", criterionIds: [] };
-    expect(contracts.RecruitingAssessmentAskTargetSchema?.parse(target)).toEqual(target);
-    expect(
-      contracts.RecruitingAssessmentToolInputSchema.safeParse({ ...ask, target }).success,
-    ).toBe(true);
-    expect(
-      contracts.RecruitingAssessmentToolInputSchema.safeParse({
-        ...ask,
-        options: ["a", "b", "c", "d"],
-        question: "q".repeat(240),
-      }).success,
-    ).toBe(true);
-  });
-
-  it("rejects ambiguous, oversized and caller-authored native card/runtime fields", () => {
-    for (const change of [
-      { question: "" },
-      { question: "  " },
-      { question: "q".repeat(241) },
-      { options: ["one"] },
-      { options: ["a", "b", "c", "d", "e"] },
-      { options: ["same", "same"] },
-      { options: ["", "valid"] },
-      { options: ["  ", "valid"] },
-      { options: ["x".repeat(81), "valid"] },
-      { target: { ...ask.target, assessmentVersion: 0 } },
-      { target: { ...ask.target, criterionIds: [""] } },
-      { target: { kind: "role", criterionIds: [], candidateKey: "extra" } },
-      { target: { ...ask.target, atomIds: ["atom-sample"] } },
-      { messageId: "forged" },
-      { sourceThreadId: "forged" },
-      { botId: "forged" },
-      { blockIndex: 0 },
-    ])
-      expect(
-        contracts.RecruitingAssessmentToolInputSchema.safeParse({ ...ask, ...change }).success,
-      ).toBe(false);
-  });
-});
-
 describe("candidate index contracts", () => {
   it("defines one complete canonical candidate display schema", () => {
     expect(contracts.RecruitingCandidateOutputSchemaId.parse("candidate_output_v1")).toBe(
@@ -1698,7 +1420,6 @@ describe("candidate index contracts", () => {
       contracts.ListRecruitingCandidatesInput.parse({
         roleId: "role",
         limit: 25,
-        assessmentState: "unassessed",
         sourceEffectId: "native-read",
         actionId: "action",
         sort: "name",
@@ -1780,7 +1501,7 @@ describe("recruiting.roleCandidates contract", () => {
           location: null,
           email: "ada@example.test",
           linkedinUrl: null,
-          autumn: null,
+          sourced: null,
           crm: {
             serverId: "server",
             organizationId: "10000000-0000-4000-8000-000000000001",
@@ -1829,18 +1550,6 @@ describe("recruiting brief drafts", () => {
     };
     expect(schema.properties.fields.items.required).not.toContain("consequential");
   });
-
-  it("shows one to nine first picks without recording a round", () => {
-    const show = (candidateKeys: string[]) =>
-      contracts.RecruitingResearchToolInputSchema.safeParse({
-        operation: "show_picks",
-        candidateKeys,
-      }).success;
-    expect(show(["linkedin:/in/a"])).toBe(true);
-    expect(show([])).toBe(false);
-    expect(show(["linkedin:/in/a", "linkedin:/in/a"])).toBe(false);
-    expect(show(Array.from({ length: 10 }, (_, index) => `linkedin:/in/p${index}`))).toBe(false);
-  });
 });
 
 describe("calibration round keys", () => {
@@ -1853,5 +1562,27 @@ describe("calibration round keys", () => {
     });
     expect(result.success).toBe(false);
     expect(result.error?.issues[0]?.message).toContain("Repeated: linkedin:/in/p3");
+  });
+});
+
+describe("stored quality-check grade pages", () => {
+  it("still reads a stored request and no longer takes one as tool input", () => {
+    const request = {
+      operation: "save_grades",
+      expectedRoleRevision: 1,
+      rows: [
+        {
+          name: "Ada",
+          linkedin_url: "https://www.linkedin.com/in/ada",
+          education: [{ school: "State University", degree: "MS" }],
+          match_score: 80,
+          match_tier: "Promising",
+          fit_reasons: "Senior Data Engineer",
+          requirements_assessment: [{ requirement: "Kafka", status: "met", evidence: "Kafka" }],
+        },
+      ],
+    };
+    expect(contracts.RecruitingStoredGradesRequestSchema.safeParse(request).success).toBe(true);
+    expect(contracts.RecruitingResearchToolInputSchema.safeParse(request).success).toBe(false);
   });
 });

@@ -16,6 +16,7 @@ import { InterviewCalendar } from "./InterviewCalendar";
 import { RecruitingRoutines } from "./RecruitingRoutines";
 import { RetryNotice } from "./RetryNotice";
 import { formatDate, TabLoading } from "./shared";
+import { useGlobalRecruitingChanges } from "./useGlobalRecruitingChanges";
 
 const GMAIL_MCP_ENDPOINT = "https://gmailmcp.googleapis.com/mcp/v1";
 
@@ -65,7 +66,7 @@ export function AccountRecruitingView({
       ? { roleId: role, key: params.get("mailThread")!, emailId: params.get("mailMessage")! }
       : undefined;
   // null while unknown, so the connect button never flashes for a connected inbox.
-  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
+  const [gmail, setGmail] = useState<"connected" | "missing" | "reconnect" | null>(null);
   useEffect(() => {
     if (!globalInbox) return;
     let active = true;
@@ -73,20 +74,22 @@ export function AccountRecruitingView({
       .list()
       .then((servers) => {
         if (!active) return;
-        setGmailConnected(
-          servers.some(
-            (server) =>
-              server.enabled &&
-              server.endpoint?.startsWith(GMAIL_MCP_ENDPOINT) &&
-              server.oauthStatus === "connected",
-          ),
+        const statuses = servers
+          .filter((server) => server.enabled && server.endpoint?.startsWith(GMAIL_MCP_ENDPOINT))
+          .map((server) => server.oauthStatus);
+        setGmail(
+          statuses.includes("connected")
+            ? "connected"
+            : statuses.includes("reconnect")
+              ? "reconnect"
+              : "missing",
         );
       })
       .catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [globalInbox]);
+  }, [globalInbox, refreshSignal]);
   function clearMailAnchor() {
     if (!params.has("mailThread")) return;
     const next = new URLSearchParams(params);
@@ -120,6 +123,7 @@ export function AccountRecruitingView({
   const [loadingMore, setLoadingMore] = useState<string>();
   const [taskError, setTaskError] = useState(false);
   const [reload, setReload] = useState(0);
+  useGlobalRecruitingChanges(groups, groupId, () => setReload((value) => value + 1));
   const pageKey = JSON.stringify([
     accountKey,
     view,
@@ -442,6 +446,16 @@ export function AccountRecruitingView({
     ),
   ];
   const failedCalendars = failedCalendarList.join(", ");
+  const expiredCalendars = [
+    ...new Set(
+      page?.items.flatMap(
+        (item) =>
+          item.correspondence?.connections
+            .filter((connection) => connection.reconnect)
+            .map((connection) => connection.name) ?? [],
+      ) ?? [],
+    ),
+  ].join(", ");
   const calendarConnected = page?.items.some((item) =>
     item.correspondence?.connections.some((connection) => connection.status !== "needs_connection"),
   );
@@ -673,7 +687,11 @@ export function AccountRecruitingView({
           ) : null}
           {view === "interview" && page ? (
             <>
-              {!calendarConnected && !calendarFailed && !pending.length ? (
+              {expiredCalendars ? (
+                <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
+                  <Trans>Reconnect {expiredCalendars}</Trans>
+                </Button>
+              ) : !calendarConnected && !calendarFailed && !pending.length ? (
                 <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
                   <Trans>Connect calendar</Trans>
                 </Button>
@@ -760,9 +778,13 @@ export function AccountRecruitingView({
           <div className="space-y-6">
             {view === "inbox" && !renderCorrespondence ? (
               <>
-                {gmailConnected === false ? (
+                {gmail === "missing" || gmail === "reconnect" ? (
                   <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
-                    <Trans>Connect Gmail</Trans>
+                    {gmail === "reconnect" ? (
+                      <Trans>Reconnect Gmail</Trans>
+                    ) : (
+                      <Trans>Connect Gmail</Trans>
+                    )}
                   </Button>
                 ) : null}
                 {indexedMail?.key === readKey ? (
@@ -782,14 +804,31 @@ export function AccountRecruitingView({
                 !indexedMail.data.items.length &&
                 indexedMail.data.coverage.importsComplete &&
                 indexedMail.data.coverage.crmComplete ? (
-                  <p data-dock-avoid className="mb-3 text-sm text-muted-foreground">
-                    <Trans>No emails yet.</Trans>
-                  </p>
+                  <div data-dock-avoid className="mb-3 space-y-3 text-sm text-muted-foreground">
+                    <p>
+                      <Trans>No emails yet.</Trans>
+                    </p>
+                    {!mailSearch && !mailUnread && globalChat ? (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          navigate(`/app/g/${encodeURIComponent(globalChat.id)}?view=conversation`)
+                        }
+                      >
+                        <Trans>Find candidates with Kruit</Trans>
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : null}
                 <AccountInbox
                   accountKey={accountKey}
                   key={pageKey}
                   roles={page?.roles ?? []}
+                  conversations={
+                    globalInbox && indexedMail?.key === readKey
+                      ? indexedMail.data.conversations
+                      : undefined
+                  }
                   items={page?.items ?? []}
                   spaceId={spaceId}
                   serverThreads={
@@ -826,7 +865,7 @@ export function AccountRecruitingView({
                     const role = page?.roles.find((entry) => entry.id === roleId);
                     if (role?.groupId)
                       navigate(
-                        `/app/g/${encodeURIComponent(role.groupId)}?${new URLSearchParams({ view: "contacts", detail: `contact.${person.crm?.candidateId ?? person.autumn?.candidateKey ?? person.key}` })}`,
+                        `/app/g/${encodeURIComponent(role.groupId)}?${new URLSearchParams({ view: "contacts", detail: `contact.${person.crm?.candidateId ?? person.sourced?.candidateKey ?? person.key}` })}`,
                       );
                   }}
                   onOpenRole={(roleId) => {
@@ -918,7 +957,7 @@ export function AccountRecruitingView({
                                   className="block text-start font-semibold underline-offset-2 hover:underline"
                                   onClick={() =>
                                     navigate(
-                                      `/app/g/${encodeURIComponent(info.groupId!)}?${new URLSearchParams({ view: "contacts", detail: `contact.${candidate.crm?.candidateId ?? candidate.autumn?.candidateKey ?? candidate.key}` })}`,
+                                      `/app/g/${encodeURIComponent(info.groupId!)}?${new URLSearchParams({ view: "contacts", detail: `contact.${candidate.crm?.candidateId ?? candidate.sourced?.candidateKey ?? candidate.key}` })}`,
                                     )
                                   }
                                 >

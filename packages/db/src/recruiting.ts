@@ -7,12 +7,9 @@ import type {
   ListRecruitingCandidatesInput as CandidatesInput,
   ListRecruitingCandidatesOutput as CandidatesOutput,
   CreateRecruitingRoleInput as CreateRoleInput,
-  MessageBlock,
   RecruitingProfileActivityInput as ProfileActivityInput,
   RecordRecruitingProfileViewInput as ProfileViewInput,
   RecruitingArtifactRef,
-  RecruitingAssessmentAskInput,
-  RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
   RecruitingCalibrationRound,
   RecruitingCandidateFeedbackSelection,
@@ -26,24 +23,18 @@ import type {
   RecruitingHumanIntent,
   RecruitingMaterialReadPayload,
   RecruitingPreferenceFeedbackInput,
-  RecruitingQuestion,
   RecruitingReadPayload,
   RecruitingReplyTarget,
-  RecruitingResearchAction,
-  RecruitingResearchPurpose,
   RecruitingResearchToolInput,
   RecruitingRole,
   RecruitingRoleRevision,
   RecruitingRoleToolInput,
   RecruitingSourceRef,
-  RetainedRecruitingApprovalRequest,
   ReviseRecruitingRoleInput as ReviseRoleInput,
-  SaveRecruitingAssessmentInput as SaveAssessmentInput,
   SetRecruitingCandidateShortlistInput as ShortlistInput,
   SetRecruitingCandidateShortlistOutput as ShortlistOutput,
 } from "@rakazo/contracts";
 import {
-  ConfirmRecruitingBriefInput,
   CreateRecruitingRoleInput,
   EditRecruitingCriteriaInput,
   EffectApprovalAnsweredPayloadSchema,
@@ -54,17 +45,13 @@ import {
   ListRecruitingFeedbackInput,
   ListRecruitingFeedbackOutput,
   MessageBlock as MessageBlockSchema,
-  NativeAskAnswerPayloadSchema,
   ProductEventSchema,
   RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
-  ReassessRecruitingAssessmentInput,
   RecordRecruitingProfileViewInput,
   RecruitingArtifactRefSchema,
-  RecruitingAssessmentAskInputSchema,
-  RecruitingAssessmentSchema,
-  RecruitingBriefDraftSchema,
   RecruitingCandidateConsiderationSchema,
   RecruitingCandidateFeedbackSelectionSchema,
+  RecruitingCandidateReportSchema,
   RecruitingCrmBindingInputSchema,
   RecruitingCrmImportArgsSchema,
   RecruitingCrmImportInputSchema,
@@ -78,8 +65,6 @@ import {
   RecruitingPreferenceFeedbackSchema,
   RecruitingProfileActivityInput,
   RecruitingProfileViewedPayloadSchema,
-  RecruitingQuestionAskedPayloadSchema,
-  RecruitingQuestionSchema,
   RecruitingReplyTargetSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchSavedObservationSchema,
@@ -92,13 +77,11 @@ import {
   RecruitingShortlistToolInputSchema,
   RecruitingShortlistToolResultSchema,
   RecruitingSourceRefSchema,
-  RetainedRecruitingApprovalRequestSchema,
+  RecruitingStoredGradesRequestSchema,
   ReviseRecruitingRoleInput,
   recruitingCandidateRanking,
-  SaveRecruitingAssessmentInput,
   SetRecruitingCandidateShortlistInput,
 } from "@rakazo/contracts";
-import type { RecruitingPlaybookStage, RecruitingPlaybookStep } from "@rakazo/core";
 import {
   applyRecruitingPreferenceEdit,
   boundDirectApprovalDetails,
@@ -106,32 +89,20 @@ import {
   catalogApprovalDetails,
   catalogApprovalRequest,
   deriveRecruitingCrmImportStatus,
-  evaluateRecruitingAssessment,
-  extractLinksFromText,
   extractRecruitingCrmTarget,
-  isRecruitingPlaybookStage,
-  laterPlaybookStage,
-  mergeRecruitingReassessment,
-  nextPlaybookStep,
   normalizeRecruitingCandidateRow,
   parseRecruitingCrmImportReceipt,
   projectRecruitingCandidateReport,
-  RECRUITING_PLAYBOOK_STAGES,
   RecruitingPlaybookValidationError,
-  readRecruitingJsonString,
-  recruitingBriefClarifications,
   recruitingCalibrationIdentity,
-  requireRecruitingBriefConfirmation,
-  stuckWorkExpiresAt,
   validateRecruitingBrief,
-  validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
 import { getLogger } from "@rakazo/logging";
+import { backgroundToolSourceTrigger } from "./background-tool.js";
+import { STOPPED_TURN } from "./cancel-runs.js";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
-import type { AnswerRunInput, PauseRunForInput } from "./events.js";
 import { appendEventInTransaction } from "./events.js";
 import { createGroupInTransaction } from "./groups.js";
 import type { SourceMessage } from "./messages.js";
@@ -140,12 +111,12 @@ import {
   humanMessageInclude,
   isNativeHumanMessage,
   loadRunHumanSources,
-  validateRunHumanSourceRows,
 } from "./messages.js";
 import {
   listRecruitingSavedProfiles,
   mergeRecruitingProfileFacts,
 } from "./recruiting-saved-profiles.js";
+import { readRecruiterVerdicts } from "./recruiting-search-quality.js";
 import { IsolationError, scoped } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -153,137 +124,7 @@ type Tx = Prisma.TransactionClient;
 type RoleSnapshot = {
   role: RecruitingRole;
   revision: RecruitingRoleRevision;
-  /** Short Chinese label of the agent's next playbook step; null when the human owns the move. */
-  nextStep?: string | null;
 };
-
-/** Stages only advance (playbook S1→S12); a stale writer never regresses a role. */
-export async function advanceRecruitingPlaybookStage(
-  tx: Pick<Tx, "recruitingRole">,
-  roleId: string,
-  next: RecruitingPlaybookStage,
-): Promise<void> {
-  // One conditional write: only a role still at an earlier stage moves.
-  const earlier = RECRUITING_PLAYBOOK_STAGES.slice(0, RECRUITING_PLAYBOOK_STAGES.indexOf(next));
-  if (!earlier.length) return;
-  await tx.recruitingRole.updateMany({
-    where: { id: roleId, playbookStage: { in: [...earlier] } },
-    data: { playbookStage: next },
-  });
-}
-
-/** In-memory monotonic step for writers that already hold the role row and its CAS write. */
-function stageAfter(role: { playbookStage?: string }, next: RecruitingPlaybookStage) {
-  const current = isRecruitingPlaybookStage(role.playbookStage) ? role.playbookStage : "intake";
-  return laterPlaybookStage(current, next);
-}
-
-const CALIBRATION_FEEDBACK_THRESHOLD = 10;
-/** The scale step's target when the recruiter names none (the scale prompt's default). */
-const RECRUITING_SCALE_DEFAULT_TARGET = 100;
-
-/** After candidates are saved: ten or more saved people move the role into the feedback loop. */
-/** Saved people reach the feedback stage only once a calibration round has shown ten of them. */
-// Runs inside the save's locked transaction, where each statement is a round trip: before the
-// first round there is nothing to advance, so the count is skipped.
-async function advanceStageAfterSave(tx: Tx, roleId: string) {
-  const round = await tx.recruitingCalibrationRound.findFirst({
-    where: { roleId },
-    select: { id: true },
-  });
-  if (!round) return;
-  const saved = await tx.recruitingCandidate.count({ where: { roleId } });
-  if (saved >= CALIBRATION_FEEDBACK_THRESHOLD)
-    await advanceRecruitingPlaybookStage(tx, roleId, "feedback");
-}
-
-/** Stage plus the next playbook step for a role; used by snapshots and the run turn-end guard. */
-export async function readRecruitingPlaybookStep(
-  tx: Pick<
-    Tx,
-    | "recruitingRole"
-    | "recruitingRoleRevision"
-    | "recruitingCandidate"
-    | "recruitingCalibrationRound"
-    | "recruitingCandidatePage"
-  >,
-  roleId: string,
-): Promise<{
-  stage: RecruitingPlaybookStage;
-  step: RecruitingPlaybookStep | null;
-  savedCandidates: number;
-} | null> {
-  const role = await tx.recruitingRole.findUnique({
-    where: { id: roleId },
-    select: { title: true, playbookStage: true, currentRevisionId: true, archivedAt: true },
-  });
-  if (!role || role.archivedAt) return null;
-  const [revision, savedCandidates, acceptedRound, anyRound] = await Promise.all([
-    tx.recruitingRoleRevision.findUnique({
-      where: { id: role.currentRevisionId },
-      select: { brief: true },
-    }),
-    tx.recruitingCandidate.count({ where: { roleId } }),
-    tx.recruitingCalibrationRound.findFirst({
-      where: { roleId, approvedAt: { not: null } },
-      orderBy: { approvedAt: "asc" },
-      select: { approvedAt: true },
-    }),
-    tx.recruitingCalibrationRound.findFirst({ where: { roleId }, select: { id: true } }),
-  ]);
-  const brief = revision?.brief ? RecruitingBriefDraftSchema.safeParse(revision.brief) : null;
-  // The stored stage only moves forward from writes made after it shipped. A role that already
-  // has a confirmed brief, saved people or an accepted round is at least at that stage, so it
-  // is never pushed back to a fresh calibration search.
-  let stage = isRecruitingPlaybookStage(role.playbookStage) ? role.playbookStage : "intake";
-  const confirmed = (revision?.brief as { confirmation?: unknown } | null)?.confirmation;
-  if (confirmed && typeof confirmed === "object")
-    stage = laterPlaybookStage(stage, "calibration_10");
-  // Saved people mean the brief was searched; feedback starts only once a round showed ten.
-  if (savedCandidates >= CALIBRATION_FEEDBACK_THRESHOLD)
-    stage = laterPlaybookStage(stage, anyRound ? "feedback" : "calibration_10");
-  if (stage === "feedback" && !anyRound) stage = "calibration_10";
-  if (acceptedRound) stage = laterPlaybookStage(stage, "scale");
-  const openClarifications = brief?.success ? recruitingBriefClarifications(brief.data).length : 0;
-  // Scale is delivered once people were saved after the round was accepted, or the pool already
-  // holds the default target; the next move is then the recruiter's, so nothing is pushed.
-  const scaled =
-    stage === "scale" &&
-    (savedCandidates >= RECRUITING_SCALE_DEFAULT_TARGET ||
-      (acceptedRound?.approvedAt != null &&
-        (await tx.recruitingCandidatePage.findFirst({
-          where: { roleId, observedAt: { gt: acceptedRound.approvedAt } },
-          select: { effectId: true },
-        })) !== null));
-  return {
-    stage,
-    savedCandidates,
-    step: scaled
-      ? null
-      : nextPlaybookStep(stage, {
-          title: role.title,
-          hasBrief: Boolean(revision?.brief),
-          openClarifications,
-          savedCandidates,
-        }),
-  };
-}
-
-export type { RecruitingAssessmentSnapshot } from "@rakazo/contracts";
-
-/** The intent quote is not in the recruiter's current message; says which words to copy. */
-export class RecruitingIntentQuoteError extends IsolationError {
-  /** A quote the current message does contain, so a save can be repeated without the model. */
-  readonly quote: string;
-  constructor(text: string, quote = text) {
-    const excerpt = text.length > 300 ? `${text.slice(0, 300)}…` : text;
-    super(
-      `intent.quote must be exact words copied from the recruiter's current message, not from a system or agent message. Their current message reads: ${JSON.stringify(excerpt)}`,
-    );
-    this.name = "RecruitingIntentQuoteError";
-    this.quote = quote;
-  }
-}
 
 /**
  * A source reference that is the actor's own but does not check out. Still an IsolationError
@@ -302,15 +143,6 @@ export class RecruitingConflictError extends Error {
   constructor(message = "Recruiting revision changed") {
     super(message);
     this.name = "RecruitingConflictError";
-  }
-}
-
-export class RecruitingSourceValidationError extends Error {
-  constructor(sourceRefId: string, locator: string) {
-    super(
-      `Source ${JSON.stringify(sourceRefId)} at ${JSON.stringify(locator)}: quote must be exact contiguous text from the original read receipt; copy one unchanged excerpt without omissions or joined passages.`,
-    );
-    this.name = "RecruitingSourceValidationError";
   }
 }
 
@@ -436,7 +268,12 @@ async function requireRole(
   thread?: Awaited<ReturnType<typeof requireThread>>,
 ) {
   if (lock) {
-    // One existing row lock orders role revisions and candidate assessment CAS writes.
+    // One existing row lock orders role revisions and candidate assessment CAS writes. The role's
+    // conversation is locked first, the order every event append takes (it updates the
+    // conversation row): locking the role first deadlocked against live runs (staging 11-26).
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = (SELECT "sourceThreadId" FROM "recruiting_roles" WHERE "id" = ${roleId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId}) AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR NO KEY UPDATE`,
+    );
     await tx.$queryRaw(
       Prisma.sql`SELECT "id" FROM "recruiting_roles" WHERE "id" = ${roleId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
     );
@@ -562,38 +399,16 @@ async function validateSources(
       messageIds.add(source.anchor.messageId);
     }
   }
-  const sourceMessageTargets: RecruitingAssessmentSnapshot["sourceMessageTargets"] = [];
-  if (!messageIds.size) return sourceMessageTargets;
+  if (!messageIds.size) return;
   const ids = [...messageIds].sort();
   // A message's thread never changes.
   const messages = await onceInTransaction(tx, `message-threads:${ids.join(",")}`, () =>
     tx.message.findMany({ where: { id: { in: ids } }, select: { id: true, threadId: true } }),
   );
   if (messages.length !== messageIds.size) throw new IsolationError();
-  const threads = new Map<string, Awaited<ReturnType<typeof requireThread>>>();
   for (const threadId of new Set(messages.map((message) => message.threadId)))
-    threads.set(
-      threadId,
-      threadId === authorizedThread?.id
-        ? scoped(actor, authorizedThread)
-        : await requireThread(tx, actor, threadId),
-    );
-  for (const message of messages) {
-    const thread = threads.get(message.threadId)!;
-    if (thread.groupId)
-      sourceMessageTargets.push({
-        messageId: message.id,
-        threadId: thread.id,
-        target: { groupId: thread.groupId },
-      });
-    else if (thread.botId)
-      sourceMessageTargets.push({
-        messageId: message.id,
-        threadId: thread.id,
-        target: { botId: thread.botId },
-      });
-  }
-  return sourceMessageTargets;
+    if (threadId === authorizedThread?.id) scoped(actor, authorizedThread);
+    else await requireThread(tx, actor, threadId);
 }
 
 function definitionSources(definition: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria">) {
@@ -690,8 +505,8 @@ function validateBriefAuthorship(
 
 /**
  * Brief facts may cite a recruiter message by its runtime id ("human-message:<messageId>")
- * without repeating the full reference. Supply that reference from the native message itself,
- * quoting its first text block; later validation still checks the quote and human authorship.
+ * without repeating the full reference. Supply that reference from the native message itself;
+ * later validation still checks human authorship.
  */
 async function citedHumanMessageSources(
   tx: Tx,
@@ -721,28 +536,13 @@ async function citedHumanMessageSources(
   return [...missing].flatMap(([id, messageId]) => {
     const message = messages.find((row) => row.id === messageId);
     if (!message || !isNativeHumanMessage(message)) return [];
-    const blocks = message.blocks as { kind: string; text?: string }[];
-    const blockIndex = blocks.findIndex((block) => block.kind === "text" && block.text?.trim());
-    const quote = blocks[blockIndex]?.text;
-    if (!quote) return [];
-    return [
-      {
-        id,
-        kind: "original_material" as const,
-        anchor: { kind: "message" as const, messageId, locator: `blocks[${blockIndex}].text` },
-        readState: "read" as const,
-        readAt,
-        quote,
-      },
-    ];
+    return [{ ...humanMessageSource(message), id, readAt }];
   });
 }
 
 function definitionData(input: CreateRoleInput | ReviseRoleInput) {
   return {
-    brief: input.brief
-      ? ({ ...input.brief, confirmation: null } as Prisma.InputJsonValue)
-      : Prisma.DbNull,
+    brief: input.brief ? (input.brief as Prisma.InputJsonValue) : Prisma.DbNull,
     sourceRefs: input.sourceRefs as Prisma.InputJsonValue,
     criteria: input.criteria as Prisma.InputJsonValue,
     preferences: input.preferences as Prisma.InputJsonValue,
@@ -836,7 +636,6 @@ async function createRoleInTransaction(
       title: input.title,
       revision: 1,
       currentRevisionId: randomUUID(),
-      playbookStage: input.brief && input.title ? "calibration_10" : "intake",
     },
   });
   await tx.recruitingRoleRevision.create({
@@ -1348,10 +1147,7 @@ export async function getRecruitingRoleSnapshot(
       const thread = await requireThread(tx, actor, input.threadId);
       if (!thread.activeRecruitingRoleId) return null;
       const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
-      const snapshot = await roleSnapshot(tx, actor, role, thread);
-      // Additive display hint; a partial test double without the candidate delegate still snapshots.
-      const playbook = await readRecruitingPlaybookStep(tx, role.id).catch(() => null);
-      return { ...snapshot, nextStep: playbook?.step?.label ?? null };
+      return roleSnapshot(tx, actor, role, thread);
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
@@ -1392,14 +1188,22 @@ export async function reviseRecruitingRole(
   const input = ReviseRecruitingRoleInput.parse(untrusted);
   const artifacts = await loadRoleMaterials(prisma, actor, input, material);
   return prisma.$transaction(async (tx) => {
-    // Match criteria, confirmation and native writes: lock the thread before the role.
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = (SELECT "sourceThreadId" FROM "recruiting_roles" WHERE "id" = ${input.roleId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId}) AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
-    );
     const role = await requireRole(tx, actor, input.roleId, true);
     const thread = await requireThread(tx, actor, role.sourceThreadId);
     return reviseRoleInTransaction(tx, actor, input, artifacts, role, thread);
   });
+}
+
+/**
+ * A rename keeps the role number the recruiter's name for the role carries. Branch fosp 11-21
+ * (479fde17): the role agent renamed 「测试固定 · 数据工程师 6 · 15261」 to "Senior Data Engineer",
+ * every later handoff for 15261 was refused as a new role, and the role was opened twice.
+ */
+export function keepNumberedTitle(next: string, current: string | null): string {
+  const number = [...(current ?? "").matchAll(/(?<![\p{L}\p{N}])(\d{4,6})(?![\p{L}\p{N}])/gu)]
+    .map((match) => match[1])
+    .find((n) => n && !/^(?:19|20)\d\d$/.test(n));
+  return next && current && number && !next.includes(number) ? current : next;
 }
 
 async function reviseRoleInTransaction(
@@ -1424,8 +1228,7 @@ async function reviseRoleInTransaction(
   const revision = await tx.recruitingRoleRevision.create({
     data: { roleId: role.id, revision: role.revision + 1, ...definitionData(input) },
   });
-  const revisedStage =
-    input.brief && input.title ? stageAfter(role, "calibration_10") : role.playbookStage;
+  const title = keepNumberedTitle(input.title, role.title);
   const changed = await tx.recruitingRole.updateMany({
     where: {
       id: role.id,
@@ -1435,144 +1238,26 @@ async function reviseRoleInTransaction(
       currentRevisionId: role.currentRevisionId,
     },
     data: {
-      title: input.title,
+      title,
       revision: revision.revision,
       currentRevisionId: revision.id,
-      playbookStage: revisedStage,
     },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
   const sourceThread = authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId));
-  await syncRoleGroupName(tx, actor, sourceThread, input.title, role.title);
+  await syncRoleGroupName(tx, actor, sourceThread, title, role.title);
   await recordRecruitingChange(tx, actor, sourceThread, role.id);
   return roleSnapshot(
     tx,
     actor,
     {
       ...role,
-      title: input.title,
+      title,
       revision: revision.revision,
       currentRevisionId: revision.id,
-      playbookStage: revisedStage,
     },
     authorizedThread,
   );
-}
-
-/** Human RPC and the verified native approval share one atomic confirmation write. */
-export async function confirmRecruitingBrief(
-  prisma: PrismaClient,
-  actor: Actor,
-  raw: unknown,
-  material?: RecruitingRoleMaterialContext,
-): Promise<RoleSnapshot> {
-  const input = ConfirmRecruitingBriefInput.parse(raw);
-  const loaded = await getRecruitingWorkspace(prisma, actor, { threadId: input.threadId });
-  if (loaded?.role.id !== input.roleId) throw new IsolationError();
-  if (loaded.role.revision !== input.expectedRevision) throw new RecruitingConflictError();
-  const artifacts = await loadRoleMaterials(prisma, actor, loaded.revision, material);
-  return prisma.$transaction((tx) =>
-    confirmRecruitingBriefInTransaction(tx, actor, input, artifacts),
-  );
-}
-
-function requireConfirmableBrief(revision: RecruitingRoleRevision) {
-  if (!revision.brief)
-    throw new RecruitingPlaybookValidationError(
-      "Read the original material and prepare a sourced brief first.",
-    );
-  validateRecruitingBrief(revision.brief, revision);
-  if (recruitingBriefClarifications(revision.brief).length)
-    throw new RecruitingPlaybookValidationError(
-      "Resolve the material brief questions before confirmation.",
-    );
-  if (
-    revision.criteria.some(
-      (criterion) => criterion.priority === "hard" && criterion.definitionQuestions.length,
-    )
-  )
-    throw new RecruitingPlaybookValidationError(
-      "Resolve the material hard-criterion questions before confirmation.",
-    );
-}
-
-async function confirmRecruitingBriefInTransaction(
-  tx: Prisma.TransactionClient,
-  actor: Actor,
-  input: { threadId: string; roleId: string; expectedRevision: number },
-  artifacts: ReadonlyMap<string, Uint8Array>,
-  approval?: { runId: string; confirmedAt: string },
-): Promise<RoleSnapshot> {
-  await tx.$queryRaw(
-    Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${input.threadId} AND "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId} FOR UPDATE`,
-  );
-  const thread = await requireThread(tx, actor, input.threadId);
-  if (thread.activeRecruitingRoleId !== input.roleId) throw new IsolationError();
-  const role = await requireRole(tx, actor, input.roleId, true, thread);
-  if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
-  const workspace = await roleSnapshot(tx, actor, role, thread);
-  const { revision } = workspace;
-  requireConfirmableBrief(revision);
-  const messages = await validateReadSources(
-    tx,
-    actor,
-    definitionSources(revision),
-    artifacts,
-    thread,
-  );
-  validateBriefAuthorship(
-    { ...revision, expectedRevision: role.revision, title: role.title },
-    messages,
-  );
-  if (revision.brief!.confirmation?.revision === role.revision) return workspace;
-  const nextRevision = role.revision + 1;
-  const message = await createThreadMessageInTransaction(tx, {
-    threadId: thread.id,
-    role: "user",
-    ...(approval ? { runId: approval.runId } : {}),
-    blocks: [
-      {
-        kind: "text",
-        text: `Confirm recruiting brief for ${role.title} (requirements version ${role.revision}).`,
-      },
-    ],
-  });
-  const brief = {
-    ...revision.brief,
-    confirmation: {
-      revision: nextRevision,
-      userId: actor.userId,
-      messageId: message.id,
-      confirmedAt: approval?.confirmedAt ?? new Date().toISOString(),
-    },
-  };
-  const saved = await tx.recruitingRoleRevision.create({
-    data: {
-      roleId: role.id,
-      revision: nextRevision,
-      ...definitionData({ ...revision, expectedRevision: role.revision, title: role.title }),
-      brief: brief as Prisma.InputJsonValue,
-    },
-  });
-  const confirmedStage = stageAfter(role, "calibration_10");
-  const changed = await tx.recruitingRole.updateMany({
-    where: {
-      id: role.id,
-      spaceId: actor.spaceId,
-      userId: actor.userId,
-      revision: role.revision,
-      currentRevisionId: role.currentRevisionId,
-    },
-    data: { revision: nextRevision, currentRevisionId: saved.id, playbookStage: confirmedStage },
-  });
-  if (changed.count !== 1) throw new RecruitingConflictError();
-  await recordRecruitingChange(tx, actor, thread, role.id);
-  return roleSnapshot(tx, actor, {
-    ...role,
-    revision: nextRevision,
-    currentRevisionId: saved.id,
-    playbookStage: confirmedStage,
-  });
 }
 
 function criterionStatement(
@@ -1875,20 +1560,84 @@ export function mergeRecruitingRoleUpdate(
   for (const item of upserts.values())
     if (!saved.criteria.some((existing) => existing.id === item.id)) criteria.push(item);
   const replaced = new Set((update.sourceRefs ?? []).map((ref) => ref.id));
-  // A new revision starts unconfirmed, exactly as a full revise resubmits the draft.
-  const savedBrief = saved.brief
-    ? (({ confirmation: _, ...draft }) => draft)(saved.brief)
-    : saved.brief;
+  // A kept brief follows the criteria this update leaves: a removed requirement loses its rule
+  // and an added one gets the rule its own citation implies. Staging 11-27: an update that only
+  // added the recruiter's new requirement was refused three times for the missing rule.
+  const kept = update.brief === undefined ? saved.brief : undefined;
+  const roleSources = [
+    ...saved.sourceRefs.filter((ref) => !replaced.has(ref.id)),
+    ...(update.sourceRefs ?? []),
+  ];
+  const held = new Set([
+    ...roleSources.map((ref) => ref.id),
+    ...criteria.flatMap((item) => item.sourceRefs.map((ref) => ref.id)),
+  ]);
+  // What a requirement's own citation implies for its rule.
+  const cited = (item: (typeof criteria)[number]) => {
+    const source = item.sourceRefs.find((ref) => ref.readState === "read");
+    return source
+      ? {
+          origin:
+            source.anchor.kind === "message" ? ("user_instruction" as const) : ("jd" as const),
+          sourceRefIds: [source.id],
+        }
+      : null;
+  };
+  const brief = kept
+    ? {
+        ...kept,
+        rules: [
+          ...kept.rules.flatMap((rule) => {
+            const item = criteria.find((candidate) => candidate.id === rule.criterionId);
+            if (!item) return [];
+            // A rule whose source the update dropped cites what its requirement now cites
+            // (staging 11-27: a changed requirement's rule still named the replaced source, and
+            // the update was refused three times).
+            const moved = rule.sourceRefIds.some((id) => !held.has(id)) ? cited(item) : null;
+            const next = moved ? { ...rule, ...moved } : rule;
+            // A requirement this update made a must-have rejects from now on.
+            return upserts.has(item.id) && item.priority === "hard" && next.origin !== "inferred"
+              ? [{ ...next, effect: "reject" as const }]
+              : [next];
+          }),
+          ...criteria.flatMap((item) => {
+            const from = cited(item);
+            if (!from || kept.rules.some((rule) => rule.criterionId === item.id)) return [];
+            return [
+              {
+                criterionId: item.id,
+                ...from,
+                effect: item.priority === "hard" ? ("reject" as const) : ("flag" as const),
+              },
+            ];
+          }),
+        ],
+      }
+    : update.brief === undefined
+      ? saved.brief
+      : update.brief;
+  // A kept fact, filter or answer keeps its saved source when the requirement that carried it
+  // was removed or changed.
+  const stillCited = new Set(
+    kept
+      ? [
+          ...kept.fields.flatMap((field) => field.sourceRefIds),
+          ...kept.searchFilters.flatMap((filter) => filter.sourceRefIds),
+          ...kept.questions.flatMap((question) => question.answeredBySourceRefId ?? []),
+        ]
+      : [],
+  );
+  const carried = saved.criteria
+    .flatMap((item) => item.sourceRefs)
+    .filter((ref, index, all) => all.findIndex((other) => other.id === ref.id) === index)
+    .filter((ref) => stillCited.has(ref.id) && !held.has(ref.id));
   const merged = RecruitingRoleToolInputSchema.parse({
     operation: "revise",
     roleId: update.roleId,
     expectedRevision: update.expectedRevision,
     title: update.title ?? current.role.title,
-    brief: update.brief === undefined ? savedBrief : update.brief,
-    sourceRefs: [
-      ...saved.sourceRefs.filter((ref) => !replaced.has(ref.id)),
-      ...(update.sourceRefs ?? []),
-    ],
+    brief,
+    sourceRefs: [...roleSources, ...carried],
     criteria,
     preferences: update.preferences ?? saved.preferences,
     definitionQuestions: update.definitionQuestions ?? saved.definitionQuestions,
@@ -2051,13 +1800,18 @@ async function requireCurrentHumanSource(
     "id" | "botId" | "threadId" | "sourceMessageId" | "trigger"
   >,
   sourceMessageId: string | null,
-  quote: string,
-  allowOriginalIntent = false,
   ancestors = new Set<string>(),
-  acceptEarlierQuote = false,
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage }> {
   if (ancestors.has(run.id)) throw new IsolationError();
   ancestors.add(run.id);
+  // A turn that waited on a slow tool resumes as a background run; it still acts for the message
+  // that started it (staging 11-16: a resumed global turn's handoff could save no feedback).
+  run = {
+    ...run,
+    trigger: await backgroundToolSourceTrigger(tx, { ...run, spaceId: actor.spaceId }).catch(
+      () => run.trigger,
+    ),
+  };
   const {
     source: given,
     steering,
@@ -2082,10 +1836,7 @@ async function requireCurrentHumanSource(
         actor,
         delegator,
         delegator.sourceMessageId,
-        quote,
-        allowOriginalIntent,
         ancestors,
-        acceptEarlierQuote,
       );
       if (
         human.message.threadId !== delegator.threadId ||
@@ -2115,10 +1866,7 @@ async function requireCurrentHumanSource(
       actor,
       sender,
       inheritedLatest?.id ?? sender.sourceMessageId,
-      quote,
-      allowOriginalIntent,
       ancestors,
-      acceptEarlierQuote,
     );
     if (human.message.threadId !== latest.threadId || human.message.seq >= latest.seq)
       throw new IsolationError();
@@ -2131,37 +1879,13 @@ async function requireCurrentHumanSource(
           where: { id: run.sourceMessageId ?? "" },
           include: humanMessageInclude,
         });
-  if (allowOriginalIntent && original && answers.some((answer) => answer.seq <= original.seq))
-    throw new IsolationError();
-  const hasQuote = (message: SourceMessage) =>
-    (message.blocks as { kind: string; text?: string }[]).some(
-      (block) =>
-        block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
-    );
-  const latestHasQuote = hasQuote(latest);
-  // An acceptance stays the recruiter's decision when they write again right after it, such as
-  // "also prioritize the Bay Area": it may cite their own earlier message from this run.
-  const earlier =
-    acceptEarlierQuote && !latestHasQuote
-      ? [hint, original, ...steering.map((item) => item.message), ...answers].find(
-          (message): message is SourceMessage =>
-            !!message &&
-            message.threadId === run.threadId &&
-            isNativeHumanMessage(message) &&
-            hasQuote(message),
-        )
-      : undefined;
-  const source =
-    earlier ??
-    (!latestHasQuote &&
-    allowOriginalIntent &&
-    original?.threadId === run.threadId &&
-    isNativeHumanMessage(original) &&
-    hasQuote(original)
-      ? original
-      : latest);
+  // A message the recruiter sent while the run worked is the one it acts for now.
+  const source = steering
+    .map((item) => item.message)
+    .filter(isNativeHumanMessage)
+    .reduce((current, message) => (message.seq > current.seq ? message : current), latest);
   if (
-    !isNativeHumanMessage(source) ||
+    !MessageBlockSchema.array().safeParse(source.blocks).success ||
     (source.id === run.sourceMessageId &&
       !["user", "follow_up", "reaction"].includes(run.trigger) &&
       !steering.some((item) => item.messageId === source.id) &&
@@ -2169,41 +1893,32 @@ async function requireCurrentHumanSource(
     (original &&
       isNativeHumanMessage(original) &&
       original.threadId === latest.threadId &&
-      original.seq > latest.seq) ||
-    (!acceptEarlierQuote &&
-      steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq))
+      original.seq > latest.seq)
   )
     throw new IsolationError();
-  const sourceBlocks = source.blocks as { kind: string; text?: string }[];
-  const quoteIndex = sourceBlocks.findIndex(
-    (block) =>
-      block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
-  );
-  if (quoteIndex < 0) {
-    const texts = sourceBlocks.flatMap((block) =>
-      block.kind === "text" && block.text ? [block.text] : [],
-    );
-    throw new RecruitingIntentQuoteError(texts.join("\n"), texts[0]);
-  }
-  const humanSource: RecruitingSourceRef = {
-    id: `human-message:${source.id}`,
-    kind: "original_material",
-    anchor: { kind: "message", messageId: source.id, locator: `blocks[${quoteIndex}].text` },
-    readState: "read",
-    readAt: new Date().toISOString(),
-    quote,
-  };
-  return { source: humanSource, message: source };
+  return { source: humanMessageSource(source), message: source };
 }
 
-/**
- * The recruiter's latest message in a conversation as the source of record keeping, quoting the
- * cited words when that message holds them and otherwise its first text.
- */
+/** A recruiter's message as a source: where it is, never what it says. */
+function humanMessageSource(message: SourceMessage): RecruitingSourceRef {
+  const text = (message.blocks as { kind: string }[]).findIndex((block) => block.kind === "text");
+  return {
+    id: `human-message:${message.id}`,
+    kind: "original_material",
+    anchor: {
+      kind: "message",
+      messageId: message.id,
+      locator: text < 0 ? "blocks[0]" : `blocks[${text}].text`,
+    },
+    readState: "read",
+    readAt: new Date().toISOString(),
+  };
+}
+
+/** The recruiter's latest message in a conversation as the source of record keeping. */
 async function latestHumanSource(
   tx: Tx,
   threadId: string,
-  quote: string,
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage } | null> {
   const recent = await tx.message.findMany({
     where: { threadId, role: "user", botId: null },
@@ -2212,24 +1927,7 @@ async function latestHumanSource(
     include: humanMessageInclude,
   });
   const message = recent.find(isNativeHumanMessage);
-  if (!message) return null;
-  const blocks = message.blocks as { kind: string; text?: string }[];
-  const texts = blocks.flatMap((block, index) =>
-    block.kind === "text" && block.text ? [{ index, text: block.text }] : [],
-  );
-  const cited = texts.find((block) => block.text.includes(quote)) ?? texts[0];
-  if (!cited) return null;
-  return {
-    source: {
-      id: `human-message:${message.id}`,
-      kind: "original_material",
-      anchor: { kind: "message", messageId: message.id, locator: `blocks[${cited.index}].text` },
-      readState: "read",
-      readAt: new Date().toISOString(),
-      quote: cited.text.includes(quote) ? quote : cited.text,
-    },
-    message,
-  };
+  return message ? { source: humanMessageSource(message), message } : null;
 }
 
 function verifiedFeedbackChoice(
@@ -2288,16 +1986,9 @@ async function candidateDecisionTarget(
   revisions: { candidateKey: string; expectedRevision: number }[],
   operation: "hold" | "pass" | "resume",
   human: SourceMessage,
-  quote: string,
   allowRecorded = false,
 ) {
-  if (
-    !isNativeHumanMessage(human) ||
-    !(human.blocks as { kind: string; text?: string }[]).some(
-      (block) => block.kind === "text" && block.text?.includes(quote),
-    )
-  )
-    throw new IsolationError();
+  if (!isNativeHumanMessage(human)) throw new IsolationError();
   const candidates = await tx.recruitingCandidate.findMany({
     where: { roleId, candidateKey: { in: [...keys] } },
     select: { candidateKey: true, revision: true, consideration: true },
@@ -2353,7 +2044,6 @@ async function setCandidateDecisionInTransaction(
     revisions,
     operation,
     human,
-    quote,
     allowRecorded,
   );
   if (recorded) return "already_recorded" as const;
@@ -2442,8 +2132,6 @@ export async function readRecruitingFeedbackContext(
     expectedRoleRevision?: number;
     sourceRefs: readonly RecruitingSourceRef[];
     candidateKeys?: readonly string[];
-    /** A round acceptance may cite the recruiter's earlier message from this run. */
-    acceptEarlierQuote?: boolean;
     /**
      * Record keeping (a round's direction, reviews of people) is never refused over which
      * recruiter message it cites: when the run's own message can't be traced, it cites the
@@ -2478,17 +2166,9 @@ async function feedbackContextInTransaction(
     actor,
     run,
     input.sourceMessageId,
-    intent.quote,
-    false,
-    new Set(),
-    input.acceptEarlierQuote,
   ).catch(async (error: unknown) => {
-    if (
-      !input.recordKeeping ||
-      !(error instanceof IsolationError || error instanceof RecruitingIntentQuoteError)
-    )
-      throw error;
-    const latest = await latestHumanSource(tx, run.threadId, intent.quote);
+    if (!input.recordKeeping || !(error instanceof IsolationError)) throw error;
+    const latest = await latestHumanSource(tx, run.threadId);
     if (!latest) throw error;
     return latest;
   });
@@ -2593,7 +2273,6 @@ export async function prepareNativeRecruitingCandidateDecision(
       input.candidateRevisions!,
       operation,
       context.message,
-      input.intent.quote,
       true,
     );
     const profiles = await candidateProfiles(tx, actor, input.roleId, input.candidateKeys);
@@ -2842,8 +2521,6 @@ export async function listRecruitingFeedback(
       const request = RecruitingFeedbackInputSchema.safeParse(row.request);
       if (!parsed.success || !request.success) continue;
       const record = parsed.data;
-      // The source quote is checked against the recruiter's message below. It may differ from the
-      // agent's own summary in intent.quote when the save cited their latest message.
       if (
         (record.feedback.target !== "candidate" && record.feedback.target !== "round") ||
         record.feedback.roleId !== input.roleId ||
@@ -2893,9 +2570,6 @@ export async function listRecruitingFeedback(
         authorizedThreads.add(human.threadId);
       }
       if (
-        !(human.blocks as { kind: string; text?: string }[]).some(
-          (block) => block.kind === "text" && block.text?.includes(record.source.quote!),
-        ) ||
         (record.feedback.target !== "candidate" && record.feedback.target !== "round") ||
         record.choice !==
           verifiedFeedbackChoice(
@@ -2964,11 +2638,25 @@ export async function authorizeRecruitingMemoryCommit(
     // A group note stays inside this conversation; preferences still go through feedback.
     const botNote =
       (request.scope === "bot" && request.botId === run.botId) || request.scope === "group";
+    // A preference's receipt is written by the run that saved the revision, so the lookup goes
+    // through those runs' events instead of every event in the account (3.5 s on a staging
+    // account with 300k events, inside the serializable save; notes took 13 s there).
+    const sourceRunIds = existing
+      ? (
+          await tx.memoryRevision.findMany({
+            where: { documentId: existing.id, sourceRunId: { not: null } },
+            select: { sourceRunId: true },
+            distinct: ["sourceRunId"],
+          })
+        ).flatMap((revision) => (revision.sourceRunId ? [revision.sourceRunId] : []))
+      : [];
     const preferenceDocument =
       existing &&
+      sourceRunIds.length > 0 &&
       (await tx.event.findFirst({
         where: {
           spaceId: actor.spaceId,
+          runId: { in: sourceRunIds },
           type: "memory.revised",
           AND: [
             { payload: { path: ["kind"], equals: "recruiting_preference" } },
@@ -2996,7 +2684,6 @@ export async function authorizeRecruitingMemoryCommit(
     actor,
     run,
     request.recruiting.sourceMessageId,
-    feedback.intent.quote,
   );
   await validateSources(tx, actor, feedback.sourceRefs);
   if (thread.activeRecruitingRoleId)
@@ -3141,8 +2828,7 @@ export async function executeRecruitingRoleMutation(
       )
         throw new IsolationError();
       const source = RecruitingSourceRefSchema.parse(saved.source);
-      if (source.anchor.kind !== "message" || source.quote !== input.intent.quote)
-        throw new IsolationError();
+      if (source.anchor.kind !== "message") throw new IsolationError();
       const human = await threadMessage(tx, source.anchor.messageId, run.threadId);
       if (!human || !isNativeHumanMessage(human)) throw new IsolationError();
       await validateReadSources(tx, actor, [source], artifacts);
@@ -3199,26 +2885,16 @@ export async function executeRecruitingRoleMutation(
     requireResearchLease(run, context);
     if (effect.status !== "executing") throw new IsolationError();
     if (!definitionInput && !archiveInput) throw new RecruitingConflictError();
-    // A role stays the recruiter's request when they add a detail while it is being written
-    // ("recent graduates preferred"): the create may cite their earlier message from this run.
-    // An update to a saved role's brief is record keeping too: when the run's own recruiter
-    // message can't be traced, it cites their latest message. Create, bind and archive still need it.
+    // An update to a saved role's brief is record keeping: when the run's own recruiter message
+    // can't be traced, it cites their latest message. Create, bind and archive still need it.
     const { source: humanSource, message: source } = await requireCurrentHumanSource(
       tx,
       actor,
       run,
       context.sourceMessageId,
-      input.intent.quote,
-      input.operation === "create",
-      undefined,
-      input.operation === "create",
     ).catch(async (error: unknown) => {
-      if (
-        input.operation !== "update" ||
-        !(error instanceof IsolationError || error instanceof RecruitingIntentQuoteError)
-      )
-        throw error;
-      const latest = await latestHumanSource(tx, run.threadId, input.intent.quote);
+      if (input.operation !== "update" || !(error instanceof IsolationError)) throw error;
+      const latest = await latestHumanSource(tx, run.threadId);
       if (!latest) throw error;
       return latest;
     });
@@ -3486,661 +3162,6 @@ export async function recordRecruitingContextAdoption(
   });
 }
 
-async function assessmentSnapshot(
-  tx: Tx,
-  actor: Actor,
-  role: RecruitingRole,
-  row: Prisma.RecruitingAssessmentGetPayload<Record<string, never>>,
-): Promise<RecruitingAssessmentSnapshot> {
-  const assessment = RecruitingAssessmentSchema.parse({
-    ...row,
-    createdAt: row.createdAt.toISOString(),
-  });
-  const revision = await tx.recruitingRoleRevision.findFirst({
-    where: { id: row.roleRevisionId, roleId: role.id },
-  });
-  if (!revision) throw new IsolationError();
-  const roleRevision = RecruitingRoleRevisionSchema.parse({
-    ...revision,
-    createdAt: revision.createdAt.toISOString(),
-  });
-  await requireRun(tx, actor, row.createdByRunId);
-  const sourceMessageTargets = await validateDefinition(tx, actor, {
-    sourceRefs: [...assessment.sourceRefs, ...roleRevision.sourceRefs],
-    criteria: roleRevision.criteria,
-  });
-  return {
-    assessment,
-    roleRevision,
-    sourceMessageTargets,
-    isCurrent: role.currentRevisionId === assessment.roleRevisionId,
-  };
-}
-
-export async function listRecruitingAssessments(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: { roleId: string; offset?: number },
-): Promise<RecruitingAssessmentSnapshot[]> {
-  return prisma.$transaction(
-    async (tx) => {
-      const role = await requireRole(tx, actor, input.roleId);
-      const rows =
-        input.offset !== undefined
-          ? await tx.$queryRaw<Prisma.RecruitingAssessmentGetPayload<object>[]>(Prisma.sql`
-            SELECT DISTINCT ON ("candidateKey") * FROM recruiting_assessments
-            WHERE "roleId" = ${role.id}
-            ORDER BY "candidateKey" ASC, version DESC
-            LIMIT 200 OFFSET ${input.offset}
-          `)
-          : await tx.recruitingAssessment.findMany({
-              where: { roleId: role.id },
-              distinct: ["candidateKey"],
-              orderBy: [{ candidateKey: "asc" }, { version: "desc" }],
-            });
-      const snapshots = [];
-      for (const row of rows) snapshots.push(await assessmentSnapshot(tx, actor, role, row));
-      return snapshots;
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-  );
-}
-
-export async function getRecruitingAssessment(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: { roleId: string; candidateKey: string; version?: number },
-): Promise<RecruitingAssessmentSnapshot | null> {
-  return prisma.$transaction(
-    async (tx) => {
-      const role = await requireRole(tx, actor, input.roleId);
-      const row = await tx.recruitingAssessment.findFirst({
-        where: { roleId: role.id, candidateKey: input.candidateKey, version: input.version },
-        orderBy: { version: "desc" },
-      });
-      return row ? assessmentSnapshot(tx, actor, role, row) : null;
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-  );
-}
-
-/** Native runtime identity, adopted context and effect receipt; never model tool arguments. */
-export type RecruitingAssessmentSaveContext = {
-  runId: string;
-  threadId: string;
-  botId: string;
-  leaseOwner: string;
-  leaseFence: number;
-  contextArtifact?: RecruitingArtifactRef;
-  effectId: string;
-  effectRequest: unknown;
-};
-export type RecruitingAssessmentArtifactBytes = { artifactId: string; bytes: Uint8Array };
-export type RecruitingQuestionPauseContext = {
-  actor: Actor;
-  effectId: string;
-  effectRequest: unknown;
-  contextArtifact?: RecruitingArtifactRef;
-  artifacts: readonly RecruitingAssessmentArtifactBytes[];
-};
-type PreparedRecruitingQuestion =
-  | { kind: "completed"; eventSeq: number }
-  | { kind: "new"; request: RecruitingAssessmentAskInput; effectId: string; askIndex: number };
-
-function questionCard(blocks: unknown, askIndex: number) {
-  const parsed = MessageBlockSchema.array().parse(blocks);
-  const block = parsed[askIndex];
-  if (
-    parsed.length !== 1 ||
-    block?.kind !== "ask" ||
-    block.approvalEffectId ||
-    block.credential ||
-    block.input === "secret" ||
-    !block.actions ||
-    new Set(block.actions.map((action) => action.id)).size !== block.actions.length
-  )
-    throw new IsolationError();
-  return block;
-}
-
-async function currentQuestionTargets(
-  tx: Tx,
-  actor: Actor,
-  role: RecruitingRole,
-  requests: readonly RecruitingAssessmentAskInput[],
-) {
-  const current = new Set<RecruitingAssessmentAskInput>();
-  const matching = requests.filter((request) => role.currentRevisionId === request.roleRevisionId);
-  if (!matching.length) return current;
-  const definition = (await roleSnapshot(tx, actor, role)).revision;
-  const candidates = matching.flatMap((request) =>
-    request.target.kind === "candidate" ? [request.target.candidateKey] : [],
-  );
-  const rows = candidates.length
-    ? await tx.recruitingAssessment.findMany({
-        where: { roleId: role.id, candidateKey: { in: [...new Set(candidates)] } },
-        distinct: ["candidateKey"],
-        orderBy: [{ candidateKey: "asc" }, { version: "desc" }],
-      })
-    : [];
-  const byCandidate = new Map(rows.map((row) => [row.candidateKey, row]));
-  const verified = new Set<string>();
-  const origins = new Set<string>();
-  const sources: RecruitingAssessmentSourceRef[] = [];
-  for (const request of matching) {
-    const ids = request.target.criterionIds;
-    if (
-      new Set(ids).size !== ids.length ||
-      ids.some((id) => !definition.criteria.some((criterion) => criterion.id === id))
-    )
-      throw new IsolationError();
-    if (request.target.kind === "candidate") {
-      const row = byCandidate.get(request.target.candidateKey);
-      if (
-        !row ||
-        row.version !== request.target.assessmentVersion ||
-        row.roleRevisionId !== request.roleRevisionId
-      )
-        continue;
-      if (!verified.has(row.candidateKey)) {
-        const assessment = RecruitingAssessmentSchema.parse({
-          ...row,
-          createdAt: row.createdAt.toISOString(),
-        });
-        if (!origins.has(row.createdByRunId)) {
-          await requireRun(tx, actor, row.createdByRunId);
-          origins.add(row.createdByRunId);
-        }
-        sources.push(...assessment.sourceRefs);
-        verified.add(row.candidateKey);
-      }
-    }
-    current.add(request);
-  }
-  // The shared current revision and its sources were authorized above; check assessment sources once.
-  await validateSources(tx, actor, sources);
-  return current;
-}
-
-async function questionTargetCurrent(
-  tx: Tx,
-  actor: Actor,
-  role: RecruitingRole,
-  request: RecruitingAssessmentAskInput,
-) {
-  return (await currentQuestionTargets(tx, actor, role, [request])).has(request);
-}
-
-async function questionsInTransaction(
-  tx: Tx,
-  actor: Actor,
-  input: {
-    threadId: string;
-    roleId: string;
-    effectId?: string;
-    candidateKey?: string;
-    offset?: number;
-  },
-): Promise<RecruitingQuestion[]> {
-  const thread = await requireThread(tx, actor, input.threadId);
-  const role = await requireRole(tx, actor, input.roleId);
-  const events = await tx.event.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: thread.id,
-      type: "recruiting.question.asked",
-      ...(input.offset !== undefined ? { runId: { not: null } } : {}),
-      AND: [
-        { payload: { path: ["roleId"], equals: role.id } },
-        ...(input.offset !== undefined && input.candidateKey
-          ? [
-              {
-                OR: [
-                  { NOT: { payload: { path: ["target", "kind"], equals: "candidate" } } },
-                  { payload: { path: ["target", "candidateKey"], equals: input.candidateKey } },
-                ],
-              },
-            ]
-          : []),
-        ...(input.effectId !== undefined
-          ? [{ payload: { path: ["effectId"], equals: input.effectId } }]
-          : []),
-      ],
-    },
-    orderBy: { seq: "asc" },
-    ...(input.offset !== undefined ? { take: 200, skip: input.offset } : {}),
-  });
-  const asked = events.flatMap((event) => {
-    const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
-    if (
-      !event.runId ||
-      (input.candidateKey &&
-        receipt.target.kind === "candidate" &&
-        receipt.target.candidateKey !== input.candidateKey)
-    )
-      return [];
-    return [{ event, receipt }];
-  });
-  if (!asked.length) return [];
-  // ponytail: batch native proof rows inside this snapshot; never retain authorization across reads.
-  const runIds = [...new Set(asked.map(({ event }) => event.runId!))];
-  const runs = await tx.run.findMany({
-    where: { id: { in: runIds }, spaceId: actor.spaceId, userId: actor.userId },
-    select: {
-      id: true,
-      spaceId: true,
-      userId: true,
-      threadId: true,
-      botId: true,
-      status: true,
-      updatedAt: true,
-      bot: { select: { spaceId: true, userId: true } },
-    },
-  });
-  const byRun = new Map(runs.map((run) => [run.id, run]));
-  for (const id of runIds) {
-    const run = scoped(actor, byRun.get(id) ?? null);
-    scoped(actor, run.bot);
-    if (run.threadId !== thread.id) throw new IsolationError();
-  }
-  const botIds = [...new Set(runs.map((run) => run.botId))];
-  const effects = await tx.externalEffect.findMany({
-    where: {
-      id: { in: asked.map(({ receipt }) => receipt.effectId) },
-      spaceId: actor.spaceId,
-      runId: { in: runIds },
-      kind: "recruiting_assess",
-      status: "completed",
-    },
-  });
-  const byEffect = new Map(effects.map((effect) => [effect.id, effect]));
-  const proofRows = await tx.event.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: thread.id,
-      runId: { in: runIds },
-      botId: { in: botIds },
-      OR: [
-        { type: { in: ["thread.choice", "run.waiting_input", "computer.takeover.requested"] } },
-        {
-          type: "thread.message.created",
-          OR: asked.map(({ receipt }) => ({
-            payload: { path: ["messageId"], equals: receipt.messageId },
-          })),
-        },
-      ],
-    },
-    orderBy: { seq: "asc" },
-  });
-  const created = new Map<string, (typeof proofRows)[number]>();
-  const choices = new Map<string, (typeof proofRows)[number]>();
-  const receiptsByRun = new Map<string, typeof proofRows>();
-  const messageIds = new Set(asked.map(({ receipt }) => receipt.messageId));
-  const messageIdsByRun = new Map(runIds.map((id) => [id, new Set<string>()]));
-  for (const event of proofRows) {
-    const run = byRun.get(event.runId!);
-    if (!run || event.botId !== run.botId) continue;
-    const payload = event.payload as { messageId?: string; askIndex?: number } | null;
-    if (event.type === "thread.message.created") {
-      if (typeof payload?.messageId === "string") {
-        const key = stableJsonValue([run.id, payload.messageId]);
-        if (!created.has(key)) created.set(key, event);
-      }
-      continue;
-    }
-    const receipts = receiptsByRun.get(run.id) ?? [];
-    receipts.push(event);
-    receiptsByRun.set(run.id, receipts);
-    if (event.type === "thread.choice") {
-      if (typeof payload?.messageId === "string" && typeof payload.askIndex === "number") {
-        const key = stableJsonValue([run.id, payload.messageId, payload.askIndex]);
-        if (!choices.has(key)) choices.set(key, event);
-      }
-      const parsed = NativeAskAnswerPayloadSchema.safeParse(payload);
-      if (parsed.success) {
-        messageIds.add(parsed.data.messageId);
-        messageIds.add(parsed.data.answerMessageId);
-        messageIdsByRun.get(run.id)!.add(parsed.data.messageId).add(parsed.data.answerMessageId);
-      }
-    }
-  }
-  const messages = await tx.message.findMany({
-    where: { threadId: thread.id, id: { in: [...messageIds] } },
-    include: humanMessageInclude,
-  });
-  const byMessage = new Map(messages.map((message) => [message.id, message]));
-  const answersByRun = new Map<string, Set<string>>();
-  const questions = asked.map(({ event, receipt }) => {
-    const run = byRun.get(event.runId!)!;
-    const effect = byEffect.get(receipt.effectId);
-    if (
-      !effect ||
-      effect.runId !== run.id ||
-      stableJsonValue(effect.result) !== stableJsonValue(receipt)
-    )
-      throw new IsolationError();
-    const request = RecruitingAssessmentAskInputSchema.parse(effect.request);
-    if (
-      event.botId !== run.botId ||
-      receipt.roleId !== role.id ||
-      receipt.roleRevisionId !== request.roleRevisionId ||
-      request.roleId !== role.id ||
-      stableJsonValue(request.target) !== stableJsonValue(receipt.target)
-    )
-      throw new IsolationError();
-    const message = byMessage.get(receipt.messageId);
-    if (
-      !message ||
-      message.runId !== run.id ||
-      message.botId !== run.botId ||
-      message.role !== "bot" ||
-      message.clientNonce !== `recruiting-question:${effect.id}`
-    )
-      throw new IsolationError();
-    const block = questionCard(message.blocks, receipt.askIndex);
-    const originalEvent = created.get(stableJsonValue([run.id, message.id]));
-    const original = originalEvent
-      ? questionCard((originalEvent.payload as { blocks?: unknown }).blocks, receipt.askIndex)
-      : null;
-    const { status: _status, answer: _answer, ...display } = block;
-    const { status: _originalStatus, answer: _originalAnswer, ...originalDisplay } = original ?? {};
-    if (
-      !original ||
-      original.status === "answered" ||
-      stableJsonValue(display) !== stableJsonValue(originalDisplay)
-    )
-      throw new IsolationError();
-    const proof = choices.get(stableJsonValue([run.id, message.id, receipt.askIndex]));
-    if (block.status === "answered") {
-      const parsed = NativeAskAnswerPayloadSchema.safeParse(proof?.payload);
-      if (!parsed.success || parsed.data.answeredByUserId !== actor.userId)
-        throw new IsolationError();
-      let answers = answersByRun.get(run.id);
-      if (!answers) {
-        const human = validateRunHumanSourceRows(
-          actor,
-          run,
-          receiptsByRun.get(run.id) ?? [],
-          [...messageIdsByRun.get(run.id)!].flatMap((id) => {
-            const message = byMessage.get(id);
-            return message ? [message] : [];
-          }),
-        );
-        answers = new Set(human.answers.map((answer) => answer.id));
-        answersByRun.set(run.id, answers);
-      }
-      if (!answers.has(parsed.data.answerMessageId)) throw new IsolationError();
-    } else if (proof) throw new IsolationError();
-    return { receipt, run, request, block };
-  });
-  const current =
-    thread.activeRecruitingRoleId === role.id
-      ? await currentQuestionTargets(
-          tx,
-          actor,
-          role,
-          questions.map(({ request }) => request),
-        )
-      : new Set<RecruitingAssessmentAskInput>();
-  const pendingBotIds = [
-    ...new Set(
-      questions
-        .filter(
-          ({ request, run, block }) =>
-            current.has(request) && run.status === "waiting_input" && block.status !== "answered",
-        )
-        .map(({ run }) => run.botId),
-    ),
-  ];
-  const members =
-    thread.groupId && pendingBotIds.length
-      ? await tx.chatGroupMember.findMany({
-          where: { groupId: thread.groupId, botId: { in: pendingBotIds } },
-          select: { botId: true },
-        })
-      : [];
-  const conversations =
-    thread.externalConversationId && pendingBotIds.length
-      ? await tx.externalConversation.findMany({
-          where: {
-            id: thread.externalConversationId,
-            spaceId: actor.spaceId,
-            userId: actor.userId,
-            botId: { in: pendingBotIds },
-          },
-          select: { botId: true },
-        })
-      : [];
-  const memberBots = new Set(members.map((member) => member.botId));
-  const conversationBots = new Set(conversations.map((conversation) => conversation.botId));
-  return questions.map(({ receipt, run, request, block }) =>
-    RecruitingQuestionSchema.parse({
-      ...receipt,
-      threadId: thread.id,
-      botId: run.botId,
-      groupId: thread.groupId,
-      runId: run.id,
-      block,
-      expiresAt: stuckWorkExpiresAt(run.status, run.updatedAt.toISOString()),
-      runStatus: run.status,
-      isCurrent: current.has(request),
-      canAnswer:
-        current.has(request) &&
-        run.status === "waiting_input" &&
-        block.status !== "answered" &&
-        (!thread.botId || thread.botId === run.botId) &&
-        (!thread.groupId || memberBots.has(run.botId)) &&
-        (!thread.externalConversationId || conversationBots.has(run.botId)),
-    }),
-  );
-}
-
-async function questionInTransaction(
-  tx: Tx,
-  actor: Actor,
-  input: { threadId: string; roleId: string; effectId: string },
-): Promise<RecruitingQuestion | null> {
-  return (await questionsInTransaction(tx, actor, input))[0] ?? null;
-}
-
-export async function getRecruitingQuestion(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: { threadId: string; roleId: string; effectId: string },
-): Promise<RecruitingQuestion | null> {
-  return prisma.$transaction((tx) => questionInTransaction(tx, actor, input), {
-    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-  });
-}
-
-export async function listRecruitingQuestions(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: { threadId: string; roleId: string; candidateKey?: string; offset?: number },
-): Promise<RecruitingQuestion[]> {
-  return prisma.$transaction((tx) => questionsInTransaction(tx, actor, input), {
-    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-  });
-}
-
-/** Runs before the native pause clears its lease; completed receipts never create another card. */
-export async function prepareRecruitingQuestionInTransaction(
-  tx: Tx,
-  input: PauseRunForInput,
-): Promise<PreparedRecruitingQuestion> {
-  const trusted = input.recruitingQuestion;
-  if (!trusted || trusted.actor.spaceId !== input.spaceId) throw new IsolationError();
-  const actor = trusted.actor;
-  const request = RecruitingAssessmentAskInputSchema.parse(trusted.effectRequest);
-  const { run, thread } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
-  if (run.threadId !== input.threadId || run.botId !== input.botId) throw new IsolationError();
-  const role = await requireRole(tx, actor, request.roleId, true);
-  await tx.$queryRaw(
-    Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
-  );
-  const effect = await tx.externalEffect.findFirst({
-    where: {
-      id: trusted.effectId,
-      spaceId: actor.spaceId,
-      runId: run.id,
-      kind: "recruiting_assess",
-    },
-  });
-  if (!effect || stableJsonValue(effect.request) !== stableJsonValue(trusted.effectRequest))
-    throw new IsolationError();
-  if (effect.status === "completed") {
-    const question = await questionInTransaction(tx, actor, {
-      threadId: thread.id,
-      roleId: role.id,
-      effectId: effect.id,
-    });
-    if (!question) throw new IsolationError();
-    const event = await tx.event.findFirstOrThrow({
-      where: {
-        spaceId: actor.spaceId,
-        threadId: thread.id,
-        type: "recruiting.question.asked",
-        payload: { path: ["effectId"], equals: effect.id },
-      },
-    });
-    return { kind: "completed", eventSeq: event.seq };
-  }
-  requireResearchLease(run, input);
-  if (
-    effect.status !== "executing" ||
-    thread.activeRecruitingRoleId !== role.id ||
-    !(await questionTargetCurrent(tx, actor, role, request))
-  )
-    throw new RecruitingConflictError();
-  const context = {
-    ...input,
-    contextArtifact: trusted.contextArtifact,
-    effectId: effect.id,
-    effectRequest: effect.request,
-  };
-  await requireAssessmentAdoption(
-    tx,
-    actor,
-    context,
-    role,
-    new Map(trusted.artifacts.map(({ artifactId, bytes }) => [artifactId, bytes])),
-  );
-  const card = questionCard(input.blocks, 0);
-  if (
-    card.status === "answered" ||
-    card.actions!.length !== request.options.length ||
-    stableJsonValue(input.offeredActions?.map((action) => action.label)) !==
-      stableJsonValue(request.options) ||
-    stableJsonValue(input.offeredActions?.map((action) => action.id)) !==
-      stableJsonValue(card.actions!.map((action) => action.id))
-  )
-    throw new IsolationError();
-  return { kind: "new", request, effectId: effect.id, askIndex: 0 };
-}
-
-export async function commitRecruitingQuestionInTransaction(
-  tx: Tx,
-  input: PauseRunForInput,
-  prepared: Extract<PreparedRecruitingQuestion, { kind: "new" }>,
-  message: { id: string },
-) {
-  const payload = {
-    roleId: prepared.request.roleId,
-    roleRevisionId: prepared.request.roleRevisionId,
-    target: prepared.request.target,
-    effectId: prepared.effectId,
-    messageId: message.id,
-    askIndex: prepared.askIndex,
-  };
-  const completed = await tx.externalEffect.updateMany({
-    where: {
-      id: prepared.effectId,
-      runId: input.runId,
-      spaceId: input.spaceId,
-      status: "executing",
-    },
-    data: { status: "completed", result: payload },
-  });
-  if (completed.count !== 1) throw new IsolationError();
-  return appendEventInTransaction(tx, {
-    spaceId: input.spaceId,
-    threadId: input.threadId,
-    botId: input.botId,
-    runId: input.runId,
-    type: "recruiting.question.asked",
-    payload,
-  });
-}
-
-/** One guard protects both card clicks and native composer answers. */
-export async function authorizeRecruitingQuestionAnswerInTransaction(
-  tx: Tx,
-  input: AnswerRunInput,
-  message: { clientNonce: string | null },
-  askIndex: number,
-): Promise<boolean> {
-  if (!message.clientNonce?.startsWith("recruiting-question:")) return true;
-  const actor: Actor = {
-    spaceId: input.spaceId,
-    userId: input.answeredByUserId,
-    email: "",
-    isDeploymentOwner: false,
-  };
-  try {
-    const { run, thread } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
-    if (run.status !== "waiting_input" || run.threadId !== input.threadId) return false;
-    const effectId = message.clientNonce.slice("recruiting-question:".length);
-    const event = await tx.event.findFirst({
-      where: {
-        spaceId: actor.spaceId,
-        threadId: thread.id,
-        runId: run.id,
-        type: "recruiting.question.asked",
-        payload: { path: ["effectId"], equals: effectId },
-      },
-    });
-    if (!event) return false;
-    const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
-    if (
-      thread.activeRecruitingRoleId !== receipt.roleId ||
-      receipt.messageId !== input.messageId ||
-      receipt.askIndex !== askIndex
-    )
-      return false;
-    await requireRole(tx, actor, receipt.roleId, true);
-    const question = await questionInTransaction(tx, actor, {
-      threadId: thread.id,
-      roleId: receipt.roleId,
-      effectId,
-    });
-    return question?.canAnswer === true;
-  } catch (error) {
-    if (
-      error instanceof IsolationError ||
-      error instanceof RecruitingConflictError ||
-      (error instanceof Error && error.name === "ZodError")
-    )
-      return false;
-    throw error;
-  }
-}
-
-function assessmentSelection(text: string, start: number, end: number, quote: string) {
-  try {
-    validateRecruitingTextSelection(text, start, end, quote);
-  } catch {
-    throw new IsolationError();
-  }
-}
-
-function assessmentJsonString(bytes: Uint8Array, path: readonly (string | number)[]): string {
-  try {
-    return readRecruitingJsonString(bytes, path);
-  } catch {
-    throw new IsolationError();
-  }
-}
-
 async function validateReadSources(
   tx: Tx,
   actor: Actor,
@@ -4153,9 +3174,9 @@ async function validateReadSources(
   const messageIds = new Set<string>();
   const artifactIds = new Set<string>();
   for (const source of unique.values()) {
-    if (source.readState === "read" && source.quote === undefined) continue;
     if (source.anchor.kind === "message") messageIds.add(source.anchor.messageId);
-    else artifactIds.add(source.anchor.artifact.artifactId);
+    else if (source.readState !== "read" || source.quote !== undefined)
+      artifactIds.add(source.anchor.artifact.artifactId);
   }
   if (messageIds.size)
     await tx.$queryRaw(
@@ -4165,7 +3186,7 @@ async function validateReadSources(
     await tx.$queryRaw(
       Prisma.sql`SELECT "id" FROM "artifacts" WHERE "id" IN (${Prisma.join([...artifactIds].sort())}) ORDER BY "id" FOR SHARE`,
     );
-  // ponytail: reuse locked rows only within this validation call; every quote is checked below.
+  // ponytail: reuse locked rows only within this validation call.
   const loadedMessages = messageIds.size
     ? await tx.message.findMany({
         where: { id: { in: [...messageIds] } },
@@ -4175,7 +3196,6 @@ async function validateReadSources(
   if (loadedMessages.length !== messageIds.size) throw new IsolationError();
   const messages = new Map(loadedMessages.map((message) => [message.id, message]));
   const rows = new Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>();
-  const pdfTexts = new Map<string, string>();
   const provenance = new Map<
     string,
     {
@@ -4211,14 +3231,6 @@ async function validateReadSources(
           source.id,
           'locator must name a text block of that message, such as "blocks[0].text".',
         );
-      const start = selection?.start ?? block.text.indexOf(source.quote);
-      if (start < 0) throw new RecruitingSourceValidationError(source.id, source.anchor.locator);
-      assessmentSelection(
-        block.text,
-        start,
-        selection?.end ?? start + source.quote.length,
-        source.quote,
-      );
     } else {
       let artifact = rows.get(source.anchor.artifact.artifactId);
       if (!artifact) {
@@ -4317,255 +3329,9 @@ async function validateReadSources(
         createHash("sha256").update(bytes).digest("hex") !== artifact.hash
       )
         throw new IsolationError();
-      // ponytail: role references attest only extracted text; other fields need typed selections.
-      if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
-        throw new RecruitingSourceCheckError(source.id, 'locator must be "text" for a file.');
-      const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
-      const pdf = isExtractedDocumentMimeType(artifact.mimeType);
-      const jsonPath =
-        selection?.kind === "artifact_json_string"
-          ? selection.path
-          : !selection && json
-            ? ["text"]
-            : undefined;
-      if (jsonPath ? !json : (!artifact.mimeType.startsWith("text/") && !pdf) || json)
-        throw new RecruitingSourceCheckError(
-          source.id,
-          "this file type has no quotable text; quote the page text or the recruiter's message.",
-        );
-      if (pdf && !pdfTexts.has(artifact.hash)) {
-        try {
-          pdfTexts.set(artifact.hash, await extractDocumentText(bytes, artifact.mimeType));
-        } catch {
-          throw new IsolationError();
-        }
-      }
-      const text = jsonPath
-        ? assessmentJsonString(bytes, jsonPath)
-        : pdf
-          ? pdfTexts.get(artifact.hash)!
-          : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      const start = selection?.start ?? text.indexOf(source.quote);
-      if (start < 0) throw new RecruitingSourceValidationError(source.id, source.anchor.locator);
-      assessmentSelection(text, start, selection?.end ?? start + source.quote.length, source.quote);
     }
   }
   return messages;
-}
-
-async function requireAssessmentAdoption(
-  tx: Tx,
-  actor: Actor,
-  context: RecruitingAssessmentSaveContext,
-  role: RecruitingRole,
-  artifacts: ReadonlyMap<string, Uint8Array>,
-) {
-  if (!context.contextArtifact) throw new IsolationError();
-  const event = await tx.event.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: context.threadId,
-      botId: context.botId,
-      runId: context.runId,
-      type: "recruiting.context.adopted",
-    },
-    orderBy: { seq: "desc" },
-  });
-  if (!event) throw new IsolationError();
-  const payload = event.payload as {
-    roleId?: string;
-    roleRevisionId?: string;
-    contextArtifact?: RecruitingArtifactRef;
-  };
-  if (
-    payload.roleId !== role.id ||
-    payload.roleRevisionId !== role.currentRevisionId ||
-    payload.contextArtifact?.artifactId !== context.contextArtifact.artifactId ||
-    payload.contextArtifact?.sha256 !== context.contextArtifact.sha256
-  )
-    throw new RecruitingConflictError();
-  await validateArtifact(tx, actor, context.contextArtifact);
-  const artifact = await tx.artifact.findUniqueOrThrow({
-    where: { id: context.contextArtifact.artifactId },
-  });
-  const bytes = artifacts.get(artifact.id);
-  if (
-    artifact.runId !== context.runId ||
-    artifact.botId !== context.botId ||
-    !bytes ||
-    bytes.byteLength !== artifact.size ||
-    createHash("sha256").update(bytes).digest("hex") !== artifact.hash
-  )
-    throw new IsolationError();
-  const manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  if (
-    manifest.version !== 1 ||
-    manifest.actor?.spaceId !== actor.spaceId ||
-    manifest.actor?.userId !== actor.userId ||
-    manifest.runId !== context.runId ||
-    manifest.threadId !== context.threadId ||
-    manifest.botId !== context.botId ||
-    manifest.roleId !== role.id ||
-    manifest.roleRevisionId !== role.currentRevisionId ||
-    manifest.roleRevision !== role.revision
-  )
-    throw new IsolationError();
-}
-
-/** The immutable snapshot and native effect completion commit together. */
-export async function saveRecruitingAssessment(
-  prisma: PrismaClient,
-  actor: Actor,
-  context: RecruitingAssessmentSaveContext,
-  untrusted: SaveAssessmentInput,
-  trustedArtifacts: readonly RecruitingAssessmentArtifactBytes[],
-): Promise<RecruitingAssessmentSnapshot> {
-  const request = context.effectRequest as { operation?: unknown } & Record<string, unknown>;
-  if (request?.operation !== "save" && request?.operation !== "reassess")
-    throw new IsolationError();
-  const schema =
-    request.operation === "reassess"
-      ? ReassessRecruitingAssessmentInput
-      : SaveRecruitingAssessmentInput;
-  const input = schema.parse(untrusted);
-  const { operation: _operation, ...requestInput } = request;
-  if (stableJsonValue(schema.parse(requestInput)) !== stableJsonValue(input))
-    throw new IsolationError();
-  const artifacts = new Map(trustedArtifacts.map(({ artifactId, bytes }) => [artifactId, bytes]));
-  if (artifacts.size !== trustedArtifacts.length) throw new IsolationError();
-  return prisma.$transaction(async (tx) => {
-    const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId, false);
-    if (run.threadId !== context.threadId || run.botId !== context.botId)
-      throw new IsolationError();
-    // ponytail: one role row lock serializes candidate writes; split by candidate only if contention appears.
-    const role = await requireRole(tx, actor, input.roleId, true);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${context.effectId} FOR UPDATE`,
-    );
-    const effect = await tx.externalEffect.findFirst({
-      where: {
-        id: context.effectId,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        kind: "recruiting_assess",
-      },
-    });
-    if (!effect || stableJsonValue(effect.request) !== stableJsonValue(context.effectRequest))
-      throw new IsolationError();
-    if (effect.status === "completed") {
-      const saved = effect.result as { assessment?: unknown; isCurrent?: unknown } | null;
-      const assessment = RecruitingAssessmentSchema.parse(saved?.assessment);
-      if (
-        assessment.roleId !== role.id ||
-        assessment.roleRevisionId !== input.roleRevisionId ||
-        assessment.candidateKey !== input.candidateKey ||
-        assessment.version !== input.expectedRevision + 1 ||
-        assessment.createdByRunId !== run.id
-      )
-        throw new IsolationError();
-      const row = await tx.recruitingAssessment.findUnique({
-        where: {
-          roleId_candidateKey_version: {
-            roleId: role.id,
-            candidateKey: assessment.candidateKey,
-            version: assessment.version,
-          },
-        },
-      });
-      if (!row) throw new IsolationError();
-      const snapshot = await assessmentSnapshot(tx, actor, role, row);
-      if (stableJsonValue(snapshot.assessment) !== stableJsonValue(assessment))
-        throw new IsolationError();
-      await validateReadSources(tx, actor, assessment.sourceRefs, artifacts);
-      return snapshot;
-    }
-    requireResearchLease(run, context);
-    if (effect.status !== "executing" || thread.activeRecruitingRoleId !== role.id)
-      throw new IsolationError();
-    const revision = await tx.recruitingRoleRevision.findFirst({
-      where: { id: input.roleRevisionId, roleId: role.id },
-    });
-    if (!revision) throw new IsolationError();
-    if (role.currentRevisionId !== input.roleRevisionId) throw new RecruitingConflictError();
-    const definition = RecruitingRoleRevisionSchema.parse({
-      ...revision,
-      createdAt: revision.createdAt.toISOString(),
-    });
-    await validateDefinition(tx, actor, definition);
-    await requireAssessmentAdoption(tx, actor, context, role, artifacts);
-    const last = await tx.recruitingAssessment.findFirst({
-      where: { roleId: role.id, candidateKey: input.candidateKey },
-      orderBy: { version: "desc" },
-    });
-    if ((last?.version ?? 0) !== input.expectedRevision) throw new RecruitingConflictError();
-    if (request.operation === "reassess" && !last) throw new RecruitingConflictError();
-    const content =
-      request.operation === "reassess"
-        ? mergeRecruitingReassessment(
-            definition,
-            (await assessmentSnapshot(tx, actor, role, last!)).assessment,
-            input,
-          )
-        : input;
-    await validateReadSources(tx, actor, content.sourceRefs, artifacts);
-    const now = new Date();
-    const judgments = evaluateRecruitingAssessment(definition, content, {
-      precision: "day",
-      year: now.getUTCFullYear(),
-      month: now.getUTCMonth() + 1,
-      day: now.getUTCDate(),
-    });
-    const row = await tx.recruitingAssessment.create({
-      data: {
-        roleId: role.id,
-        candidateKey: input.candidateKey,
-        roleRevisionId: input.roleRevisionId,
-        version: input.expectedRevision + 1,
-        basedOnVersion: input.expectedRevision || null,
-        facts: content.facts as Prisma.InputJsonValue,
-        judgments: judgments as Prisma.InputJsonValue,
-        questions: content.questions as Prisma.InputJsonValue,
-        sourceRefs: content.sourceRefs as Prisma.InputJsonValue,
-        createdByRunId: run.id,
-      },
-    });
-    await tx.recruitingCandidate.upsert({
-      where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
-      create: { roleId: role.id, candidateKey: input.candidateKey },
-      update: {},
-    });
-    const snapshot = await assessmentSnapshot(tx, actor, role, row);
-    const completed = await tx.externalEffect.updateMany({
-      where: {
-        id: effect.id,
-        runId: run.id,
-        status: "executing",
-        run: {
-          status: "running",
-          leaseOwner: context.leaseOwner,
-          leaseFence: context.leaseFence,
-          leaseExpiresAt: { gt: new Date() },
-        },
-      },
-      data: { status: "completed", result: snapshot as unknown as Prisma.InputJsonValue },
-    });
-    if (completed.count !== 1) throw new IsolationError();
-    await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId: thread.id,
-      botId: run.botId,
-      runId: run.id,
-      type: "recruiting.assessment.saved",
-      payload: {
-        roleId: role.id,
-        roleRevisionId: input.roleRevisionId,
-        candidateKey: input.candidateKey,
-        version: row.version,
-        effectId: effect.id,
-      },
-    });
-    return snapshot;
-  });
 }
 
 type ResearchTaskRow = Prisma.RecruitingResearchTaskGetPayload<Record<string, never>>;
@@ -4586,11 +3352,74 @@ const looseRecord = (value: unknown): value is LooseRecord =>
 const looseArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /**
+ * A citation of a message the recruiter did not write in this conversation (a made-up or
+ * mistyped id, or the note that handed their words to this team) cites the recruiter's latest
+ * own message instead, as a plain locator, so a save does not fail on it. Staging 11-27: the
+ * latest "user" message was the hand-off note, so citing it, or any unknown id, was refused six
+ * times in one run as not the recruiter's; a preference save in the main conversation was
+ * refused the same way for an id that did not exist.
+ */
+export async function citeRecruiterMessages<T>(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+  args: T,
+): Promise<T> {
+  const messageIds = new Set<string>();
+  const messageOf = (value: unknown) => {
+    const anchor = looseRecord(value) ? value.anchor : undefined;
+    return looseRecord(anchor) && anchor.kind === "message" && typeof anchor.messageId === "string"
+      ? anchor.messageId
+      : null;
+  };
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(collect);
+    else if (looseRecord(value)) {
+      const id = messageOf(value);
+      if (id) messageIds.add(id);
+      Object.values(value).forEach(collect);
+    }
+  };
+  collect(args);
+  if (!messageIds.size) return args;
+  const [present, recent] = await Promise.all([
+    prisma.message.findMany({
+      where: { id: { in: [...messageIds] }, threadId },
+      include: humanMessageInclude,
+    }),
+    prisma.message.findMany({
+      where: { threadId, role: "user", botId: null },
+      orderBy: { seq: "desc" },
+      take: 30,
+      include: humanMessageInclude,
+    }),
+  ]);
+  const known = new Set(present.filter(isNativeHumanMessage).map((message) => message.id));
+  const latest = recent.find(isNativeHumanMessage);
+  const repoint = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(repoint);
+    if (!looseRecord(value)) return value;
+    const record = Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, repoint(item)]),
+    );
+    const id = messageOf(value);
+    if (!id || known.has(id) || !latest) return record;
+    getLogger().warn("recruiting.source.repaired", { reason: "message_not_recruiters" });
+    const { quote: _quote, ...rest } = record;
+    return {
+      ...rest,
+      anchor: { kind: "message", messageId: latest.id, locator: "blocks[0].text" },
+    };
+  };
+  return repoint(args) as T;
+}
+
+/**
  * Fill a role save from the server's own records before it is checked, so a value the model
  * copied imperfectly never rejects the save. Ownership is unchanged: every artifact, message and
  * role read here is scoped to the actor, and the save still runs every isolation check.
  * - A file reference takes its fingerprint from the file row and its url and read time from the
  *   native read receipt; a role reference without a selection reads the extracted text.
+ * - A file id that is no file of this person, beside exactly one real file, is that file.
  * - An update or revise acts on the conversation's current role.
  * - A brief that cites a source id the save does not define cites the recruiter's message that
  *   holds that value (else their latest message) for their own words, or the role's only
@@ -4651,6 +3480,7 @@ export async function fillRecruitingRoleArgs(
       : [],
   ]);
   const hashes = new Map(files.map((file) => [file.id, file.hash]));
+  const soleFile = hashes.size === 1 ? [...hashes.keys()][0] : undefined;
   const receipts = new Map<string, { url: string; readAt: string }>();
   for (const event of events) {
     const payload = RecruitingMaterialReadPayloadSchema.safeParse(event.payload);
@@ -4669,15 +3499,20 @@ export async function fillRecruitingRoleArgs(
     const record = Object.fromEntries(
       Object.entries(value).map(([key, item]) => [key, fill(item)]),
     );
-    const id = artifactOf(value);
+    const cited = artifactOf(value);
+    // Staging 11-26: one of two citations of the same PDF had a letter added to its id, and the
+    // whole save was refused. An id that is no file of this person, in a save that cites exactly
+    // one real file, is that file.
+    const id = cited && !hashes.has(cited) && soleFile ? soleFile : cited;
     const hash = id ? hashes.get(id) : undefined;
     if (!id || !hash || !looseRecord(record.anchor)) return record;
+    if (id !== cited) getLogger().warn("recruiting.source.repaired", { reason: "file_id_unknown" });
     const anchor = record.anchor as LooseRecord;
     const filled: LooseRecord = {
       ...record,
       anchor: {
         ...anchor,
-        artifact: { ...(anchor.artifact as LooseRecord), sha256: hash },
+        artifact: { ...(anchor.artifact as LooseRecord), artifactId: id, sha256: hash },
         ...(record.selection === undefined ? { locator: "text" } : {}),
       },
     };
@@ -4685,54 +3520,7 @@ export async function fillRecruitingRoleArgs(
     return receipt && record.kind === "original_material" ? { ...filled, ...receipt } : filled;
   };
   let filled = fill(args) as LooseRecord;
-  // A citation of a message outside this conversation (a made-up or mistyped id) cites the
-  // recruiter's latest message instead, as a plain locator, so the save does not fail on it.
-  const messageIds = new Set<string>();
-  const messageOf = (value: unknown) => {
-    const anchor = looseRecord(value) ? value.anchor : undefined;
-    return looseRecord(anchor) && anchor.kind === "message" && typeof anchor.messageId === "string"
-      ? anchor.messageId
-      : null;
-  };
-  const collectMessages = (value: unknown): void => {
-    if (Array.isArray(value)) value.forEach(collectMessages);
-    else if (looseRecord(value)) {
-      const id = messageOf(value);
-      if (id) messageIds.add(id);
-      Object.values(value).forEach(collectMessages);
-    }
-  };
-  collectMessages(filled);
-  if (messageIds.size && thread) {
-    const [present, latest] = await Promise.all([
-      prisma.message.findMany({
-        where: { id: { in: [...messageIds] }, threadId: context.threadId },
-        select: { id: true },
-      }),
-      prisma.message.findFirst({
-        where: { threadId: context.threadId, role: "user" },
-        orderBy: { seq: "desc" },
-        select: { id: true },
-      }),
-    ]);
-    const known = new Set(present.map((message) => message.id));
-    const repoint = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map(repoint);
-      if (!looseRecord(value)) return value;
-      const record = Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, repoint(item)]),
-      );
-      const id = messageOf(value);
-      if (!id || known.has(id) || !latest) return record;
-      getLogger().warn("recruiting.source.repaired", { reason: "message_not_in_thread" });
-      const { quote: _quote, ...rest } = record;
-      return {
-        ...rest,
-        anchor: { kind: "message", messageId: latest.id, locator: "blocks[0].text" },
-      };
-    };
-    filled = repoint(filled) as LooseRecord;
-  }
+  if (thread) filled = await citeRecruiterMessages(prisma, context.threadId, filled);
   if (
     (filled.operation === "update" || filled.operation === "revise") &&
     thread?.activeRecruitingRoleId
@@ -4808,11 +3596,14 @@ export async function fillRecruitingRoleArgs(
   ].filter(looseRecord);
   const known = new Set(sources.map((source) => source.id));
   // The role's material: read pages first, then pasted messages, in the order the role lists them.
-  const quoted = sources.filter(
-    (source) => source.kind === "original_material" && typeof source.quote === "string",
-  );
   const onPage = (source: LooseRecord) =>
     looseRecord(source.anchor) && source.anchor.kind === "artifact";
+  const quoted = sources.filter(
+    (source) =>
+      source.kind === "original_material" &&
+      (typeof source.quote === "string" ||
+        (looseRecord(source.anchor) && source.anchor.kind === "message")),
+  );
   const material = [
     ...new Map(
       [...quoted.filter(onPage), ...quoted.filter((source) => !onPage(source))].map((source) => [
@@ -5032,41 +3823,29 @@ export async function recordRecruitingWebMaterial(
     };
   });
 }
-type RecruitingApprovalContext = {
+type RecruitingRunContext = {
   runId: string;
   threadId: string;
   botId: string;
   leaseOwner: string;
   leaseFence: number;
 };
-export type RecruitingApprovalResult = {
-  status: "approved";
-  stage: RetainedRecruitingApprovalRequest["stage"];
-  roleId: string;
-  roleRevisionId: string;
-  approvalEffectId: string;
-  payloadHash: string;
-  approvedByUserId: string;
-  approvedAt: string;
-};
 
-function recruitingApprovalHash(input: unknown) {
+function approvalRequestHash(input: unknown) {
   return createHash("sha256").update(stableJsonValue(input)).digest("hex");
 }
 
-async function approvalWorkspace(
+/** The role, its thread and the exact saved revision an action names. */
+async function roleRevisionWorkspace(
   tx: Tx,
   actor: Actor,
   threadId: string,
-  input: Pick<RetainedRecruitingApprovalRequest, "roleId" | "expectedRoleRevision"> & {
-    stage?: RetainedRecruitingApprovalRequest["stage"];
-  },
+  input: { roleId: string; expectedRoleRevision: number },
   current = true,
-  requireSelection = current,
 ) {
   const thread = await requireThread(tx, actor, threadId);
   const role = await requireRole(tx, actor, input.roleId, true);
-  if (requireSelection && thread.activeRecruitingRoleId !== role.id) throw new IsolationError();
+  if (current && thread.activeRecruitingRoleId !== role.id) throw new IsolationError();
   if (current && role.revision !== input.expectedRoleRevision) throw new RecruitingConflictError();
   const row = await tx.recruitingRoleRevision.findFirst({
     where: { roleId: role.id, revision: input.expectedRoleRevision },
@@ -5078,20 +3857,6 @@ async function approvalWorkspace(
   });
   await validateDefinition(tx, actor, revision);
   if (revision.brief) validateRecruitingBrief(revision.brief, revision);
-  if (input.stage === "brief") {
-    requireConfirmableBrief(revision);
-    if (revision.brief!.confirmation) throw new RecruitingConflictError();
-    return { role, revision, thread };
-  }
-  requireRecruitingBriefConfirmation(revision);
-  const confirmation = revision.brief!.confirmation!;
-  const human = await tx.message.findUnique({
-    where: { id: confirmation.messageId },
-    include: humanMessageInclude,
-  });
-  if (confirmation.userId !== actor.userId || !human || !isNativeHumanMessage(human))
-    throw new IsolationError();
-  await requireThread(tx, actor, human.threadId);
   return { role, revision, thread };
 }
 
@@ -5119,7 +3884,7 @@ async function approvalAnswerProof(
     answer.effectId !== effect.id ||
     answer.answer !== "allow" ||
     answer.answeredByUserId !== actor.userId ||
-    answer.requestHash !== recruitingApprovalHash(effect.request)
+    answer.requestHash !== approvalRequestHash(effect.request)
   )
     throw new IsolationError();
   const message = await tx.message.findUnique({ where: { id: answer.messageId } });
@@ -5143,764 +3908,6 @@ async function approvalAnswerProof(
     throw new IsolationError();
   return { run, proof };
 }
-
-/** This role revision's latest approved documents package, for a calibration request that omits it. */
-export async function latestRecruitingDocumentsApprovalId(
-  prisma: Pick<PrismaClient, "externalEffect">,
-  actor: Actor,
-  input: { roleId: string; expectedRoleRevision: number },
-): Promise<string | null> {
-  const effect = await prisma.externalEffect.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      kind: "recruiting_request_approval",
-      status: "completed",
-      AND: [
-        { request: { path: ["stage"], equals: "documents" } },
-        { request: { path: ["roleId"], equals: input.roleId } },
-        { request: { path: ["expectedRoleRevision"], equals: input.expectedRoleRevision } },
-      ],
-    },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true },
-  });
-  return effect?.id ?? null;
-}
-
-/**
- * The ten profiles of the latest unapproved calibration round, with their exact saved sources,
- * so a calibration approval need not copy long source ids by hand. Null when no complete round
- * of this revision is recorded. prepareRecruitingApproval still verifies every field.
- */
-export async function latestRecruitingCalibrationProfiles(
-  prisma: Pick<PrismaClient, "recruitingRoleRevision" | "recruitingCalibrationRound"> & {
-    recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findFirst">;
-  },
-  actor: Actor,
-  input: { roleId: string; expectedRoleRevision: number },
-) {
-  const revision = await prisma.recruitingRoleRevision.findFirst({
-    where: {
-      roleId: input.roleId,
-      revision: input.expectedRoleRevision,
-      role: { spaceId: actor.spaceId },
-    },
-    select: { id: true },
-  });
-  if (!revision) return null;
-  const round = await prisma.recruitingCalibrationRound.findFirst({
-    where: { roleId: input.roleId, approvedAt: null },
-    orderBy: { round: "desc" },
-    select: { candidateKeys: true },
-  });
-  if (!round?.candidateKeys.length) return null;
-  const profiles = [];
-  for (const candidateKey of round.candidateKeys) {
-    const occurrence = await prisma.recruitingCandidateOccurrence.findFirst({
-      where: {
-        roleId: input.roleId,
-        candidateKey,
-        linkedinUrl: { not: null },
-        page: { roleRevisionId: revision.id, taskId: null, actionId: null },
-      },
-      orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
-      include: { page: { include: { effect: { select: { request: true } } } } },
-    });
-    if (!occurrence?.linkedinUrl || unassessedPageRequest(occurrence.page.effect.request))
-      return null;
-    let reference: ReturnType<typeof candidateSourceReference>;
-    try {
-      reference = candidateSourceReference(occurrence.page, occurrence.rowIndex);
-    } catch (error) {
-      if (error instanceof IsolationError) return null;
-      throw error;
-    }
-    const { providerTaskId, roleRevisionId, effectId, rowIndex, artifactRef } = reference;
-    if (!providerTaskId) return null;
-    const evidence = Array.isArray(occurrence.evidenceUrls)
-      ? occurrence.evidenceUrls.find(
-          (url): url is string => typeof url === "string" && url.startsWith("https://"),
-        )
-      : undefined;
-    profiles.push({
-      candidateKey,
-      linkedinUrl: occurrence.linkedinUrl,
-      evidenceUrl: evidence ?? occurrence.linkedinUrl,
-      source: { providerTaskId, roleRevisionId, effectId, rowIndex, artifactRef },
-    });
-  }
-  return profiles;
-}
-
-async function completedRecruitingApproval(
-  tx: Tx,
-  actor: Actor,
-  effectId: string,
-  scope: { roleId: string; expectedRoleRevision: number },
-  stage: RetainedRecruitingApprovalRequest["stage"],
-  current = true,
-) {
-  const effect = await tx.externalEffect.findFirst({
-    where: {
-      id: effectId,
-      spaceId: actor.spaceId,
-      kind: "recruiting_request_approval",
-      status: "completed",
-    },
-  });
-  if (effect?.kind !== "recruiting_request_approval" || effect.status !== "completed")
-    throw new IsolationError();
-  const input = RetainedRecruitingApprovalRequestSchema.parse(effect.request);
-  if (
-    input.stage !== stage ||
-    input.roleId !== scope.roleId ||
-    input.expectedRoleRevision !== scope.expectedRoleRevision
-  )
-    throw new RecruitingConflictError();
-  const { run, proof } = await approvalAnswerProof(tx, actor, effect);
-  const workspace = await approvalWorkspace(tx, actor, run.threadId, input, current, false);
-  let approvedRevisionId = workspace.revision.id;
-  if (input.stage === "brief") {
-    const row = await tx.recruitingRoleRevision.findFirst({
-      where: { roleId: input.roleId, revision: input.expectedRoleRevision + 1 },
-    });
-    if (!row) throw new IsolationError();
-    const revision = RecruitingRoleRevisionSchema.parse({
-      ...row,
-      createdAt: row.createdAt.toISOString(),
-    });
-    const confirmation = revision.brief?.confirmation;
-    const human =
-      confirmation &&
-      (await tx.message.findUnique({
-        where: { id: confirmation.messageId },
-        include: humanMessageInclude,
-      }));
-    if (
-      !confirmation ||
-      confirmation.revision !== input.expectedRoleRevision + 1 ||
-      confirmation.userId !== actor.userId ||
-      confirmation.confirmedAt !== proof.createdAt.toISOString() ||
-      !human ||
-      !isNativeHumanMessage(human) ||
-      human.threadId !== run.threadId ||
-      human.runId !== run.id ||
-      stableJsonValue(
-        definitionData({
-          ...revision,
-          expectedRevision: revision.revision,
-          title: workspace.role.title,
-        }),
-      ) !==
-        stableJsonValue(
-          definitionData({
-            ...workspace.revision,
-            expectedRevision: input.expectedRoleRevision,
-            title: workspace.role.title,
-          }),
-        )
-    )
-      throw new IsolationError();
-    approvedRevisionId = revision.id;
-  }
-  const expected: RecruitingApprovalResult = {
-    status: "approved",
-    stage: input.stage,
-    roleId: input.roleId,
-    roleRevisionId: approvedRevisionId,
-    approvalEffectId: effect.id,
-    payloadHash: recruitingApprovalHash(input),
-    approvedByUserId: actor.userId,
-    approvedAt: proof.createdAt.toISOString(),
-  };
-  if (stableJsonValue(effect.result) !== stableJsonValue(expected)) throw new IsolationError();
-  const recorded = await tx.event.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      runId: run.id,
-      type: "effect.recorded",
-      payload: { path: ["effectId"], equals: effect.id },
-    },
-  });
-  if (
-    !recorded ||
-    stableJsonValue(recorded.payload) !==
-      stableJsonValue({
-        effectId: effect.id,
-        tool: "recruiting_request_approval",
-        ...expected,
-      })
-  )
-    throw new IsolationError();
-  const package_ = await recruitingApprovalPackage(tx, actor, input, current, undefined, workspace);
-  return { input, result: expected, package: package_, workspace };
-}
-
-type RecruitingApprovalPackage = {
-  files: MessageBlock[];
-  documentRefs: RecruitingArtifactRef[];
-  sourceRefs: RecruitingAssessmentSourceRef[];
-  profiles?: { name: string; linkedinUrl: string; evidenceUrl: string }[];
-  requirements?: string;
-};
-
-async function recruitingApprovalPackage(
-  tx: Tx,
-  actor: Actor,
-  input: RetainedRecruitingApprovalRequest,
-  current = true,
-  bytes?: ReadonlyMap<string, Uint8Array>,
-  workspace?: Awaited<ReturnType<typeof approvalWorkspace>>,
-): Promise<RecruitingApprovalPackage> {
-  if (input.stage === "brief") {
-    if (!workspace || workspace.revision.revision !== input.expectedRoleRevision)
-      throw new IsolationError();
-    const { revision, role, thread } = workspace;
-    requireConfirmableBrief(revision);
-    if (bytes) {
-      const messages = await validateReadSources(
-        tx,
-        actor,
-        definitionSources(revision),
-        bytes,
-        thread,
-      );
-      validateBriefAuthorship(
-        { ...revision, title: role.title, expectedRevision: revision.revision },
-        messages,
-      );
-    }
-    const brief = revision.brief!;
-    return {
-      files: [],
-      documentRefs: [],
-      sourceRefs: definitionSources(revision),
-      requirements: [
-        ...brief.fields.map(
-          (field) =>
-            `${field.key.replaceAll("_", " ")}: ${field.value ?? "Unknown"}${field.state === "conflict" ? " (Conflicting information)" : field.state === "missing" && field.value !== null ? " (Unconfirmed)" : ""}${field.origin === "inferred" ? " (Assumption)" : ""}`,
-        ),
-        ...brief.searchFilters.map(
-          (filter) =>
-            `Search ${filter.mode}: ${filter.statement}${filter.origin === "inferred" ? " (Assumption)" : ""}`,
-        ),
-        ...revision.criteria.map((criterion) => {
-          const rule = brief.rules.find((rule) => rule.criterionId === criterion.id)!;
-          return `${criterion.priority === "hard" ? "Required" : "Preferred"}: ${criterionStatement(criterion.expression, true)} (${rule.effect === "reject" ? "Reject if not met" : "Flag for review"}${rule.origin === "inferred" ? "; Assumption" : ""})`;
-        }),
-        ...revision.preferences.map((preference) => `Preference: ${preference}`),
-        ...revision.definitionQuestions.map((question) => `Open question: ${question}`),
-        ...revision.criteria.flatMap((criterion) =>
-          criterion.definitionQuestions.map((question) => `Open question: ${question}`),
-        ),
-      ].join("\n"),
-    };
-  }
-  if (input.stage === "calibration") {
-    const documents = await completedRecruitingApproval(
-      tx,
-      actor,
-      input.documentsApprovalEffectId,
-      input,
-      "documents",
-      current,
-    );
-    const unique = new Set(input.profiles.map((profile) => profile.candidateKey));
-    const identities = input.profiles.map((profile) =>
-      recruitingCalibrationIdentity(profile.linkedinUrl),
-    );
-    if (
-      unique.size !== input.profiles.length ||
-      identities.some((identity) => !identity) ||
-      new Set(identities).size !== input.profiles.length
-    )
-      throw new IsolationError();
-    const nativeRefs = input.profiles.flatMap((profile) =>
-      "source" in profile ? [profile.source] : [],
-    );
-    const pageIds = [...new Set(nativeRefs.map((ref) => ref.effectId))];
-    const pages = pageIds.length
-      ? await tx.recruitingCandidatePage.findMany({
-          where: { roleId: input.roleId, effectId: { in: pageIds } },
-          include: { effect: { select: { request: true, result: true } } },
-        })
-      : [];
-    if (pages.length !== pageIds.length) throw new IsolationError();
-    const artifacts = await candidatePageArtifacts(tx, actor, pages, true);
-    const savedPages = new Map(pages.map((page) => [page.effectId, page]));
-    const profiles: NonNullable<RecruitingApprovalPackage["profiles"]> = [];
-    const sources: RecruitingAssessmentSourceRef[] = [];
-    for (const profile of input.profiles) {
-      if ("source" in profile) {
-        const ref = profile.source;
-        const page = savedPages.get(ref.effectId);
-        const artifact = artifacts.get(ref.effectId);
-        if (
-          !page ||
-          !artifact ||
-          page.roleId !== input.roleId ||
-          page.roleRevisionId !== documents.result.roleRevisionId ||
-          ref.roleRevisionId !== page.roleRevisionId ||
-          artifact.id !== ref.artifactRef.artifactId ||
-          artifact.hash !== ref.artifactRef.sha256 ||
-          page.rowCount === null ||
-          ref.rowIndex >= page.rowCount ||
-          researchReadRequest(page.effect.request, undefined, "get_rows").args.task_id !==
-            ref.providerTaskId
-        )
-          throw new IsolationError();
-        const occurrence = await tx.recruitingCandidateOccurrence.findUnique({
-          where: { pageId_rowIndex: { pageId: ref.effectId, rowIndex: ref.rowIndex } },
-        });
-        const result = page.effect.result;
-        const body = mcpObject(result);
-        if (
-          !body ||
-          !Array.isArray(body.rows) ||
-          !result ||
-          typeof result !== "object" ||
-          Array.isArray(result) ||
-          (result.isError !== undefined && result.isError !== false) ||
-          result.error !== undefined ||
-          body.error !== undefined ||
-          (body.task_id !== undefined && body.task_id !== ref.providerTaskId) ||
-          body.rows.length !== page.rowCount
-        )
-          throw new IsolationError();
-        const raw = body.rows[ref.rowIndex];
-        const normalized = normalizeRecruitingCandidateRow(raw, { schemaKnown: true });
-        const urls = projectRecruitingCandidateReport(raw).sourceUrls;
-        if (
-          !occurrence ||
-          occurrence.roleId !== input.roleId ||
-          occurrence.candidateKey !== profile.candidateKey ||
-          normalized.candidateKey !== profile.candidateKey ||
-          !normalized.name?.trim() ||
-          /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(normalized.name) ||
-          normalized.name !== occurrence.name ||
-          normalized.linkedinUrl !== occurrence.linkedinUrl ||
-          profile.candidateKey !==
-            `linkedin:${recruitingCalibrationIdentity(profile.linkedinUrl)}` ||
-          !urls.includes(profile.linkedinUrl) ||
-          !urls.includes(profile.evidenceUrl)
-        )
-          throw new IsolationError();
-        if (bytes) {
-          const original = bytes.get(artifact.id);
-          if (
-            !original ||
-            original.byteLength !== artifact.size ||
-            createHash("sha256").update(original).digest("hex") !== artifact.hash ||
-            stableJsonValue(
-              JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(original)),
-            ) !== stableJsonValue({ request: page.effect.request, providerResult: result })
-          )
-            throw new IsolationError();
-        }
-        profiles.push({
-          name: normalized.name,
-          linkedinUrl: urls.find((url) => url === profile.linkedinUrl)!,
-          evidenceUrl: urls.find((url) => url === profile.evidenceUrl)!,
-        });
-        continue;
-      }
-      const row = await tx.recruitingAssessment.findFirst({
-        where: {
-          roleId: input.roleId,
-          candidateKey: profile.candidateKey,
-          ...(current ? {} : { version: profile.assessmentVersion }),
-        },
-        orderBy: { version: "desc" },
-      });
-      if (
-        !row ||
-        row.version !== profile.assessmentVersion ||
-        row.roleRevisionId !== documents.result.roleRevisionId
-      )
-        throw new RecruitingConflictError();
-      await requireRun(tx, actor, row.createdByRunId);
-      const refs = RecruitingAssessmentSchema.parse({
-        ...row,
-        createdAt: row.createdAt.toISOString(),
-      }).sourceRefs;
-      await validateSources(tx, actor, refs);
-      for (const url of [profile.linkedinUrl, profile.evidenceUrl]) {
-        let observed = false;
-        for (const source of refs.filter((ref) => ref.readState === "read" && ref.url === url)) {
-          if (extractLinksFromText(source.quote ?? "").includes(url)) {
-            observed = true;
-            break;
-          }
-          if (source.anchor.kind !== "artifact") continue;
-          const artifact = await validateArtifact(tx, actor, source.anchor.artifact);
-          if (!artifact.runId) continue;
-          const receipt = await tx.event.findFirst({
-            where: {
-              spaceId: actor.spaceId,
-              runId: artifact.runId,
-              botId: artifact.botId ?? undefined,
-              type: "recruiting.material.read",
-              AND: [
-                { payload: { path: ["reader"], equals: "web_fetch" } },
-                { payload: { path: ["artifact", "artifactId"], equals: artifact.id } },
-                { payload: { path: ["artifact", "sha256"], equals: artifact.hash } },
-                { payload: { path: ["url"], equals: url } },
-              ],
-            },
-          });
-          if (!receipt) continue;
-          const payload = RecruitingMaterialReadPayloadSchema.parse(receipt.payload);
-          const origin = await requireRun(tx, actor, artifact.runId);
-          if (
-            receipt.threadId !== origin.threadId ||
-            origin.botId !== artifact.botId ||
-            payload.url !== url ||
-            payload.readAt !== source.readAt ||
-            payload.artifact.artifactId !== artifact.id ||
-            payload.artifact.sha256 !== artifact.hash
-          )
-            throw new IsolationError();
-          observed = true;
-          break;
-        }
-        if (!observed) throw new IsolationError();
-      }
-      sources.push(...refs);
-    }
-    if (bytes) {
-      await recruitingApprovalPackage(tx, actor, documents.input, current, bytes);
-      await validateReadSources(tx, actor, sources, bytes);
-    }
-    return {
-      ...documents.package,
-      sourceRefs: sources,
-      documentRefs: [
-        ...documents.package.documentRefs,
-        ...nativeRefs.map((ref) => ref.artifactRef),
-      ],
-      ...(profiles.length ? { profiles } : {}),
-    };
-  }
-  const files: MessageBlock[] = [];
-  const documentRefs: RecruitingArtifactRef[] = [];
-  for (const [kind, ref] of Object.entries(input.documents)) {
-    if (!ref) continue;
-    const artifact = await validateArtifact(tx, actor, ref);
-    const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
-    if (
-      kind === "jdText"
-        ? !artifact.mimeType.startsWith("text/") && !json
-        : artifact.mimeType !== "application/pdf"
-    )
-      throw new IsolationError();
-    if (bytes) {
-      const body = bytes.get(artifact.id);
-      if (
-        !body ||
-        body.byteLength !== artifact.size ||
-        createHash("sha256").update(body).digest("hex") !== artifact.hash
-      )
-        throw new IsolationError();
-      if (kind === "jdText") {
-        try {
-          const text = new TextDecoder("utf-8", { fatal: true }).decode(body);
-          if (!text.trim()) throw new IsolationError();
-          if (json && !assessmentJsonString(body, ["text"]).trim()) throw new IsolationError();
-        } catch {
-          throw new IsolationError();
-        }
-      } else if (new TextDecoder().decode(body.subarray(0, 5)) !== "%PDF-")
-        throw new IsolationError();
-    }
-    documentRefs.push(ref);
-    files.push({
-      kind: "file",
-      artifactId: artifact.id,
-      mimeType: artifact.mimeType,
-      name: artifact.name,
-      size: artifact.size,
-    });
-  }
-  return { files, documentRefs, sourceRefs: [] };
-}
-
-async function loadRecruitingApprovalMaterials(
-  prisma: PrismaClient,
-  actor: Actor,
-  trusted: RecruitingApprovalContext,
-  input: RetainedRecruitingApprovalRequest,
-  material: RecruitingRoleMaterialContext | undefined,
-  replay = false,
-) {
-  const package_ = await prisma.$transaction(async (tx) => {
-    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
-    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
-      throw new IsolationError();
-    if (!replay) requireResearchLease(run, trusted);
-    if (
-      input.stage === "calibration" &&
-      input.profiles.some((profile) => "assessmentVersion" in profile)
-    ) {
-      const retained = await tx.externalEffect.findFirst({
-        where: {
-          spaceId: actor.spaceId,
-          runId: run.id,
-          kind: "recruiting_request_approval",
-          request: { equals: input as Prisma.InputJsonValue },
-          status: { in: ["intended", "approved", "executing", "completed"] },
-        },
-      });
-      if (
-        !retained ||
-        retained.runId !== run.id ||
-        retained.spaceId !== actor.spaceId ||
-        retained.kind !== "recruiting_request_approval" ||
-        !["intended", "approved", "executing", "completed"].includes(retained.status) ||
-        stableJsonValue(retained.request) !== stableJsonValue(input)
-      )
-        throw new IsolationError();
-    }
-    const workspace = await approvalWorkspace(tx, actor, trusted.threadId, input, !replay);
-    return recruitingApprovalPackage(tx, actor, input, !replay, undefined, workspace);
-  });
-  // Reuse the existing native Artifact authorization/store reader; synthetic locators are never persisted.
-  return loadRoleMaterials(
-    prisma,
-    actor,
-    {
-      criteria: [],
-      sourceRefs: [
-        ...package_.sourceRefs,
-        ...package_.documentRefs.map((ref) => ({
-          id: ref.artifactId,
-          kind: "original_material" as const,
-          anchor: { kind: "artifact" as const, artifact: ref, locator: "approval-package" },
-          readState: "read" as const,
-          readAt: new Date().toISOString(),
-          quote: "approval-package",
-        })),
-      ],
-    },
-    material,
-  );
-}
-
-export async function prepareRecruitingApproval(
-  prisma: PrismaClient,
-  actor: Actor,
-  trusted: RecruitingApprovalContext,
-  untrustedInput: unknown,
-  material?: RecruitingRoleMaterialContext,
-): Promise<{
-  files: MessageBlock[];
-  roleTitle: string;
-  profiles?: RecruitingApprovalPackage["profiles"];
-  requirements?: string;
-}> {
-  const input = RetainedRecruitingApprovalRequestSchema.parse(untrustedInput);
-  const bytes = await loadRecruitingApprovalMaterials(prisma, actor, trusted, input, material);
-  return prisma.$transaction(async (tx) => {
-    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId);
-    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
-      throw new IsolationError();
-    requireResearchLease(run, trusted);
-    const workspace = await approvalWorkspace(tx, actor, trusted.threadId, input);
-    const { role } = workspace;
-    const package_ = await recruitingApprovalPackage(tx, actor, input, true, bytes, workspace);
-    return {
-      files: package_.files,
-      roleTitle: role.title,
-      ...(package_.profiles ? { profiles: package_.profiles } : {}),
-      ...(package_.requirements ? { requirements: package_.requirements } : {}),
-    };
-  });
-}
-
-export async function executeRecruitingApproval(
-  prisma: PrismaClient,
-  actor: Actor,
-  trusted: RecruitingApprovalContext & { effectId: string; effectRequest: unknown },
-  untrustedInput: unknown,
-  material?: RecruitingRoleMaterialContext,
-): Promise<RecruitingApprovalResult> {
-  const input = RetainedRecruitingApprovalRequestSchema.parse(untrustedInput);
-  if (stableJsonValue(input) !== stableJsonValue(trusted.effectRequest)) throw new IsolationError();
-  // Read status only to permit immutable completed receipts after the run/role has advanced.
-  const retained = await prisma.$transaction((tx) =>
-    tx.externalEffect.findFirst({
-      where: {
-        id: trusted.effectId,
-        spaceId: actor.spaceId,
-        runId: trusted.runId,
-        kind: "recruiting_request_approval",
-      },
-    }),
-  );
-  const replay = retained?.status === "completed";
-  const bytes = await loadRecruitingApprovalMaterials(
-    prisma,
-    actor,
-    trusted,
-    input,
-    material,
-    replay,
-  );
-  return prisma.$transaction(async (tx) => {
-    const { run } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
-    if (run.threadId !== trusted.threadId || run.botId !== trusted.botId)
-      throw new IsolationError();
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
-    );
-    const effect = await tx.externalEffect.findFirst({
-      where: {
-        id: trusted.effectId,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        kind: "recruiting_request_approval",
-      },
-    });
-    if (
-      effect?.kind !== "recruiting_request_approval" ||
-      effect.runId !== run.id ||
-      stableJsonValue(effect.request) !== stableJsonValue(trusted.effectRequest)
-    )
-      throw new IsolationError();
-    if (effect.status === "completed") {
-      const saved = await completedRecruitingApproval(
-        tx,
-        actor,
-        effect.id,
-        input,
-        input.stage,
-        false,
-      );
-      await recruitingApprovalPackage(tx, actor, input, false, bytes, saved.workspace);
-      return saved.result;
-    }
-    requireResearchLease(run, trusted);
-    if (effect.status !== "executing") throw new IsolationError();
-    const workspace = await approvalWorkspace(tx, actor, trusted.threadId, input);
-    const { proof } = await approvalAnswerProof(tx, actor, effect);
-    let approvedRevisionId = workspace.revision.id;
-    if (input.stage === "brief") {
-      const confirmed = await confirmRecruitingBriefInTransaction(
-        tx,
-        actor,
-        {
-          threadId: trusted.threadId,
-          roleId: input.roleId,
-          expectedRevision: input.expectedRoleRevision,
-        },
-        bytes,
-        { runId: run.id, confirmedAt: proof.createdAt.toISOString() },
-      );
-      approvedRevisionId = confirmed.revision.id;
-    } else await recruitingApprovalPackage(tx, actor, input, true, bytes);
-    // An approved ten-profile calibration accepts the round it showed and opens the next stage,
-    // so the round panel stops asking for feedback on a round the recruiter already approved.
-    if (input.stage === "calibration") {
-      const latest = await tx.recruitingCalibrationRound.findFirst({
-        where: { roleId: input.roleId },
-        orderBy: { round: "desc" },
-        select: { id: true },
-      });
-      await tx.recruitingCalibrationRound.updateMany({
-        where: { id: latest?.id ?? "", approvedAt: null },
-        data: {
-          approvedAt: proof.createdAt,
-          approvedByUserId: actor.userId,
-          approvalSource: { kind: "approval", effectId: effect.id },
-        },
-      });
-      await advanceRecruitingPlaybookStage(tx, input.roleId, "scale");
-    }
-    const result: RecruitingApprovalResult = {
-      status: "approved",
-      stage: input.stage,
-      roleId: input.roleId,
-      roleRevisionId: approvedRevisionId,
-      approvalEffectId: effect.id,
-      payloadHash: recruitingApprovalHash(input),
-      approvedByUserId: actor.userId,
-      approvedAt: proof.createdAt.toISOString(),
-    };
-    const completed = await tx.externalEffect.updateMany({
-      where: {
-        id: effect.id,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        status: "executing",
-        run: {
-          status: "running",
-          leaseOwner: trusted.leaseOwner,
-          leaseFence: trusted.leaseFence,
-          leaseExpiresAt: { gt: new Date() },
-        },
-      },
-      data: { status: "completed", result },
-    });
-    if (completed.count !== 1) throw new IsolationError();
-    await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      runId: run.id,
-      type: "effect.recorded",
-      payload: { effectId: effect.id, tool: "recruiting_request_approval", ...result },
-    });
-    return result;
-  });
-}
-
-/** Called only for this tool's native card; stale cards can still be denied. */
-export async function authorizeRecruitingApprovalAnswerInTransaction(
-  tx: Tx,
-  input: AnswerRunInput,
-  effectRequest: unknown,
-): Promise<boolean> {
-  if (input.answer !== "allow") return false;
-  const actor: Actor = {
-    spaceId: input.spaceId,
-    userId: input.answeredByUserId,
-    email: "",
-    isDeploymentOwner: false,
-  };
-  try {
-    const request = RetainedRecruitingApprovalRequestSchema.parse(effectRequest);
-    const { run } = await lockLiveRecruitingRun(tx, actor, input.runId, false);
-    if (run.status !== "waiting_input" || run.threadId !== input.threadId) return false;
-    const workspace = await approvalWorkspace(tx, actor, input.threadId, request);
-    await recruitingApprovalPackage(tx, actor, request, true, undefined, workspace);
-    return true;
-  } catch (error) {
-    if (
-      error instanceof IsolationError ||
-      error instanceof RecruitingConflictError ||
-      error instanceof RecruitingPlaybookValidationError ||
-      (error instanceof Error && error.name === "ZodError")
-    )
-      return false;
-    throw error;
-  }
-}
-
-export type RecruitingResearchContextInput = {
-  runId: string;
-  sourceMessageId?: string | null;
-  intent?: RecruitingHumanIntent;
-  expectedRoleRevision?: number;
-  mcpServerId?: string;
-  taskId?: string;
-  actionId?: string;
-  clientNonce?: string;
-  toolName?: "research" | "reply" | "get_task" | "get_rows";
-  historical?: boolean;
-  purpose?: RecruitingResearchPurpose;
-  approvalEffectId?: string;
-};
 
 export function recruitingResearchSnapshot(task: ResearchTaskRow, action: ResearchActionRow) {
   return {
@@ -6182,211 +4189,86 @@ async function requireResearchHandoff(
   return { ...block, sender };
 }
 
-async function requireResearchSource(
+/**
+ * The saved research action an older page was read under, with its run, task, source message and
+ * effect checked against the actor. Research tasks are no longer started; this only proves pages
+ * that older roles already hold.
+ */
+async function savedResearchAction(
   tx: Tx,
   actor: Actor,
-  run: Awaited<ReturnType<typeof lockLiveRecruitingRun>>["run"],
-  sourceMessageId: string | null,
-  quote: string,
-) {
-  const { source, answers } = await requireRunSource(tx, actor, run, sourceMessageId);
-  if (isNativeHumanMessage(source) || answers.some((answer) => answer.seq > source.seq))
-    return requireCurrentHumanSource(tx, actor, run, sourceMessageId, quote);
-  const handoff = await requireResearchHandoff(tx, actor, run, source, true);
-  if (!handoff.text.includes(quote)) throw new IsolationError();
-  return {
-    message: source,
-    source: RecruitingSourceRefSchema.parse({
-      id: `group-handoff:${source.id}`,
-      kind: "original_material",
-      anchor: { kind: "message", messageId: source.id, locator: "blocks[0].text" },
-      readState: "read",
-      readAt: new Date().toISOString(),
-      quote,
-    }),
-  };
-}
-
-async function researchContextInTransaction(
-  tx: Tx,
-  actor: Actor,
-  input: RecruitingResearchContextInput,
-  requireLive = false,
-  // Internal only (never from caller input): page-provenance reads skip re-validating the
-  // action's request/context/receipt/output artifacts; run, thread, role, task, action, source
-  // message and effect isolation checks below still run.
+  input: { runId: string; actionId: string },
+  // Page-provenance reads skip re-validating the action's request/context/receipt/output
+  // artifacts; run, thread, role, task, action, source message and effect checks still run.
   skipActionArtifacts = false,
 ) {
-  const live =
-    input.historical && !requireLive ? null : await lockLiveRecruitingRun(tx, actor, input.runId);
-  if (!live) await requireRun(tx, actor, input.runId);
-  const run =
-    live?.run ??
-    (await tx.run.findUniqueOrThrow({
-      where: { id: input.runId },
-      include: { bot: { select: { spaceId: true, userId: true } } },
-    }));
-  const thread = live?.thread ?? (await requireThread(tx, actor, run.threadId));
-  let action =
-    input.actionId || input.clientNonce
-      ? await tx.recruitingResearchAction.findFirst({
-          where: {
-            ...(input.actionId ? { id: input.actionId } : { clientNonce: input.clientNonce }),
-          },
-        })
-      : null;
-  if ((input.actionId || input.clientNonce) && !action) {
-    if (input.actionId) throw new IsolationError();
-  }
-  if (action && input.taskId && action.taskId !== input.taskId) throw new IsolationError();
-  const taskId = action?.taskId ?? input.taskId;
-  let task = taskId ? await tx.recruitingResearchTask.findUnique({ where: { id: taskId } }) : null;
-  const roleId = input.historical && task ? task.roleId : thread.activeRecruitingRoleId;
-  if (!roleId) throw new IsolationError();
-  const role = await requireRole(tx, actor, roleId, true, thread);
-  if (action)
-    action = await tx.recruitingResearchAction.findUniqueOrThrow({ where: { id: action.id } });
-  if (task) task = await tx.recruitingResearchTask.findUniqueOrThrow({ where: { id: task.id } });
-  if (!action && task && !input.actionId && !input.clientNonce) {
-    action = task.pendingActionId
-      ? await tx.recruitingResearchAction.findUnique({ where: { id: task.pendingActionId } })
-      : await tx.recruitingResearchAction.findFirst({
-          where: { taskId: task.id },
-          orderBy: { id: "desc" },
-        });
-    if (!action || action.taskId !== task.id) throw new IsolationError();
-  }
-  if (input.expectedRoleRevision !== undefined && role.revision !== input.expectedRoleRevision)
-    throw new RecruitingConflictError();
-  const workspace = await roleSnapshot(tx, actor, role, thread, run);
-  const source = input.intent
-    ? (
-        await requireResearchSource(
-          tx,
-          actor,
-          run,
-          input.sourceMessageId === undefined ? run.sourceMessageId : input.sourceMessageId,
-          RecruitingHumanIntentSchema.parse(input.intent).quote,
-        )
-      ).source
-    : null;
-  if ((taskId && !task) || (task && task.roleId !== role.id)) throw new IsolationError();
-  if (task && task.createdByRunId !== run.id)
-    await requireRun(tx, actor, task.createdByRunId, thread);
-  const boundServerId = task?.mcpServerId;
-  if (input.mcpServerId && boundServerId && input.mcpServerId !== boundServerId)
+  await requireRun(tx, actor, input.runId);
+  const run = await tx.run.findUniqueOrThrow({
+    where: { id: input.runId },
+    include: { bot: { select: { spaceId: true, userId: true } } },
+  });
+  const thread = await requireThread(tx, actor, run.threadId);
+  const found = await tx.recruitingResearchAction.findFirst({ where: { id: input.actionId } });
+  if (!found) throw new IsolationError();
+  const foundTask = await tx.recruitingResearchTask.findUnique({ where: { id: found.taskId } });
+  if (!foundTask) throw new IsolationError();
+  const role = await requireRole(tx, actor, foundTask.roleId, true, thread);
+  const action = await tx.recruitingResearchAction.findUniqueOrThrow({ where: { id: found.id } });
+  const task = await tx.recruitingResearchTask.findUniqueOrThrow({ where: { id: foundTask.id } });
+  if (task.roleId !== role.id) throw new IsolationError();
+  if (task.createdByRunId !== run.id) await requireRun(tx, actor, task.createdByRunId, thread);
+  scoped(
+    actor,
+    await tx.mcpServer.findFirst({
+      where: { id: task.mcpServerId, spaceId: actor.spaceId, userId: actor.userId },
+      select: { id: true, spaceId: true, userId: true },
+    }),
+  );
+  if (
+    !(await tx.recruitingRoleRevision.findFirst({
+      where: { id: action.roleRevisionId, roleId: role.id },
+    }))
+  )
     throw new IsolationError();
-  const serverId = boundServerId ?? input.mcpServerId;
-  const server = serverId
-    ? scoped(
-        actor,
-        await tx.mcpServer.findFirst({
-          where: {
-            id: serverId,
-            spaceId: actor.spaceId,
-            userId: actor.userId,
-            ...(input.historical ? {} : { enabled: true }),
-          },
-          select: {
-            id: true,
-            spaceId: true,
-            userId: true,
-            enabled: true,
-            revision: true,
-            slug: true,
-          },
-        }),
-      )
-    : null;
-  if (server && !input.historical) {
-    const assignment = await tx.botMcpServer.findFirst({
-      where: {
-        serverId: server.id,
-        botId: run.botId,
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-      },
+  const origin = action.runId === run.id ? run : await requireRun(tx, actor, action.runId, thread);
+  const message = await tx.message.findUnique({
+    where: { id: action.sourceMessageId },
+    include: humanMessageInclude,
+  });
+  if (!message || message.threadId !== origin.threadId) throw new IsolationError();
+  if (!isNativeHumanMessage(message))
+    await requireResearchHandoff(
+      tx,
+      actor,
+      await tx.run.findUniqueOrThrow({ where: { id: origin.id } }),
+      message,
+      false,
+    );
+  const snapshot = recruitingResearchSnapshot(task, action).action;
+  if (!skipActionArtifacts)
+    for (const ref of [
+      snapshot.requestArtifact,
+      snapshot.contextArtifact,
+      ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
+      ...snapshot.outputArtifacts,
+    ])
+      await validateArtifact(tx, actor, ref, { run, thread });
+  await tx.artifact.findUniqueOrThrow({ where: { id: action.requestArtifactId } });
+  if (action.effectId) {
+    const effect = await tx.externalEffect.findFirst({
+      where: { id: action.effectId, spaceId: actor.spaceId },
     });
-    const toolName = input.toolName ?? (action?.kind === "continue" ? "reply" : "research");
     if (
-      !assignment ||
-      (!assignment.allowAllTools &&
-        (!Array.isArray(assignment.allowedTools) || !assignment.allowedTools.includes(toolName)))
-    )
-      throw new IsolationError();
-    if (task && task.serverRevision !== server.revision) throw new RecruitingConflictError();
-  }
-  let effect: ResearchEffectRow | null = null;
-  let requestArtifact: Prisma.ArtifactGetPayload<Record<string, never>> | null = null;
-  if (action) {
-    if (
-      !task ||
-      !(await tx.recruitingRoleRevision.findFirst({
-        where: { id: action.roleRevisionId, roleId: role.id },
+      !effect ||
+      effect.idempotencyKey !== `recruiting-research:${action.id}` ||
+      (await tx.recruitingResearchAction.findFirst({
+        where: { effectId: effect.id, id: { not: action.id } },
       }))
     )
       throw new IsolationError();
-    const origin =
-      action.runId === run.id ? run : await requireRun(tx, actor, action.runId, thread);
-    const message = await tx.message.findUnique({
-      where: { id: action.sourceMessageId },
-      include: humanMessageInclude,
-    });
-    if (!message || message.threadId !== origin.threadId) throw new IsolationError();
-    if (!isNativeHumanMessage(message))
-      await requireResearchHandoff(
-        tx,
-        actor,
-        await tx.run.findUniqueOrThrow({ where: { id: origin.id } }),
-        message,
-        !input.historical,
-      );
-    const snapshot = recruitingResearchSnapshot(task, action).action;
-    if (!skipActionArtifacts)
-      for (const ref of [
-        snapshot.requestArtifact,
-        snapshot.contextArtifact,
-        ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
-        ...snapshot.outputArtifacts,
-      ])
-        await validateArtifact(tx, actor, ref, { run, thread });
-    requestArtifact = await tx.artifact.findUniqueOrThrow({
-      where: { id: action.requestArtifactId },
-    });
-    if (action.effectId) {
-      effect = await tx.externalEffect.findFirst({
-        where: { id: action.effectId, spaceId: actor.spaceId },
-      });
-      if (
-        !effect ||
-        effect.idempotencyKey !== `recruiting-research:${action.id}` ||
-        (await tx.recruitingResearchAction.findFirst({
-          where: { effectId: effect.id, id: { not: action.id } },
-        }))
-      )
-        throw new IsolationError();
-      if (effect.runId !== run.id) await requireRun(tx, actor, effect.runId, thread);
-    }
+    if (effect.runId !== run.id) await requireRun(tx, actor, effect.runId, thread);
   }
-  return {
-    run,
-    thread,
-    workspace,
-    server,
-    task,
-    action,
-    effect,
-    requestArtifact,
-    source,
-  };
-}
-
-export async function readRecruitingResearchContext(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: RecruitingResearchContextInput,
-) {
-  return prisma.$transaction((tx) => researchContextInTransaction(tx, actor, input));
+  return { task, action };
 }
 
 async function requireResearchAdoption(
@@ -6499,24 +4381,6 @@ function requireResearchLease(
   )
     throw new IsolationError();
 }
-
-export type RecruitingResearchObservationInput = {
-  runId: string;
-  actionId: string;
-  effectId: string;
-  request: Prisma.InputJsonValue;
-  rawResult: Prisma.InputJsonValue;
-  toolName: "get_task" | "get_rows";
-  outputArtifact: RecruitingResearchArtifactInput;
-  observedProviderState?: string;
-  taskState?: "active" | "completed" | "closed" | "unknown";
-  usage?: RecruitingResearchAction["usage"];
-  cursor?: string | null;
-  historicalBackfill?: boolean;
-  /** Classified by the native adapter from the exact effect result; raw bytes stay in ArtifactStore. */
-  rows?: readonly unknown[];
-  outputId?: string | null;
-};
 
 type ResearchReadBinding = Extract<RecruitingReadPayload, { phase: "bound" }>;
 type ResearchReadRecorded = Extract<RecruitingReadPayload, { phase: "recorded" }>;
@@ -6644,7 +4508,6 @@ async function researchReadBinding(
   tx: Tx,
   actor: Actor,
   effect: ResearchEffectRow,
-  lease?: ResearchLease,
   memo: ProofMemo = unmemoized,
   pageOnly = false,
 ) {
@@ -6681,20 +4544,13 @@ async function researchReadBinding(
   if (bindings.length !== 1 || recorded.length > 1) throw new IsolationError();
   const { event, payload } = bindings[0]!;
   const binding = payload as ResearchReadBinding;
-  if (lease && effect.runId !== lease.runId) throw new IsolationError();
   if (event.runId !== owner.id || event.threadId !== owner.threadId || event.botId !== owner.botId)
     throw new IsolationError();
-  const context = {
-    runId: owner.id,
-    actionId: binding.actionId,
-    toolName: binding.toolName,
-    historical: !lease,
-  };
+  const context = { runId: owner.id, actionId: binding.actionId };
   const saved = await memo(`context:${pageOnly}:${stableJsonValue(context)}`, () =>
-    researchContextInTransaction(tx, actor, context, false, pageOnly),
+    savedResearchAction(tx, actor, context, pageOnly),
   );
-  if (lease) requireResearchLease(saved.run, lease);
-  if (!saved.task || !saved.action || saved.task.id !== binding.taskId) throw new IsolationError();
+  if (saved.task.id !== binding.taskId) throw new IsolationError();
   const call = researchReadRequest(effect.request, saved.task, binding.toolName);
   const materialized = recorded[0];
   if (
@@ -6745,7 +4601,7 @@ async function recordedResearchReadArtifact(
     payload.outputArtifact.artifactId !== artifact.id ||
     payload.outputArtifact.sha256 !== artifact.hash ||
     !RecruitingArtifactRefSchema.array()
-      .parse(read.saved.action!.outputArtifacts)
+      .parse(read.saved.action.outputArtifacts)
       .some((ref) => ref.artifactId === artifact.id && ref.sha256 === artifact.hash)
   )
     throw new IsolationError();
@@ -6753,291 +4609,6 @@ async function recordedResearchReadArtifact(
     validateArtifact(tx, actor, payload.outputArtifact),
   );
   return artifact;
-}
-
-export async function bindRecruitingResearchReadEffect(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: ResearchLease & { actionId: string; effectId: string; request: Prisma.InputJsonValue },
-) {
-  return prisma.$transaction(async (tx) => {
-    let effect = await tx.externalEffect.findFirst({
-      where: { id: input.effectId, spaceId: actor.spaceId, runId: input.runId },
-    });
-    if (!effect || stableJsonValue(effect.request) !== stableJsonValue(input.request))
-      throw new IsolationError();
-    const existing = await researchReadBinding(
-      tx,
-      actor,
-      effect,
-      effect.status === "completed" ? undefined : input,
-    );
-    if (existing) {
-      if (
-        input.actionId !== existing.binding.actionId &&
-        !(await tx.recruitingResearchAction.findFirst({
-          where: { id: input.actionId, taskId: existing.binding.taskId },
-        }))
-      )
-        throw new IsolationError();
-      await recordedResearchReadArtifact(tx, actor, existing);
-      return { saved: existing.saved, effect, binding: existing.binding };
-    }
-    const call = researchReadRequest(input.request);
-    const saved = await researchContextInTransaction(tx, actor, {
-      runId: input.runId,
-      actionId: input.actionId,
-      toolName: call.toolName,
-    });
-    requireResearchLease(saved.run, input);
-    if (!saved.task || !saved.action) throw new IsolationError();
-    researchReadRequest(input.request, saved.task, call.toolName);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${effect.id} FOR UPDATE`,
-    );
-    effect = await tx.externalEffect.findUniqueOrThrow({ where: { id: effect.id } });
-    if (
-      effect.runId !== input.runId ||
-      effect.spaceId !== actor.spaceId ||
-      stableJsonValue(effect.request) !== stableJsonValue(input.request)
-    )
-      throw new IsolationError();
-    const raced = await researchReadBinding(tx, actor, effect);
-    if (raced) {
-      if (raced.binding.taskId !== saved.task.id) throw new IsolationError();
-      return { saved: raced.saved, effect, binding: raced.binding };
-    }
-    if (!["intended", "approved", "executing"].includes(effect.status)) throw new IsolationError();
-    const binding: ResearchReadBinding = {
-      phase: "bound",
-      taskId: saved.task.id,
-      actionId: saved.action.id,
-      effectId: effect.id,
-      toolName: call.toolName,
-    };
-    const event = await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId: saved.run.threadId,
-      botId: saved.run.botId,
-      runId: saved.run.id,
-      type: "recruiting.read",
-      payload: binding,
-    });
-    researchReadPayload(event);
-    return { saved, effect, binding };
-  });
-}
-
-export async function claimRecruitingResearchReadEffect(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: ResearchLease & { effectId: string; from: "intended" | "approved" },
-) {
-  return prisma.$transaction(async (tx) => {
-    const effect = await tx.externalEffect.findFirst({
-      where: {
-        id: input.effectId,
-        spaceId: actor.spaceId,
-        runId: input.runId,
-      },
-    });
-    if (!effect) throw new IsolationError();
-    const read = await researchReadBinding(tx, actor, effect, input);
-    if (!read || !["intended", "approved"].includes(input.from) || effect.status !== input.from)
-      return false;
-    const claimed = await tx.externalEffect.updateMany({
-      where: {
-        id: effect.id,
-        spaceId: actor.spaceId,
-        runId: input.runId,
-        status: input.from,
-        request: { equals: effect.request as Prisma.InputJsonValue },
-      },
-      data: { status: "executing" },
-    });
-    return claimed.count === 1;
-  });
-}
-
-export async function listUnmappedRecruitingResearchReads(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: { runId: string; taskId: string },
-) {
-  return prisma.$transaction(async (tx) => {
-    await requireRun(tx, actor, input.runId);
-    const task = await tx.recruitingResearchTask.findUnique({ where: { id: input.taskId } });
-    if (!task) throw new IsolationError();
-    await requireRole(tx, actor, task.roleId, true);
-    const events = await tx.event.findMany({
-      where: {
-        spaceId: actor.spaceId,
-        type: "recruiting.read",
-        payload: { path: ["taskId"], equals: task.id },
-      },
-    });
-    const pending = [];
-    for (const effectId of new Set(events.map((event) => researchReadPayload(event).effectId))) {
-      const effect = await tx.externalEffect.findFirst({
-        where: { id: effectId, spaceId: actor.spaceId },
-      });
-      if (!effect) throw new IsolationError();
-      const read = await researchReadBinding(tx, actor, effect);
-      if (!read || read.binding.taskId !== task.id) throw new IsolationError();
-      if (effect.status !== "completed") continue;
-      const recorded = await recordedResearchReadArtifact(tx, actor, read);
-      const indexed =
-        read.toolName === "get_rows"
-          ? await tx.recruitingCandidatePage.findUnique({ where: { effectId: effect.id } })
-          : true;
-      if (!recorded || !indexed)
-        pending.push({
-          ...(recorded
-            ? {
-                outputArtifact: {
-                  name: recorded.name,
-                  mimeType: recorded.mimeType,
-                  size: recorded.size,
-                  hash: recorded.hash,
-                  storageKey: recorded.storageKey,
-                  clientNonce: `recruiting-observation:${effect.id}`,
-                },
-              }
-            : {}),
-          saved: read.saved,
-          effect,
-          toolName: read.toolName,
-          args: read.args,
-          route: read.route,
-        });
-    }
-    return pending;
-  });
-}
-
-export async function recordRecruitingResearchObservation(
-  prisma: PrismaClient,
-  actor: Actor,
-  input: RecruitingResearchObservationInput,
-) {
-  return prisma.$transaction(async (tx) => {
-    const capture = await requireRun(tx, actor, input.runId);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${capture.threadId} FOR UPDATE`,
-    );
-    const context = await researchContextInTransaction(tx, actor, { ...input, historical: true });
-    const { run, thread, action, task } = context;
-    if (
-      !action ||
-      !task?.providerTaskId ||
-      (input.usage !== undefined && !action.receiptArtifactId)
-    )
-      throw new IsolationError();
-    const effect = await tx.externalEffect.findFirst({
-      where: { id: input.effectId, spaceId: actor.spaceId, status: "completed" },
-    });
-    if (
-      !effect ||
-      (effect.runId !== run.id && !input.historicalBackfill) ||
-      stableJsonValue(effect.request) !== stableJsonValue(input.request) ||
-      stableJsonValue(effect.result) !== stableJsonValue(input.rawResult) ||
-      input.outputArtifact.clientNonce !== `recruiting-observation:${effect.id}`
-    )
-      throw new IsolationError();
-    researchReadRequest(input.request, task, input.toolName);
-    const read = await researchReadBinding(tx, actor, effect);
-    if (
-      !read ||
-      read.binding.actionId !== action.id ||
-      read.binding.taskId !== task.id ||
-      read.toolName !== input.toolName
-    )
-      throw new IsolationError();
-    const recorded = await recordedResearchReadArtifact(tx, actor, read);
-    if (recorded) {
-      if (recorded.hash !== input.outputArtifact.hash) throw new RecruitingConflictError();
-      const candidateRows = await indexRecruitingCandidateRows(
-        tx,
-        actor,
-        action,
-        task,
-        effect,
-        recorded,
-        read.args,
-        input,
-      );
-      return { task, action, outputArtifact: recorded, candidateRows };
-    }
-    const outputArtifact = await createResearchArtifact(
-      tx,
-      actor,
-      run,
-      thread,
-      input.outputArtifact,
-    );
-    const candidateRows = await indexRecruitingCandidateRows(
-      tx,
-      actor,
-      action,
-      task,
-      effect,
-      outputArtifact,
-      read.args,
-      input,
-    );
-    const outputArtifacts = [
-      ...RecruitingArtifactRefSchema.array().parse(action.outputArtifacts),
-      { artifactId: outputArtifact.id, sha256: outputArtifact.hash },
-    ];
-    const updated = await tx.recruitingResearchAction.update({
-      where: { id: action.id },
-      data: {
-        outputArtifacts,
-        ...(!input.historicalBackfill && input.observedProviderState !== undefined
-          ? { observedProviderState: input.observedProviderState }
-          : {}),
-        ...(!input.historicalBackfill && input.usage !== undefined
-          ? {
-              usage:
-                input.usage === null ? Prisma.JsonNull : (input.usage as Prisma.InputJsonValue),
-            }
-          : {}),
-        ...(!input.historicalBackfill && input.cursor !== undefined
-          ? { cursor: input.cursor }
-          : {}),
-      },
-    });
-    const changedTask =
-      !input.historicalBackfill && task.pendingActionId === action.id && input.taskState
-        ? await tx.recruitingResearchTask.update({
-            where: { id: task.id },
-            data: {
-              state: input.taskState,
-              ...(task.pendingActionId === action.id && input.taskState === "closed"
-                ? { pendingActionId: null }
-                : {}),
-            },
-          })
-        : task;
-    const event = await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      runId: run.id,
-      type: "recruiting.read",
-      allowCancelledRun: true,
-      payload: {
-        phase: "recorded",
-        taskId: task.id,
-        actionId: action.id,
-        effectId: effect.id,
-        outputArtifact: { artifactId: outputArtifact.id, sha256: outputArtifact.hash },
-      },
-    });
-    researchReadPayload(event);
-    recruitingResearchSnapshot(changedTask, updated);
-    return { task: changedTask, action: updated, outputArtifact, candidateRows };
-  });
 }
 
 export async function listRecruitingResearch(
@@ -7177,187 +4748,6 @@ export async function listRecruitingResearch(
   return result;
 }
 
-async function indexRecruitingCandidateRows(
-  tx: Tx,
-  actor: Actor,
-  action: Pick<ResearchActionRow, "id" | "roleRevisionId" | "candidateOutputSchema"> | null,
-  task: Pick<ResearchTaskRow, "id" | "roleId">,
-  effect: ResearchEffectRow,
-  artifact: { id: string; hash: string },
-  request: Prisma.InputJsonObject,
-  input: Pick<RecruitingResearchObservationInput, "toolName" | "rows" | "outputId">,
-  nativeRevisionId?: string,
-) {
-  if (input.toolName !== "get_rows") return [];
-  if (await tx.recruitingCandidatePage.findUnique({ where: { effectId: effect.id } }))
-    return tx.recruitingCandidateOccurrence.findMany({
-      where: { pageId: effect.id },
-      orderBy: { rowIndex: "asc" },
-      select: { rowIndex: true, candidateKey: true },
-    });
-  const schemaKnown =
-    action === null || action.candidateOutputSchema === RECRUITING_CANDIDATE_OUTPUT_SCHEMA;
-  const rows = (input.rows ?? []).map((row, rowIndex) => {
-    const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
-      schemaKnown,
-    });
-    return {
-      pageId: effect.id,
-      rowIndex,
-      roleId: task.roleId,
-      candidateKey: candidateKey ?? `source-row:${effect.id}:${rowIndex}`,
-      ...profile,
-      evidenceUrls: profile.evidenceUrls === null ? Prisma.DbNull : [...profile.evidenceUrls],
-      issues: [...profile.issues],
-    };
-  });
-  const sourceRows = schemaKnown
-    ? (input.rows ?? []).flatMap((row, rowIndex) =>
-        row !== null &&
-        typeof row === "object" &&
-        !Array.isArray(row) &&
-        rows[rowIndex]!.name !== null &&
-        rows[rowIndex]!.candidateKey === `source-row:${effect.id}:${rowIndex}`
-          ? [{ rowIndex, row }]
-          : [],
-      )
-    : [];
-  if (sourceRows.length) {
-    const call = researchReadRequest(
-      effect.request,
-      undefined,
-      "get_rows",
-      agentRunBody(effect.result),
-    );
-    // ponytail: compare this authorized read view in SQL; persist row fingerprints
-    // only if its growing page history outgrows this scoped scan. Caller holds the role lock.
-    const reused = await tx.$queryRaw<Array<{ rowIndex: number; candidateKey: string }>>(
-      Prisma.sql`
-        WITH incoming_source_rows AS (
-          SELECT (item->>'rowIndex')::int AS "rowIndex", item->'row' AS "row",
-            row_number() OVER (PARTITION BY item->'row' ORDER BY (item->>'rowIndex')::int) AS ordinal
-          FROM jsonb_array_elements(${JSON.stringify(sourceRows)}::jsonb) item
-        ), source_pages AS MATERIALIZED (
-          SELECT page."effectId", page."observedAt", previous."result",
-            CASE WHEN previous."request"->>1 = 'direct' THEN previous."request"->2->'args'
-              ELSE previous."request"->2->'arguments' END AS args
-          FROM "recruiting_candidate_pages" page
-          JOIN "external_effects" previous ON previous."id" = page."effectId"
-          JOIN "runs" owner ON owner."id" = previous."runId"
-          JOIN "bots" bot ON bot."id" = owner."botId"
-          JOIN "threads" thread ON thread."id" = owner."threadId"
-          JOIN "artifacts" artifact ON artifact."id" = page."artifactId"
-          WHERE page."roleId" = ${task.roleId} AND page."effectId" <> ${effect.id}
-            AND previous."spaceId" = ${actor.spaceId} AND previous."status" = 'completed'
-            AND owner."spaceId" = ${actor.spaceId} AND owner."userId" = ${actor.userId}
-            AND bot."spaceId" = ${actor.spaceId} AND bot."userId" = ${actor.userId}
-            AND thread."spaceId" = ${actor.spaceId} AND thread."userId" = ${actor.userId}
-            AND artifact."spaceId" = ${actor.spaceId} AND artifact."userId" = ${actor.userId}
-            AND artifact."hash" = page."artifactHash" AND artifact."runId" = owner."id"
-            AND artifact."botId" = bot."id"
-            AND page."outputId" IS NOT DISTINCT FROM ${input.outputId ?? null}::text
-            AND previous."request"->>0 = '__rakazoCatalogTool'
-            AND (
-              (previous."request"->>1 = 'direct'
-                AND jsonb_array_length(CASE WHEN jsonb_typeof(previous."request") = 'array'
-                  THEN previous."request" ELSE '[]'::jsonb END) = 3
-                AND previous."request"->2->'route' = ${JSON.stringify(call.route)}::jsonb
-                AND (previous."request"->2->'args') - 'limit' = ${JSON.stringify(call.args)}::jsonb - 'limit')
-              OR (previous."request"->>1 IN ('connectors_execute_tool', 'mcp_execute_tool')
-                AND jsonb_array_length(CASE WHEN jsonb_typeof(previous."request") = 'array'
-                  THEN previous."request" ELSE '[]'::jsonb END) = 4
-                AND previous."request"->3 = ${JSON.stringify(call.route)}::jsonb
-                AND previous."request"->2->>'id' = ${`${call.route.resourceId}:get_rows`}
-                AND (previous."request"->2->'arguments') - 'limit' = ${JSON.stringify(call.args)}::jsonb - 'limit')
-            )
-        ), read_results AS (
-          SELECT * FROM source_pages
-          UNION ALL
-          SELECT current."id", current."updatedAt", current."result", ${JSON.stringify(call.args)}::jsonb
-          FROM "external_effects" current WHERE current."id" = ${effect.id}
-            AND current."spaceId" = ${actor.spaceId} AND current."status" = 'completed'
-        ), read_views AS MATERIALIZED (
-          SELECT saved.*, envelope.body FROM read_results saved
-          CROSS JOIN LATERAL (
-            SELECT COALESCE(saved."result"->'structuredContent', (
-              SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
-              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(saved."result"->'content') = 'array'
-                THEN saved."result"->'content' ELSE '[]'::jsonb END) block
-              WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
-            )) AS body
-          ) envelope
-        ), matched_source_rows AS (
-          SELECT DISTINCT ON (incoming."row", page."effectId", occurrence."candidateKey")
-            incoming."row", occurrence."candidateKey", page."observedAt", page."effectId",
-            occurrence."rowIndex"
-          FROM read_views page JOIN read_views current ON current."effectId" = ${effect.id}
-          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(page.body->'rows') = 'array'
-            THEN page.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
-          JOIN "recruiting_candidate_occurrences" occurrence ON occurrence."pageId" = page."effectId"
-            AND occurrence."rowIndex" = returned.ordinality - 1
-          JOIN incoming_source_rows incoming ON returned.value = incoming."row"
-          WHERE page."effectId" <> current."effectId" AND (
-              page.args = current.args OR (
-                NOT (page.args ? 'cursor') AND NOT (current.args ? 'cursor')
-                AND page.body->'next_cursor' = 'null'::jsonb
-                AND current.body->'next_cursor' = 'null'::jsonb
-                AND jsonb_typeof(current.body->'rows') = 'array'
-              )
-            )
-            AND occurrence."roleId" = ${task.roleId} AND occurrence."name" IS NOT NULL
-            AND occurrence."candidateKey" LIKE 'source-row:%'
-          ORDER BY incoming."row", page."effectId", occurrence."candidateKey", occurrence."rowIndex"
-        ), selected_source_pages AS (
-          SELECT DISTINCT ON ("row") "row", "effectId"
-          FROM (
-            SELECT "row", "effectId", "observedAt", count(*) AS multiplicity
-            FROM matched_source_rows GROUP BY "row", "effectId", "observedAt"
-          ) pages ORDER BY "row", multiplicity DESC, "observedAt", "effectId"
-        ), prior_source_rows AS (
-          SELECT matched."row", matched."candidateKey", row_number() OVER (
-            PARTITION BY matched."row" ORDER BY matched."rowIndex", matched."candidateKey"
-          ) AS ordinal FROM matched_source_rows matched JOIN selected_source_pages selected
-            ON matched."row" = selected."row" AND matched."effectId" = selected."effectId"
-        )
-        SELECT incoming."rowIndex", prior."candidateKey"
-        FROM incoming_source_rows incoming JOIN prior_source_rows prior
-          ON incoming."row" = prior."row" AND incoming.ordinal = prior.ordinal
-      `,
-    );
-    for (const { rowIndex, candidateKey } of reused) rows[rowIndex]!.candidateKey = candidateKey;
-  }
-  await tx.recruitingCandidatePage.create({
-    data: {
-      effectId: effect.id,
-      roleId: task.roleId,
-      taskId: action ? task.id : null,
-      actionId: action?.id ?? null,
-      roleRevisionId: action?.roleRevisionId ?? nativeRevisionId!,
-      artifactId: artifact.id,
-      artifactHash: artifact.hash,
-      requestCursor: typeof request.cursor === "string" ? request.cursor : null,
-      outputId: input.outputId ?? null,
-      // Native completion time orders historical recovery independently of indexing time.
-      observedAt: effect.updatedAt,
-      rowCount: input.rows === undefined ? null : rows.length,
-    },
-  });
-  if (!rows.length) return [];
-  await tx.recruitingCandidate.createMany({
-    data: [...new Set(rows.map((row) => row.candidateKey))].map((candidateKey) => ({
-      roleId: task.roleId,
-      candidateKey,
-    })),
-    skipDuplicates: true,
-  });
-  await advanceStageAfterSave(tx, task.roleId);
-  await tx.recruitingCandidateOccurrence.createMany({ data: rows });
-  await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${effect.id}`);
-  return rows.map(({ rowIndex, candidateKey }) => ({ rowIndex, candidateKey }));
-}
-
-type NativeCandidateSaveInput = Extract<RecruitingResearchToolInput, { operation: "save_results" }>;
-
 /** The JSON body of an agent run tool result: structured content, else its first JSON text. */
 function agentRunBody(result: unknown): { id?: unknown; status?: unknown } | undefined {
   const value = result as { structuredContent?: unknown; content?: unknown } | null;
@@ -7374,297 +4764,6 @@ function agentRunBody(result: unknown): { id?: unknown; status?: unknown } | und
   return undefined;
 }
 
-async function nativeCandidatePage(
-  tx: Tx,
-  actor: Actor,
-  runId: string,
-  input: NativeCandidateSaveInput,
-  context?: {
-    run: Awaited<ReturnType<typeof requireRun>>;
-    thread: Awaited<ReturnType<typeof requireThread>>;
-  },
-) {
-  const run = context?.run ?? (await requireRun(tx, actor, runId));
-  const thread = context?.thread ?? (await requireThread(tx, actor, run.threadId));
-  if (run.id !== runId || thread.id !== run.threadId) throw new IsolationError();
-  if (!thread.activeRecruitingRoleId) throw new IsolationError();
-  const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
-  if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
-    throw new RecruitingConflictError();
-  // A people-search agent run that graded people is saved like a research page: its run id
-  // names the finished call in this run, and its structured rows are the page.
-  if (input.providerTaskId.startsWith("agent_run_")) {
-    const calls = await tx.externalEffect.findMany({
-      where: {
-        spaceId: actor.spaceId,
-        runId,
-        status: "completed",
-        request: { path: ["0"], equals: "__rakazoCatalogTool" },
-        OR: [
-          { request: { path: ["2", "route", "toolName"], equals: "agent_run" } },
-          { request: { path: ["3", "toolName"], equals: "agent_run" } },
-        ],
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
-    for (const effect of calls) {
-      if (effect.runId !== run.id || effect.spaceId !== actor.spaceId) continue;
-      const body = agentRunBody(effect.result);
-      if (body?.id !== input.providerTaskId || body.status !== "completed") continue;
-      const request = effect.request as unknown[];
-      const route = (
-        request[1] === "direct" ? (request[2] as { route?: unknown })?.route : request[3]
-      ) as { resourceId?: unknown; resourceRevision?: unknown } | null;
-      if (typeof route?.resourceId !== "string" || typeof route.resourceRevision !== "number")
-        continue;
-      if (input.mcpServerId !== undefined && route.resourceId !== input.mcpServerId) continue;
-      await requireResearchAdoption(
-        tx,
-        actor,
-        run,
-        { id: role.id, currentRevisionId: role.currentRevisionId },
-        undefined,
-        effect.createdAt,
-        { run, thread },
-      );
-      return {
-        role,
-        effect,
-        call: {
-          route: {
-            connectorId: "mcp" as const,
-            resourceId: route.resourceId,
-            resourceRevision: route.resourceRevision,
-            toolName: "get_rows" as ResearchReadTool,
-          },
-          args: { task_id: input.providerTaskId } as Prisma.InputJsonObject,
-        },
-        snapshot: { request: effect.request, providerResult: effect.result },
-      };
-    }
-    throw new IsolationError();
-  }
-  // ponytail: filter the native JSON receipt; keep the full parser and provenance checks below.
-  const effects = await tx.externalEffect.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      runId,
-      status: "completed",
-      request: { path: ["0"], equals: "__rakazoCatalogTool" },
-      OR: ["direct", "connectors_execute_tool", "mcp_execute_tool"].map((tool) => {
-        const route = tool === "direct" ? ["2", "route"] : ["3"];
-        const args = ["2", tool === "direct" ? "args" : "arguments"];
-        return {
-          AND: [
-            { request: { path: ["1"], equals: tool } },
-            { request: { path: [...route, "toolName"], equals: "get_rows" } },
-            { request: { path: [...args, "task_id"], equals: input.providerTaskId } },
-            { request: { path: [...args, "cursor"], equals: input.cursor ?? Prisma.AnyNull } },
-            ...(input.mcpServerId === undefined
-              ? []
-              : [{ request: { path: [...route, "resourceId"], equals: input.mcpServerId } }]),
-          ],
-        };
-      }),
-    },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-  });
-  for (const effect of effects) {
-    if (
-      effect.runId !== run.id ||
-      effect.status !== "completed" ||
-      effect.spaceId !== actor.spaceId
-    )
-      continue;
-    let call: ReturnType<typeof researchReadRequest>;
-    try {
-      call = researchReadRequest(effect.request, undefined, "get_rows");
-    } catch (error) {
-      if (error instanceof IsolationError) continue;
-      throw error;
-    }
-    if (
-      (input.mcpServerId !== undefined && call.route.resourceId !== input.mcpServerId) ||
-      call.args.task_id !== input.providerTaskId ||
-      (call.args.cursor ?? null) !== input.cursor
-    )
-      continue;
-    await requireResearchAdoption(
-      tx,
-      actor,
-      run,
-      { id: role.id, currentRevisionId: role.currentRevisionId },
-      undefined,
-      effect.createdAt,
-      { run, thread },
-    );
-    return {
-      role,
-      effect,
-      call,
-      snapshot: { request: effect.request, providerResult: effect.result },
-    };
-  }
-  throw new IsolationError();
-}
-
-/** Read retained native output only; this never dispatches a provider request. */
-export async function readNativeRecruitingCandidatePage(
-  prisma: PrismaClient,
-  actor: Actor,
-  runId: string,
-  raw: NativeCandidateSaveInput,
-) {
-  const input = RecruitingResearchToolInputSchema.parse(raw);
-  if (input.operation !== "save_results") throw new IsolationError();
-  return prisma.$transaction((tx) => nativeCandidatePage(tx, actor, runId, input));
-}
-
-/** Artifact metadata, candidate projection and the native save effect commit together. */
-export async function saveNativeRecruitingCandidatePage(
-  prisma: PrismaClient,
-  actor: Actor,
-  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
-  raw: NativeCandidateSaveInput,
-  captured: {
-    sourceEffectId: string;
-    rows: readonly unknown[];
-    outputId?: string | null;
-    outputArtifact: RecruitingResearchArtifactInput;
-  },
-) {
-  const input = RecruitingResearchToolInputSchema.parse(raw);
-  if (
-    input.operation !== "save_results" ||
-    stableJsonValue(input) !==
-      stableJsonValue(RecruitingResearchToolInputSchema.parse(trusted.effectRequest))
-  )
-    throw new IsolationError();
-  return prisma.$transaction(async (tx) => {
-    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
-    );
-    const saving = await tx.externalEffect.findFirst({
-      where: {
-        id: trusted.effectId,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        kind: "recruiting_research",
-      },
-    });
-    if (
-      saving?.kind !== "recruiting_research" ||
-      saving.runId !== run.id ||
-      stableJsonValue(RecruitingResearchToolInputSchema.parse(saving.request)) !==
-        stableJsonValue(input)
-    )
-      throw new IsolationError();
-    if (saving.status === "completed") return saving.result;
-    requireResearchLease(run, trusted);
-    if (saving.status !== "executing") throw new IsolationError();
-    const source = await nativeCandidatePage(tx, actor, run.id, input, { run, thread });
-    const bytes = Buffer.from(stableJsonValue(source.snapshot));
-    if (
-      source.effect.id !== captured.sourceEffectId ||
-      captured.outputArtifact.hash !== createHash("sha256").update(bytes).digest("hex") ||
-      captured.outputArtifact.size !== bytes.length ||
-      captured.outputArtifact.clientNonce !== `recruiting-observation:${source.effect.id}`
-    )
-      throw new IsolationError();
-    const previous = await tx.recruitingCandidatePage.findUnique({
-      where: { effectId: source.effect.id },
-    });
-    if (
-      previous &&
-      (previous.taskId !== null ||
-        previous.actionId !== null ||
-        previous.roleId !== source.role.id ||
-        previous.roleRevisionId !== source.role.currentRevisionId ||
-        previous.artifactHash !== captured.outputArtifact.hash)
-    )
-      throw new IsolationError();
-    const artifact = previous
-      ? await candidatePageArtifact(tx, actor, previous)
-      : await createResearchArtifact(tx, actor, run, thread, captured.outputArtifact);
-    const candidateRows = await indexRecruitingCandidateRows(
-      tx,
-      actor,
-      null,
-      { id: source.effect.id, roleId: source.role.id },
-      source.effect,
-      artifact,
-      source.call.args,
-      { toolName: "get_rows", rows: captured.rows, outputId: captured.outputId },
-      source.role.currentRevisionId!,
-    );
-    if (!previous)
-      await appendEventInTransaction(tx, {
-        spaceId: actor.spaceId,
-        threadId: run.threadId,
-        botId: run.botId,
-        runId: run.id,
-        type: "recruiting.candidates.saved",
-        payload: {
-          roleId: source.role.id,
-          roleRevisionId: source.role.currentRevisionId!,
-          effectId: source.effect.id,
-          mcpServerId: source.call.route.resourceId,
-          serverRevision: source.call.route.resourceRevision,
-          providerTaskId: input.providerTaskId,
-          requestCursor: input.cursor,
-          outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-          candidateOutputSchema: RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
-        },
-      });
-    const result = {
-      status: "saved",
-      roleId: source.role.id,
-      roleRevisionId: source.role.currentRevisionId,
-      sourceEffectId: source.effect.id,
-      outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-      profileFactsVersion: 1,
-      candidateRows: candidateRows.map((entry) => {
-        const facts = RecruitingSavedProfileSchema.omit({
-          personKey: true,
-          provider: true,
-          fetchedAt: true,
-        }).safeParse((captured.rows[entry.rowIndex] as { _profile?: unknown } | null)?._profile);
-        return {
-          ...entry,
-          ...(facts.success ? { _profile: facts.data } : {}),
-          _profileSourceEffectId: source.effect.id,
-        };
-      }),
-    };
-    const completed = await tx.externalEffect.updateMany({
-      where: {
-        id: saving.id,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        status: "executing",
-        run: {
-          status: "running",
-          leaseOwner: trusted.leaseOwner,
-          leaseFence: trusted.leaseFence,
-          leaseExpiresAt: { gt: new Date() },
-        },
-      },
-      data: { status: "completed", result },
-    });
-    if (completed.count !== 1) throw new IsolationError();
-    await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      runId: run.id,
-      type: "effect.recorded",
-      payload: { effectId: saving.id, tool: "recruiting_research", ...result },
-    });
-    return result;
-  });
-}
-
 type CsvImportInput = Extract<RecruitingResearchToolInput, { operation: "import_csv" }>;
 
 /**
@@ -7673,14 +4772,15 @@ type CsvImportInput = Extract<RecruitingResearchToolInput, { operation: "import_
  */
 function unassessedPageRequest(
   request: unknown,
-): CsvImportInput | PeopleSearchInput | GradesInput | null {
+): CsvImportInput | PeopleSearchInput | StoredGradesInput | null {
   const parsed = RecruitingResearchToolInputSchema.safeParse(request);
-  return parsed.success &&
-    (parsed.data.operation === "import_csv" ||
-      parsed.data.operation === "save_search" ||
-      parsed.data.operation === "save_grades")
-    ? parsed.data
-    : null;
+  if (parsed.success)
+    return parsed.data.operation === "import_csv" || parsed.data.operation === "save_search"
+      ? parsed.data
+      : null;
+  // A grade page the retired quality check saved is still read like any other stored page.
+  const grades = RecruitingStoredGradesRequestSchema.safeParse(request);
+  return grades.success ? grades.data : null;
 }
 
 /** Artifact nonce of an unassessed page's receipt, by the operation that saved it. */
@@ -7833,6 +4933,53 @@ export function recruitingPeopleSearchReceipt(
  * Save the people a people-search connector returned earlier in this run as one unassessed
  * candidate page on the thread's role. Every source must be a completed call of this run.
  */
+/** The grades a search may give a person it found; anything else is not saved as a grade. */
+const SEARCH_MATCH_TIERS: ReadonlySet<string> = new Set([
+  "Strong",
+  "Promising",
+  "Uncertain",
+  "Partial",
+]);
+
+/** The grade a saved search row shows the agent: its tier, score and the requirements not shown. */
+function gradeShown(entry: { row: Record<string, unknown>; check?: unknown }, already: boolean) {
+  if (already) return { alreadyGraded: true };
+  const check = entry.check as
+    | {
+        match_tier?: unknown;
+        match_score?: unknown;
+        criteria?: { statement: string; level: string; avoid?: boolean }[];
+      }
+    | undefined;
+  const tier = check?.match_tier ?? entry.row.match_tier;
+  if (typeof tier !== "string" || !SEARCH_MATCH_TIERS.has(tier)) return {};
+  const said = (level: string, avoid: boolean) =>
+    (check?.criteria ?? [])
+      .filter((item) => item.level === level && !!item.avoid === avoid)
+      .map((item) => item.statement.slice(0, 80));
+  const notShown = said("silent", false);
+  const doesNotMeet = said("opposite", false);
+  const turnedDownFor = said("opposite", true);
+  return {
+    grade: tier,
+    score: check?.match_score ?? entry.row.match_score ?? null,
+    ...(doesNotMeet.length ? { doesNotMeet } : {}),
+    ...(notShown.length ? { notShown } : {}),
+    ...(turnedDownFor.length ? { sameAsTurnedDown: turnedDownFor } : {}),
+  };
+}
+
+/** The people of a role who already have a grade. */
+export async function listRecruitingGradedCandidateKeys(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  roleId: string,
+): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ candidateKey: string }[]>(Prisma.sql`
+    SELECT DISTINCT o."candidateKey" FROM "recruiting_candidate_occurrences" o
+    WHERE o."roleId" = ${roleId} AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'`);
+  return rows.map((row) => row.candidateKey);
+}
+
 export async function saveRecruitingCandidatePeopleSearch(
   prisma: PrismaClient,
   actor: Actor,
@@ -7870,7 +5017,10 @@ export async function saveRecruitingCandidatePeopleSearch(
     )
       throw new IsolationError();
     if (saving.status === "completed") return saving.result;
-    requireResearchLease(run, trusted);
+    // Stop clears the lease, but a search the provider already answered was paid for: keep its
+    // people. Stop everything and other cancels still save nothing.
+    if (!(run.status === "cancelled" && run.error === STOPPED_TURN))
+      requireResearchLease(run, trusted);
     if (saving.status !== "executing" || !thread.activeRecruitingRoleId) throw new IsolationError();
     const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
     if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
@@ -7893,19 +5043,33 @@ export async function saveRecruitingCandidatePeopleSearch(
       file.clientNonce !== `recruiting-people-search:${saving.id}`
     )
       throw new IsolationError();
+    const graded = new Set(await listRecruitingGradedCandidateKeys(tx, role.id));
     const saved = await saveUnassessedCandidatePage(
       tx,
       actor,
       { run, thread, role, saving, trusted, file },
       {
-        rows: captured.rows,
+        // A person's grade for the role is given once, by the search that found them. The requirement check's
+        // verdicts ride with it and never grade anyone. Someone already graded keeps theirs.
+        rows: captured.rows.map((entry) => {
+          const key = normalizeRecruitingCandidateRow(entry.row, {
+            schemaKnown: true,
+          }).candidateKey;
+          if (key && graded.has(key)) return entry;
+          const check = (entry as { check?: Prisma.InputJsonObject }).check;
+          const { match_tier: tier, match_score: score } = check ?? entry.row;
+          if (typeof tier === "string" && SEARCH_MATCH_TIERS.has(tier) && typeof score === "number")
+            return { ...entry, matchFields: check ?? { match_score: score, match_tier: tier } };
+          // No search grade yet: the check's verdicts are kept and grade nobody.
+          return check ? { ...entry, matchFields: check } : entry;
+        }),
         describe: ({ artifact, observedAt, candidateRows }) => ({
           source: {
             kind: "people_search",
             searchedBy: { userId: actor.userId, runId: run.id },
             observedAt: observedAt.toISOString(),
           },
-          /** People never returned before for this role; only they may fill a later round. */
+          /** People never returned before for this role. */
           profileFactsVersion: 1,
           newPeople: candidateRows.filter((row) => !row.alreadyInPool).length,
           outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
@@ -7918,6 +5082,18 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
+              // The search's own sentence on why it returned the person.
+              reason: saved.why_recommended ?? null,
+              // Where the person is relative to the place the recruiter asked for.
+              ...(typeof saved.location_tag === "string"
+                ? { locationTag: saved.location_tag }
+                : {}),
+              // The full profile judged on each saved requirement: what the agent weighs when it
+              // picks and groups a round.
+              ...(typeof saved.requirements_assessment === "string"
+                ? { requirements_assessment: saved.requirements_assessment }
+                : {}),
+              ...gradeShown(captured.rows[row.rowIndex]!, graded.has(row.candidateKey)),
               email: (saved._profile as { email?: string | null } | undefined)?.email ?? null,
               _profile: saved._profile,
               _profileSourceEffectId: captured.rows[row.rowIndex]!.sourceEffectId,
@@ -7931,116 +5107,7 @@ export async function saveRecruitingCandidatePeopleSearch(
   });
 }
 
-type GradesInput = Extract<RecruitingResearchToolInput, { operation: "save_grades" }>;
-
-/** Canonical receipt bytes for one save_grades call; recomputed here, never trusted from the caller. */
-export function recruitingGradesReceipt(input: GradesInput) {
-  return {
-    version: 1,
-    kind: "reviewer_grades",
-    request: input,
-    rows: input.rows.map((row, rowIndex) => ({ rowIndex, row })),
-  };
-}
-
-/**
- * Save the quality check's own grades as one page on the thread's role. Every graded person must
- * already be saved for the role: grading never adds anyone.
- */
-export async function saveRecruitingCandidateGrades(
-  prisma: PrismaClient,
-  actor: Actor,
-  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
-  raw: GradesInput,
-  captured: { outputArtifact: RecruitingResearchArtifactInput },
-) {
-  const input = RecruitingResearchToolInputSchema.parse(raw);
-  if (
-    input.operation !== "save_grades" ||
-    stableJsonValue(input) !==
-      stableJsonValue(RecruitingResearchToolInputSchema.parse(trusted.effectRequest))
-  )
-    throw new IsolationError();
-  return prisma.$transaction(async (tx) => {
-    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
-    await tx.$queryRaw(
-      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
-    );
-    const saving = await tx.externalEffect.findFirst({
-      where: {
-        id: trusted.effectId,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        kind: "recruiting_research",
-      },
-    });
-    if (
-      saving?.kind !== "recruiting_research" ||
-      saving.runId !== run.id ||
-      stableJsonValue(RecruitingResearchToolInputSchema.parse(saving.request)) !==
-        stableJsonValue(input)
-    )
-      throw new IsolationError();
-    if (saving.status === "completed") return saving.result;
-    requireResearchLease(run, trusted);
-    if (saving.status !== "executing" || !thread.activeRecruitingRoleId) throw new IsolationError();
-    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
-    if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
-      throw new RecruitingConflictError();
-    const rows = input.rows.map((grade, rowIndex) => {
-      const row: Record<string, string> = { name: grade.name, linkedin_url: grade.linkedin_url };
-      if (grade.current_title) row.current_title = grade.current_title;
-      if (grade.current_company) row.current_company = grade.current_company;
-      if (grade.location) row.location = grade.location;
-      return {
-        rowIndex,
-        row,
-        matchFields: { match_score: grade.match_score, match_tier: grade.match_tier },
-        candidateKey: normalizeRecruitingCandidateRow(row, { schemaKnown: true }).candidateKey,
-      };
-    });
-    const keys = rows.map((row) => row.candidateKey);
-    const saved = await tx.recruitingCandidate.count({
-      where: { roleId: role.id, candidateKey: { in: keys.filter((key) => key !== null) } },
-    });
-    if (
-      keys.some((key) => key === null) ||
-      new Set(keys).size !== keys.length ||
-      saved !== keys.length
-    )
-      throw new RecruitingGradeRowsError(
-        "Grade only people already saved for this role, each once, with their saved LinkedIn profile link.",
-      );
-    const bytes = Buffer.from(stableJsonValue(recruitingGradesReceipt(input)));
-    const file = captured.outputArtifact;
-    if (
-      file.hash !== createHash("sha256").update(bytes).digest("hex") ||
-      file.size !== bytes.length ||
-      file.clientNonce !== `recruiting-grades:${saving.id}`
-    )
-      throw new IsolationError();
-    return saveUnassessedCandidatePage(
-      tx,
-      actor,
-      { run, thread, role, saving, trusted, file },
-      {
-        rows,
-        describe: ({ artifact, observedAt, candidateRows }) => ({
-          source: {
-            kind: "reviewer_grades",
-            gradedBy: { userId: actor.userId, runId: run.id },
-            observedAt: observedAt.toISOString(),
-          },
-          outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-          graded: candidateRows.length,
-        }),
-      },
-    );
-  });
-}
-
-/** A save_grades call named someone who is not saved for the role. */
-export class RecruitingGradeRowsError extends Error {}
+type StoredGradesInput = ReturnType<typeof RecruitingStoredGradesRequestSchema.parse>;
 
 type UnassessedPageContext = {
   run: { id: string; botId: string; threadId: string };
@@ -8077,6 +5144,7 @@ async function saveUnassessedCandidatePage(
   if (!role.currentRevisionId) throw new RecruitingConflictError();
   const artifact = await createResearchArtifact(tx, actor, run, thread, file);
   if (input.rows.some((row, index) => row.rowIndex !== index)) throw new IsolationError();
+  const reports = savedCandidateReports(input.rows.map((item) => item.row));
   const rows = input.rows.map(({ rowIndex, row, matchFields }) => {
     // Unmapped or blank columns stay absent (missing_field), so they never mask older values.
     const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
@@ -8090,6 +5158,7 @@ async function saveUnassessedCandidatePage(
       ...profile,
       evidenceUrls: Prisma.DbNull,
       issues: [...profile.issues],
+      report: reports[rowIndex]!,
       ...(matchFields ? { matchFields } : {}),
     };
   });
@@ -8126,7 +5195,6 @@ async function saveUnassessedCandidatePage(
   if (rows.length) {
     await tx.recruitingCandidateOccurrence.createMany({ data: rows });
     await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${saving.id}`);
-    await advanceStageAfterSave(tx, role.id);
   }
   const result = {
     status: "saved",
@@ -8244,13 +5312,13 @@ async function candidatePageArtifact(
     }),
   );
   if (effect?.status !== "completed") throw new IsolationError();
-  const read = await researchReadBinding(tx, actor, effect, undefined, memo, pageOnly);
+  const read = await researchReadBinding(tx, actor, effect, memo, pageOnly);
   if (
     read?.toolName !== "get_rows" ||
     read.binding.taskId !== page.taskId ||
     read.binding.actionId !== page.actionId ||
-    read.saved.task?.roleId !== page.roleId ||
-    read.saved.action?.roleRevisionId !== page.roleRevisionId ||
+    read.saved.task.roleId !== page.roleId ||
+    read.saved.action.roleRevisionId !== page.roleRevisionId ||
     (canonical && read.saved.action.candidateOutputSchema !== RECRUITING_CANDIDATE_OUTPUT_SCHEMA)
   )
     throw new IsolationError();
@@ -8608,6 +5676,21 @@ const candidateMatchKeys = [
   "score",
 ];
 /**
+ * Each row's display report, projected once at save so the candidate list never re-reads the
+ * page. Rows are read in the receipt's canonical key order, as a read of the saved page sees them.
+ */
+function savedCandidateReports(pageRows: readonly unknown[]) {
+  const saved = JSON.parse(stableJsonValue(pageRows)) as unknown[];
+  return saved.map((row) => {
+    try {
+      return projectRecruitingCandidateReport(row, saved) as Prisma.InputJsonObject;
+    } catch {
+      return Prisma.DbNull;
+    }
+  });
+}
+
+/**
  * Copies each saved provider row's match cells onto its occurrence, once. Rows without such
  * cells get {} so NULL always means "not filled yet". Idempotent; `scope` filters alias `o`.
  */
@@ -8699,10 +5782,10 @@ export function candidateIndexQuery(
         WHERE s.v IS NOT NULL)
       ELSE CASE match."value" #>> '{}'
         WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Uncertain' THEN 3 END END`;
+  // A person keeps their latest Reviewer grade after a brief change: grades are never redone.
   const rankingValue = Prisma.sql`CASE WHEN reviewer."roleRevisionId" IS NOT NULL THEN
-    CASE WHEN reviewer."roleRevisionId" <> (SELECT "currentRevisionId" FROM "recruiting_roles" WHERE "id" = ${roleId}) THEN 4000
-      ELSE CASE reviewer.grade WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1000
-        WHEN 'Partial' THEN 2000 ELSE 3000 END + COALESCE(100 - reviewer.score, 101) END
+    CASE reviewer.grade WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1000
+      WHEN 'Partial' THEN 2000 ELSE 3000 END + COALESCE(100 - reviewer.score, 101)
     WHEN provider.score IS NOT NULL THEN 5000 + 100 - provider.score ELSE 6000 END`;
   const fields = [
     ["name", "name"],
@@ -8804,10 +5887,7 @@ export function candidateIndexQuery(
       COALESCE(p."issues", '[]'::jsonb) AS "issues",
       d."discoveryCount",
       to_char(d."firstDiscoveredAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "firstDiscoveredAt",
-      to_char(d."lastDiscoveredAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastDiscoveredAt",
-      a."version" AS "assessmentVersion", a."roleRevisionId" AS "assessmentRoleRevisionId",
-      to_char(a."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "assessmentCreatedAt",
-      a."judgments"->>'hardGate' AS "hardGate"
+      to_char(d."lastDiscoveredAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastDiscoveredAt"
     FROM "recruiting_candidates" c
     LEFT JOIN LATERAL (
       SELECT o.* FROM "recruiting_candidate_occurrences" o
@@ -8885,18 +5965,20 @@ export function candidateIndexQuery(
       ) m
     ) match ON true
     LEFT JOIN LATERAL (
-      SELECT o."pageId", gp."roleRevisionId", CASE
+      -- A person's grade is the newest saved tier, whoever gave it: the search grades the people
+      -- it returns, so a tier needs no separate grading page to count.
+      SELECT o."pageId", page."roleRevisionId", CASE
         WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
           THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade,
         CASE WHEN reviewer_score.value IS NOT NULL
           THEN round(LEAST(100, GREATEST(0, reviewer_score.value))) END AS score
       FROM "recruiting_candidate_occurrences" o
-      JOIN grade_pages gp ON gp."effectId" = o."pageId"
       JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
       CROSS JOIN LATERAL (SELECT COALESCE(
         ${scoreCellPart(Prisma.sql`o."matchFields"`, "fraction")},
         ${scoreCellPart(Prisma.sql`o."matchFields"`, "plain")}) AS value) reviewer_score
       WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+        AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'
       ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC LIMIT 1
     ) reviewer ON true
     LEFT JOIN LATERAL (
@@ -8910,17 +5992,18 @@ export function candidateIndexQuery(
         : Prisma.empty
     }
     LEFT JOIN LATERAL (
-      SELECT count(*)::int AS "discoveryCount", min(page."observedAt") AS "firstDiscoveredAt",
+      -- A grade saved for a person is not a search finding them again: with graders saving five
+      -- at a time, half of a role's "found again" count was its own grading (play, 11-25).
+      SELECT (count(*) FILTER (WHERE NOT EXISTS (
+          SELECT 1 FROM "external_effects" graded WHERE graded."id" = page."effectId"
+            AND graded."kind" = 'recruiting_research'
+            AND graded."request"->>'operation' = 'save_grades')))::int AS "discoveryCount",
+        min(page."observedAt") AS "firstDiscoveredAt",
         max(page."observedAt") AS "lastDiscoveredAt"
       FROM "recruiting_candidate_occurrences" o
       JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
       WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
     ) d ON true
-    LEFT JOIN LATERAL (
-      SELECT "version", "roleRevisionId", "createdAt", "judgments" FROM "recruiting_assessments" a
-      WHERE a."roleId" = c."roleId" AND a."candidateKey" = c."candidateKey"
-      ORDER BY "version" DESC LIMIT 1
-    ) a ON true
     WHERE c."roleId" = ${roleId}
   )`;
 }
@@ -8959,10 +6042,6 @@ type CandidateQueryRow = {
   discoveryCount: number;
   firstDiscoveredAt: string | null;
   lastDiscoveredAt: string | null;
-  assessmentVersion: number | null;
-  assessmentRoleRevisionId: string | null;
-  assessmentCreatedAt: string | null;
-  hardGate: string | null;
   sortValue: string;
 };
 
@@ -9410,7 +6489,7 @@ export async function getRecruitingCrmTarget(
 async function prepareCrmBinding(
   tx: Tx,
   actor: Actor,
-  trusted: RecruitingApprovalContext,
+  trusted: RecruitingRunContext,
   input: ReturnType<typeof RecruitingCrmBindingInputSchema.parse>,
 ) {
   const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId);
@@ -9473,7 +6552,7 @@ async function prepareCrmBinding(
 export async function prepareRecruitingCrmBinding(
   prisma: PrismaClient,
   actor: Actor,
-  trusted: RecruitingApprovalContext,
+  trusted: RecruitingRunContext,
   raw: unknown,
 ) {
   const input = RecruitingCrmBindingInputSchema.parse(raw);
@@ -9486,7 +6565,7 @@ export async function prepareRecruitingCrmBinding(
 export async function executeRecruitingCrmBinding(
   prisma: PrismaClient,
   actor: Actor,
-  trusted: RecruitingApprovalContext & { effectId: string; effectRequest: unknown },
+  trusted: RecruitingRunContext & { effectId: string; effectRequest: unknown },
   raw: unknown,
 ) {
   const input = RecruitingCrmBindingInputSchema.parse(raw);
@@ -10574,7 +7653,7 @@ async function nativeReplyContext(
         { id: raw.replyToEmailId },
       );
   if (!emailProof || !membershipProof) throw new IsolationError();
-  // A native CRM member need not have an Autumn occurrence; existing local hold/pass still applies.
+  // A native CRM member need not have a search occurrence; existing local hold/pass still applies.
   if (
     typeof candidate.linkedin_identity === "string" &&
     /^\/in\/[^/]+$/.test(candidate.linkedin_identity)
@@ -10689,7 +7768,7 @@ async function replyContext(
   const effect = link?.effect;
   const current =
     !effect || (effect.runId === run.id && ["intended", "approved"].includes(effect.status));
-  const workspace = await approvalWorkspace(tx, actor, run.threadId, input, current, current);
+  const workspace = await roleRevisionWorkspace(tx, actor, run.threadId, input, current);
   if (current) {
     requireResearchLease(run, trusted);
     if (role.crmBindingEffectId !== imported.bindingEffectId) throw new RecruitingConflictError();
@@ -11343,8 +8422,6 @@ export async function listRecruitingCandidates(
         // Reject search cursors that could skip newly matched whitespace variants.
         ...(input.query ? { queryProjection: 1 } : {}),
         query: input.query ?? "",
-        assessmentState: input.assessmentState ?? null,
-        verdict: input.verdict ?? null,
         shortlisted: input.shortlisted ?? null,
         ...(input.shortlistedSince ? { shortlistedSince: input.shortlistedSince } : {}),
         actionId: input.actionId ?? null,
@@ -11371,13 +8448,6 @@ export async function listRecruitingCandidates(
         clauses.push(
           Prisma.sql`strpos(lower(regexp_replace(concat_ws(' ', b."name", b."title", b."company", b."location", b."linkedinUrl", b."candidateKey"), '[[:space:]]+', ' ', 'g')), lower(regexp_replace(${input.query}, '[[:space:]]+', ' ', 'g'))) > 0`,
         );
-      if (input.assessmentState === "unassessed")
-        clauses.push(Prisma.sql`b."assessmentVersion" IS NULL`);
-      if (input.assessmentState === "current")
-        clauses.push(Prisma.sql`b."assessmentRoleRevisionId" = ${role.currentRevisionId}`);
-      if (input.assessmentState === "outdated")
-        clauses.push(Prisma.sql`b."assessmentRoleRevisionId" <> ${role.currentRevisionId}`);
-      if (input.verdict) clauses.push(Prisma.sql`b."hardGate" = ${input.verdict}`);
       if (input.shortlisted !== undefined)
         clauses.push(Prisma.sql`b."shortlisted" = ${input.shortlisted}`);
       if (input.shortlistedSince)
@@ -11386,15 +8456,15 @@ export async function listRecruitingCandidates(
         );
       if (explicitSource) clauses.push(Prisma.sql`b."sourcePageId" IS NOT NULL`);
       if (input.rankingGroup) {
-        const group = [
-          "strong_match",
-          "worth_talking",
-          "partial",
-          "uncertain",
-          "outdated",
-          "unreviewed",
-          "unscored",
-        ].indexOf(input.rankingGroup);
+        // Thousands of rankingValue; 4 was the retired "needs a new review".
+        const group = {
+          strong_match: 0,
+          worth_talking: 1,
+          partial: 2,
+          uncertain: 3,
+          unreviewed: 5,
+          unscored: 6,
+        }[input.rankingGroup];
         clauses.push(Prisma.sql`floor(b."rankingValue" / 1000) = ${group}`);
       }
       const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, rankDomainPageId ?? input.sourceEffectId, input)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
@@ -11422,8 +8492,6 @@ export async function listRecruitingCandidates(
             sourceRows: bigint;
             candidates: bigint;
             identifiedCandidates: bigint;
-            unassessed: bigint;
-            assessed: bigint;
             shortlistedCount: bigint;
             rankAvailable: boolean;
             tierAvailable: boolean;
@@ -11442,8 +8510,6 @@ export async function listRecruitingCandidates(
           (SELECT COALESCE(bool_or("scoreValue" IS NOT NULL), false) FROM filtered) AS "scoreAvailable",
           COALESCE(sum("discoveryCount"), 0)::bigint AS "sourceRows", count(*) AS "candidates",
           count(*) FILTER (WHERE "countIdentified") AS "identifiedCandidates",
-          count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
-          count(*) FILTER (WHERE "assessmentVersion" IS NOT NULL) AS "assessed",
           count(*) FILTER (WHERE "shortlisted") AS "shortlistedCount" FROM base
       ) SELECT totals.*, candidate_page.* FROM totals LEFT JOIN candidate_page ON true
         ORDER BY ${order}`);
@@ -11453,8 +8519,6 @@ export async function listRecruitingCandidates(
           sourceRows: _sourceRows,
           candidates: _candidates,
           identifiedCandidates: _identifiedCandidates,
-          unassessed: _unassessed,
-          assessed: _assessed,
           shortlistedCount: _shortlisted,
           rankAvailable: _rankAvailable,
           tierAvailable: _tierAvailable,
@@ -11484,16 +8548,12 @@ export async function listRecruitingCandidates(
         sourceRows,
         candidates,
         identifiedCandidates,
-        unassessed,
-        assessed,
         shortlistedCount,
       } = result[0]!;
       const counts = {
         sourceRows,
         candidates,
         identifiedCandidates,
-        unassessed,
-        assessed,
         shortlisted: shortlistedCount,
       };
       const attached = await attachedCrmTarget(tx, actor, role.id, role.sourceThreadId);
@@ -11530,6 +8590,23 @@ export async function listRecruitingCandidates(
         tx,
         actor,
         selected.map((row) => row.candidateKey),
+      );
+      const sourceOccurrences = selected.flatMap((row) =>
+        row.sourcePageId && row.sourceRowIndex !== null
+          ? [{ pageId: row.sourcePageId, rowIndex: row.sourceRowIndex }]
+          : [],
+      );
+      const reports = new Map(
+        (sourceOccurrences.length
+          ? await tx.recruitingCandidateOccurrence.findMany({
+              where: { roleId: role.id, OR: sourceOccurrences },
+              select: { pageId: true, rowIndex: true, report: true },
+            })
+          : []
+        ).flatMap((row) => {
+          const report = RecruitingCandidateReportSchema.safeParse(row.report);
+          return report.success ? [[`${row.pageId}:${row.rowIndex}`, report.data] as const] : [];
+        }),
       );
       // The source receipt is already read and authorized with these pages. Display its facts
       // before the background projection finishes, without another query or waiting for media.
@@ -11588,10 +8665,6 @@ export async function listRecruitingCandidates(
         roleRevisionId: role.currentRevisionId,
         items: selected.map(
           ({
-            assessmentVersion,
-            assessmentRoleRevisionId,
-            assessmentCreatedAt,
-            hardGate,
             reviewerPageId,
             providerPageId,
             reviewerRoleRevisionId,
@@ -11647,22 +8720,14 @@ export async function listRecruitingCandidates(
               decisionAt: decision?.source.createdAt ?? null,
               ...(sourcePageId && sourceRowIndex !== null
                 ? {
-                    latestSource: candidateSourceReference(
-                      pages.get(sourcePageId)!,
-                      sourceRowIndex,
-                    ),
+                    latestSource: {
+                      ...candidateSourceReference(pages.get(sourcePageId)!, sourceRowIndex),
+                      ...(reports.has(`${sourcePageId}:${sourceRowIndex}`)
+                        ? { report: reports.get(`${sourcePageId}:${sourceRowIndex}`) }
+                        : {}),
+                    },
                   }
                 : {}),
-              latestAssessment:
-                assessmentVersion === null
-                  ? null
-                  : {
-                      version: assessmentVersion,
-                      roleRevisionId: assessmentRoleRevisionId,
-                      createdAt: assessmentCreatedAt,
-                      isCurrent: assessmentRoleRevisionId === role.currentRevisionId,
-                      hardGate,
-                    },
             };
           },
         ),
@@ -11679,10 +8744,24 @@ export async function listRecruitingCandidates(
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
   for (const verify of afterRead) verify();
-  return result;
+  // Fosp 11-20 (2a781497): "these three, no" was saved as the recruiter's not-a-fit, yet
+  // Results showed them unmarked, since only a hold/pass decision was shown.
+  const verdicts = await readRecruiterVerdicts(prisma, actor, {
+    roleId: result.roleId,
+    candidateKeys: result.items.map((item) => item.candidateKey),
+  });
+  return verdicts.size
+    ? {
+        ...result,
+        items: result.items.map((item) => ({
+          ...item,
+          recruiterVerdict: verdicts.get(item.candidateKey) ?? null,
+        })),
+      }
+    : result;
 }
 
-/** Every LinkedIn URL Autumn observed for a role (owner-fenced); identity only, never a profile. */
+/** Every LinkedIn URL the search observed for a role (owner-fenced); identity only, never a profile. */
 export async function listRecruitingCandidateLinkedinUrls(
   prisma: PrismaClient,
   actor: Actor,
@@ -11936,6 +9015,46 @@ export async function executeNativeRecruitingShortlist(
   });
 }
 
+/**
+ * The role's one saved person a key in another shape names: a list row's "sourced:<key>"
+ * ("autumn:<key>" before the rename) or a LinkedIn handle without its prefix. A play 11-24: the
+ * prefixed handle was refused, the agent fell back to the list's thin row and told the recruiter
+ * the profile showed no evidence.
+ */
+async function candidateByOtherKeyShape(
+  tx: Pick<Tx, "recruitingCandidate">,
+  roleId: string,
+  given: string,
+) {
+  const key = given.replace(/^(sourced|autumn):/, "");
+  const handle = key.split("/").pop();
+  if (!handle) return null;
+  const near = await tx.recruitingCandidate.findMany({
+    where: { roleId, OR: [{ candidateKey: key }, { candidateKey: { endsWith: `/${handle}` } }] },
+    take: 2,
+  });
+  return near.length === 1 ? (near[0] ?? null) : null;
+}
+
+/** The role's people whose newest grade from the search is Strong or Promising. */
+export async function listRecruitingFitCandidateKeys(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  roleId: string,
+): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ candidateKey: string }[]>(Prisma.sql`
+    SELECT g."candidateKey" FROM (
+      SELECT DISTINCT ON (o."candidateKey") o."candidateKey", CASE
+        WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
+          THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade
+      FROM "recruiting_candidate_occurrences" o
+      JOIN "recruiting_candidate_pages" p ON p."effectId" = o."pageId"
+      WHERE o."roleId" = ${roleId} AND jsonb_typeof(o."matchFields"->'match_tier') <> 'null'
+      ORDER BY o."candidateKey", p."observedAt" DESC, p."effectId" DESC
+    ) g
+    WHERE g.grade IN ('Strong', 'Promising')`);
+  return rows.map((row) => row.candidateKey);
+}
+
 export async function listRecruitingCandidateSources(
   prisma: PrismaClient,
   actor: Actor,
@@ -11946,9 +9065,10 @@ export async function listRecruitingCandidateSources(
   const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
-      const candidate = await tx.recruitingCandidate.findUnique({
-        where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
-      });
+      const candidate =
+        (await tx.recruitingCandidate.findUnique({
+          where: { roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey } },
+        })) ?? (await candidateByOtherKeyShape(tx, role.id, input.candidateKey));
       if (!candidate) throw new IsolationError();
       const scope = candidateCursorScope({
         roleId: role.id,
@@ -12040,11 +9160,11 @@ export async function listRecruitingCandidateSources(
 
 // ---------------------------------------------------------------------------
 // Calibration review rounds: which ten saved people each round showed the recruiter, and the
-// recruiter's decision to move on to finding more people. Autumn owns matching; this only keeps
+// recruiter's decision to move on to finding more people. The search owns matching; this only keeps
 // identity, ordering and the human decision.
 // ---------------------------------------------------------------------------
 
-/** A round rule the agent can fix by asking Autumn again; the message is safe to show the agent. */
+/** A round rule the agent can fix by asking the search again; the message is safe to show the agent. */
 export class RecruitingCalibrationRoundError extends Error {
   constructor(message: string) {
     super(message);
@@ -12065,7 +9185,10 @@ type CalibrationRoundInput = Extract<
 export async function saveRecruitingCalibrationRound(
   prisma: PrismaClient,
   actor: Actor,
-  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
+  trusted: ResearchLease & {
+    effectId: string;
+    effectRequest: unknown;
+  },
   raw: CalibrationRoundInput,
 ) {
   const input = RecruitingResearchToolInputSchema.parse(raw);
@@ -12160,50 +9283,24 @@ export async function saveRecruitingCalibrationRound(
       where: { roleId: role.id },
       orderBy: { round: "desc" },
     });
-    if (previous?.approvedAt)
-      throw new RecruitingCalibrationRoundError(
-        "The recruiter already approved the calibration. Continue with finding more people instead of another calibration round.",
-      );
-    if (previous) {
-      const shown = new Set(
-        (
-          await tx.recruitingCalibrationRound.findMany({
-            where: { roleId: role.id },
-            select: { candidateKeys: true },
-          })
-        ).flatMap((round) => round.candidateKeys),
-      );
-      const pages = await tx.recruitingCandidateOccurrence.findMany({
-        where: { roleId: role.id, candidateKey: { in: [...keys] } },
-        select: { candidateKey: true, page: { select: { observedAt: true } } },
-      });
-      const earliest = new Map<string, number>();
-      for (const row of pages) {
-        const at = row.page.observedAt.getTime();
-        earliest.set(row.candidateKey, Math.min(earliest.get(row.candidateKey) ?? at, at));
-      }
-      const seen = keys.filter(
-        (key) => shown.has(key) || (earliest.get(key) ?? 0) <= previous.createdAt.getTime(),
-      );
-      if (seen.length)
-        throw new RecruitingCalibrationRoundError(
-          `Round ${previous.round + 1} must show only new people, but ${seen.length} of these ten were already returned before round ${previous.round}. Run a new quick people search with the round feedback that excludes everyone already returned for this role, save it with save_search, and record ten people whose alreadyInPool is false.`,
-        );
-    }
+    const now = new Date();
     const round = await tx.recruitingCalibrationRound.create({
       data: {
         roleId: role.id,
         round: (previous?.round ?? 0) + 1,
         candidateKeys: [...keys],
         effectId: saving.id,
+        status: "shown",
+        ownerBotId: run.botId,
+        statusAt: now,
       },
     });
-    await advanceRecruitingPlaybookStage(tx, role.id, "feedback");
     const result = {
       status: "saved",
       roleId: role.id,
       round: round.round,
       candidateKeys: round.candidateKeys,
+      roundStatus: round.status,
     };
     const completed = await tx.externalEffect.updateMany({
       where: {
@@ -12234,15 +9331,26 @@ export async function saveRecruitingCalibrationRound(
 }
 
 async function calibrationRoundView(
-  tx: Pick<Tx, "recruitingCalibrationRound" | "recruitingCandidateOccurrence">,
+  tx: Pick<
+    Tx,
+    | "recruitingCalibrationRound"
+    | "recruitingCandidateOccurrence"
+    | "recruitingCandidate"
+    | "$queryRaw"
+  >,
+  actor: Actor,
   roleId: string,
+  number?: number,
 ): Promise<RecruitingCalibrationRound | null> {
   const round = await tx.recruitingCalibrationRound.findFirst({
-    where: { roleId },
+    where: { roleId, ...(number ? { round: number } : {}) },
     orderBy: { round: "desc" },
   });
   if (!round) return null;
-  // Newest saved row per person; display only.
+  // Each person as the round's list in chat showed them: the newest row saved by the time the
+  // round was recorded. A later save (a grade's reading of the full profile) can name another
+  // employer, and the page must not disagree with the chat. A person with no row by then falls
+  // back to their newest row.
   const rows = await tx.recruitingCandidateOccurrence.findMany({
     where: { roleId, candidateKey: { in: round.candidateKeys } },
     select: {
@@ -12257,20 +9365,46 @@ async function calibrationRoundView(
     orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
   });
   const latest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows)
+    if (row.page.observedAt <= round.createdAt && !latest.has(row.candidateKey))
+      latest.set(row.candidateKey, row);
   for (const row of rows) if (!latest.has(row.candidateKey)) latest.set(row.candidateKey, row);
+  const decisions = new Map(
+    (
+      await tx.recruitingCandidate.findMany({
+        where: {
+          roleId,
+          candidateKey: { in: round.candidateKeys },
+          consideration: { not: Prisma.DbNull },
+        },
+        select: { candidateKey: true, consideration: true },
+      })
+    ).map((candidate) => [
+      candidate.candidateKey,
+      candidateConsideration(actor, candidate.consideration)?.operation,
+    ]),
+  );
+  const verdicts = await readRecruiterVerdicts(tx, actor, {
+    roleId,
+    candidateKeys: round.candidateKeys,
+  });
   return {
     round: round.round,
     createdAt: round.createdAt.toISOString(),
     approvedAt: round.approvedAt?.toISOString() ?? null,
-    candidates: round.candidateKeys.map((candidateKey) => {
+    candidates: round.candidateKeys.map((candidateKey, index) => {
       const row = latest.get(candidateKey);
+      const decision = decisions.get(candidateKey);
       return {
+        number: index + 1,
         candidateKey,
         name: row?.name ?? null,
         title: row?.title ?? null,
         company: row?.company ?? null,
         location: row?.location ?? null,
         linkedinUrl: row?.linkedinUrl ?? null,
+        ...(decision === "hold" || decision === "pass" ? { decision } : {}),
+        ...(verdicts.has(candidateKey) ? { recruiterVerdict: verdicts.get(candidateKey) } : {}),
       };
     }),
   };
@@ -12280,13 +9414,18 @@ async function calibrationRoundView(
 export async function readRecruitingCalibrationRound(
   prisma: PrismaClient,
   actor: Actor,
-  input: { threadId: string },
+  input: { threadId: string; roleId?: string; round?: number },
 ): Promise<{ roleId: string | null; round: RecruitingCalibrationRound | null }> {
   return prisma.$transaction(async (tx) => {
     const thread = await requireThread(tx, actor, input.threadId);
-    if (!thread.activeRecruitingRoleId) return { roleId: null, round: null };
-    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
-    return { roleId: role.id, round: await calibrationRoundView(tx, role.id) };
+    // A role conversation reads its own role; the global conversation names one.
+    const roleId = thread.activeRecruitingRoleId ?? input.roleId;
+    if (!roleId) return { roleId: null, round: null };
+    const role = await requireRole(tx, actor, roleId, false, thread);
+    return {
+      roleId: role.id,
+      round: await calibrationRoundView(tx, actor, role.id, input.round),
+    };
   });
 }
 
@@ -12315,7 +9454,6 @@ async function approveLatestCalibrationRound(
     data: { approvedAt, approvedByUserId: actor.userId, approvalSource: source },
   });
   if (updated.count !== 1) throw new RecruitingConflictError();
-  await advanceRecruitingPlaybookStage(tx, roleId, "scale");
   return { round: latest.round, approvedAt: approvedAt.toISOString(), already: false };
 }
 
@@ -12340,10 +9478,7 @@ export async function approveRecruitingCalibrationRound(
   });
 }
 
-/**
- * The recruiter accepted the round in their own words; the quote must come from the run's
- * current human message, exactly like other direct recruiting decisions.
- */
+/** The recruiter accepted the round in their own words; it cites the run's current human message. */
 export async function approveRecruitingCalibrationRoundFromMessage(
   prisma: PrismaClient,
   actor: Actor,
@@ -12359,7 +9494,6 @@ export async function approveRecruitingCalibrationRoundFromMessage(
     const { message } = await feedbackContextInTransaction(tx, actor, {
       ...input,
       sourceRefs: [],
-      acceptEarlierQuote: true,
     });
     await requireRole(tx, actor, input.roleId, true);
     return approveLatestCalibrationRound(tx, actor, input.roleId, null, {
@@ -12373,10 +9507,13 @@ export async function approveRecruitingCalibrationRoundFromMessage(
 async function profileActivityTarget(tx: Tx, actor: Actor, input: ProfileActivityInput) {
   const role = await requireRole(tx, actor, input.roleId);
   let profileCrmSource: RecruitingCrmRoleReference | undefined;
-  if (input.candidateKey.startsWith("autumn:")) {
+  if (input.candidateKey.startsWith("sourced:")) {
     const candidate = await tx.recruitingCandidate.findUnique({
       where: {
-        roleId_candidateKey: { roleId: role.id, candidateKey: input.candidateKey.slice(7) },
+        roleId_candidateKey: {
+          roleId: role.id,
+          candidateKey: input.candidateKey.slice("sourced:".length),
+        },
       },
       select: { candidateKey: true },
     });
@@ -12479,7 +9616,15 @@ function profileEventWhere(
     AND: [
       ...(crmSource ? [{ payload: { path: ["crmSource"], equals: crmSource } }] : []),
       { payload: { path: ["roleId"], equals: roleId } },
-      { payload: { path: ["candidateKey"], equals: candidateKey } },
+      // Views recorded before the key rename keep their stored "autumn:<key>".
+      {
+        OR: [
+          candidateKey,
+          ...(candidateKey.startsWith("sourced:")
+            ? [`autumn:${candidateKey.slice("sourced:".length)}`]
+            : []),
+        ].map((key) => ({ payload: { path: ["candidateKey"], equals: key } })),
+      },
       { payload: { path: ["actorUserId"], equals: actor.userId } },
       {
         payload: {

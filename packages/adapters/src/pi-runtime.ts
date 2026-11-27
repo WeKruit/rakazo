@@ -58,6 +58,7 @@ import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
+import { databaseConflictText } from "./connector-safety.js";
 import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
 import {
   RECORD_TOOL_DEADLINE_MS,
@@ -97,6 +98,7 @@ import {
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
+  spillRequiredResult,
   type ToolOutputStore,
   withoutUndeclaredArguments,
 } from "./pi-runtime-limits.js";
@@ -109,6 +111,7 @@ import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { deliverFinishedShells } from "./shell-command-stream.js";
+import type { HelperTurn } from "./structured-output.js";
 import { outputSchema, structuredTurn } from "./structured-output.js";
 import type { SubagentSession } from "./subagent-delivery.js";
 import {
@@ -352,7 +355,7 @@ export class PiAgentRuntime implements AgentRuntime {
             type: "text",
             text: `Unknown model ${selectedModel.provider}/${selectedModel.modelId}`,
           });
-          queue.push({ type: "done" });
+          queue.push({ type: "done", failed: true });
           return;
         }
         const { models, model, apiKey } = selectedModel;
@@ -808,7 +811,12 @@ export class PiAgentRuntime implements AgentRuntime {
                 // another model turn that would hide the error.
                 !providerFailureText(event.message) &&
                 !host.pausePending &&
-                silentToolContinuations < MAX_SILENT_TOOL_CONTINUATIONS
+                // A run that may end silent with nothing owed is asked once: a second empty
+                // reply is its answer (each grading batch spent three more model calls, s50).
+                silentToolContinuations <
+                  (request.allowSilentEmpty && !(request.reportOwed?.() ?? false)
+                    ? 1
+                    : MAX_SILENT_TOOL_CONTINUATIONS)
               ) {
                 silentToolContinuations += 1;
                 // Unreported work: the last continuation asks for the report itself.
@@ -924,7 +932,15 @@ export class PiAgentRuntime implements AgentRuntime {
         if (error && !budgetExceeded) {
           throw new Error(sanitizeProviderError(activeStreamTarget.model.provider, error));
         }
-        if (!budgetExceeded && terminalMessage && !messageHasToolCall(terminalMessage)) {
+        // Pi stops after a tool batch that all set terminate, leaving the tool result last: the
+        // tool ended the turn (a hand-off), so it ends with nothing more said, never its result.
+        const toolEnded = terminalMessage?.role === "toolResult";
+        if (
+          !budgetExceeded &&
+          terminalMessage &&
+          !toolEnded &&
+          !messageHasToolCall(terminalMessage)
+        ) {
           const terminalText = assistantText(terminalMessage);
           const sincePendingFinal = streamed.slice(streamedBeforePendingFinal);
           if (terminalText.trim() && !sincePendingFinal.includes(terminalText)) {
@@ -949,7 +965,7 @@ export class PiAgentRuntime implements AgentRuntime {
             queue.push({ type: "text", text: budgetMessage });
             streamed = budgetMessage;
           }
-        } else if (!host.pausePending && toolWorkPendingFinal) {
+        } else if (!host.pausePending && toolWorkPendingFinal && !toolEnded) {
           // Scheduled/FYI runs may finish after tools with no user-visible text; unreported work
           // ends empty too, and the host posts the report from its own records.
           if (request.allowSilentEmpty || request.reportOwed?.()) {
@@ -957,7 +973,7 @@ export class PiAgentRuntime implements AgentRuntime {
           } else {
             throw new Error(MISSING_TOOL_FINAL_RESPONSE_ERROR);
           }
-        } else if (!streamed.trim() && !host.pausePending) {
+        } else if (!streamed.trim() && !host.pausePending && !toolEnded) {
           streamed = "";
           const lastMessage = agent.state.messages.at(-1);
           const fallback = lastMessage?.role === "assistant" ? assistantText(lastMessage) : "";
@@ -1602,6 +1618,7 @@ function toHistory(
         rakazoHistory: true,
         rakazoMessageId: m.id,
         rakazoCreatedAt: m.createdAt,
+        ...(m.summary ? { rakazoSummary: true } : {}),
       };
       if (m.role === "assistant")
         return {
@@ -1758,7 +1775,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       }
       if (tool.name === "remember") {
         return {
-          content: raw.content,
+          // An edit carries no content; an undefined value here failed every edit-mode save.
+          ...(raw.content === undefined ? {} : { content: raw.content }),
           path: String(raw.path ?? "MEMORY.md"),
           expectedRevision: raw.expectedRevision,
           // The schema offers a partial edit; dropping it here failed every edit-mode save.
@@ -1809,17 +1827,6 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           ...(options === undefined ? {} : { options }),
           ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
           ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
-          // An over-long planned search keeps its first 300 characters instead of failing the card.
-          ...(raw.plannedSearches === undefined
-            ? {}
-            : {
-                plannedSearches: Array.isArray(raw.plannedSearches)
-                  ? raw.plannedSearches.map((query) => {
-                      const text = String(query).trim();
-                      return text.length > 300 ? text.slice(0, 300).replace(/\s+\S*$/, "") : text;
-                    })
-                  : raw.plannedSearches,
-              }),
         };
       }
       if (tool.name === "request_secret") {
@@ -1958,13 +1965,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               throw new Error(
                 "ask_user requires two to four unique, non-empty options or a valid requestedSchema. Add two to four short options (the card already offers a custom answer) and ask again; never ask in plain text instead.",
               );
-            const { question, plannedSearches } = parsed.data;
-            const known = await host.request.beforeAsk?.(question, plannedSearches);
+            const { question } = parsed.data;
+            const known = await host.request.beforeAsk?.(question);
             if (known) {
               // Each bounce costs the person another model step before the card; say which check.
               getLogger().info("ask.not_shown", {
                 runId: host.request.runId,
-                plannedSearches: plannedSearches?.length ?? null,
                 reason: typeof known === "string" ? "already_answered" : known.instead.slice(0, 80),
               });
               return {
@@ -1980,15 +1986,6 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                 details: args,
               };
             }
-            // ponytail: "?" count and numbered lines; a form (requestedSchema) may still hold several fields.
-            // Chinese question marks and "2、" count too: a Chinese card asked two questions at once.
-            if (
-              (question.match(/[?？]/g)?.length ?? 0) > 1 ||
-              /(^|\n)\s*2(?:[.)]\s|、)/.test(question)
-            )
-              throw new Error(
-                "Ask one question at a time: ask only the single most decision-affecting question first, with options.",
-              );
             const helped = await subagentResultsBeforePause(host);
             if (helped) return helped;
             // A message the user sent while this question was being written may already answer
@@ -2006,7 +2003,6 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             host.queue.push({
               type: "ask",
               text: question,
-              ...(plannedSearches ? { plannedSearches } : {}),
               ...(requestedSchema
                 ? { requestedSchema }
                 : {
@@ -2120,13 +2116,21 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
         })();
         clearTimeout(promotionTimer);
         await promotion;
-        if (VERBATIM_TOOL_RESULTS.has(tool.name)) return result as AgentToolResult<unknown>;
+        if (VERBATIM_TOOL_RESULTS.has(tool.name))
+          return spillRequiredResult(
+            result as AgentToolResult<unknown>,
+            toolOutputStore(host, tool.name, executionId),
+            host.activeModel.config.contextWindow ?? host.activeModel.model.contextWindow,
+          );
         return boundAgentToolResult(
           result as AgentToolResult<unknown>,
           toolOutputStore(host, tool.name, executionId),
         );
       } catch (error) {
         failure = error;
+        // A database conflict reaches the model as plain words, never its SQL or code.
+        const conflict = databaseConflictText(error);
+        if (conflict) throw new Error(conflict, { cause: error });
         throw error;
       } finally {
         clearTimeout(promotionTimer);
@@ -2196,7 +2200,7 @@ async function executeSubagent(
   const withPrevious = (text: string) => (previous ? `${previous}\n\n${text}` : text);
   const work = schema
     ? structuredTurn((prompt) => helper.turn(prompt), task, args.output_schema, schema)
-    : helper.turn(task);
+    : helper.turn(task).then((result) => result.text);
   if (args.background !== true) {
     const result = await work;
     return withPrevious(`${result}\n\n(helper handle: ${helper.handle})`);
@@ -2229,8 +2233,8 @@ async function subagentResultsBeforePause(
 }
 
 interface SubagentHelper extends SubagentSession {
-  /** One prompt to this helper; resolves with its result text and never rejects. */
-  turn(task: string): Promise<string>;
+  /** One prompt to this helper; resolves with its result and never rejects. */
+  turn(task: string): Promise<HelperTurn>;
 }
 
 async function createSubagent(
@@ -2305,7 +2309,18 @@ async function createSubagent(
   }
   const subagentModel = modelForCompletion(selectedModel.model, requestModel.maxTokens);
 
-  const childDefs = host.request.tools.filter((tool) => !DELEGATION_TOOL_NAMES.has(tool.name));
+  // A helper's result goes to the agent that started it, so it has no line to the user: its
+  // progress notes were posted in the chat, in English in a Chinese conversation (s64, 11-24).
+  // A helper given its own tool list, like a named agent's, gets only those: graders handed the
+  // lead's whole set ran searches and recorded a round from the recruiter's words (s67, 11-24).
+  const own =
+    Array.isArray(args.tools) && args.tools.length ? new Set(args.tools.map(String)) : null;
+  const childDefs = host.request.tools.filter(
+    (tool) =>
+      !DELEGATION_TOOL_NAMES.has(tool.name) &&
+      tool.name !== "message_user" &&
+      (!own || own.has(tool.name)),
+  );
   const nestedHost: ToolHost = {
     ...host,
     activeModel: {
@@ -2476,7 +2491,7 @@ async function createSubagent(
   });
 
   let started = false;
-  const turn = async (prompt: string): Promise<string> => {
+  const turn = async (prompt: string): Promise<HelperTurn> => {
     session.busy = true;
     await host.subagentGate.acquire();
     if (started) {
@@ -2502,7 +2517,7 @@ async function createSubagent(
       session.busy = false;
     }
   };
-  const subagentTurn = async (prompt: string): Promise<string> => {
+  const subagentTurn = async (prompt: string): Promise<HelperTurn> => {
     try {
       if (host.signal.aborted) {
         host.queue.push({
@@ -2513,7 +2528,7 @@ async function createSubagent(
           status: "failed",
           result: "stopped",
         });
-        return "stopped";
+        return { text: "stopped", ended: true };
       }
       const onAbort = () => nested.abort();
       host.signal.addEventListener("abort", onAbort);
@@ -2543,7 +2558,7 @@ async function createSubagent(
           status: "failed",
           result: message,
         });
-        return `Subagent failed: ${message}`;
+        return { text: `Subagent failed: ${message}`, ended: true };
       }
       const budgetMessage = budgetExceeded
         ? toolCallBudgetExceededMessage(host.toolCallBudget.limit)
@@ -2561,7 +2576,7 @@ async function createSubagent(
         status: "completed",
         result: clipped,
       });
-      return clipped;
+      return { text: clipped, ended: false };
     } catch (error) {
       const message = sanitizeError(error instanceof Error ? error.message : String(error));
       host.queue.push({
@@ -2572,7 +2587,7 @@ async function createSubagent(
         status: "failed",
         result: message,
       });
-      return `Subagent failed: ${message}`;
+      return { text: `Subagent failed: ${message}`, ended: true };
     }
   };
   const session: SubagentHelper = {
@@ -2662,6 +2677,7 @@ function builtinParameters(tool: ConnectorTool) {
     return Type.Object({
       name: Type.Optional(Type.String()),
       task: Type.Optional(Type.String()),
+      tools: Type.Optional(Type.Array(Type.String())),
       instructions: Type.Optional(Type.String()),
       model_provider: Type.Optional(Type.String()),
       model_id: Type.Optional(Type.String()),
@@ -4241,30 +4257,32 @@ export function reliableModelStream(
   cacheRetention?: ModelsSimpleStreamOptions["cacheRetention"],
   firstEventTimeoutMs: number = MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
 ): AssistantMessageEventStream {
-  const watchdog = isCodexModel(model)
-    ? codexStreamIdleWatchdog(
-        options?.signal,
-        MODEL_STREAM_IDLE_TIMEOUT_MS,
-        MODEL_STREAM_TOTAL_TIMEOUT_MS,
-        firstEventTimeoutMs,
-      )
-    : undefined;
+  const codex = isCodexModel(model);
+  // Every provider's stream is bounded: staging 11-16, an OpenAI answer stream went silent and
+  // held a recruiter's turn for over four minutes with no retry. Codex arms on its first 2xx and
+  // gets the tight first-event bound. Other providers may not report response headers and may
+  // think silently before their first item, so their bound starts with the request.
+  const watchdog = codexStreamIdleWatchdog(
+    options?.signal,
+    MODEL_STREAM_IDLE_TIMEOUT_MS,
+    MODEL_STREAM_TOTAL_TIMEOUT_MS,
+    codex ? firstEventTimeoutMs : MODEL_STREAM_IDLE_TIMEOUT_MS,
+  );
+  if (!codex) watchdog.ping();
   try {
     const preparedOptions = reliableStreamOptions(
       model,
-      watchdog
-        ? {
-            ...options,
-            signal: watchdog.signal,
-            fetch: codexRequestFetch(options?.fetch, MODEL_ERROR_BODY_TIMEOUT_MS),
-            // Only a 2xx arms the shared watchdog. Error bodies are bounded by
-            // the fetch wrapper, and a caller-supplied hook still sees every status.
-            onResponse: (response, requestModel) => {
-              if (response.status >= 200 && response.status < 300) watchdog.ping();
-              return options?.onResponse?.(response, requestModel);
-            },
-          }
-        : options,
+      {
+        ...options,
+        signal: watchdog.signal,
+        // Error bodies are bounded by the fetch wrapper; only Codex requests go through it.
+        ...(codex ? { fetch: codexRequestFetch(options?.fetch, MODEL_ERROR_BODY_TIMEOUT_MS) } : {}),
+        // Only a 2xx arms the shared watchdog, and a caller-supplied hook still sees every status.
+        onResponse: (response, requestModel) => {
+          if (response.status >= 200 && response.status < 300) watchdog.ping();
+          return options?.onResponse?.(response, requestModel);
+        },
+      },
       configuredMaxTokens,
       accessToken,
       cacheRetention,
@@ -4272,9 +4290,9 @@ export function reliableModelStream(
     const stream = runStream
       ? runStream(preparedOptions)
       : models.streamSimple(model, context, preparedOptions);
-    return watchdog ? watchdog.wrap(stream, model) : stream;
+    return watchdog.wrap(stream, model);
   } catch (error) {
-    watchdog?.dispose();
+    watchdog.dispose();
     throw error;
   }
 }

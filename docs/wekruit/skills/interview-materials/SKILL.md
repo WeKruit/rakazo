@@ -5,7 +5,7 @@ description: Prepare existing recruiting documents and an audience-specific inte
 
 # Interview materials
 
-Use for screening materials, an approved client submission or an interview brief. Reuse Review recruiting draft for message approval and Coordinate interview for scheduling. This skill grants no sending, sharing, CRM or calendar permission.
+Use for screening materials, an approved client submission or an interview brief. Reuse Send to people for message approval and Book or move an interview for scheduling. This skill grants no sending, sharing, CRM or calendar permission.
 
 ## Resolve the existing case
 

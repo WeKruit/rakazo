@@ -172,10 +172,10 @@ export function SchedulingPlanHistory({
         plans.map((plan) => (
           <article className="space-y-3 rounded-lg border p-3" key={plan.id}>
             <p className="text-sm font-medium">
-              {plan.roleTitle} · {plan.originalEmail.subject}
+              {plan.originalEmail ? `${plan.roleTitle} · ${plan.originalEmail.subject}` : plan.roleTitle}
             </p>
             <p className="text-xs text-muted-foreground">
-              {plan.originalEmail.eaccount ?? t`Mailbox not recorded`}
+              {plan.originalEmail?.eaccount ?? t`Mailbox not recorded`}
             </p>
             <PlanTimes plan={plan} />
             <p className="text-xs text-muted-foreground">
@@ -280,10 +280,10 @@ export function SchedulingPlanForm({
       }),
   );
   const choices = (candidates.data?.items ?? []).flatMap((person) =>
-    person.autumn && person.name && person.email
+    person.sourced && person.name && person.email
       ? [
           {
-            candidateKey: person.autumn.candidateKey,
+            candidateKey: person.sourced.candidateKey,
             name: person.name,
             email: person.email,
           },
@@ -315,6 +315,7 @@ export function SchedulingPlanForm({
   const slot = slots.find((value) => JSON.stringify(value) === slotKey);
   const calendar = slot
     ? {
+        provider: slot.provider,
         sourceId: slot.sourceId,
         sourceRevision: slot.sourceRevision,
         eventTypeId: slot.eventTypeId,

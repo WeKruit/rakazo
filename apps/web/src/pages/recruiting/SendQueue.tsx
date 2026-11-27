@@ -9,7 +9,7 @@ const SHOWN = 5;
 
 /**
  * Who the role's sending campaign has emailed and who is still waiting for their first email, with
- * when that goes out. Sending now or resuming goes through the role's chat, whose card confirms it.
+ * when that goes out. Sending now or resuming is asked in the role's chat, whose card confirms it.
  */
 export function SendQueue(props: {
   campaign: RecruitingRoleCampaign | undefined;
@@ -22,13 +22,20 @@ export function SendQueue(props: {
   // Only a read that reports contact times can tell waiting from emailed.
   if (read.leads.some((lead) => lead.contactedAt === undefined)) return null;
   const waiting = read.leads.filter((lead) => !lead.contactedAt && lead.status !== BOUNCED);
-  const emailed = read.leads.filter((lead) => lead.contactedAt).length;
+  const emailed = read.leads.filter((lead) => lead.contactedAt);
   const bounced = read.leads.filter((lead) => lead.status === BOUNCED).length;
   const paused = campaign.status === PAUSED;
   if (!waiting.length || (campaign.status !== ACTIVE && !paused)) return null;
   const when = read.queuedFirstEmail;
   const names = waiting.slice(0, SHOWN).map((lead) => lead.name || lead.email);
   const more = waiting.length - names.length;
+  // Each name sits beside its own status: "Ada Chen · 1 emailed" read as Ada emailed (sim 11-20).
+  const waitingNames = `${names.join(", ")}${more > 0 ? t` and ${more} more` : ""}`;
+  const moreEmailed = emailed.length - SHOWN;
+  const emailedNames = `${emailed
+    .slice(0, SHOWN)
+    .map((lead) => lead.name || lead.email)
+    .join(", ")}${moreEmailed > 0 ? t` and ${moreEmailed} more` : ""}`;
   return (
     <section
       aria-label={t`Waiting to send`}
@@ -43,9 +50,8 @@ export function SendQueue(props: {
               : t`${waiting.length} waiting for their first email`}
         </p>
         <p className="truncate text-xs text-muted-foreground">
-          {names.join(", ")}
-          {more > 0 ? t` and ${more} more` : ""}
-          {emailed ? ` · ${t`${emailed} emailed`}` : ""}
+          {t`Not emailed yet: ${waitingNames}`}
+          {emailed.length ? ` · ${t`Emailed: ${emailedNames}`}` : ""}
           {bounced ? ` · ${t`${bounced} bounced`}` : ""}
         </p>
       </div>

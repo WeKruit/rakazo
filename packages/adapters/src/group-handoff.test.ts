@@ -1,21 +1,20 @@
 import type { PrismaClient } from "@rakazo/db";
-import { chatReplyToAsk } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
-  GLOBAL_HANDOFF_ROLE_WORK,
   handoffToGroupBot,
   isQuietStageReport,
   NO_ROLE_HANDOFF,
-  namesRole,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
-  reportStalledGroupStage,
   watchOpenStages,
 } from "./group-handoff.js";
-import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
+import type * as RoundCheck from "./recruiting-round-check.js";
 
-vi.mock("./recruiting-research-poll.js", () => ({
-  recruitingResearchInFlight: vi.fn(async () => false),
+const roundCounts = vi.hoisted(() => ({ counted: 10, target: 10 }));
+vi.mock("./recruiting-round-check.js", async (original) => ({
+  ...(await original<typeof RoundCheck>()),
+  requestCounts: vi.fn(async () => ({ counted: roundCounts.counted })),
+  requestTarget: vi.fn(async () => roundCounts.target),
 }));
 
 const run = {
@@ -39,7 +38,7 @@ function harness(
     chatGroup: {
       findFirst: vi.fn(async () => ({
         id: "group-1",
-        members: ["bot-a", "bot-b", "bot-c"].map((id) => ({
+        members: ["bot-a", "bot-b", "bot-c", "bot-d"].map((id) => ({
           bot: { id, name: id.toUpperCase(), spawnKey: crew?.spawnKeys[id] ?? null },
         })),
       })),
@@ -356,81 +355,6 @@ describe("coordinator search handoff", () => {
   });
 });
 
-describe("account-wide conversation handoff", () => {
-  const spawnKeys = {
-    "bot-a": "recruiting:user-1:main",
-    "bot-b": "recruiting:user-1:outreach",
-    "bot-c": "recruiting:user-1:sourcer",
-  };
-  const global = "recruiting-global-abc";
-
-  // 11-11 staging: "email alex@… about a backend role" from a fresh account hit a dead end
-  // because Main could not reach Outreach in the account-wide conversation.
-  it("hands a one-off email to Outreach without a role", async () => {
-    const { deps, tx } = harness([{ kind: "text", text: "email alex" }], undefined, {
-      spawnKeys,
-      activeRecruitingRoleId: null,
-    });
-    Object.assign(tx, {
-      recruitingRole: {
-        findMany: vi.fn(async () => [{ id: "role-9", title: "Senior Data Engineer" }]),
-      },
-    });
-    await expect(
-      handoffToGroupBot(deps as never, run, global, { bot_id: "bot-b", message: "Email Alex" }),
-    ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
-  });
-
-  it("sends work in a role the recruiter named to that role's team", async () => {
-    const { deps, runCreate, tx } = harness(
-      [{ kind: "text", text: "在「测试固定 · Agent 工程师 5」里，回复那封邮件" }],
-      undefined,
-      { spawnKeys, activeRecruitingRoleId: null },
-    );
-    Object.assign(tx, {
-      recruitingRole: {
-        findMany: vi.fn(async () => [{ id: "role-9", title: "测试固定 · Agent 工程师 5" }]),
-      },
-    });
-    const result = await handoffToGroupBot(deps as never, run, global, {
-      bot_id: "bot-b",
-      message: "Reply",
-    });
-    expect(result).toMatchObject({ error: expect.stringContaining('role_id "role-9"') });
-    expect(runCreate).not.toHaveBeenCalled();
-  });
-
-  // 11-11 staging: the request was steered into a turn started by another message.
-  it("reads the role from the brief when the turn started from another message", async () => {
-    const { deps, runCreate, tx } = harness([{ kind: "text", text: "Dallas" }], undefined, {
-      spawnKeys,
-      activeRecruitingRoleId: null,
-    });
-    Object.assign(tx, {
-      recruitingRole: {
-        findMany: vi.fn(async () => [{ id: "role-9", title: "测试固定 · Agent 工程师 5" }]),
-      },
-    });
-    const result = await handoffToGroupBot(deps as never, run, global, {
-      bot_id: "bot-b",
-      message: "Goal: 在「测试固定 · Agent 工程师 5」里，回复那封邮件",
-    });
-    expect(result).toMatchObject({ error: expect.stringContaining('role_id "role-9"') });
-    expect(runCreate).not.toHaveBeenCalled();
-  });
-
-  it("keeps role work with the role's team", async () => {
-    const { deps, runCreate } = harness([{ kind: "text", text: "find people" }], undefined, {
-      spawnKeys,
-      activeRecruitingRoleId: null,
-    });
-    await expect(
-      handoffToGroupBot(deps as never, run, global, { bot_id: "bot-c", message: "Find" }),
-    ).resolves.toEqual({ error: GLOBAL_HANDOFF_ROLE_WORK });
-    expect(runCreate).not.toHaveBeenCalled();
-  });
-});
-
 describe("group handoff report back", () => {
   const worker = { ...run, id: "run-b", botId: "bot-b", sourceMessageId: "message-0" };
   const asked = {
@@ -565,25 +489,29 @@ describe("group handoff report back", () => {
     );
   });
 
-  it.each([
-    ["没有发出去的原因是什么？", false],
-    ["Find ten more people like these.", true],
-  ])("after an answered %s, wakes the sender: %s", async (question, wakes) => {
-    // Staging 11-13: the teammate answered the recruiter's question, then the sender restated it
-    // and handed it back, so one question got three answers.
+  // Staging change-mind-mid-run 11-16: the teammate's email arrived while Kruit's turn was still
+  // running; the report started another turn, and the running one ended saying it had no draft.
+  // As Workloop steers a child's result into the parent's current turn, the report joins it.
+  it("steers the report into the sender's running turn instead of starting another", async () => {
     const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
-      { blocks: [{ kind: "text", text: "已排队 3 人，周五 9:00 发出。" }] },
+      { blocks: [{ kind: "text", text: "Here is the email." }] },
     ]);
-    tx.message.findFirst.mockImplementation((async (query?: {
-      where?: { role?: string; blocks?: unknown };
-    }) =>
-      query?.where?.blocks
-        ? null
-        : query?.where?.role === "user"
-          ? { blocks: [{ kind: "text", text: question }] }
-          : { blocks: [asked] }) as never);
-    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
-    expect(runCreate.mock.calls.length > 0).toBe(wakes);
+    const steeringCreate = vi.fn(async () => ({ id: "steer-1" }));
+    Object.assign(tx, { steeringMessage: { create: steeringCreate } });
+    const lookup = tx.run.findFirst;
+    tx.run.findFirst = vi.fn(async (query?: { where?: { botId?: string; status?: unknown } }) =>
+      query?.where?.botId === "bot-a" && query.where.status
+        ? { id: "run-a-live", status: "running" }
+        : lookup(),
+    ) as never;
+    await expect(
+      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" }),
+    ).resolves.toEqual({ runId: "run-a-live" });
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(steeringCreate).toHaveBeenCalledWith({
+      data: { messageId: "message-1", botId: "bot-a", userId: worker.userId, runId: "run-a-live" },
+    });
+    expect(deps.jobs.enqueue).not.toHaveBeenCalled();
   });
 
   it("leaves the next step to the recruiter while a card waits on them", async () => {
@@ -620,6 +548,36 @@ describe("group handoff report back", () => {
         where: expect.objectContaining({ runId: "run-b", status: "completed" }),
       }),
     );
+  });
+
+  it("does not wake the sender after a round that meets the number asked", async () => {
+    // Play s151: the report after a round of ten woke the lead, which recorded the same people as
+    // a second round. A round one person short still reports, so the lead can steer the rest.
+    const roundRun = (counted: number) => {
+      roundCounts.counted = counted;
+      const h = harness([asked], undefined, undefined, [
+        { blocks: [{ kind: "text", text: "本轮 10 人" }] },
+      ]);
+      Object.assign(h.deps.prisma, {
+        externalEffect: {
+          findMany: vi.fn(async () => [{ id: "effect-round", request: { asked: 10 } }]),
+        },
+        recruitingCalibrationRound: {
+          findFirst: vi.fn(async () => ({ roleId: "role-1", effectId: "effect-round" })),
+        },
+      });
+      return h;
+    };
+    const met = roundRun(10);
+    await expect(
+      reportGroupHandoffOutcome(met.deps as never, worker, "group-1", { status: "completed" }),
+    ).resolves.toBeUndefined();
+    expect(met.runCreate).not.toHaveBeenCalled();
+    const short = roundRun(9);
+    await reportGroupHandoffOutcome(short.deps as never, worker, "group-1", {
+      status: "completed",
+    });
+    expect(short.messageCreate).toHaveBeenCalled();
   });
 
   it("counts a held-back reply's retry as the stage's result", async () => {
@@ -673,14 +631,14 @@ describe("group handoff report back", () => {
   });
 
   it.each([
-    ["typed in the chat", chatReplyToAsk("我们外联用哪些发件邮箱？"), true, false],
-    ["picked on the card", "Selected choice choice-1: 不要求", false, false],
+    ["typed in the chat", true, true, false],
+    ["picked on the card", false, false, false],
     // Staging 11-10: the sender already acted on the typed answer, then a report back told it to
     // act on it again, and it restated the recruiter's feedback a second time.
-    ["typed in the chat and already replied to", chatReplyToAsk("仅本轮不合适"), false, true],
+    ["typed in the chat and already replied to", true, false, true],
   ])(
     "reminds the sender of a question closed by a message %s",
-    async (_, answer, reminds, replied) => {
+    async (_, typed, reminds, replied) => {
       const question = "语言要求按哪种处理？";
       const reply = "我们外联用哪些发件邮箱？";
       const { deps, messageCreate, tx } = harness([asked]);
@@ -693,14 +651,18 @@ describe("group handoff report back", () => {
               ? { id: "reply-1" }
               : null
             : {
-                runId: "run-a",
                 seq: 5,
-                blocks: [{ kind: "ask", text: question, status: "answered", answer: reply }],
+                blocks: [
+                  {
+                    kind: "ask",
+                    text: question,
+                    status: "answered",
+                    answer: reply,
+                    ...(typed ? { answeredInChat: true } : {}),
+                  },
+                ],
               }
           : { blocks: [asked] }) as never);
-      tx.run.findFirst.mockImplementation((async () => ({
-        task: { prompt: `新岗位\n\n${question}\nAnswer: ${answer}` },
-      })) as never);
       await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
       const text = (
         messageCreate.mock.calls[0] as unknown as [{ data: { blocks: [{ text: string }] } }]
@@ -745,7 +707,6 @@ describe("long stage check-in", () => {
     trigger: "recruiting_research",
     clientNonce,
   });
-  const inFlight = vi.mocked(recruitingResearchInFlight);
 
   function stageHarness(existing?: { sourceRuns: [] }, sourceNonce: string | null = null) {
     const h = harness([asked], existing);
@@ -768,7 +729,6 @@ describe("long stage check-in", () => {
   }
 
   it("reports a declined turn's stage when its retry finishes", async () => {
-    inFlight.mockResolvedValueOnce(false);
     const { deps, messageCreate, stageLookup } = stageHarness(
       undefined,
       "autocontinue:run-b:decline",
@@ -781,83 +741,6 @@ describe("long stage check-in", () => {
       expect.objectContaining({ where: expect.objectContaining({ id: "run-b" }) }),
     );
     expect(reported(messageCreate)).toEqual(["group-report:run-b"]);
-  });
-
-  it("holds the report while the worker's own search is still running", async () => {
-    inFlight.mockResolvedValueOnce(true);
-    const { deps, messageCreate } = stageHarness();
-    await expect(
-      reportGroupStageOutcome(deps as never, handedIn, "group-1", { status: "completed" }),
-    ).resolves.toBeUndefined();
-    expect(inFlight).toHaveBeenLastCalledWith(deps.prisma, "role-1", expect.any(Number), {
-      botId: "bot-b",
-      threadId: "thread-1",
-    });
-    expect(messageCreate).not.toHaveBeenCalled();
-  });
-
-  it("checks in once when the search's first partial results are saved", async () => {
-    inFlight.mockResolvedValueOnce(true);
-    const { deps, messageCreate, runCreate, stageLookup } = stageHarness();
-    await expect(
-      reportGroupStageOutcome(deps as never, wake("research-wake:task:rows:20"), "group-1", {
-        status: "completed",
-      }),
-    ).resolves.toEqual({ runId: "run-b" });
-    expect(stageLookup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          botId: "bot-b",
-          threadId: "thread-1",
-          trigger: "follow_up",
-          status: "completed",
-        }),
-      }),
-    );
-    expect(reported(messageCreate)).toEqual(["group-checkin:run-b"]);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [
-            expect.objectContaining({
-              toBotId: "bot-a",
-              report: "progress",
-              text: expect.stringContaining("reply exactly NO_RESPONSE"),
-            }),
-          ],
-        }),
-      }),
-    );
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ botId: "bot-a", trigger: "follow_up" }),
-      }),
-    );
-  });
-
-  it("never checks in twice, after the stage ended, or for a failed partial save", async () => {
-    inFlight.mockResolvedValueOnce(true);
-    const again = stageHarness({ sourceRuns: [] });
-    await expect(
-      reportGroupStageOutcome(again.deps as never, wake("n:rows:40"), "group-1", {
-        status: "completed",
-      }),
-    ).resolves.toBeUndefined();
-    expect(again.messageCreate).not.toHaveBeenCalled();
-
-    const finished = stageHarness();
-    await expect(
-      reportGroupStageOutcome(finished.deps as never, wake("n:rows:40"), "group-1", {
-        status: "completed",
-      }),
-    ).resolves.toBeUndefined();
-    await expect(
-      reportGroupStageOutcome(finished.deps as never, wake("n:rows:40"), "group-1", {
-        status: "failed",
-        error: "save failed",
-      }),
-    ).resolves.toBeUndefined();
-    expect(finished.messageCreate).not.toHaveBeenCalled();
   });
 
   it("reports the stage when the search's final wake ends with nothing left running", async () => {
@@ -885,24 +768,6 @@ describe("long stage check-in", () => {
       }),
     ).resolves.toBeUndefined();
     expect(messageCreate).not.toHaveBeenCalled();
-  });
-
-  it("tells the delegator when the search stopped being followed unfinished", async () => {
-    const { deps, messageCreate } = stageHarness();
-    await reportStalledGroupStage(deps as never, stage);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          clientNonce: "group-report:run-b",
-          blocks: [
-            expect.objectContaining({
-              report: "failed",
-              text: expect.stringContaining("still not finished"),
-            }),
-          ],
-        }),
-      }),
-    );
   });
 
   it("lets only the check-in answer end silently", () => {
@@ -1026,19 +891,6 @@ describe("open stage watch", () => {
     );
   });
 
-  it("follows a finished turn only while its research still runs", async () => {
-    const idle = watchHarness([stage("completed", 41)]);
-    await expect(watchOpenStages(idle.deps as never, now, 100)).resolves.toBe(0);
-    vi.mocked(recruitingResearchInFlight).mockResolvedValueOnce(true as never);
-    const { deps, messageCreate } = watchHarness([stage("completed", 41)]);
-    await watchOpenStages(deps as never, now, 100);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ clientNonce: "group-checkin:run-completed:4" }),
-      }),
-    );
-  });
-
   it("skips reported stages, stages nobody asked back, and a busy coordinator", async () => {
     const reported = watchHarness([stage("completed", 30)], {
       reported: ["group-report:run-completed"],
@@ -1052,26 +904,5 @@ describe("open stage watch", () => {
     await expect(watchOpenStages(busy.deps as never, now, 100)).resolves.toBe(0);
     for (const { messageCreate } of [reported, unasked, handedOn, busy])
       expect(messageCreate).not.toHaveBeenCalled();
-  });
-});
-
-describe("a role named in a handoff", () => {
-  it("matches the title written with full-width brackets or without its qualifier", () => {
-    // 11-13 staging: "Senior Data Engineer（Seattle）" in a brief missed the role
-    // "Senior Data Engineer (Seattle)", so one person's email went to two teams.
-    expect(namesRole("senior data engineer (seattle) 岗位", "Senior Data Engineer (Seattle)")).toBe(
-      "full",
-    );
-    expect(
-      namesRole(
-        "senior data engineer(seattle)岗位".normalize("NFKC"),
-        "Senior Data Engineer (Seattle)",
-      ),
-    ).toBe("core");
-    expect(namesRole("只发 senior data engineer 的首封", "Senior Data Engineer (Seattle)")).toBe(
-      "core",
-    );
-    expect(namesRole("write to ada", "Senior Data Engineer (Seattle)")).toBeUndefined();
-    expect(namesRole("an ops role", "Ops (NY)")).toBeUndefined();
   });
 });

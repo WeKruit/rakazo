@@ -161,6 +161,8 @@ export function RoleCampaignCard(props: CampaignScope) {
 export function SequenceTab(
   props: RecruitingTabProps & {
     onAskChat?: (message: string) => void;
+    /** Sends the recruiter's request into the role chat at once, for a one-click ask. */
+    onSendChat?: (message: string) => void;
     onViewAnalytics?: (roleId?: string) => void;
     requestedCampaign?: { id: string; serverId?: string };
     composeNew?: boolean;
@@ -417,6 +419,7 @@ export function SequenceTab(
       : [];
 
   const live = campaign?.status === "ready" ? campaign.campaign : null;
+  const sentTotal = live ? (campaign?.stats?.sent ?? null) : null;
   const currentRows = campaigns.data?.items ?? [];
   const sequenceRows = [
     ...currentRows,
@@ -624,7 +627,20 @@ export function SequenceTab(
           <Trans>Could not read this sequence. Try refreshing.</Trans>
         </TabNotice>
       ) : null}
-      <SendQueue campaign={campaign} onAskChat={props.onAskChat} />
+      <SendQueue campaign={campaign} onAskChat={props.onSendChat ?? props.onAskChat} />
+      {!live && !nativeDrafts.data?.campaign && nativeDrafts.data?.savedEmail?.length ? (
+        <section aria-label={t`Saved email`} className="space-y-4 rounded-xl border p-5">
+          {nativeDrafts.data.savedEmail.map((step, index) => (
+            <article key={`${index}:${step.subject}`} className="space-y-1">
+              <p className="text-xs text-muted-foreground">
+                {index === 0 ? t`Email 1` : t`Email ${index + 1}, day ${step.delay_days}`}
+              </p>
+              <h3 className="text-sm font-medium">{step.subject}</h3>
+              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{step.body}</p>
+            </article>
+          ))}
+        </section>
+      ) : null}
       {currentRows.length || nativeDrafts.data?.campaigns?.length ? (
         <label className="flex max-w-sm items-center gap-3 text-xs">
           <span className="shrink-0">
@@ -678,6 +694,7 @@ export function SequenceTab(
         detail={page === "detail"}
         onMetric={page === "detail" ? setRunFilter : undefined}
         sendDates={null}
+        sendContext={sentTotal != null ? t`Sent (all time): ${sentTotal}` : undefined}
         overviewCounts={!live ? savedCounts : undefined}
         overviewPartial={
           !live &&

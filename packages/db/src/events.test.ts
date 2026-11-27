@@ -23,7 +23,6 @@ import {
   completedRunBlocks,
   completedRunSummary,
   createPendingSteeringRun,
-  declineConnectionAskInTransaction,
   discardAnsweredSteering,
   finalizeComputerControlRelease,
   finalizeRun,
@@ -36,6 +35,7 @@ import {
   publishTransientThreadEvent,
   queueTransient,
   sendUserMessage,
+  waitingAskTakesText,
 } from "./events.js";
 import { RunHistoryWriteError } from "./messages.js";
 import { IsolationError } from "./scope.js";
@@ -574,21 +574,14 @@ describe("native approval answer provenance", () => {
     },
   );
 
-  it("never stores an always-allow rule for recruiting gate approvals", async () => {
-    const f = approvalAnswerFixture();
-    f.effect.kind = "recruiting_request_approval";
-    await expect(answerRunInput(f.prisma, { ...f.input, answer: "always" })).resolves.toBe(false);
-    expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
-    expect(f.tx.actionApprovalRule.upsert).not.toHaveBeenCalled();
-  });
-
-  it.each(["brief", "documents"])(
-    "rejects an invalid %s allow but leaves stale cards usable for deny",
-    async (stage) => {
-      const f = approvalAnswerFixture({ stage, roleId: "missing-role" });
+  it.each(["allow", "always"])(
+    "refuses %s on a waiting card of the retired recruiting approval step, which can still be declined",
+    async (answer) => {
+      const f = approvalAnswerFixture({ stage: "brief", roleId: "role" });
       f.effect.kind = "recruiting_request_approval";
-      await expect(answerRunInput(f.prisma, { ...f.input, answer: "allow" })).resolves.toBe(false);
+      await expect(answerRunInput(f.prisma, { ...f.input, answer })).resolves.toBe(false);
       expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+      expect(f.tx.actionApprovalRule.upsert).not.toHaveBeenCalled();
       await expect(answerRunInput(f.prisma, { ...f.input, answer: "deny" })).resolves.toBe(true);
       expect(f.effect.status).toBe("denied");
     },
@@ -961,7 +954,7 @@ describe("ordinary native Ask answer provenance", () => {
     const answer = "  Paris\nwith the local team  ";
     await expect(answerRunInput(f.prisma, { ...f.input, answer })).resolves.toBe(true);
     expect(f.rows.find((row) => row.id === "created-human")?.blocks).toEqual([
-      { kind: "text", text: answer },
+      { kind: "text", text: answer, cardAnswer: true },
     ]);
     expect(f.rows[0]?.blocks).toEqual([
       { kind: "ask", text: "Which city?", status: "answered", answer },
@@ -2781,7 +2774,7 @@ describe("answerRunInput", () => {
         botId: undefined,
         runId: "run-1",
         clientNonce: "call:call-1:answer-1",
-        blocks: [{ kind: "text", text: "Toronto" }],
+        blocks: [{ kind: "text", text: "Toronto", cardAnswer: true }],
       }),
     });
     expect(tx.event.create).toHaveBeenCalledWith(
@@ -2890,7 +2883,7 @@ describe("answerRunInput", () => {
           botId: undefined,
           runId: "run-1",
           clientNonce,
-          blocks: [{ kind: "text", text: "use [redacted]" }],
+          blocks: [{ kind: "text", text: "use [redacted]", cardAnswer: true }],
         }),
       });
       expect(tx.message.update).toHaveBeenCalledWith({
@@ -4661,6 +4654,44 @@ describe("hasUnclaimedSteering", () => {
 });
 
 describe("claimSteering", () => {
+  // fr 11-21 (fc199112): a checked round's report sat behind the role chat's open "what next?"
+  // card for 60–90 s, or until the recruiter gave up.
+  it("continues with a teammate's report beside a turn waiting on a card, not with a person's words", async () => {
+    const continuation = async (block: object) => {
+      const tx = {
+        run: {
+          findFirst: vi.fn(async ({ where }: { where: { status: { in: string[] } } }) =>
+            where.status.in.includes("waiting_input")
+              ? { id: "asking", status: "waiting_input" }
+              : null,
+          ),
+          create: vi.fn().mockResolvedValue({ id: "next-run" }),
+        },
+        task: { create: vi.fn().mockResolvedValue({ id: "task" }) },
+        steeringMessage: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "row",
+              userId: "user",
+              originTrigger: null,
+              message: { id: "message", seq: 2, blocks: [block] },
+            },
+          ]),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      return createPendingSteeringRun(tx as never, {
+        threadId: "thread",
+        botId: "bot",
+        spaceId: "space",
+      });
+    };
+    await expect(
+      continuation({ kind: "handoff", fromBotId: "reviewer", toBotId: "bot", text: "Show it" }),
+    ).resolves.toBe("next-run");
+    await expect(continuation({ kind: "text", text: "more like these" })).resolves.toBeNull();
+  });
+
   it("keeps follow-up input unread until the old turn ends, then activates it in message order", async () => {
     let active = true;
     let originTrigger: string | null = "follow_up";
@@ -5952,17 +5983,12 @@ describe("connect card answers", () => {
     expect(f.run.status).toBe("waiting_input");
   });
 
-  it("closes as not connected when the recruiter writes past it", async () => {
+  // Gate eec6adf0, one-off-email: each message typed past the card closed it, and every reply
+  // brought a new card under a closed one that showed only 「暂不」.
+  it("stays open when the recruiter writes past it; the message gets its own turn", async () => {
     const f = connectFixture({ secretId: "secret-1" }, true);
-    expect(await declineConnectionAskInTransaction(f.tx as never, f.input)).toBe(true);
-    expect(f.run.status).toBe("queued");
-    expect(card(f)).toMatchObject({ status: "answered", answer: "not_connected" });
-    expect(prompt(f)).toContain("Instantly is still not connected.");
-  });
-
-  it("leaves other cards for their own answer", async () => {
-    const f = ordinaryAnswerFixture();
-    expect(await declineConnectionAskInTransaction(f.tx as never, f.input)).toBe(false);
+    expect(await waitingAskTakesText(f.tx as never, f.input)).toBe(false);
     expect(f.run.status).toBe("waiting_input");
+    expect(card(f)).toMatchObject({ status: "pending" });
   });
 });

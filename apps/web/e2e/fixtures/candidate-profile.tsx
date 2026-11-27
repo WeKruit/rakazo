@@ -164,7 +164,6 @@ function candidate(index: number): RecruitingCandidate {
     discoveryCount: 1,
     firstDiscoveredAt: checkedAt,
     lastDiscoveredAt: checkedAt,
-    latestAssessment: null,
     crm: null,
     latestSource: {
       providerTaskId: "fixture-provider-task",

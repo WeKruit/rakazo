@@ -33,13 +33,6 @@ describe("stop scopes", () => {
 });
 
 function fixture(owned = true) {
-  const research = {
-    findMany: vi.fn(async () => [{ id: "research" }]),
-    findFirst: vi.fn(async () =>
-      owned ? { id: "research", providerTaskId: "provider-task" } : null,
-    ),
-    updateMany: vi.fn(async () => ({ count: 1 })),
-  };
   const cloud = {
     findMany: vi.fn(async () => [{ id: "cloud", cancelRequested: true }]),
     findFirst: vi.fn(async () => (owned ? { id: "cloud" } : null)),
@@ -47,7 +40,6 @@ function fixture(owned = true) {
   };
   const tx = {
     $queryRaw: vi.fn(),
-    recruitingResearchTask: research,
     cloudAgent: cloud,
     externalEffect: {
       findMany: vi.fn(async () => [{ id: "search-effect" }]),
@@ -66,14 +58,13 @@ function fixture(owned = true) {
     run: { findMany: vi.fn(async () => [{ id: "native-background" }]) },
     $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
   };
-  return { prisma: prisma as unknown as PrismaClient, research, cloud, tx };
+  return { prisma: prisma as unknown as PrismaClient, cloud, tx };
 }
 
 it("lists only records sharing the already-authorized thread's owner in one snapshot query", async () => {
   const f = fixture();
   const startedAt = new Date("2026-10-31T04:00:00.000Z");
   const rows = [
-    { id: "research", kind: "research", status: "running", startedAt, estimateMs: null },
     { id: "cloud", kind: "cloud_agent", status: "cancelling", startedAt, estimateMs: null },
     { id: "native-background", kind: "run", status: "running", startedAt, estimateMs: null },
     { id: "search-effect", kind: "agent_run", status: "running", startedAt, estimateMs: 600_000 },
@@ -88,38 +79,11 @@ it("lists only records sharing the already-authorized thread's owner in one snap
   expect(values[0]).toBe("thread");
   expect(sql).toContain('r."spaceId" = o."spaceId" AND r."userId" = o."userId"');
   expect(sql).toContain('c."spaceId" = o."spaceId" AND c."userId" = o."userId"');
-  expect(sql).toContain('rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"');
   expect(sql).toContain('e."spaceId" = o."spaceId"');
   expect(sql).toContain("starts_with(e.\"idempotencyKey\", 'work_estimate:agent_run_')");
   expect(sql).toContain("e.request->>'estimateMs'");
   expect(JSON.stringify(values)).toContain("recruiting_grade");
   expect(JSON.stringify(values)).toContain("tool_background");
-});
-
-it("closes one research follow-up without touching other work", async () => {
-  const f = fixture();
-  const wakes = await cancelThreadBackgroundTask(f.prisma, actor, target, {
-    id: "research",
-    kind: "research",
-  });
-  expect(wakes).toEqual(["research-wake"]);
-  expect(f.tx.run.findMany).toHaveBeenCalledWith(
-    expect.objectContaining({
-      where: expect.objectContaining({
-        ...scope,
-        OR: [
-          { clientNonce: "recruiting-research-wake:research:provider-task" },
-          { clientNonce: { startsWith: "recruiting-research-wake:research:provider-task:" } },
-        ],
-      }),
-    }),
-  );
-  expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
-  expect(f.research.updateMany).toHaveBeenCalledExactlyOnceWith({
-    where: { id: "research", state: "active", createdByRun: scope },
-    data: { state: "closed" },
-  });
-  expect(f.cloud.updateMany).not.toHaveBeenCalled();
 });
 
 it("requests cloud cancellation through its existing outbox without claiming it finished", async () => {
@@ -129,7 +93,6 @@ it("requests cloud cancellation through its existing outbox without claiming it 
     where: { id: "cloud", ...scope, status: "running" },
     data: { cancelRequested: true, version: { increment: 1 }, nextPollAt: expect.any(Date) },
   });
-  expect(f.research.updateMany).not.toHaveBeenCalled();
 });
 
 it("stops following one search and returns its active native wakes for cancellation", async () => {
@@ -192,14 +155,13 @@ it("only selects owned native automation or handed-off tasks for cancellation", 
   );
 });
 
-it.each(["research", "cloud_agent", "agent_run", "run"] as const)(
+it.each(["cloud_agent", "agent_run", "run"] as const)(
   "rejects another account's %s task before mutation",
   async (kind) => {
     const f = fixture(false);
     await expect(
       cancelThreadBackgroundTask(f.prisma, actor, target, { id: "foreign", kind }),
     ).rejects.toBeInstanceOf(IsolationError);
-    expect(f.research.updateMany).not.toHaveBeenCalled();
     expect(f.cloud.updateMany).not.toHaveBeenCalled();
     expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
   },

@@ -355,6 +355,10 @@ model DeploymentSettings {
   senderSelfSetup                 Boolean  @default(false)
   /// Where customers reach a person (credits, turning on sending, help). Null hides contact links.
   supportEmail                    String?
+  /// Recruiting defaults the startup walk last applied to every account, and the account it
+  /// reached; a null cursor under the current key means the walk finished.
+  recruitingBackfillKey           String?
+  recruitingBackfillCursor        String?
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
 
@@ -618,6 +622,7 @@ model Thread {
   tasks                       Task[]
   runs                        Run[]
   routines                    Routine[]
+  recruitingInboxMessages     RecruitingInboxMessage[]
 
   @@index([spaceId])
   @@map("threads")
@@ -652,6 +657,7 @@ model Message {
   @@unique([threadId, clientNonce])
   @@index([threadId, seq])
   @@index([replyToMessageId])
+  @@index([createdAt])
   @@map("messages")
 }
 
@@ -762,6 +768,10 @@ model Run {
   botOutcomeReturnedAt DateTime?
   messagingMirroredAt  DateTime?
   teamChatMirroredAt   DateTime?
+  /// Why a completed run ended before its work was done: "loop_guard", "cost" or "time".
+  stopKind             String?
+  /// The candidate reply ids a reply check-in run reported, so a later check-in skips them.
+  checkinReplyIds      Json?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
   attempts             Attempt[]
@@ -885,6 +895,7 @@ model ExternalEffect {
 
   @@unique([idempotencyKey])
   @@index([runId, status])
+  @@index([kind, status, createdAt, id])
   @@map("external_effects")
 }
 
@@ -1046,6 +1057,8 @@ model MemoryDocument {
   scope     String
   path      String
   content   String
+  /// Structured form of a document the server writes and reads back; null for every other document.
+  data      Json?
   revision  Int              @default(1)
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
@@ -1661,7 +1674,6 @@ model RecruitingRole {
   revision Int
   currentRevisionId String @unique
   archivedAt DateTime?
-  playbookStage String @default("intake")
   currentRevision RecruitingRoleRevision @relation("CurrentRecruitingRevision", fields: [currentRevisionId], references: [id], onDelete: NoAction)
   revisions RecruitingRoleRevision[] @relation("RecruitingRoleRevisions")
   activeThreads Thread[] @relation("ActiveRecruitingRole")
@@ -1692,6 +1704,13 @@ model RecruitingCalibrationRound {
   approvedByUserId String?
   /// What carried the human decision: {kind:"control"} or {kind:"message",messageId} or {kind:"approval",effectId}.
   approvalSource Json?
+  /// Always "shown": the hold for the retired quality check wrote the other values. Stored rows keep theirs.
+  status String @default("shown")
+  /// The bot whose run recorded the round; only it shows the checked round.
+  ownerBotId String?
+  /// Bumped on every status change; a change applies only to the version it read.
+  version Int @default(0)
+  statusAt DateTime @default(now())
 
   @@unique([roleId, round])
   @@map("recruiting_calibration_rounds")
@@ -1863,6 +1882,8 @@ model RecruitingCandidateOccurrence {
   issues Json
   /// Provider match cells (rank/tier/score keys) of this saved row; null until backfilled.
   matchFields Json?
+  /// This row's display report, projected when the page was saved; null for older rows.
+  report Json?
 
   @@id([pageId, rowIndex])
   @@index([roleId, candidateKey])
@@ -1916,7 +1937,7 @@ model RecruitingReminder {
   owner User @relation("RecruitingReminderOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   roleId String?
   role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  /// "autumn:<key>" | "crm:<id>", same key space as roleCandidates items.
+  /// "sourced:<key>" | "crm:<id>", same key space as roleCandidates items.
   candidateKey String?
   title String
   note String?
@@ -1977,7 +1998,7 @@ model RecruitingCrmContact {
   email String?
   phone String?
   linkedinUrl String?
-  /// linkedin.com/in/<slug>, else lowercased email; matches Autumn rows for the same person.
+  /// linkedin.com/in/<slug>, else lowercased email; matches search rows for the same person.
   identityKey String?
   stage String?
   contactStatus String
@@ -2038,6 +2059,7 @@ model RecruitingCrmMessage {
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmMessageId])
   @@index([userId, spaceId, crmCandidateId])
+  @@index([userId, spaceId, mcpServerId, organizationId, crmRoleId, sentAt])
   @@map("recruiting_crm_messages")
 }
 
@@ -2077,7 +2099,7 @@ model RecruitingCandidateNote {
   owner User @relation("RecruitingCandidateNoteOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   roleId String?
   role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  /// "autumn:<key>" | "crm:<id>", same key space as reminders.
+  /// "sourced:<key>" | "crm:<id>", same key space as reminders.
   candidateKey String
   body String
   artifactIds String[] @default([])
@@ -2340,10 +2362,14 @@ model RecruitingInboxMessage {
   id String @id
   userId String @map("user_id")
   spaceId String @map("space_id")
-  roleId String @map("role_id")
+  /// Exactly one of roleId and threadId: the role the mail is for, or the conversation that sent
+  /// it outside a role.
+  roleId String? @map("role_id")
+  threadId String? @map("thread_id")
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  thread Thread? @relation(fields: [threadId], references: [id], onDelete: Cascade)
   originKey String @map("origin_key")
   dedupeKey String @map("dedupe_key")
   threadKey String? @map("thread_key")
@@ -2360,6 +2386,7 @@ model RecruitingInboxMessage {
   person Json?
   @@unique([userId, spaceId, receiptId, receiptOrdinal])
   @@index([userId, spaceId, roleId, messageAt, id])
+  @@index([userId, spaceId, threadId, messageAt, id], map: "recruiting_inbox_messages_conversation_page")
   @@index([userId, spaceId, sourceKind, receiptId])
   @@map("recruiting_inbox_messages")
 }

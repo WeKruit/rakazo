@@ -285,6 +285,8 @@ export const MailReplySchema = z.strictObject({
   sentAt: IsoDate.nullable(),
   canAnswer: z.boolean().optional(),
   error: z.string().optional(),
+  /** The candidate's questions that the agent says nothing the recruiter said or saved answers. */
+  openQuestions: z.array(z.string().min(1).max(500)).max(20).optional(),
 });
 export type MailReply = z.infer<typeof MailReplySchema>;
 export const AskAnswerSchema = z.union([
@@ -325,7 +327,7 @@ export const AskMultiple = z
     "true when the person may pick more than one option (e.g. several kinds of experience that all count); leave out for a single choice.",
   );
 
-/** People-search queries planned on the last recruiting question, run the moment it is answered. */
+/** Queries of the retired planned-search events; kept so stored events still read. */
 export const PlannedPeopleSearchesSchema = z.array(z.string().trim().min(3).max(300)).max(4);
 const askQuestion = {
   question: z
@@ -336,12 +338,6 @@ const askQuestion = {
       "One question with a single question mark; a recommendation follows it as a statement, never as a second question.",
     ),
 };
-// Last, so the question and its choices stream to the person before the search plan is written.
-const askPlannedSearches = {
-  plannedSearches: PlannedPeopleSearchesSchema.optional().describe(
-    "Recruiting intake only, on a clarifying question before the first round: the four people-search queries you would run if this answer were the last one needed. They run the moment the recruiter answers. Pass [] when the recruiter said not to look for people outside their own list.",
-  ),
-};
 export const AskUserInputSchema = z.union([
   z.strictObject({
     ...askQuestion,
@@ -351,9 +347,8 @@ export const AskUserInputSchema = z.union([
       .max(4)
       .refine((values) => new Set(values).size === values.length),
     multiple: AskMultiple.optional(),
-    ...askPlannedSearches,
   }),
-  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema, ...askPlannedSearches }),
+  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema }),
 ]);
 export const AskUserInputJsonSchema = z.toJSONSchema(AskUserInputSchema);
 
@@ -489,9 +484,13 @@ export const AskBlockSchema = z
     /** The options are checkboxes: the answer is every picked label plus any typed text. */
     multiple: z.boolean().optional(),
     answer: z.string().optional(),
+    /** The answer was typed in the chat while the card was open, not given on the card. */
+    answeredInChat: z.literal(true).optional(),
     requestedSchema: AskRequestedSchema.optional(),
     formResponse: AskFormResponseSchema.optional(),
     connection: AskConnectionSchema.optional(),
+    /** A copy of another conversation's card: answering it answers that card. */
+    answerTarget: z.object({ threadId: Id, runId: Id, messageId: Id }).optional(),
     actions: z
       .array(
         z.object({
@@ -539,6 +538,12 @@ export const AskBlockSchema = z
     "A form response belongs to an answered form",
   );
 
+/** A BCP 47 language tag for the interface, such as "zh-CN" or "en". */
+export const UiLocaleTag = z
+  .string()
+  .max(35)
+  .regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/);
+
 export const MessageBlock = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("text"),
@@ -547,6 +552,12 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
     crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
     recruitingContext: RecruitingChatContextSchema.optional(),
+    /** Set by the server on a role team's round list; `roundId` once the round is recorded. */
+    recruitingRoundList: z.object({ roundId: z.string().optional() }).optional(),
+    /** Set by the server on the message it records an answer to a question card as (picked, typed on the card or spoken). */
+    cardAnswer: z.literal(true).optional(),
+    /** The sender's interface language when they wrote this, such as "zh-CN" or "en". */
+    uiLocale: UiLocaleTag.optional(),
   }),
   z.object({
     kind: z.literal("card"),
@@ -773,6 +784,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     returnThreadId: Id.optional(),
     /** Links in a bot-started chain; absent when a person started it. */
     hop: z.number().int().nonnegative().optional(),
+    /** The recruiter's own words this hands over, as they wrote them (delegate_to_role). */
+    recruiterWords: z.string().optional(),
   }),
 ]);
 export type MessageBlock = z.infer<typeof MessageBlock>;
@@ -866,6 +879,11 @@ export const RecruitingQuestionAskedPayloadSchema = z.strictObject({
 export type RecruitingQuestionAskedPayload = z.infer<typeof RecruitingQuestionAskedPayloadSchema>;
 
 export const RecruitingProfileViewedPayloadSchema = RecruitingProfileActivityInput.extend({
+  /** Stored rows are never rewritten: a view recorded before the key rename keeps "autumn:<key>". */
+  candidateKey: z
+    .string()
+    .max(300)
+    .regex(/^(sourced|autumn|crm):\S+$/),
   roleTitle: z.string(),
   /** Exact imported attachment provenance; never an execution or approval receipt. */
   crmSource: RecruitingCrmRoleReferenceSchema.optional(),
@@ -925,7 +943,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 12;
+export const EVENT_FORMAT_VERSION = 20;
 
 export const ProductEventSchema = z
   .object({

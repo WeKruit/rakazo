@@ -181,6 +181,17 @@ describePostgres("memory commits (PostgreSQL)", () => {
     return { bot, thread, source, run, path, agentContext, commit, feedback, recruiting };
   }
 
+  it("keeps a document's structured form with its text and drops it when only text is saved", async () => {
+    const path = "structured-form.md";
+    const data = { fixes: [{ tool: "t" }] };
+    await store.commit({ ...request(path, "one"), data }, context);
+    const read = async () =>
+      (await store.read({ scope: "user", path }, context)).documents[0]?.data;
+    expect(await read()).toEqual(data);
+    await store.commit(request(path, "two", 1), context);
+    expect(await read()).toBeUndefined();
+  });
+
   it("rejects agent memory writes that bypass recruiting intent without creating document or history", async () => {
     const f = await agentFixture();
     await expect(store.commit(f.commit, f.agentContext)).rejects.toThrow();
@@ -262,10 +273,7 @@ describePostgres("memory commits (PostgreSQL)", () => {
       operation: "add",
       previousAnchor: null,
       anchor: { start, end: start + f.feedback.content.length, quote: f.feedback.content },
-      source: {
-        anchor: { kind: "message", messageId: f.source.id },
-        quote: f.feedback.intent.quote,
-      },
+      source: { anchor: { kind: "message", messageId: f.source.id } },
     });
     expect(receipts[1]?.payload).toMatchObject({
       operation: "replace",
@@ -500,13 +508,6 @@ describePostgres("memory commits (PostgreSQL)", () => {
         ...valid,
         recruiting: { ...f.recruiting, feedback: { ...f.feedback, expectedRevision: 1 } },
       },
-      {
-        ...valid,
-        recruiting: {
-          ...f.recruiting,
-          feedback: { ...f.feedback, intent: { ...f.feedback.intent, quote: "Invented consent" } },
-        },
-      },
       { ...valid, sourceRunId: "other-run" },
       { ...valid, sourceThreadId: "other-thread" },
       { ...valid, content: "Also erase unrelated preferences" },
@@ -552,7 +553,7 @@ describePostgres("memory commits (PostgreSQL)", () => {
     expect(await prisma.memoryRevision.count({ where: { sourceRunId: f.run.id } })).toBe(0);
   });
 
-  it("rejects a formerly valid source after newer claimed human steering", async () => {
+  it("cites newer claimed human steering as the source", async () => {
     const f = await agentFixture();
     const newer = await prisma.message.create({
       data: {
@@ -571,12 +572,13 @@ describePostgres("memory commits (PostgreSQL)", () => {
         claimedAt: new Date(),
       },
     });
-    await expect(
-      store.commit({ ...f.commit, recruiting: f.recruiting }, f.agentContext),
-    ).rejects.toThrow();
-    expect(
-      await prisma.memoryDocument.count({ where: { spaceId: context.spaceId, path: f.path } }),
-    ).toBe(0);
+    await store.commit({ ...f.commit, recruiting: f.recruiting }, f.agentContext);
+    const receipt = await prisma.event.findFirstOrThrow({
+      where: { runId: f.run.id, type: "memory.revised" },
+    });
+    expect(receipt.payload).toMatchObject({
+      source: { anchor: { kind: "message", messageId: newer.id } },
+    });
   });
 
   it("rechecks live run state inside the memory transaction after an earlier authorization", async () => {

@@ -23,17 +23,12 @@ import { getLogger } from "@rakazo/logging";
 import { COMPLETION_EMAIL_OFFER, completionEmailAnswered } from "./completion-email.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
-import { blocksText } from "./reply-suggestion.js";
+import { requestCounts, requestTarget, roundStillMissing } from "./recruiting-round-check.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
 export const NO_ROLE_HANDOFF =
   "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds. Save the role now with recruiting_role, quoting the recruiter's own words, then hand off again with the same brief.";
-
-/** Above the role teams, only role-free work goes to a teammate in the room itself. */
-export const GLOBAL_HANDOFF_ROLE_WORK =
-  "Not handed off: in this conversation only an email to an address the recruiter gave (Outreach) or an interview booking for a named person (Scheduling) goes to a teammate here. Role work goes to that role's team with delegate_to_role; a new role goes to start_role.";
 
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -133,31 +128,6 @@ export async function handoffToGroupBot(
       const target = group.members.find((member) => member.bot.id === targetId);
       if (!target) return { error: "handoff target is not a group member" } as const;
       const targetKey = recruitingBotKey(target.bot);
-      if (
-        groupId.startsWith("recruiting-global-") &&
-        targetKey !== "outreach" &&
-        targetKey !== "scheduling"
-      )
-        return { error: GLOBAL_HANDOFF_ROLE_WORK } as const;
-      // Work in a role the recruiter names (such as replying in that role's email thread) needs
-      // that role's campaign and threads, which only its own team holds.
-      if (groupId.startsWith("recruiting-global-")) {
-        // A request steered into a running turn is not its source message; the brief quotes it.
-        const asked = roleTitleText(
-          `${JSON.stringify(activeSource.sourceMessage?.blocks ?? [])}\n${input.message}`,
-        );
-        const roles = await tx.recruitingRole.findMany({
-          where: { userId: run.userId, spaceId: run.spaceId, archivedAt: null },
-          select: { id: true, title: true },
-        });
-        const named =
-          roles.find((role) => namesRole(asked, role.title) === "full") ??
-          roles.find((role) => namesRole(asked, role.title) === "core");
-        if (named)
-          return {
-            error: `Not handed off: the recruiter named the role "${named.title}", whose email threads and campaign only its team holds. Hand this to that team with delegate_to_role, role_id "${named.id}".`,
-          } as const;
-      }
       // A search stage saves people into the conversation's role; without one the sourcing
       // teammate has nowhere to put them, so the coordinator sets the role up first.
       const source = group.members.find((member) => member.bot.id === run.botId);
@@ -316,19 +286,41 @@ async function confirmedSend(
   return sent !== null;
 }
 
-/** Whether the recruiter's latest message in the thread is a question. */
-async function latestUserMessageAsks(
-  tx: Pick<PrismaClient, "message">,
-  threadId: string,
+/**
+ * Whether the stage recorded a round of people and the request for a number it served is met, by
+ * the same counts the round's own result gives. The round's list is what the user sees, so there
+ * is nothing left to check: play s151 woke the lead after a round and it recorded the same people
+ * again. A round recorded without a number asked serves no number and is not short.
+ */
+async function roundDelivered(
+  prisma: PrismaClient,
+  run: { id: string; threadId: string; userId: string; spaceId: string },
 ): Promise<boolean> {
-  const latest = await tx.message.findFirst({
-    where: { threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    select: { blocks: true },
+  const effects = await prisma.externalEffect.findMany({
+    where: { runId: run.id, status: "completed" },
+    select: { id: true, request: true },
+    orderBy: { createdAt: "desc" },
+    take: 200,
   });
-  const parsed = MessageBlock.array().safeParse(latest?.blocks ?? []);
-  if (!parsed.success) return false;
-  return /[?？]\s*$/.test(blocksText(parsed.data).trim());
+  const ids = effects.map((effect) => effect.id);
+  const round = ids.length
+    ? await prisma.recruitingCalibrationRound.findFirst({
+        where: { effectId: { in: ids }, status: "shown" },
+        orderBy: { createdAt: "desc" },
+        select: { roleId: true, effectId: true },
+      })
+    : null;
+  if (!round) return false;
+  const request = effects.find((effect) => effect.id === round.effectId)?.request;
+  const asked =
+    request && typeof request === "object" && !Array.isArray(request)
+      ? Number((request as Record<string, unknown>).asked)
+      : Number.NaN;
+  if (!Number.isFinite(asked) || asked <= 0) return true;
+  const role = { roleId: round.roleId, userId: run.userId, spaceId: run.spaceId };
+  const { counted } = await requestCounts(prisma, role);
+  const target = await requestTarget(prisma, role, run.threadId, asked, counted);
+  return !roundStillMissing(counted, target).stillMissing;
 }
 
 /** Whether a card in the thread is still waiting for the recruiter's answer. */
@@ -372,6 +364,14 @@ export async function reportGroupHandoffOutcome(
   },
 ): Promise<{ runId: string } | undefined> {
   if (!run.sourceMessageId) return undefined;
+  if (
+    outcome.status === "completed" &&
+    (await roundDelivered(deps.prisma, run).catch((error) => {
+      getLogger().warn("round delivery not read", { error: String(error) });
+      return false;
+    }))
+  )
+    return undefined;
   const finalKey = `group-report:${run.id}`;
   const deliveryKey =
     outcome.status !== "progress"
@@ -415,10 +415,6 @@ export async function reportGroupHandoffOutcome(
       if (botMessageHopExhausted(hop)) return undefined;
       const mail = await readMailReplyOutcomeReport(tx, run);
       const posted = outcome.status === "completed" && !mail && (await postedResult(tx, run.id));
-      // Staging 11-13: a teammate answered the recruiter's question, then the sender restated it
-      // or handed it back for proof, so one question got two or three answers. An answered
-      // question needs nothing more from the sender.
-      if (posted && (await latestUserMessageAsks(tx, run.threadId))) return undefined;
       // Staging 11-13: after the recruiter confirmed a send and Outreach said it went out, the
       // report woke Main, which listed the account's roles unasked. A confirmed send is done.
       if (posted && (await confirmedSend(tx, run.id))) return undefined;
@@ -461,6 +457,41 @@ export async function reportGroupHandoffOutcome(
         runId: run.id,
         clientNonce: deliveryKey,
       });
+      const event = () =>
+        appendEventInTransaction(tx, {
+          spaceId: run.spaceId,
+          threadId: run.threadId,
+          botId: run.botId,
+          type: "group.handoff",
+          runId: run.id,
+          payload: { messageId: message.id, fromBotId: run.botId, toBotId: asked.fromBotId, text },
+        });
+      // Staging 11-16 (change-mind-mid-run): the teammate's result came back while the sender's
+      // turn was still running; a new turn started for it and the running one ended saying it had
+      // no draft. As Workloop steers a child's result into the parent's current turn, the report
+      // joins the sender's running turn; a turn that ends before reading it is requeued with it.
+      const working = await tx.run.findFirst({
+        where: {
+          threadId: run.threadId,
+          botId: asked.fromBotId,
+          status: { in: ["leased", "running"] },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, status: true },
+      });
+      if (working?.status) {
+        await tx.steeringMessage.create({
+          data: {
+            messageId: message.id,
+            botId: asked.fromBotId,
+            userId: run.userId,
+            runId: working.id,
+          },
+        });
+        const steered = await event();
+        await touchGroupUpdatedAt(tx, groupId);
+        return { runId: working.id, eventSeq: steered.seq, steered: true };
+      }
       const task = await tx.task.create({
         data: {
           spaceId: run.spaceId,
@@ -483,22 +514,16 @@ export async function reportGroupHandoffOutcome(
           sourceMessageId: message.id,
         },
       });
-      const event = await appendEventInTransaction(tx, {
-        spaceId: run.spaceId,
-        threadId: run.threadId,
-        botId: run.botId,
-        type: "group.handoff",
-        runId: run.id,
-        payload: { messageId: message.id, fromBotId: run.botId, toBotId: asked.fromBotId, text },
-      });
+      const created = await event();
       await touchGroupUpdatedAt(tx, groupId);
-      return { runId: nextRun.id, eventSeq: event.seq };
+      return { runId: nextRun.id, eventSeq: created.seq, steered: false };
     }),
   );
   if (!committed) return undefined;
   await deps.events.notify(run.threadId, committed.eventSeq).catch((error) => {
     getLogger().error("group report realtime notification", error);
   });
+  if (committed.steered) return { runId: committed.runId };
   await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
     getLogger().error("group report enqueue", error);
   });
@@ -571,10 +596,8 @@ async function retriedStage(prisma: StageDeps["prisma"], turn: WorkerTurn) {
 }
 
 /**
- * A worker's turn ended in a group. A handed-in turn that leaves its own research running at the
- * provider has not finished the stage, so its report waits. That research's wakes continue the
- * same stage: the first partial-results wake sends the one mid-stage check-in, and the turn that
- * ends with nothing of the worker's still running delivers the final report.
+ * A worker's turn ended in a group: a turn woken to collect its search, or a retried turn,
+ * delivers the stage's report to the teammate that handed it over.
  */
 export async function reportGroupStageOutcome(
   deps: StageDeps,
@@ -584,46 +607,9 @@ export async function reportGroupStageOutcome(
 ): Promise<{ runId: string } | undefined> {
   const wake = turn.trigger === "recruiting_research";
   if (!wake && turn.trigger !== "follow_up") return undefined;
-  const partial = wake && Boolean(turn.clientNonce?.includes(":rows:"));
-  if (partial && outcome.status === "failed") return undefined;
   const stage = wake ? await handedStage(deps.prisma, turn) : await retriedStage(deps.prisma, turn);
   if (!stage) return undefined;
-  if (outcome.status === "completed") {
-    const thread = await deps.prisma.thread.findUnique({
-      where: { id: turn.threadId },
-      select: { activeRecruitingRoleId: true },
-    });
-    const running =
-      thread?.activeRecruitingRoleId &&
-      (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId, Date.now(), {
-        botId: turn.botId,
-        threadId: turn.threadId,
-      }));
-    if (running)
-      return partial
-        ? reportGroupHandoffOutcome(deps, stage, groupId, { status: "progress" })
-        : undefined;
-    if (partial) return undefined;
-  }
   return reportGroupHandoffOutcome(deps, stage, groupId, outcome);
-}
-
-/** The worker's research stopped being followed before the provider finished it. */
-export async function reportStalledGroupStage(
-  deps: StageDeps,
-  worker: Pick<WorkerTurn, "spaceId" | "threadId" | "botId" | "userId">,
-): Promise<void> {
-  const thread = await deps.prisma.thread.findFirst({
-    where: { id: worker.threadId, spaceId: worker.spaceId },
-    select: { groupId: true },
-  });
-  if (!thread?.groupId) return;
-  const stage = await handedStage(deps.prisma, worker);
-  if (!stage) return;
-  await reportGroupHandoffOutcome(deps, stage, thread.groupId, {
-    status: "failed",
-    error: "the search is still not finished at the provider after two hours of checks",
-  });
 }
 
 /** A delegator's turn that reads a teammate's check-in or finished stage may end silently. */
@@ -660,6 +646,7 @@ export async function loadGroupContext(
             select: {
               id: true,
               name: true,
+              spawnKey: true,
               title: true,
               description: true,
               mcpServers: {
@@ -681,7 +668,7 @@ export async function loadGroupContext(
   if (!group) return undefined;
   return renderGroupMembersContext(
     group.name,
-    group.members.map(({ bot: { mcpServers, ...bot } }) => ({
+    group.members.map(({ bot: { mcpServers, spawnKey: _spawnKey, ...bot } }) => ({
       ...bot,
       // Read from the bot's real service assignments, so the roster never drifts from them.
       capabilities: mcpServers.map(({ server, allowAllTools, allowedTools }) => {
@@ -702,7 +689,7 @@ export async function loadGroupContext(
 
 /** How often an open handed stage checks in with the teammate that handed it over. */
 export const STAGE_WATCH_MS = 10 * 60_000;
-/** Stages older than this are left to the stuck-work and research-stall reports. */
+/** Stages older than this are left to the stuck-work report. */
 const STAGE_WATCH_WINDOW_MS = 24 * 60 * 60_000;
 
 /**
@@ -719,7 +706,7 @@ export async function watchOpenStages(
   const runs = await deps.prisma.run.findMany({
     where: {
       trigger: "follow_up",
-      status: { in: ["queued", "leased", "running", "completed"] },
+      status: { in: ["queued", "leased", "running"] },
       sourceMessageId: { not: null },
       createdAt: {
         gte: new Date(now.getTime() - STAGE_WATCH_WINDOW_MS),
@@ -776,20 +763,6 @@ export async function watchOpenStages(
   let sent = 0;
   for (const { run, asked, groupId } of stages) {
     if (reported.has(`group-report:${run.id}`)) continue;
-    // A finished turn is an open stage only while its own research still runs at the provider.
-    if (
-      run.status === "completed" &&
-      !(
-        run.thread.activeRecruitingRoleId &&
-        (await recruitingResearchInFlight(
-          deps.prisma,
-          run.thread.activeRecruitingRoleId,
-          now.getTime(),
-          { botId: run.botId, threadId: run.threadId },
-        ))
-      )
-    )
-      continue;
     const busy = await deps.prisma.run.count({
       where: {
         threadId: run.threadId,
@@ -804,12 +777,7 @@ export async function watchOpenStages(
           where: { roleId: run.thread.activeRecruitingRoleId },
         })
       : undefined;
-    const doing =
-      run.status === "completed"
-        ? "is waiting for its research results"
-        : run.status === "queued"
-          ? "has not started yet"
-          : "is still running";
+    const doing = run.status === "queued" ? "has not started yet" : "is still running";
     const slot = Math.floor(minutes / (STAGE_WATCH_MS / 60_000));
     // The first check-in of a long stage is where the recruiter is offered an email at the end.
     const offerEmail =
@@ -831,18 +799,3 @@ export async function watchOpenStages(
   return sent;
 }
 
-/** Lower-case text with full-width punctuation and runs of spaces folded, for title matching. */
-function roleTitleText(text: string): string {
-  return text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ");
-}
-
-/**
- * Whether the text names a role: its full title, or the title without a trailing qualifier such
- * as "(Seattle)", which briefs often write as "Senior Data Engineer（Seattle）" or leave out.
- */
-export function namesRole(asked: string, title: string): "full" | "core" | undefined {
-  const full = roleTitleText(title).trim();
-  if (full.length > 1 && asked.includes(full)) return "full";
-  const core = full.replace(/\s*\([^)]*\)$/, "").trim();
-  return core.length >= 6 && asked.includes(core) ? "core" : undefined;
-}

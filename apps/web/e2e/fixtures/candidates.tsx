@@ -19,11 +19,11 @@ const rows: RoleCandidate[] = Array.from({ length: 1000 }, (_, index) => ({
   email: null,
   linkedinUrl: null,
   crm: null,
-  autumn: {
+  sourced: {
     company: "Example Company",
     shortlisted: false,
     latestSource: { report: { fields: [] } },
-  } as RoleCandidate["autumn"],
+  } as RoleCandidate["sourced"],
 }));
 function Fixture() {
   const [selected, setSelected] = useState<string>();

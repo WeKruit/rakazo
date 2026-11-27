@@ -25,7 +25,7 @@ function entityIn(tag: string, entities: QuickOutput["entities"]) {
 }
 
 /**
- * Autumn's own assessment of one candidate: its short headline, tags and per-criterion verdicts
+ * The search's own assessment of one candidate: its short headline, tags and per-criterion verdicts
  * first, with each criterion's full evidence and the full summary one click away. Display only:
  * nothing here re-ranks or re-judges the candidate.
  */
@@ -203,7 +203,7 @@ export function AssessmentCard({
                   <span
                     className={`min-w-0 flex-1 text-muted-foreground ${expanded ? "" : "truncate"}`}
                   >
-                    {verdict ?? (expanded ? null : row.text || t`No evidence provided.`)}
+                    {verdict ?? (expanded ? null : row.text || (name ? null : t`No evidence provided.`))}
                   </span>
                   {hasDetail ? (
                     <ChevronDown

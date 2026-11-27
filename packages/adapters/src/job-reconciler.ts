@@ -19,17 +19,18 @@ import { returnBotMessageOutcome } from "./bot-messages.js";
 import { scheduleComputerControlExpiry } from "./computer-control.js";
 import { watchOpenStages } from "./group-handoff.js";
 import { rearmRecruitingAgentRunWaits } from "./recruiting-agent-run-wait.js";
-import { sweepIdleRecruitingRoles } from "./recruiting-idle-sweep.js";
+import { RECRUITING_CHECKIN_INTERVAL_MS, sweepRecruitingCheckins } from "./recruiting-checkin.js";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
 import { reconcileStuckWork } from "./stuck-work.js";
-import { isLoopGuardStopText } from "./tool-loop.js";
 import { isUserProgressClientNonce } from "./user-progress.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 100;
+// After one full sweep per process, profile intents are discovered from recent saves only;
+// older unprojected saves are swept again when the process restarts.
+const PROFILE_RECENT_MS = 60 * 60_000;
 const ROUTINE_LOOKAHEAD_MS = 60_000;
 const CONTROL_LOOKAHEAD_MS = 60_000;
-const IDLE_SWEEP_INTERVAL_MS = 5 * 60_000;
 const STAGE_WATCH_SCAN_MS = 60_000;
 /** Searches still running at the provider get their follow-up re-armed this often. */
 const SEARCH_WAIT_REARM_MS = 2 * 60_000;
@@ -37,6 +38,8 @@ const SEARCH_WAIT_REARM_MS = 2 * 60_000;
 // with an application using the one-key advisory-lock API.
 const RECONCILIATION_LOCK_NAMESPACE = 1_380_019_075;
 const RECONCILIATION_LOCK_ID = 1;
+/** A leader touches its lock session every tick (30 s); one silent this long is gone. */
+const STALE_LEADER_SECONDS = 5 * 60;
 
 type Cursor = { at: Date; id: string };
 type ControlCursor = { at: Date | null; id: string };
@@ -53,9 +56,10 @@ export interface ReconciliationLeadership {
  */
 export function createPostgresReconciliationLeadership(
   pool: Pick<Pool, "connect">,
-  options: { lockId?: number } = {},
+  options: { lockId?: number; staleLeaderSeconds?: number } = {},
 ): ReconciliationLeadership {
   const lockId = options.lockId ?? RECONCILIATION_LOCK_ID;
+  const staleLeaderSeconds = options.staleLeaderSeconds ?? STALE_LEADER_SECONDS;
   let leaderClient: PoolClient | undefined;
   let leaderErrorListener: (() => void) | undefined;
 
@@ -68,7 +72,17 @@ export function createPostgresReconciliationLeadership(
 
   return {
     async tryAcquire() {
-      if (leaderClient) return true;
+      if (leaderClient) {
+        // Each tick touches the lock's session, so followers can tell a live leader from one
+        // whose worker died without closing its connection.
+        const client = leaderClient;
+        try {
+          await client.query("SELECT 1");
+          return true;
+        } catch {
+          loseClient(client);
+        }
+      }
 
       const candidate = await pool.connect();
       try {
@@ -77,6 +91,16 @@ export function createPostgresReconciliationLeadership(
           [RECONCILIATION_LOCK_NAMESPACE, lockId],
         );
         if (!result.rows[0]?.acquired) {
+          // A worker that vanished (a replaced container) can leave its session open and keep
+          // the lock, so no one reconciles until the connection times out (20 minutes on staging,
+          // 2026-11-14). A holder whose session has been idle far past the tick is ended here.
+          await candidate.query(
+            `SELECT pg_terminate_backend(a.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+             WHERE l.locktype = 'advisory' AND l.granted AND l.classid = $1::integer::oid
+               AND l.objid = $2::integer::oid AND l.objsubid = 2 AND a.state = 'idle'
+               AND a.state_change < now() - make_interval(secs => $3)`,
+            [RECONCILIATION_LOCK_NAMESPACE, lockId, staleLeaderSeconds],
+          );
           candidate.release();
           return false;
         }
@@ -142,10 +166,13 @@ export function createJobReconciler(
   let routineCursor: Cursor | undefined;
   let controlCursor: ControlCursor | undefined;
   let profileCursor: Cursor | undefined;
+  let profileSweptAt: Date | undefined;
   let controlScanDeadline: Date | undefined;
-  let idleSweptAt = 0;
   let stagesWatchedAt = 0;
   let searchWaitsArmedAt = 0;
+  let checkinsOfferedAt = 0;
+  // Set on stop: an in-flight pass ends at its next step instead of querying a closing pool.
+  let stopped = false;
 
   const reconcileOnce = async () => {
     if (reconciling) return reconciling;
@@ -162,6 +189,7 @@ export function createJobReconciler(
           getLogger().error("auxiliary reconciliation", result.reason);
       }
 
+      if (stopped) return;
       const now = new Date();
       try {
         // Newly marked save receipts are the durable intent. Never load raw profile facts here.
@@ -177,6 +205,7 @@ export function createJobReconciler(
               WHERE done.kind='recruiting_profile_projection' AND done.status='completed'
                 AND done."idempotencyKey"='recruiting-profile-project:'||page."effectId"||':'||page."artifactHash")
             ${profileCursor ? Prisma.sql`AND (saving."createdAt",saving.id)>(${profileCursor.at},${profileCursor.id})` : Prisma.empty}
+            ${profileSweptAt ? Prisma.sql`AND saving."createdAt">${new Date(profileSweptAt.getTime() - PROFILE_RECENT_MS)}` : Prisma.empty}
           ORDER BY saving."createdAt",saving.id LIMIT ${batchSize}
         `);
         await Promise.all(
@@ -185,9 +214,11 @@ export function createJobReconciler(
         const last = pages.at(-1);
         profileCursor =
           pages.length === batchSize && last ? { at: last.createdAt, id: last.id } : undefined;
+        if (!profileCursor) profileSweptAt = now;
       } catch (error) {
         getLogger().error("recruiting profile reconciliation", error);
       }
+      if (stopped) return;
       try {
         questionCursor = await reconcileRecruitingQuestions({
           ...deps,
@@ -198,20 +229,8 @@ export function createJobReconciler(
       } catch (error) {
         getLogger().error("recruiting question reconciliation", error);
       }
-      if (deps.events && now.getTime() - idleSweptAt >= IDLE_SWEEP_INTERVAL_MS) {
-        idleSweptAt = now.getTime();
-        try {
-          await sweepIdleRecruitingRoles({
-            prisma: deps.prisma,
-            jobs: deps.jobs,
-            events: deps.events,
-            now,
-            batchSize,
-          });
-        } catch (error) {
-          getLogger().error("recruiting idle sweep", error);
-        }
-      }
+      if (stopped) return;
+      if (stopped) return;
       if (now.getTime() - searchWaitsArmedAt >= SEARCH_WAIT_REARM_MS) {
         searchWaitsArmedAt = now.getTime();
         try {
@@ -220,6 +239,17 @@ export function createJobReconciler(
           getLogger().error("search follow-up re-arm", error);
         }
       }
+      if (stopped) return;
+      // Candidates' replies are read without anyone opening a page, and wake the role's agent.
+      if (now.getTime() - checkinsOfferedAt >= RECRUITING_CHECKIN_INTERVAL_MS) {
+        checkinsOfferedAt = now.getTime();
+        try {
+          await sweepRecruitingCheckins({ prisma: deps.prisma, jobs: deps.jobs, now, batchSize });
+        } catch (error) {
+          getLogger().error("reply check-in sweep", error);
+        }
+      }
+      if (stopped) return;
       if (deps.events && now.getTime() - stagesWatchedAt >= STAGE_WATCH_SCAN_MS) {
         stagesWatchedAt = now.getTime();
         try {
@@ -237,6 +267,7 @@ export function createJobReconciler(
           getLogger().error("stage watch", error);
         }
       }
+      if (stopped) return;
       try {
         stuckCursor = await reconcileStuckWork({
           prisma: deps.prisma,
@@ -250,6 +281,7 @@ export function createJobReconciler(
       } catch (error) {
         getLogger().error("stuck work reconciliation", error);
       }
+      if (stopped) return;
       controlScanDeadline ??= new Date(now.getTime() + CONTROL_LOOKAHEAD_MS);
       const runCursorFilter = runCursor
         ? {
@@ -378,6 +410,7 @@ export function createJobReconciler(
             sourceMessageId: true,
             status: true,
             error: true,
+            stopKind: true,
             bot: { select: { name: true } },
           },
         });
@@ -394,9 +427,7 @@ export function createJobReconciler(
                 ? `Could not complete the delegated request: ${run.error ?? "unknown error"}`
                 : transcript.text ||
                   "The delegated bot completed its turn without a written summary.";
-            // Loop-guard stops complete without an error; their persisted final text
-            // is the only marker available when the executor's outcome delivery fails.
-            const loopGuardStop = isLoopGuardStopText(transcript.text);
+            const loopGuardStop = run.stopKind === "loop_guard";
             // Same stable delivery key as the executor path (auto-outcome:<runId>), so a
             // concurrent or earlier return is replayed instead of double-posted. Progress-only
             // transcripts (all mid-turn user-progress messages) return as status.
@@ -487,11 +518,13 @@ export function createJobReconciler(
     reconcileOnce,
     start() {
       if (timer) return;
+      stopped = false;
       reconcileSafely();
       timer = setInterval(reconcileSafely, intervalMs);
       timer.unref?.();
     },
     async stop() {
+      stopped = true;
       if (timer) clearInterval(timer);
       timer = undefined;
       await reconciling?.catch(() => undefined);

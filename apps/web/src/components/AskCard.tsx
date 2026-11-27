@@ -14,6 +14,7 @@ import {
   askFormContent,
   askFormDefaults,
   askFormOptions,
+  connectCardOpen,
   isApprovalAskBlock,
   isSecretAskBlock,
   multiSelectAskAnswer,
@@ -27,6 +28,7 @@ import { connectMcpOauth } from "../lib/mcp-connect";
 import { errorText } from "../lib/user-error";
 import { AskDeadline } from "./AskDeadline";
 import { SuccessPop } from "./ai/primitives";
+import { InactiveAsk } from "./InactiveAsk";
 import { MailReplyAskContent } from "./MailReplyAskContent";
 
 export type AskBlock = Extract<ThreadMessage["blocks"][number], { kind: "ask" }>;
@@ -72,7 +74,6 @@ function approvalActionLabel(
     return t`Always allow this tool`;
   if (id === "deny" && fallback === "Deny") return t`Deny`;
   if (id === "allow" && fallback === "Confirm and send") return t`Confirm and send`;
-  if (id === "always" && fallback === "Send when I say send") return t`Send when I say send`;
   if (id === "deny" && fallback === "Cancel") return t`Cancel`;
   if (id === "allow" && fallback === "Looks good, start searching")
     return t`Looks good, start searching`;
@@ -132,8 +133,7 @@ export function AskCard({
       <ConnectionAskCard
         connection={block.connection}
         answer={block.status === "answered" ? block.answer : undefined}
-        canAnswer={canAnswer}
-        expiresAt={block.status !== "answered" ? expiresAt : null}
+        canAnswer={canAnswer && connectCardOpen(block)}
         onAnswer={onAnswer}
       />
     );
@@ -152,19 +152,17 @@ export function AskCard({
 
 type ConnectionState = "idle" | "connecting" | "connected" | "failed";
 
-/** Asks the user to connect an integration through the existing MCP OAuth flow,
- * then answers the same ask so the waiting run continues. */
+/** Asks the user to connect an integration through the existing MCP OAuth flow, then answers
+ * the same ask so the waiting run continues. Signing in never expires, so it has no deadline. */
 function ConnectionAskCard({
   connection,
   answer,
   canAnswer,
-  expiresAt,
   onAnswer,
 }: {
   connection: AskConnection;
   answer: string | undefined;
   canAnswer: boolean;
-  expiresAt?: string | null;
   onAnswer: (text: AskAnswer) => Promise<void>;
 }) {
   const { t } = useLingui();
@@ -183,7 +181,11 @@ function ConnectionAskCard({
         return;
       }
       setState("connected");
-      await onAnswer("connected" satisfies ConnectionAskAnswer);
+      // A card closed earlier records the sign-in only when no other work is running; the
+      // connection itself is made either way.
+      await onAnswer("connected" satisfies ConnectionAskAnswer).catch((error: unknown) => {
+        if (answer === undefined) throw error;
+      });
     } catch {
       setState("failed");
     }
@@ -201,7 +203,7 @@ function ConnectionAskCard({
     }
   }
 
-  const connected = answer === "connected" || (answer === undefined && state === "connected");
+  const connected = answer === "connected" || state === "connected";
   return (
     <fieldset
       data-testid="connection-ask-card"
@@ -227,18 +229,17 @@ function ConnectionAskCard({
           <span className="block text-[13px] text-muted-foreground">{connection.reason}</span>
         </span>
       </div>
-      {canAnswer && expiresAt ? <AskDeadline expiresAt={expiresAt} /> : null}
       {connected ? (
         <div className="mt-3">
           <SuccessPop label={t`Connected`} />
         </div>
-      ) : answer !== undefined ? (
+      ) : answer !== undefined && !canAnswer ? (
         <div className="mt-3 text-[13px] text-muted-foreground">
           <Trans>Not now</Trans>
         </div>
       ) : !canAnswer ? (
         <div className="mt-3 text-[13.5px] font-medium text-muted-foreground">
-          <Trans>No longer active</Trans>
+          <InactiveAsk />
         </div>
       ) : (
         <>
@@ -251,14 +252,16 @@ function ConnectionAskCard({
             <Button className="rounded-full" disabled={busy} onClick={() => void connect()}>
               {state === "connecting" ? <Trans>Connecting…</Trans> : <Trans>Connect</Trans>}
             </Button>
-            <Button
-              variant="ghost"
-              className="rounded-full text-muted-foreground"
-              disabled={busy}
-              onClick={() => void decline()}
-            >
-              <Trans>Not now</Trans>
-            </Button>
+            {answer === undefined ? (
+              <Button
+                variant="ghost"
+                className="rounded-full text-muted-foreground"
+                disabled={busy}
+                onClick={() => void decline()}
+              >
+                <Trans>Not now</Trans>
+              </Button>
+            ) : null}
           </div>
         </>
       )}
@@ -408,7 +411,7 @@ function QuestionAskCard({
             </div>
           ) : !canAnswer ? (
             <div className="mt-3.5 text-[13.5px] font-medium text-muted-foreground">
-              <Trans>No longer active</Trans>
+              <InactiveAsk />
             </div>
           ) : block.requestedSchema ? (
             <form

@@ -1,17 +1,18 @@
 import {
   DisabledBuiltinToolsSchema,
   disabledBuiltinToolSet,
-  RecruitingApprovalToolCallSchema,
   RecruitingCandidatesToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
   RecruitingReplyInputSchema,
   RecruitingShortlistToolInputSchema,
 } from "@rakazo/contracts";
-import { RECRUITING_BRIEF_CHECKLIST } from "@rakazo/core";
+import { RECRUITING_DISABLED_BUILTIN_TOOLS, RECRUITING_UNUSED_BUILTIN_TOOLS } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { builtinAgentTools } from "./builtin-tools.js";
+import { selectBuiltinToolsForRun } from "./executor.js";
+import { normalizeOpenAiToolParameters } from "./openai-tool-parameters.js";
 
 describe("native recruiting approval tool", () => {
   it("offers scoped saved candidate reads as a disableable read-only tool", () => {
@@ -43,43 +44,6 @@ describe("native recruiting approval tool", () => {
       expect(tool?.inputSchema).toEqual(z.toJSONSchema(schema, { io: "input" }));
       expect(tool?.readOnly).not.toBe(true);
     }
-  });
-
-  it("exposes the shared strict staged request as a one-time human approval", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_request_approval");
-
-    expect(tool).toBeDefined();
-    expect(tool?.inputSchema).toEqual(
-      z.toJSONSchema(RecruitingApprovalToolCallSchema, { io: "input" }),
-    );
-    expect(tool?.readOnly).not.toBe(true);
-    expect(tool?.description).toContain("a documents call is refused");
-    expect(tool?.description).toMatch(/never self-approve/i);
-    expect(
-      RecruitingApprovalToolCallSchema.parse({
-        stage: "brief",
-        roleId: "role",
-        expectedRoleRevision: 3,
-      }),
-    ).toEqual({ stage: "brief", roleId: "role", expectedRoleRevision: 3 });
-    expect(tool?.description).toContain('stage:"brief"');
-    expect(tool?.description).toContain("Generic ask_user answers never confirm requirements");
-    const role = builtinAgentTools.find((entry) => entry.name === "recruiting_role");
-    expect(role?.description).toContain('recruiting_request_approval stage:"brief"');
-    expect(role?.description).not.toContain("in the Role panel");
-  });
-
-  it("reuses indexed native row identities when assessing research results", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess");
-    expect(tool?.description).toContain("reuse the exact candidateKey");
-    expect(tool?.description).toContain("candidateRows entry for that rowIndex");
-  });
-  it("offers optional native result saving without making it a search prerequisite", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
-    expect(tool?.description).toContain("save_results");
-    expect(tool?.description).toContain("same run");
-    expect(tool?.description).toContain("research provider's own research and reply tools");
-    expect(tool?.description).toContain("linkedin_url");
   });
 
   it("guides reusable preferences through one exact edit without confusing it with a full document", () => {
@@ -126,16 +90,32 @@ describe("native recruiting approval tool", () => {
   });
 });
 
-describe("recruiting brief checklist", () => {
-  it("reaches every account through the role and brief-approval tools", () => {
-    const description = (name: string) =>
-      builtinAgentTools.find((tool) => tool.name === name)!.description;
-    expect(description("recruiting_role")).toContain(RECRUITING_BRIEF_CHECKLIST);
-    expect(description("recruiting_request_approval")).toContain(
-      "ask the unstated language requirement before this card",
+describe("recruiting tool budget", () => {
+  // Every Kruit call carries these definitions: 40 tools, about 7.7 times its instructions on 11-16.
+  // Workloop pins its prompt the same way (TestPrompt_FitsTheBudget). Lower it, never raise it:
+  // move procedure into skills and rarely used tools behind tool search instead. Raised once on
+  // 11-20 by the user's decision to give the base agent back skills, sub-agents and the scratchpad.
+  it("keeps the built-in tools a recruiter turn always carries within budget", () => {
+    const tools = selectBuiltinToolsForRun({
+      graphicalToolsAllowed: false,
+      groupId: null,
+      trigger: "user",
+      semanticMemoryEnabled: true,
+      messagingChannelRun: false,
+      historyRetrievalEnabled: true,
+      disabledBuiltinTools: [
+        ...RECRUITING_DISABLED_BUILTIN_TOOLS,
+        ...RECRUITING_UNUSED_BUILTIN_TOOLS,
+      ],
+    });
+    const chars = tools.reduce(
+      (total, tool) =>
+        total +
+        (tool.description?.length ?? 0) +
+        JSON.stringify(normalizeOpenAiToolParameters(tool.inputSchema)).length,
+      0,
     );
-    expect(description("recruiting_request_approval")).toContain(
-      "run the first calibration round as a quick people search in the same turn; never",
-    );
+    // +100 (11-21): grades accept a degree given as an object instead of refusing the save.
+    expect(chars).toBeLessThanOrEqual(96_600);
   });
 });

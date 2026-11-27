@@ -2,15 +2,12 @@
 import { createHash, webcrypto } from "node:crypto";
 import { ORPCError } from "@orpc/client";
 import type {
-  RecruitingAssessment,
-  RecruitingAssessmentSnapshot,
   RecruitingAssessmentSourceRef,
   RecruitingCandidate,
   RecruitingCrmCandidateSync,
   RecruitingCrmDataOutput,
   RecruitingCrmTarget,
   RecruitingEmploymentRule,
-  RecruitingQuestion,
   RecruitingRole,
   RecruitingRoleRevision,
 } from "@rakazo/contracts";
@@ -40,20 +37,16 @@ const api = vi.hoisted(() => ({
   correspondence: vi.fn(),
   crmData: vi.fn(),
   readSource: vi.fn(),
-  listAssessments: vi.fn(),
   listCandidates: vi.fn(),
   listFeedback: vi.fn(),
   searchQuality: vi.fn(),
   listCandidateSources: vi.fn(),
   setCandidateShortlist: vi.fn(),
-  getAssessment: vi.fn(),
   listResearch: vi.fn(),
-  listQuestions: vi.fn(),
   answer: vi.fn(),
   createRole: vi.fn(),
   bindRole: vi.fn(),
   reviseRole: vi.fn(),
-  confirmBrief: vi.fn(),
   editCriteria: vi.fn(),
   list: vi.fn(),
   history: vi.fn(),
@@ -1371,67 +1364,6 @@ const savedObservation = {
   requestCursor: null,
   artifactRef: { artifactId: "native-results", sha256: "a".repeat(64) },
 };
-const assessmentSource = {
-  ...source,
-  selection: { kind: "message_text", blockIndex: 0, start: 0, end: source.quote.length },
-} satisfies RecruitingAssessmentSourceRef;
-const assessment = {
-  assessment: {
-    roleId: role.id,
-    candidateKey: "candidate-1",
-    roleRevisionId: "revision-1",
-    version: 1,
-    basedOnVersion: null,
-    createdByRunId: "run-1",
-    createdAt: "2026-01-01T00:00:00Z",
-    facts: [
-      { kind: "statement", id: "fact-1", statement: "Built a compiler", sourceRefIds: [source.id] },
-    ],
-    sourceRefs: [assessmentSource],
-    judgments: {
-      atoms: [
-        {
-          atomId: "atom-1",
-          verdict: "unknown",
-          factIds: ["fact-1"],
-          evidence: [source.id],
-          missing: ["Which component?"],
-        },
-      ],
-      employment: [],
-      hardGate: "unknown",
-      criteria: [
-        {
-          criterionId: "criterion-1",
-          verdict: "unknown",
-          factIds: ["fact-1"],
-          evidence: [source.id],
-          missing: ["Which component?"],
-        },
-      ],
-    },
-    questions: ["How long?"],
-  } satisfies RecruitingAssessment,
-  isCurrent: false,
-  roleRevision: {
-    ...revision,
-    id: "revision-1",
-    revision: 1,
-    criteria: [
-      {
-        ...revision.criteria[0]!,
-        expression: { kind: "atom", id: "atom-1", statement: "Original systems requirement" },
-      },
-    ],
-  },
-  sourceMessageTargets: [
-    {
-      messageId: source.anchor.messageId,
-      threadId: "material-thread",
-      target: { groupId: "material-group" },
-    },
-  ],
-} satisfies RecruitingAssessmentSnapshot;
 let cleanup: (() => Promise<void>) | undefined;
 const crmTarget: RecruitingCrmTarget = {
   mcpServerId: "crm-server",
@@ -1477,13 +1409,11 @@ function candidatePage(items = [candidateFixture()]) {
       sourceRows: 19,
       candidates: 12,
       identifiedCandidates: 10,
-      unassessed: 9,
-      assessed: 3,
       shortlisted: 2,
     },
   };
 }
-function candidateFixture(candidateKey = "candidate-1", assessed = true) {
+function candidateFixture(candidateKey = "candidate-1") {
   return {
     roleId: role.id,
     candidateKey,
@@ -1501,18 +1431,20 @@ function candidateFixture(candidateKey = "candidate-1", assessed = true) {
     discoveryCount: 2,
     firstDiscoveredAt: "2026-01-01T00:00:00Z",
     lastDiscoveredAt: "2026-01-02T00:00:00Z",
-    latestAssessment: assessed
-      ? {
-          version: 1,
-          roleRevisionId: "revision-1",
-          createdAt: "2026-01-01T00:00:00Z",
-          isCurrent: false,
-          hardGate: "unknown" as const,
-        }
-      : null,
     crm: null as RecruitingCrmCandidateSync | null,
     latestSource: undefined as RecruitingCandidate["latestSource"],
   };
+}
+/** The people the role's list returns, whichever role and revision the workspace is on. */
+function savedPeople(...keys: string[]) {
+  api.listCandidates.mockImplementation(async ({ roleId }: { roleId: string }) => {
+    const workspace = await api.getWorkspace.mock.results.at(-1)?.value;
+    return {
+      ...candidatePage(roleId === role.id ? keys.map((key) => candidateFixture(key)) : []),
+      roleId,
+      roleRevisionId: workspace?.revision.id ?? revision.id,
+    };
+  });
 }
 beforeEach(() => {
   api.readView.mockImplementation(recruitingReadViewFixture(api));
@@ -1534,41 +1466,7 @@ beforeEach(() => {
   api.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
   api.searchQuality.mockResolvedValue({ rounds: [], goodExample: 0, notFit: 0 });
   api.readSource.mockRejectedValue(new Error("Source unavailable"));
-  api.listAssessments.mockResolvedValue([assessment]);
-  api.listCandidates.mockImplementation(async ({ roleId }: { roleId: string }) => {
-    const assessments = (await api.listAssessments.mock.results.at(-1)?.value) ?? [assessment];
-    const workspace = await api.getWorkspace.mock.results.at(-1)?.value;
-    return {
-      ...candidatePage(
-        assessments
-          .filter((item: RecruitingAssessmentSnapshot) => item.assessment.roleId === roleId)
-          .map((item: RecruitingAssessmentSnapshot) => ({
-            ...candidateFixture(item.assessment.candidateKey),
-            roleId: item.assessment.roleId,
-            latestAssessment: {
-              version: item.assessment.version,
-              roleRevisionId: item.assessment.roleRevisionId,
-              createdAt: item.assessment.createdAt,
-              isCurrent: item.isCurrent,
-              hardGate: item.assessment.judgments.hardGate,
-            },
-          })),
-      ),
-      roleId,
-      roleRevisionId: workspace?.revision.id ?? revision.id,
-    };
-  });
-  api.getAssessment.mockImplementation(
-    async ({ roleId, candidateKey }: { roleId: string; candidateKey: string }) => {
-      const assessments = (await api.listAssessments.mock.results.at(-1)?.value) ?? [assessment];
-      return (
-        assessments.find(
-          (item: RecruitingAssessmentSnapshot) =>
-            item.assessment.roleId === roleId && item.assessment.candidateKey === candidateKey,
-        ) ?? null
-      );
-    },
-  );
+  savedPeople("candidate-1");
   api.listCandidateSources.mockResolvedValue({
     roleId: role.id,
     candidateKey: "candidate-1",
@@ -1576,7 +1474,6 @@ beforeEach(() => {
     nextCursor: null,
     total: 0,
   });
-  api.listQuestions.mockResolvedValue({ questions: [] });
   api.answer.mockResolvedValue({ ok: true });
   api.listResearch.mockResolvedValue({
     observations: [],
@@ -1679,7 +1576,6 @@ async function mounted(
             showDiagnostics={diagnostics}
             refreshSignal={refreshSignal}
             onClose={() => {}}
-            onRevealMessage={reveal}
             onDiscussCandidate={discuss}
             onCandidateFeedback={feedback}
             candidateFeedbackRecipients={feedbackRecipients}
@@ -1770,7 +1666,7 @@ it("debounces candidate typing and aborts superseded query and role reads withou
 });
 
 it.each(["results", "shortlist", "contacts"] as const)(
-  "loads %s candidates without unrelated assessment, question or memory history and keeps native evidence and feedback",
+  "loads %s candidates without unrelated memory history and keeps native evidence and feedback",
   async (viewName) => {
     const candidate = { ...candidateFixture(), shortlisted: viewName === "shortlist" };
     if (viewName === "contacts") {
@@ -1861,8 +1757,6 @@ it.each(["results", "shortlist", "contacts"] as const)(
       expect(view.container.querySelector("tbody")?.textContent).toContain("Email draft");
     }
     if (viewName !== "contacts") expect(api.correspondence).not.toHaveBeenCalled();
-    expect(api.listAssessments).not.toHaveBeenCalled();
-    expect(api.listQuestions).not.toHaveBeenCalled();
     expect(api.list).not.toHaveBeenCalled();
     expect(api.listResearch).toHaveBeenCalledExactlyOnceWith({ roleId: role.id });
     expect(api.listCandidates).toHaveBeenCalledWith(
@@ -1872,7 +1766,6 @@ it.each(["results", "shortlist", "contacts"] as const)(
       }),
       { signal: expect.any(AbortSignal) },
     );
-    expect(view.container.querySelector('select[aria-label="Internal assessment"]')).not.toBeNull();
     expect(
       view.container.querySelector('select[aria-label="Research round"]')?.textContent,
     ).toContain("Search update");
@@ -1885,11 +1778,6 @@ it.each(["results", "shortlist", "contacts"] as const)(
     );
     await act(async () => {
       await vi.dynamicImportSettled();
-    });
-    expect(api.getAssessment).toHaveBeenCalledWith({
-      roleId: role.id,
-      candidateKey: "candidate-1",
-      version: 1,
     });
     expect(api.listCandidateSources).toHaveBeenCalledWith(
       expect.objectContaining({ roleId: role.id, candidateKey: "candidate-1" }),
@@ -1924,7 +1812,7 @@ it("shows a warm scoped pool read-only until current validation and evicts it on
     readCache: cache,
     readCacheScope: scope,
   };
-  const candidate = { ...candidateFixture("warm-person", false), name: "Saved person" };
+  const candidate = { ...candidateFixture("warm-person"), name: "Saved person" };
   const page = candidatePage([candidate]);
   api.listCandidates.mockResolvedValue(page);
   await mounted("thread-1", undefined, false, undefined, options);
@@ -1973,28 +1861,6 @@ it("shows a warm scoped pool read-only until current validation and evicts it on
       .getAll()
       .some(({ queryKey }) => String(queryKey[1]).startsWith(`${scope}:`)),
   ).toBe(false);
-});
-
-it("preserves an explicit workspace assessment filter when a refreshed pool has no assessments", async () => {
-  api.listCandidates.mockResolvedValue(candidatePage());
-  const view = await mounted("thread-1", undefined, false, undefined, {
-    presentation: "workspace",
-    tab: "evidence",
-  });
-  await changeSelect(view.container, "Internal assessment", "current");
-  const empty = candidatePage([]);
-  empty.counts.assessed = 0;
-  api.listCandidates.mockResolvedValue(empty);
-  await view.render("thread-1", 1);
-  expect(
-    view.container.querySelector<HTMLSelectElement>('select[aria-label="Internal assessment"]')
-      ?.value,
-  ).toBe("current");
-  expect(api.listCandidates).toHaveBeenLastCalledWith(
-    expect.objectContaining({ roleId: role.id, assessmentState: "current" }),
-    { signal: expect.any(AbortSignal) },
-  );
-  expect(api.listAssessments).not.toHaveBeenCalled();
 });
 
 it("refreshes contacts from native receipts and ignores a late response from another role", async () => {
@@ -2136,7 +2002,6 @@ it("shows actual saved brief criteria without exposing internal field keys or fe
         ],
         rules: [],
         questions: [],
-        confirmation: null,
       },
     },
   });
@@ -2155,11 +2020,8 @@ it("shows actual saved brief criteria without exposing internal field keys or fe
   expect(view.container.textContent).not.toContain("salary_range");
   expect(view.container.querySelector('[role="tablist"]')).toBeNull();
   expect(api.listCandidates).not.toHaveBeenCalled();
-  expect(api.listAssessments).not.toHaveBeenCalled();
   expect(api.listResearch).not.toHaveBeenCalled();
-  expect(api.listQuestions).not.toHaveBeenCalled();
   expect(api.list).not.toHaveBeenCalled();
-  expect(api.confirmBrief).not.toHaveBeenCalled();
   expect(api.editCriteria).not.toHaveBeenCalled();
 });
 
@@ -2488,9 +2350,6 @@ it("requires an explicit feedback choice and preserves the authored reason witho
     view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!.value,
   ).toBe("");
   expect(view.container.querySelector('[role="dialog"]')!.textContent).toContain("Feedback sent");
-  expect(view.container.querySelector('[role="dialog"]')!.textContent).toContain(
-    "Hard criteriaUnknown",
-  );
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
   expect(api.editCriteria).not.toHaveBeenCalled();
   expect(api.reviseRole).not.toHaveBeenCalled();
@@ -2559,7 +2418,7 @@ it.each([
 
 it("reads the saved decision and revision after hold before resuming without an external refresh", async () => {
   const candidate = {
-    ...candidateFixture("candidate-1", false),
+    ...candidateFixture("candidate-1"),
     name: "Synthetic Avery",
     revision: 7,
   };
@@ -2690,7 +2549,7 @@ it("prevents duplicate submissions and keeps newer edits when the earlier feedba
 });
 
 it("retries the original candidate reference when saved profile fields refresh after an uncertain outcome", async () => {
-  const candidate = { ...candidateFixture("stable-candidate", false), name: "Original candidate" };
+  const candidate = { ...candidateFixture("stable-candidate"), name: "Original candidate" };
   api.listCandidates.mockResolvedValue(candidatePage([candidate]));
   const view = await mounted();
   view.feedback.mockRejectedValueOnce(new Error("Outcome unknown"));
@@ -2711,8 +2570,8 @@ it("retries the original candidate reference when saved profile fields refresh a
 it.each(["candidate", "role", "role version", "thread", "access denial"])(
   "discards feedback and late acceptance after changing %s",
   async (change) => {
-    const first = { ...candidateFixture("first", false), name: "First candidate" };
-    const second = { ...candidateFixture("second", false), name: "Second candidate" };
+    const first = { ...candidateFixture("first"), name: "First candidate" };
+    const second = { ...candidateFixture("second"), name: "Second candidate" };
     api.listCandidates.mockImplementation(async () => {
       const workspace = await api.getWorkspace.mock.results.at(-1)?.value;
       return {
@@ -2771,7 +2630,7 @@ it.each(["Cards", "Table"])(
   "opens candidate evidence from %s without moving the list and returns focus on Escape and Close",
   async (viewName) => {
     const candidates = Array.from({ length: 30 }, (_, index) => ({
-      ...candidateFixture(`person-${index}`, false),
+      ...candidateFixture(`person-${index}`),
       name: `Synthetic person ${index}`,
     }));
     api.listCandidates.mockResolvedValue(candidatePage(candidates));
@@ -2793,7 +2652,6 @@ it.each(["Cards", "Table"])(
     expect(document.getElementById(dialog!.getAttribute("aria-labelledby")!)?.textContent).toBe(
       candidates[14]!.name,
     );
-    expect(dialog!.textContent).not.toContain("Unassessed");
     expect(dialog!.textContent).toContain("Saved candidate sources");
     expect(dialog!.textContent).not.toContain("Unknown");
     expect(view.container.querySelector(viewName === "Cards" ? "ul" : "table")).toBe(list);
@@ -2801,7 +2659,6 @@ it.each(["Cards", "Table"])(
     expect(
       view.container.querySelector<HTMLInputElement>('[aria-label="Search candidates"]')?.value,
     ).toBe("Synthetic");
-    expect(api.getAssessment).not.toHaveBeenCalled();
     expect(api.listCandidateSources).toHaveBeenCalledTimes(1);
     const close = dialog!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
     await vi.waitFor(() => expect(document.activeElement).toBe(close));
@@ -2821,33 +2678,6 @@ it.each(["Cards", "Table"])(
   },
 );
 
-it("does not reopen candidate evidence or steal focus when closed reads and refreshes finish", async () => {
-  let finish!: (value: typeof assessment) => void;
-  api.getAssessment.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const view = await mounted();
-  await view.click("Evidence");
-  const trigger = [...view.container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (button) => button.textContent === "candidate-1",
-  )!;
-  trigger.focus();
-  await view.click("candidate-1");
-  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain("Loading…");
-  await view.click("Close");
-  await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
-  const panelClose = view.container.querySelector<HTMLButtonElement>('[aria-label="Close panel"]')!;
-  panelClose.focus();
-  await act(async () => finish(assessment));
-  expect(document.activeElement).toBe(panelClose);
-  await view.render("thread-1", 1);
-  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
-  expect(document.activeElement).toBe(panelClose);
-  expect(view.container.textContent).not.toContain("Built a compiler");
-});
-
 it("updates an open candidate dialog across role revisions without refocusing and returns to its refreshed trigger", async () => {
   const view = await mounted();
   await view.click("Evidence");
@@ -2862,7 +2692,6 @@ it("updates an open candidate dialog across role revisions without refocusing an
   await view.render("thread-1", 1);
   expect(view.container.querySelector('[role="dialog"]')).toBe(dialog);
   expect(document.activeElement).toBe(close);
-  expect(dialog.textContent).toContain("Built a compiler");
   const trigger = [...view.container.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "candidate-1",
   )!;
@@ -2870,30 +2699,26 @@ it("updates an open candidate dialog across role revisions without refocusing an
   await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
 });
 
-it.each(["Discuss candidate", "Message"])(
-  "finishes closing before %s transfers focus to the native chat",
-  async (action) => {
-    const view = await mounted();
-    const composer = document.createElement("textarea");
-    view.container.append(composer);
-    try {
-      const callback = action === "Discuss candidate" ? view.discuss : view.reveal;
-      const dialogAtHandoff = vi.fn();
-      callback.mockImplementation(() => {
-        dialogAtHandoff(view.container.querySelector('[role="dialog"]'));
-        composer.focus();
-      });
-      await view.click("Evidence");
-      await view.click("candidate-1");
-      await view.click(action);
-      await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(1));
-      expect(dialogAtHandoff).toHaveBeenCalledWith(null);
-      expect(document.activeElement).toBe(composer);
-    } finally {
-      composer.remove();
-    }
-  },
-);
+it("finishes closing before Discuss candidate transfers focus to the native chat", async () => {
+  const view = await mounted();
+  const composer = document.createElement("textarea");
+  view.container.append(composer);
+  try {
+    const dialogAtHandoff = vi.fn();
+    view.discuss.mockImplementation(() => {
+      dialogAtHandoff(view.container.querySelector('[role="dialog"]'));
+      composer.focus();
+    });
+    await view.click("Evidence");
+    await view.click("candidate-1");
+    await view.click("Discuss candidate");
+    await vi.waitFor(() => expect(view.discuss).toHaveBeenCalledTimes(1));
+    expect(dialogAtHandoff).toHaveBeenCalledWith(null);
+    expect(document.activeElement).toBe(composer);
+  } finally {
+    composer.remove();
+  }
+});
 
 it.each(["role change", "access denial", "thread change"])(
   "discards a pending native chat handoff when %s occurs during dialog close",
@@ -2927,44 +2752,13 @@ it.each(["role change", "access denial", "thread change"])(
   },
 );
 
-it("switches candidate evidence without publishing a delayed previous assessment", async () => {
-  const second = {
-    ...assessment,
-    assessment: {
-      ...assessment.assessment,
-      candidateKey: "candidate-2",
-      facts: [{ ...assessment.assessment.facts[0]!, statement: "Second candidate evidence" }],
-    },
-  };
-  api.listAssessments.mockResolvedValue([assessment, second]);
-  let finish!: (value: typeof assessment) => void;
-  api.getAssessment.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const view = await mounted();
-  await view.click("Evidence");
-  await view.click("candidate-1");
-  await view.click("Close");
-  await view.click("candidate-2");
-  await act(async () => finish(assessment));
-  const dialog = view.container.querySelector('[role="dialog"]')!;
-  expect(dialog.textContent).toContain("Second candidate evidence");
-  expect(dialog.textContent).not.toContain("Built a compiler");
-  expect(api.listCandidateSources).toHaveBeenCalledTimes(2);
-  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
-});
-
 it.each(["role change", "access denial"])(
   "dismisses candidate evidence after %s and never restores it on refresh",
   async (change) => {
     const view = await mounted();
     await view.click("Evidence");
     await view.click("candidate-1");
-    expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(
-      "Built a compiler",
-    );
+    expect(view.container.querySelector('[role="dialog"]')).not.toBeNull();
     if (change === "access denial") {
       api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
     } else {
@@ -2976,7 +2770,6 @@ it.each(["role change", "access denial"])(
     }
     await view.render("thread-1", 1);
     expect(view.container.querySelector('[role="dialog"]')).toBeNull();
-    expect(view.container.textContent).not.toContain("Built a compiler");
     await view.render("thread-1", 2);
     expect(view.container.querySelector('[role="dialog"]')).toBeNull();
   },
@@ -3009,7 +2802,7 @@ it("defaults to a table with authoritative match ordering and leaves unknown sco
       ["unknown", "Unknown score", null],
     ] as const
   ).map(([key, name, score]) => ({
-    ...candidateFixture(key!, false),
+    ...candidateFixture(key!),
     name,
     latestSource: {
       providerTaskId: "provider-task-1",
@@ -3041,41 +2834,11 @@ it("defaults to a table with authoritative match ordering and leaves unknown sco
   expect(view.container.querySelector("tbody tr:last-child")?.textContent).toContain("Unknown");
 });
 
-it.each([
-  ["met", "Met", "text-success"],
-  ["unknown", "Unknown", "text-warning"],
-  ["unmet", "Unmet", "text-destructive"],
-] as const)(
-  "shows the saved %s evidence verdict in a distinct accessible status color",
-  async (verdict, label, color) => {
-    api.getAssessment.mockResolvedValue({
-      ...assessment,
-      assessment: {
-        ...assessment.assessment,
-        judgments: {
-          ...assessment.assessment.judgments,
-          hardGate: verdict,
-          criteria: assessment.assessment.judgments.criteria.map((item) => ({ ...item, verdict })),
-        },
-      },
-    });
-    const view = await mounted();
-    await view.click("Evidence");
-    await view.click("candidate-1");
-    const details = view.container.querySelector('[role="dialog"] [aria-label="candidate-1"]')!;
-    const status = [...details.querySelectorAll("span")].find((item) => item.textContent === label);
-    expect(status?.classList.contains(color)).toBe(true);
-    expect(status?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
-    expect(details.textContent).toContain("Built a compiler");
-    expect(api.reviseRole).not.toHaveBeenCalled();
-  },
-);
-
-it("shows saved unassessed profiles and authoritative totals in Cards and Table", async () => {
+it("shows saved profiles and authoritative totals in Cards and Table", async () => {
   api.listCandidates.mockResolvedValue(
     candidatePage([
       {
-        ...candidateFixture("raw-person", false),
+        ...candidateFixture("raw-person"),
         name: "Synthetic Avery",
         title: "Systems engineer",
         company: "Example Tools",
@@ -3092,7 +2855,6 @@ it("shows saved unassessed profiles and authoritative totals in Cards and Table"
   expect(view.container.textContent).toContain("Synthetic Avery");
   expect(view.container.textContent).toContain("Example Tools");
   expect(view.container.textContent).toContain("Remote");
-  expect(view.container.textContent).not.toContain("Unassessed");
   expect(view.container.querySelector("li")?.textContent).not.toContain("Unknown");
   expect(view.container.querySelector('a[href="https://example.test/avery"]')).not.toBeNull();
   await view.click("Table");
@@ -3102,103 +2864,14 @@ it("shows saved unassessed profiles and authoritative totals in Cards and Table"
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
 });
 
-it("omits unused internal assessment controls without applying stored diagnostic filters", async () => {
-  api.listAssessments.mockResolvedValue([]);
-  const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
-  const second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
-  api.listCandidates.mockImplementation(async ({ offset, assessmentState, verdict }) => ({
-    ...candidatePage(assessmentState || verdict ? [] : [offset ? second : first]),
-    total: assessmentState || verdict ? 0 : 31,
-    counts: { ...candidatePage().counts, candidates: 2, assessed: 0, unassessed: 2 },
-  }));
-  const diagnostic = await mounted();
-  await diagnostic.click("Evidence");
-  await diagnostic.click("Table");
-  await changeSelect(diagnostic.container, "Internal assessment", "current");
-  await changeSelect(diagnostic.container, "Internal verdict", "met");
-  await changeSelect(diagnostic.container, "Candidate sort", "recent");
-  await cleanup?.();
-  api.listCandidates.mockClear();
-
-  const view = await mounted("thread-1", undefined, false);
-  expect(view.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
-  expect(view.container.querySelector('select[aria-label="Internal verdict"]')).toBeNull();
-  expect(view.container.querySelector("thead")?.textContent).not.toContain("Internal assessment");
-  expect(view.container.querySelector("tbody")?.textContent).toContain(first.name);
-  expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toHaveProperty(
-    "value",
-    "recent",
-  );
-  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
-    {
-      roleId: role.id,
-      limit: 30,
-      sort: "recent",
-    },
-    { signal: expect.any(AbortSignal) },
-  );
-  await view.click("Page 2");
-  expect(api.listCandidates).toHaveBeenLastCalledWith(
-    {
-      roleId: role.id,
-      limit: 30,
-      sort: "recent",
-      offset: 30,
-    },
-    { signal: expect.any(AbortSignal) },
-  );
-  expect(view.container.querySelector("tbody")?.textContent).toContain(second.name);
-  expect(view.container.querySelector("tbody")?.textContent).not.toContain(first.name);
-  await cleanup?.();
-  api.listCandidates.mockClear();
-  // Reopening reads only the page that was on screen, not every page before it.
-  const reopened = await mounted("thread-1", undefined, false);
-  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
-    {
-      roleId: role.id,
-      limit: 30,
-      sort: "recent",
-      offset: 30,
-    },
-    { signal: expect.any(AbortSignal) },
-  );
-
-  api.listAssessments.mockRejectedValueOnce(new Error("Assessment refresh failed"));
-  await reopened.render("thread-1", 1);
-  expect(reopened.container.textContent).toContain("Could not load recruiting");
-  expect(reopened.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
-  expect(reopened.container.querySelector("tbody")?.textContent).toContain(second.name);
-
-  await reopened.render("thread-1", 1, true);
-  expect(
-    reopened.container.querySelector('select[aria-label="Internal assessment"]'),
-  ).toHaveProperty("value", "current");
-  expect(reopened.container.querySelector('select[aria-label="Internal verdict"]')).toHaveProperty(
-    "value",
-    "met",
-  );
-  expect(api.listCandidates).toHaveBeenLastCalledWith(
-    {
-      roleId: role.id,
-      limit: 30,
-      assessmentState: "current",
-      verdict: "met",
-      sort: "recent",
-    },
-    { signal: expect.any(AbortSignal) },
-  );
-});
-
 it.each([false, true])(
   "loads candidates while auxiliary reads hang and rechecks the thread binding (changed: %s)",
   async (changed) => {
     const pending = new Promise<never>(() => {});
-    api.listAssessments.mockReturnValue(pending);
     api.listResearch.mockReturnValue(pending);
-    api.listQuestions.mockReturnValue(pending);
     api.list.mockReturnValue(pending);
     const candidate = {
-      ...candidateFixture("candidate-before-rebind", false),
+      ...candidateFixture("candidate-before-rebind"),
       name: "Before rebind",
     };
     const next = {
@@ -3249,62 +2922,6 @@ it.each([false, true])(
   },
 );
 
-it("keeps the candidate page when empty auxiliary assessments finish without changing filters", async () => {
-  let finish!: (value: RecruitingAssessmentSnapshot[]) => void;
-  api.listAssessments.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const candidate = { ...candidateFixture("saved-candidate", false), name: "Saved candidate" };
-  api.listCandidates.mockResolvedValue(candidatePage([candidate]));
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Evidence");
-  expect(view.container.textContent).toContain(candidate.name);
-  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
-    {
-      roleId: role.id,
-      limit: 30,
-      sort: "ranking",
-    },
-    { signal: expect.any(AbortSignal) },
-  );
-  expect(view.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
-  expect(view.container.querySelector('select[aria-label="Internal verdict"]')).toBeNull();
-  expect(view.container.textContent).not.toContain("Internal assessment");
-  await act(async () => finish([]));
-  expect(view.container.textContent).toContain(candidate.name);
-  expect(api.listCandidates).toHaveBeenCalledTimes(1);
-  expect(view.container.querySelector('select[aria-label="Internal assessment"]')).toBeNull();
-  expect(view.container.querySelector('select[aria-label="Internal verdict"]')).toBeNull();
-});
-
-it("keeps a pending or failed assessment read distinct from an empty assessment list", async () => {
-  let fail!: (error: Error) => void;
-  api.listAssessments.mockImplementationOnce(
-    () =>
-      new Promise((_resolve, reject) => {
-        fail = reject;
-      }),
-  );
-  api.listCandidates.mockResolvedValue(candidatePage());
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Missing info");
-  expect(view.container.textContent).toContain("Loading…");
-  expect(api.listCandidates).toHaveBeenCalledTimes(1);
-  await act(async () => fail(new Error("Assessment read failed")));
-  expect(view.container.textContent).toContain("Could not load recruiting");
-  expect(api.listCandidates).toHaveBeenCalledTimes(1);
-
-  await view.render("thread-1", 1);
-  await view.click("Evidence");
-  expect(view.container.querySelector('select[aria-label="Internal assessment"]')).not.toBeNull();
-  expect(view.container.querySelector('select[aria-label="Internal verdict"]')).not.toBeNull();
-  await view.click("Table");
-  expect(view.container.querySelector("thead")?.textContent).toContain("Internal assessment");
-  expect(view.container.querySelector("tbody")?.textContent).toContain("Internal assessment");
-});
-
 it.each([
   { viewName: "Cards", identified: true },
   { viewName: "Table", identified: true },
@@ -3314,7 +2931,7 @@ it.each([
   "discusses the selected persisted candidate from $viewName (identified: $identified)",
   async ({ viewName, identified }) => {
     const candidate = {
-      ...candidateFixture("internal-candidate-key", false),
+      ...candidateFixture("internal-candidate-key"),
       name: identified ? "Synthetic Avery" : null,
       title: identified ? "Compiler engineer" : null,
       company: identified ? "Example Tools" : null,
@@ -3366,8 +2983,8 @@ it("shows CRM states in Cards and Table only when a target or import exists", as
   ] as const;
   api.listCandidates.mockResolvedValue({
     ...candidatePage([
-      ...statuses.map((status) => ({ ...candidateFixture(status, false), crm: crmSync(status) })),
-      candidateFixture("no-receipt", false),
+      ...statuses.map((status) => ({ ...candidateFixture(status), crm: crmSync(status) })),
+      candidateFixture("no-receipt"),
     ]),
     crmTarget: { bindingEffectId: "crm-binding", target: crmTarget },
   });
@@ -3409,13 +3026,13 @@ it("shows CRM states in Cards and Table only when a target or import exists", as
 });
 
 it("shows only the selected candidate's verified CRM receipt and never infers success from a status", async () => {
-  const synced = { ...candidateFixture("synced-person", false), crm: crmSync("synced") };
+  const synced = { ...candidateFixture("synced-person"), crm: crmSync("synced") };
   api.listCandidates.mockResolvedValue(
     candidatePage([
       synced,
-      { ...candidateFixture("unknown-person", false), crm: crmSync("unknown") },
+      { ...candidateFixture("unknown-person"), crm: crmSync("unknown") },
       {
-        ...candidateFixture("unverified-person", false),
+        ...candidateFixture("unverified-person"),
         crm: { ...crmSync("synced"), receipt: null },
       },
     ]),
@@ -3452,7 +3069,7 @@ it("keeps a historical CRM receipt on its exact source with its original target 
   };
   const f = rawResultsFixture();
   api.listCandidates.mockResolvedValue({
-    ...candidatePage([candidateFixture("raw-person", false)]),
+    ...candidatePage([candidateFixture("raw-person")]),
     crmTarget: {
       bindingEffectId: "new-binding",
       target: { ...crmTarget, clientLabel: "Current client" },
@@ -3495,7 +3112,7 @@ it("keeps a historical CRM receipt on its exact source with its original target 
 });
 
 it("clears the selected CRM receipt when a new binding replaces a filtered-out candidate", async () => {
-  const synced = { ...candidateFixture("synced-person", false), crm: crmSync("synced") };
+  const synced = { ...candidateFixture("synced-person"), crm: crmSync("synced") };
   api.listCandidates.mockResolvedValue({
     ...candidatePage([synced]),
     crmTarget: { bindingEffectId: "crm-binding", target: crmTarget },
@@ -3507,7 +3124,7 @@ it("clears the selected CRM receipt when a new binding replaces a filtered-out c
     synced.crm.receipt!.candidate_id,
   );
   api.listCandidates.mockResolvedValue({
-    ...candidatePage([candidateFixture("another-person", false)]),
+    ...candidatePage([candidateFixture("another-person")]),
     crmTarget: {
       bindingEffectId: "new-binding",
       target: { ...crmTarget, clientLabel: "New client" },
@@ -3544,7 +3161,7 @@ it("refreshes CRM source receipts without new discoveries and ignores a late old
     ],
   };
   api.listCandidates.mockResolvedValue(
-    candidatePage([{ ...candidateFixture("raw-person", false), crm: pending }]),
+    candidatePage([{ ...candidateFixture("raw-person"), crm: pending }]),
   );
   api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.listCandidateSources.mockResolvedValueOnce(sourcePage);
@@ -3560,7 +3177,7 @@ it("refreshes CRM source receipts without new discoveries and ignores a late old
     }),
   );
   api.listCandidates.mockResolvedValue(
-    candidatePage([{ ...candidateFixture("raw-person", false), crm: synced }]),
+    candidatePage([{ ...candidateFixture("raw-person"), crm: synced }]),
   );
   await view.click("Refresh");
   expect(api.listCandidateSources).toHaveBeenCalledTimes(2);
@@ -3583,11 +3200,11 @@ it("refreshes CRM source receipts without new discoveries and ignores a late old
 
 it("omits stale current CRM details for an excluded selection while refreshing its source history", async () => {
   const f = rawResultsFixture();
-  const pending = { ...candidateFixture("pending-person", false), crm: crmSync("pending") };
+  const pending = { ...candidateFixture("pending-person"), crm: crmSync("pending") };
   const synced = { ...pending, crm: { ...crmSync("synced"), effectId: pending.crm.effectId } };
   const target = { bindingEffectId: "crm-binding", target: crmTarget };
   const filtered = {
-    ...candidatePage([candidateFixture("another-person", false)]),
+    ...candidatePage([candidateFixture("another-person")]),
     crmTarget: target,
   };
   api.listCandidates
@@ -3655,7 +3272,7 @@ it("omits stale current CRM details for an excluded selection while refreshing i
 });
 
 it("reloads candidate pages when the CRM binding changes during pagination", async () => {
-  const synced = { ...candidateFixture("synced-person", false), crm: crmSync("synced") };
+  const synced = { ...candidateFixture("synced-person"), crm: crmSync("synced") };
   api.listCandidates
     .mockResolvedValueOnce({
       ...candidatePage([synced]),
@@ -3663,7 +3280,7 @@ it("reloads candidate pages when the CRM binding changes during pagination", asy
       crmTarget: { bindingEffectId: "crm-binding", target: crmTarget },
     })
     .mockResolvedValue({
-      ...candidatePage([candidateFixture("new-person", false)]),
+      ...candidatePage([candidateFixture("new-person")]),
       crmTarget: {
         bindingEffectId: "new-binding",
         target: { ...crmTarget, clientLabel: "New client" },
@@ -3735,7 +3352,7 @@ it("reveals the selected recruiting tab horizontally on selection and restore wi
 it("keeps an explicit Dashboard selection through delayed native hydration and preserves the saved list when changing tabs", async () => {
   const storageKey = `${rightPanelStorageKey("actor-1", role.spaceId, "group", "thread-1")}:recruiting:${role.id}`;
   const selected = {
-    ...candidateFixture("selected-candidate", false),
+    ...candidateFixture("selected-candidate"),
     name: "Synthetic saved candidate",
   };
   const saved = {
@@ -3789,8 +3406,8 @@ it("keeps an explicit Dashboard selection through delayed native hydration and p
 });
 
 it("restores the recruiting list and selected candidate from fresh pages after closing and reopening", async () => {
-  const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
-  let second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
+  const first = { ...candidateFixture("first-person"), name: "Synthetic first" };
+  let second = { ...candidateFixture("second-person"), name: "Synthetic second" };
   api.listCandidates.mockImplementation(async ({ offset }) => ({
     ...candidatePage([offset ? second : first]),
     total: 31,
@@ -3800,8 +3417,6 @@ it("restores the recruiting list and selected candidate from fresh pages after c
   await view.click("Evidence");
   await view.click("Table");
   await changeInput(view.container, "Search candidates", "Synthetic");
-  await changeSelect(view.container, "Internal assessment", "unassessed");
-  await changeSelect(view.container, "Internal verdict", "unknown");
   await changeSelect(view.container, "Candidate sort", "recent");
   await changeSelect(view.container, "Research round", `source:${savedObservation.effectId}`);
   await act(async () => {
@@ -3830,8 +3445,6 @@ it("restores the recruiting list and selected candidate from fresh pages after c
       roleId: role.id,
       limit: 30,
       query: "Synthetic",
-      assessmentState: "unassessed",
-      verdict: "unknown",
       sort: "recent",
       sourceEffectId: savedObservation.effectId,
       shortlisted: true,
@@ -3863,8 +3476,8 @@ it("restores the recruiting list and selected candidate from fresh pages after c
 });
 
 it("restores an excluded selected candidate through the existing saved-candidate read", async () => {
-  const selected = { ...candidateFixture("chosen-person", false), name: "Synthetic chosen" };
-  const other = { ...candidateFixture("other-person", false), name: "Synthetic other" };
+  const selected = { ...candidateFixture("chosen-person"), name: "Synthetic chosen" };
+  const other = { ...candidateFixture("other-person"), name: "Synthetic other" };
   api.listCandidates.mockImplementation(async ({ query }) =>
     candidatePage(query === "Other" ? [other] : [selected]),
   );
@@ -3897,9 +3510,9 @@ it.each(["source", "action"])(
       actions: [f.action],
       observations: [savedObservation, { ...savedObservation, effectId: "absent-page" }],
     });
-    const selected = { ...candidateFixture("chosen-person", false), name: "Current profile" };
+    const selected = { ...candidateFixture("chosen-person"), name: "Current profile" };
     const historical = { ...selected, name: "Historical profile" };
-    const other = { ...candidateFixture("other-person", false), name: "Other profile" };
+    const other = { ...candidateFixture("other-person"), name: "Other profile" };
     api.listCandidates.mockImplementation(async ({ query, sourceEffectId, actionId }) => {
       if (sourceEffectId === "absent-page") return candidatePage(query ? [] : [other]);
       if (sourceEffectId || actionId) return candidatePage(query ? [historical] : [other]);
@@ -3930,10 +3543,10 @@ it.each(["source", "action"])(
 );
 
 it("ignores an old-round selected-candidate response after the source changes", async () => {
-  const selected = { ...candidateFixture("chosen-person", false), name: "Current profile" };
+  const selected = { ...candidateFixture("chosen-person"), name: "Current profile" };
   const historical = { ...selected, name: "Historical profile" };
   const fresh = { ...selected, name: "Fresh profile" };
-  const other = { ...candidateFixture("other-person", false), name: "Other profile" };
+  const other = { ...candidateFixture("other-person"), name: "Other profile" };
   api.listResearch.mockResolvedValue({
     tasks: [],
     actions: [],
@@ -3962,9 +3575,9 @@ it("ignores an old-round selected-candidate response after the source changes", 
 });
 
 it("ignores a late page after filters change and keeps the new filters on reopen", async () => {
-  const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
-  const second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
-  const fresh = { ...candidateFixture("fresh-person", false), name: "Synthetic fresh" };
+  const first = { ...candidateFixture("first-person"), name: "Synthetic first" };
+  const second = { ...candidateFixture("second-person"), name: "Synthetic second" };
+  const fresh = { ...candidateFixture("fresh-person"), name: "Synthetic fresh" };
   let finish!: (page: ReturnType<typeof candidatePage>) => void;
   api.listCandidates.mockImplementation(({ offset, sort }) => {
     if (sort === "recent") return Promise.resolve(candidatePage([fresh]));
@@ -4003,7 +3616,7 @@ it("opens the last page when a saved page is past the end of the list", async ()
     ...candidatePage(
       offset === 90
         ? []
-        : [{ ...candidateFixture(`person-${offset ?? 0}`, false), name: `person-${offset ?? 0}` }],
+        : [{ ...candidateFixture(`person-${offset ?? 0}`), name: `person-${offset ?? 0}` }],
     ),
     total: 45,
   }));
@@ -4024,7 +3637,7 @@ it("opens the last page when a saved page is past the end of the list", async ()
 });
 it("keeps the chosen page after its restored read fails and is retried", async () => {
   const people = ["first", "second", "third"].map((name) => ({
-    ...candidateFixture(`${name}-person`, false),
+    ...candidateFixture(`${name}-person`),
     name: `Synthetic ${name}`,
   }));
   let rejectNextPage = false;
@@ -4154,7 +3767,7 @@ it.each(["rank", "tier", "score"])(
     await saved.click("Evidence");
     await changeSelect(saved.container, "Candidate sort", sort);
     await cleanup?.();
-    const person = { ...candidateFixture("unranked", false), name: "Synthetic Avery" };
+    const person = { ...candidateFixture("unranked"), name: "Synthetic Avery" };
     api.listCandidates.mockClear().mockResolvedValue({
       ...candidatePage([person]),
       sortAvailability: { rank: false, tier: false, score: false },
@@ -4238,16 +3851,12 @@ it.each(["tier", "score"])(
 it("requests server pages and filters while keeping selected evidence outside the visible page", async () => {
   api.listCandidates
     .mockResolvedValueOnce({ ...candidatePage(), total: 42 })
-    .mockResolvedValue(candidatePage([candidateFixture("candidate-2", false)]));
+    .mockResolvedValue(candidatePage([candidateFixture("candidate-2")]));
   const view = await mounted();
   await view.click("Evidence");
   await view.click("candidate-1");
-  expect(api.getAssessment).toHaveBeenCalledExactlyOnceWith({
-    roleId: role.id,
-    candidateKey: "candidate-1",
-    version: 1,
-  });
-  expect(view.container.textContent).toContain("Original systems requirement");
+  const dialog = view.container.querySelector('[role="dialog"]');
+  expect(dialog).not.toBeNull();
   await view.click("Page 2");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     expect.objectContaining({ roleId: role.id, offset: 30 }),
@@ -4260,14 +3869,12 @@ it("requests server pages and filters while keeping selected evidence outside th
   );
   // A new search starts again from the first page.
   expect(api.listCandidates.mock.lastCall?.[0].offset).toBeUndefined();
-  expect(view.container.textContent).toContain("Original systems requirement");
-  await changeSelect(view.container, "Internal assessment", "unassessed");
   await changeSelect(view.container, "Candidate sort", "recent");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
-    expect.objectContaining({ query: "Synthetic", assessmentState: "unassessed", sort: "recent" }),
+    expect.objectContaining({ query: "Synthetic", sort: "recent" }),
     { signal: expect.any(AbortSignal) },
   );
-  expect(view.container.textContent).toContain("Built a compiler");
+  expect(view.container.querySelector('[role="dialog"]')).toBe(dialog);
 });
 
 it("filters saved result pages alongside search updates and preserves the other candidate filters", async () => {
@@ -4304,15 +3911,11 @@ it("filters saved result pages alongside search updates and preserves the other 
     expect(select.textContent).not.toContain(id);
 
   await changeInput(view.container, "Search candidates", "Synthetic");
-  await changeSelect(view.container, "Internal assessment", "unassessed");
-  await changeSelect(view.container, "Internal verdict", "unknown");
   await changeSelect(view.container, "Candidate sort", "recent");
   const filters = {
     roleId: role.id,
     limit: 30,
     query: "Synthetic",
-    assessmentState: "unassessed",
-    verdict: "unknown",
     sort: "recent",
   };
   await changeSelect(view.container, "Research round", `action:${f.action.id}`);
@@ -4399,7 +4002,7 @@ it("ignores late saved-result pages while retaining the original candidate discu
     { signal: expect.any(AbortSignal) },
   );
   await act(async () =>
-    finish(candidatePage([{ ...candidateFixture("late-person", false), name: "Late candidate" }])),
+    finish(candidatePage([{ ...candidateFixture("late-person"), name: "Late candidate" }])),
   );
   expect(view.container.textContent).not.toContain("Late candidate");
   await view.click("Discuss candidate");
@@ -4416,7 +4019,7 @@ it("ignores late saved-result pages while retaining the original candidate discu
 
 it("shows saved source rounds with their exact original revision and Artifact", async () => {
   const f = rawResultsFixture();
-  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("raw-person", false)]));
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("raw-person")]));
   api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.listCandidateSources.mockResolvedValue({
     roleId: role.id,
@@ -4443,7 +4046,6 @@ it("shows saved source rounds with their exact original revision and Artifact", 
   const view = await mounted();
   await view.click("Evidence");
   await view.click("raw-person");
-  expect(api.getAssessment).not.toHaveBeenCalled();
   expect(api.listCandidateSources).toHaveBeenCalledWith(
     expect.objectContaining({ roleId: role.id, candidateKey: "raw-person" }),
   );
@@ -4469,7 +4071,7 @@ it("shows saved source rounds with their exact original revision and Artifact", 
 
 it("shows a native candidate source Artifact without an empty custom-action heading", async () => {
   const f = rawResultsFixture();
-  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("native-person", false)]));
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("native-person")]));
   api.listResearch.mockResolvedValue({ tasks: [], actions: [], observations: [] });
   api.listCandidateSources.mockResolvedValue({
     roleId: role.id,
@@ -4513,7 +4115,7 @@ it("shows a native candidate source Artifact without an empty custom-action head
 });
 
 it("persists shortlist with the candidate revision and leaves conflicts visibly unsaved", async () => {
-  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1")]));
   let finish!: (value: unknown) => void;
   api.setCandidateShortlist.mockReturnValueOnce(
     new Promise((resolve) => {
@@ -4539,7 +4141,7 @@ it("persists shortlist with the candidate revision and leaves conflicts visibly 
       ?.getAttribute("aria-checked"),
   ).toBe("false");
   api.listCandidates.mockResolvedValue(
-    candidatePage([{ ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 }]),
+    candidatePage([{ ...candidateFixture("candidate-1"), shortlisted: true, revision: 1 }]),
   );
   await act(async () =>
     finish({ roleId: role.id, candidateKey: "candidate-1", shortlisted: true, revision: 1 }),
@@ -4571,7 +4173,7 @@ it("distinguishes candidate index failures from an empty result and clears denie
   api.listCandidates.mockResolvedValue(candidatePage());
   await view.click("Refresh");
   expect(view.container.textContent).toContain("candidate-1");
-  api.getAssessment.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
+  api.listCandidateSources.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
   await view.click("candidate-1");
   expect(view.container.textContent).not.toContain("candidate-1");
   expect(view.container.textContent).not.toContain(role.title);
@@ -4693,37 +4295,6 @@ it("keeps recruiting diagnostics out of product views while opening verified evi
     expect(memory.textContent).toContain(diagnostic);
 });
 
-it("reads candidate evidence through its saved assessment version without fetching raw files", async () => {
-  const material = artifactSourceFixture();
-  api.listAssessments.mockResolvedValue([
-    { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [material.source] } },
-  ]);
-  api.readSource.mockResolvedValue({
-    kind: "text",
-    text: "Before\nBuilt a compiler\nAfter",
-    start: 7,
-    end: 23,
-  });
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Evidence");
-  await view.click("Unnamed candidate");
-  expect(view.container.querySelector("blockquote")).toBeNull();
-  expect(api.readSource).not.toHaveBeenCalled();
-  const evidence = await view.expand("Source", true);
-  await vi.waitFor(() =>
-    expect(evidence.querySelector("mark")?.textContent).toBe(material.source.quote),
-  );
-  expect(api.readSource).toHaveBeenCalledWith({
-    kind: "assessment",
-    roleId: assessment.assessment.roleId,
-    candidateKey: assessment.assessment.candidateKey,
-    version: assessment.assessment.version,
-    sourceRefId: material.source.id,
-  });
-  expect(api.getById).not.toHaveBeenCalled();
-  expect(evidence.querySelector("[data-artifact-id]")).toBeNull();
-});
-
 it("does not fall back to raw file access when a product source cannot be verified", async () => {
   const material = artifactSourceFixture();
   api.getWorkspace.mockResolvedValue({
@@ -4743,7 +4314,7 @@ it("does not fall back to raw file access when a product source cannot be verifi
 
 it("keeps current findings ahead of collapsed feedback and source-specific evidence in the profile drawer", async () => {
   const candidate = {
-    ...candidateFixture("profile-overview", false),
+    ...candidateFixture("profile-overview"),
     name: "Profile Example",
     title: "Software engineer",
     company: "Example company",
@@ -4847,9 +4418,9 @@ it("keeps current findings ahead of collapsed feedback and source-specific evide
   expect(api.getById).not.toHaveBeenCalled();
 });
 
-it("shows exact Autumn rule states from the latest report before source history loads without classifying prose", async () => {
+it("shows exact search rule states from the latest report before source history loads without classifying prose", async () => {
   const candidate = {
-    ...candidateFixture("provider-status", false),
+    ...candidateFixture("provider-status"),
     name: "Provider-status person",
   };
   const report = {
@@ -4926,7 +4497,7 @@ it("shows exact Autumn rule states from the latest report before source history 
 
 it("shows unnamed candidates and real profile links without exposing their storage keys", async () => {
   const candidate = {
-    ...candidateFixture("internal-candidate-key", false),
+    ...candidateFixture("internal-candidate-key"),
     name: null,
     linkedinUrl: "https://www.linkedin.com/in/example-profile",
   };
@@ -4982,7 +4553,7 @@ it("shows unnamed candidates and real profile links without exposing their stora
 
 it("uses business gate labels only in explicit match-summary expressions while preserving diagnostics and sources", async () => {
   const candidate = {
-    ...candidateFixture("summary-candidate", false),
+    ...candidateFixture("summary-candidate"),
     name: "G2 Researcher",
     company: "G2",
   };
@@ -5078,7 +4649,7 @@ it.each([
   ],
 ])("shows readable resume status %s while preserving provider evidence", async (status, label) => {
   const candidate = {
-    ...candidateFixture("resume-person", false),
+    ...candidateFixture("resume-person"),
     name: "Resume Example",
     resumeUrl: status === "available" ? "https://example.test/resume.pdf" : null,
     latestSource: {
@@ -5143,7 +4714,7 @@ it.each(["Cards", "Table"])(
     const recommendation = "Review the supplied evidence and unresolved employment scope. ".repeat(
       20,
     );
-    const candidate = { ...candidateFixture("internal-person", false), name: "Synthetic Engineer" };
+    const candidate = { ...candidateFixture("internal-person"), name: "Synthetic Engineer" };
     api.listCandidates.mockResolvedValue(candidatePage([candidate]));
     const source = {
       taskId: "internal-task",
@@ -5210,7 +4781,7 @@ it.each(["Cards", "Table"])(
     candidate.latestSource = source;
     const retainedSource = JSON.stringify(source);
     const noMatch = {
-      ...candidateFixture("missing", false),
+      ...candidateFixture("missing"),
       name: "Provider graded match",
       latestSource: {
         ...source,
@@ -5232,7 +4803,7 @@ it.each(["Cards", "Table"])(
       },
     };
     const unknown = {
-      ...candidateFixture("unknown", false),
+      ...candidateFixture("unknown"),
       name: "Unknown match",
       latestSource: {
         ...source,
@@ -5248,12 +4819,12 @@ it.each(["Cards", "Table"])(
       },
     };
     const unavailable = {
-      ...candidateFixture("unavailable", false),
+      ...candidateFixture("unavailable"),
       name: "Unavailable report",
       latestSource: { ...source, report: undefined },
     };
     const nativeScore = {
-      ...candidateFixture("native-score", false),
+      ...candidateFixture("native-score"),
       name: "Synthetic unresolved lead",
       latestSource: {
         ...source,
@@ -5331,7 +4902,6 @@ it.each(["Cards", "Table"])(
     await toggleDescription(matches[4]!, "Recommendation", recommendation);
     if (viewName === "Cards") await toggleDescription(matches[0]!, "Fit reasons", fitReasons);
     expect(api.listCandidates).toHaveBeenCalledTimes(candidateReads);
-    expect(list.textContent).not.toContain("Unassessed");
     expect(list.textContent).toContain("Resume: Could not access");
     expect(api.listCandidateSources).not.toHaveBeenCalled();
     await view.click(candidate.name);
@@ -5399,7 +4969,6 @@ it.each(["Cards", "Table"])(
     expect(sources.querySelector("time")?.dateTime).toBe("2026-01-01T00:00:00Z");
     expect(sources.textContent).toContain("Example Robotics · Geometry engineer");
     expect(sources.textContent).toContain("Pipeline · Synced");
-    expect(dialog.textContent).not.toContain("Unassessed");
     for (const hidden of [
       "internal-person",
       "internal-task",
@@ -5414,7 +4983,6 @@ it.each(["Cards", "Table"])(
     ])
       expect(dialog.textContent).not.toContain(hidden);
     expect(sources.querySelector("pre, mark, [role=status]")).toBeNull();
-    expect(api.getAssessment).not.toHaveBeenCalled();
     expect(api.getById).not.toHaveBeenCalled();
     expect(api.readSource).not.toHaveBeenCalled();
     await view.click("Close");
@@ -5466,7 +5034,7 @@ it.each(["Cards", "Table"])(
       { fields: [], expected: [] },
     ];
     const candidates = cases.map(({ fields }, index) => ({
-      ...candidateFixture(`rank-person-${index}`, false),
+      ...candidateFixture(`rank-person-${index}`),
       name: `Synthetic rank person ${index}`,
       latestSource: {
         providerTaskId: "native-task",
@@ -5533,12 +5101,12 @@ it.each(["Cards", "Table"])(
       observedAt: "2026-01-01T00:00:00Z",
     };
     const current = {
-      ...candidateFixture("current-person", false),
+      ...candidateFixture("current-person"),
       name: "Current source person",
       latestSource: currentSource,
     };
     const earlier = {
-      ...candidateFixture("earlier-person", false),
+      ...candidateFixture("earlier-person"),
       name: "Earlier source person",
       latestSource: earlierSource,
     };
@@ -5578,65 +5146,8 @@ it.each(["Cards", "Table"])(
   },
 );
 
-it("opens retained candidate report fields through the native saved assessment source", async () => {
-  const material = artifactSourceFixture(
-    '{"task_id":"internal-task","rows":[]}',
-    "application/json",
-  );
-  const reportSource = { ...material.source, kind: "provider_report" };
-  api.listAssessments.mockResolvedValue([
-    { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [reportSource] } },
-  ]);
-  api.readSource.mockResolvedValue({
-    kind: "report",
-    report: {
-      fields: [
-        {
-          label: "Geometry work",
-          value: "Built a mesh compiler",
-          evidence: "Provider cites project documentation.",
-          reasoning: "Full-time duration is unconfirmed.",
-          sourceUrls: ["https://projects.example.test/mesh"],
-        },
-        { label: "Full-time years", value: null, sourceUrls: [] },
-      ],
-      sourceUrls: ["https://profile.example.test/engineer"],
-    },
-  });
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Evidence");
-  await view.click("Unnamed candidate");
-  expect(api.readSource).not.toHaveBeenCalled();
-  const evidence = await view.expand("Source", true);
-  await vi.waitFor(() =>
-    expect(evidence.querySelector("dl dt")?.textContent).toBe("Geometry work"),
-  );
-  expect(evidence.textContent).toContain("Built a mesh compiler");
-  expect(evidence.textContent).toContain("Unknown");
-  expect(evidence.textContent).toContain("Provider cites project documentation.");
-  expect(evidence.textContent).toContain("Full-time duration is unconfirmed.");
-  expect(evidence.querySelector('a[href="https://projects.example.test/mesh"]')).not.toBeNull();
-  expect(evidence.querySelector('a[href="https://profile.example.test/engineer"]')).not.toBeNull();
-  expect(evidence.querySelector("pre, mark, [data-artifact-id]")).toBeNull();
-  for (const hidden of [
-    "internal-task",
-    material.reference.artifactId,
-    material.reference.sha256,
-    "Source text",
-  ])
-    expect(evidence.textContent).not.toContain(hidden);
-  expect(api.readSource).toHaveBeenCalledExactlyOnceWith({
-    kind: "assessment",
-    roleId: assessment.assessment.roleId,
-    candidateKey: assessment.assessment.candidateKey,
-    version: assessment.assessment.version,
-    sourceRefId: reportSource.id,
-  });
-  expect(api.getById).not.toHaveBeenCalled();
-});
-
 it("opens the newest saved source while preserving dated findings and source pagination", async () => {
-  const candidate = { ...candidateFixture("repeated-person", false), name: "Synthetic Engineer" };
+  const candidate = { ...candidateFixture("repeated-person"), name: "Synthetic Engineer" };
   api.listCandidates.mockResolvedValue(candidatePage([candidate]));
   const page = {
     roleId: role.id,
@@ -5759,53 +5270,11 @@ it.each(["source", "revision", "role", "thread", "denial"])(
   },
 );
 
-it("discards a late retained assessment report when selecting another candidate", async () => {
-  const material = artifactSourceFixture();
-  const first = {
-    ...assessment,
-    assessment: { ...assessment.assessment, sourceRefs: [material.source] },
-  };
-  const second = { ...first, assessment: { ...first.assessment, candidateKey: "candidate-2" } };
-  api.listAssessments.mockResolvedValue([first, second]);
-  api.listCandidates.mockResolvedValue(
-    candidatePage([
-      { ...candidateFixture(), name: "First engineer" },
-      { ...candidateFixture("candidate-2"), name: "Second engineer" },
-    ]),
-  );
-  let finish!: (value: unknown) => void;
-  api.readSource.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Evidence");
-  await view.click("First engineer");
-  await view.expand("Source", true);
-  await view.click("Close");
-  await view.click("Second engineer");
-  await act(async () =>
-    finish({
-      kind: "report",
-      report: {
-        fields: [
-          { label: "Geometry work", value: "First candidate retained report", sourceUrls: [] },
-        ],
-        sourceUrls: [],
-      },
-    }),
-  );
-  expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain("Second engineer");
-  expect(view.container.textContent).not.toContain("First candidate retained report");
-  expect(api.getById).not.toHaveBeenCalled();
-});
-
 it.each(["candidate", "role", "denial"])(
-  "discards a late unassessed source report after a %s change",
+  "discards a late source report after a %s change",
   async (boundary) => {
-    const first = { ...candidateFixture("first-person", false), name: "First engineer" };
-    const second = { ...candidateFixture("second-person", false), name: "Second engineer" };
+    const first = { ...candidateFixture("first-person"), name: "First engineer" };
+    const second = { ...candidateFixture("second-person"), name: "Second engineer" };
     api.listCandidates.mockResolvedValue(candidatePage([first, second]));
     let finish!: (value: unknown) => void;
     api.listCandidateSources.mockReturnValueOnce(
@@ -5856,16 +5325,14 @@ it.each(["candidate", "role", "denial"])(
             observedAt: "2026-01-01T00:00:00Z",
             crmImports: [],
             report: {
-              fields: [
-                { label: "Geometry work", value: "Late unassessed source report", sourceUrls: [] },
-              ],
+              fields: [{ label: "Geometry work", value: "Late source report", sourceUrls: [] }],
               sourceUrls: [],
             },
           },
         ],
       }),
     );
-    expect(view.container.textContent).not.toContain("Late unassessed source report");
+    expect(view.container.textContent).not.toContain("Late source report");
     if (boundary === "candidate")
       expect(view.container.querySelector('[role="dialog"]')?.textContent).toContain(second.name);
     else expect(view.container.querySelector('[role="dialog"]')).toBeNull();
@@ -5950,7 +5417,7 @@ it("retains missing identity and exposes saved profile issues without inventing 
   api.listCandidates.mockResolvedValue(
     candidatePage([
       {
-        ...candidateFixture("saved-row-4", false),
+        ...candidateFixture("saved-row-4"),
         issues: ["missing_name"],
         evidenceUrls: ["https://example.test/evidence"],
         resumeUrl: "https://example.test/resume.pdf",
@@ -5986,7 +5453,7 @@ it("ignores a late candidate page and denial from the old thread", async () => {
   };
   api.getWorkspace.mockResolvedValue(next);
   api.listCandidates.mockResolvedValue({
-    ...candidatePage([{ ...candidateFixture("new-person", false), roleId: "role-2" }]),
+    ...candidatePage([{ ...candidateFixture("new-person"), roleId: "role-2" }]),
     roleId: "role-2",
     roleRevisionId: "rev-2",
   });
@@ -6019,7 +5486,7 @@ it("ignores a late candidate page and denial from the old thread", async () => {
 
 it("saves a shortlist change from an action held since the list was refreshing", async () => {
   // An open profile keeps the action from the render it last saw, which can be mid-refresh.
-  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1")]));
   api.setCandidateShortlist
     .mockResolvedValueOnce({
       roleId: role.id,
@@ -6055,9 +5522,7 @@ it("saves a shortlist change from an action held since the list was refreshing",
   const stale = held();
   await act(async () =>
     refreshed(
-      candidatePage([
-        { ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 },
-      ]),
+      candidatePage([{ ...candidateFixture("candidate-1"), shortlisted: true, revision: 1 }]),
     ),
   );
   await act(async () => stale(false));
@@ -6072,7 +5537,7 @@ it("saves a shortlist change from an action held since the list was refreshing",
 });
 
 it("saves a shortlist change after another read invalidates the list while it refreshes", async () => {
-  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1")]));
   api.setCandidateShortlist
     .mockResolvedValueOnce({
       roleId: role.id,
@@ -6099,13 +5564,11 @@ it("saves a shortlist change after another read invalidates the list while it re
   // A sibling panel's saved change clears the shared reads before this refresh answers.
   clearRecruitingReads(cache, scope);
   api.listCandidates.mockResolvedValue(
-    candidatePage([{ ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 }]),
+    candidatePage([{ ...candidateFixture("candidate-1"), shortlisted: true, revision: 1 }]),
   );
   await act(async () =>
     refreshed(
-      candidatePage([
-        { ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 },
-      ]),
+      candidatePage([{ ...candidateFixture("candidate-1"), shortlisted: true, revision: 1 }]),
     ),
   );
   await view.click("Shortlist candidate-1");
@@ -6120,7 +5583,7 @@ it("saves a shortlist change after another read invalidates the list while it re
 });
 
 it("waits for the list to be read again when a shortlist change starts after another panel cleared it", async () => {
-  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1")]));
   api.setCandidateShortlist
     .mockResolvedValueOnce({
       roleId: role.id,
@@ -6142,7 +5605,7 @@ it("waits for the list to be read again when a shortlist change starts after ano
   });
   await view.click("Evidence");
   api.listCandidates.mockResolvedValue(
-    candidatePage([{ ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 }]),
+    candidatePage([{ ...candidateFixture("candidate-1"), shortlisted: true, revision: 1 }]),
   );
   await view.click("Shortlist candidate-1");
   // Nothing in this panel re-reads after a sibling's change; the next action must not be refused.
@@ -6162,7 +5625,7 @@ it("waits for the list to be read again when a shortlist change starts after ano
 
 it("keeps a confirmed shortlist receipt when refreshing the candidate counts fails", async () => {
   api.listCandidates
-    .mockResolvedValueOnce(candidatePage([candidateFixture("candidate-1", false)]))
+    .mockResolvedValueOnce(candidatePage([candidateFixture("candidate-1")]))
     .mockRejectedValue(new Error("offline"));
   api.setCandidateShortlist.mockResolvedValue({
     roleId: role.id,
@@ -6186,7 +5649,7 @@ it("keeps a confirmed shortlist receipt when refreshing the candidate counts fai
 });
 
 it("keeps a pending shortlist and its receipt across candidate filter changes", async () => {
-  const candidate = candidateFixture("candidate-1", false);
+  const candidate = candidateFixture("candidate-1");
   api.listCandidates.mockResolvedValue(candidatePage([candidate]));
   let finish!: (value: unknown) => void;
   api.setCandidateShortlist.mockReturnValueOnce(
@@ -6221,7 +5684,7 @@ it("keeps a pending shortlist and its receipt across candidate filter changes", 
 });
 
 it("ignores a superseded candidate read denial after a fresh shortlist receipt and read", async () => {
-  const candidate = candidateFixture("candidate-1", false);
+  const candidate = candidateFixture("candidate-1");
   api.listCandidates.mockResolvedValue(candidatePage([candidate]));
   let finish!: (value: unknown) => void;
   api.setCandidateShortlist.mockReturnValueOnce(
@@ -6286,7 +5749,7 @@ it("preserves null and primitive provider rows in the exact raw Artifact viewer"
 });
 
 it("refreshes saved sources when new discoveries arrive and ignores the replaced source denial", async () => {
-  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("raw-person", false)]));
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("raw-person")]));
   let deny!: (error: unknown) => void;
   api.listCandidateSources.mockReturnValueOnce(
     new Promise((_resolve, reject) => {
@@ -6297,7 +5760,7 @@ it("refreshes saved sources when new discoveries arrive and ignores the replaced
   await view.click("Evidence");
   await view.click("raw-person");
   api.listCandidates.mockResolvedValue(
-    candidatePage([{ ...candidateFixture("raw-person", false), discoveryCount: 3 }]),
+    candidatePage([{ ...candidateFixture("raw-person"), discoveryCount: 3 }]),
   );
   api.listCandidateSources.mockResolvedValue({
     roleId: role.id,
@@ -6762,7 +6225,6 @@ function searchFilterWorkspace() {
             sourceRefIds: [],
           },
         ],
-        confirmation: null,
       },
     },
   };
@@ -7145,48 +6607,6 @@ it.each([
   expect(view.container.querySelector('[role="alert"]')).toBeNull();
 });
 
-it("refreshes brief confirmation and saved assessments after editing criteria", async () => {
-  const brief = {
-    fields: [],
-    questions: [],
-    rules: [],
-    searchFilters: [],
-    confirmation: {
-      revision: 2,
-      userId: "user-1",
-      messageId: "confirmation-message",
-      confirmedAt: "2026-01-01T00:00:00Z",
-    },
-  };
-  api.getWorkspace.mockResolvedValue({ role, revision: { ...revision, brief } });
-  api.listAssessments.mockResolvedValue([
-    {
-      ...assessment,
-      isCurrent: true,
-      roleRevision: revision,
-      assessment: { ...assessment.assessment, roleRevisionId: revision.id },
-    },
-  ]);
-  const view = await mounted();
-  expect(view.container.textContent).toContain("Brief confirmed");
-  await view.click("Edit criteria");
-  await changeStatement(view.container, "Build reliable systems");
-  const saved = savedCriteria();
-  const next = {
-    ...saved,
-    revision: { ...saved.revision, brief: { ...brief, confirmation: null } },
-  };
-  api.editCriteria.mockResolvedValue(next);
-  api.getWorkspace.mockResolvedValue(next);
-  api.listAssessments.mockResolvedValue([{ ...assessment, isCurrent: false }]);
-  await view.click("Save");
-  expect(view.container.querySelector("textarea")).toBeNull();
-  expect(view.container.textContent).toContain("Build reliable systems");
-  expect(view.container.textContent).not.toContain("Brief confirmed");
-  await view.click("Evidence");
-  expect(view.container.textContent).toContain("Outdated");
-});
-
 it.each(["text/plain", "text/html", "application/json"])(
   "opens attested legacy %s source text with the exact quote highlighted and reads only",
   async (mimeType) => {
@@ -7235,50 +6655,10 @@ it.each(["text/plain", "text/html", "application/json"])(
     ])
       expect(method).not.toHaveBeenCalled();
     expect(api.get).not.toHaveBeenCalled();
-    expect(view.reveal).not.toHaveBeenCalled();
     await view.click("Refresh");
     expect(api.getById).toHaveBeenCalledTimes(1);
   },
 );
-
-it("projects a nested JSON string at exact UTF-16 offsets without normalizing escaped text", async () => {
-  const quote = 'same\t"quoted"\\path 😀';
-  const text = `  Prefix 😀\r\n${quote}\n${quote} trailing  `;
-  const start = text.lastIndexOf(quote);
-  const f = artifactSourceFixture(JSON.stringify({ rows: [{ detail: text }] }), "application/json");
-  api.listAssessments.mockResolvedValue([
-    {
-      ...assessment,
-      assessment: {
-        ...assessment.assessment,
-        sourceRefs: [
-          {
-            ...f.source,
-            kind: "provider_report",
-            quote,
-            selection: {
-              kind: "artifact_json_string",
-              path: ["rows", 0, "detail"],
-              start,
-              end: start + quote.length,
-            },
-          },
-        ],
-      },
-    },
-  ]);
-  api.getById.mockResolvedValue(f.artifact);
-  const view = await mounted();
-  await view.click("Evidence");
-  await view.click("candidate-1");
-  expect(api.getById).not.toHaveBeenCalled();
-  const details = await view.expand("Source excerpt");
-  await vi.waitFor(() => expect(details.querySelector("mark")?.textContent).toBe(quote));
-  expect(details.querySelector("pre")?.textContent).toBe(text);
-  expect(details.querySelector("mark")?.previousSibling?.textContent).toBe(text.slice(0, start));
-  expect(view.container.textContent).toContain("provider_report · read");
-  expect(view.container.textContent).toContain("Unknown");
-});
 
 it.each(["id", "hash", "size", "access"])(
   "withholds source files and text when Artifact %s verification fails",
@@ -7432,36 +6812,6 @@ it("does not carry expanded evidence or a late source response into another thre
   expect(view.container.textContent).not.toContain("Source excerpt");
 });
 
-it("does not carry expanded evidence or a late source response into another candidate", async () => {
-  const f = artifactSourceFixture();
-  const original = {
-    ...assessment,
-    assessment: { ...assessment.assessment, sourceRefs: [f.source] },
-  };
-  const second = {
-    ...original,
-    assessment: { ...original.assessment, candidateKey: "candidate-2" },
-  };
-  let finish!: (artifact: typeof f.artifact) => void;
-  api.listAssessments.mockResolvedValue([original, second]);
-  api.getById.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const view = await mounted();
-  await view.click("Evidence");
-  await view.click("candidate-1");
-  await view.expand("Source excerpt");
-  await view.click("candidate-2");
-  await act(async () => {
-    finish(f.artifact);
-  });
-  expect(view.container.querySelector("mark")).toBeNull();
-  expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
-  expect(api.getById).toHaveBeenCalledTimes(1);
-});
-
 it("does not carry expanded evidence into another role with the same source reference", async () => {
   const f = artifactSourceFixture();
   const original = { ...revision, criteria: [], sourceRefs: [f.source] };
@@ -7477,28 +6827,19 @@ it("does not carry expanded evidence into another role with the same source refe
     role: nextRole,
     revision: { ...original, id: nextRole.currentRevisionId, roleId: nextRole.id },
   });
-  api.listAssessments.mockResolvedValue([]);
+  savedPeople();
   api.listResearch.mockResolvedValue({ tasks: [], actions: [], observations: [] });
   await view.click("Refresh");
   expect(view.container.querySelector("mark")).toBeNull();
   expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
 });
 
-it.each(["thread", "assessment sources", "research", "questions", "user memory", "bot memory"])(
-  "logs only error metadata when %s access is revoked and clears previously opened evidence",
+it.each(["thread", "research", "user memory", "bot memory"])(
+  "logs only error metadata when %s access is revoked and clears the shown people",
   async (boundary) => {
-    const f = artifactSourceFixture();
-    api.listAssessments.mockResolvedValue([
-      { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [f.source] } },
-    ]);
-    api.getById.mockResolvedValue(f.artifact);
     const view = await mounted("thread-1", "owner-bot");
     await view.click("Evidence");
-    await view.click("candidate-1");
-    await view.expand("Source excerpt");
-    await vi.waitFor(() =>
-      expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote),
-    );
+    expect(view.container.textContent).toContain("candidate-1");
     const error = new ORPCError(
       boundary === "thread"
         ? "UNAUTHORIZED"
@@ -7508,9 +6849,7 @@ it.each(["thread", "assessment sources", "research", "questions", "user memory",
       { message: "Read denied", data: { payload: "private source payload" } },
     );
     if (boundary === "thread") api.getWorkspace.mockRejectedValueOnce(error);
-    else if (boundary === "assessment sources") api.listAssessments.mockRejectedValueOnce(error);
     else if (boundary === "research") api.listResearch.mockRejectedValueOnce(error);
-    else if (boundary === "questions") api.listQuestions.mockRejectedValueOnce(error);
     else if (boundary === "user memory") api.list.mockRejectedValueOnce(error);
     else api.list.mockImplementationOnce(async () => []).mockRejectedValueOnce(error);
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -7525,63 +6864,43 @@ it.each(["thread", "assessment sources", "research", "questions", "user memory",
     ]);
     expect(view.container.textContent).toContain("Could not load recruiting");
     expect(view.container.textContent).not.toContain("candidate-1");
-    expect(view.container.textContent).not.toContain(f.source.quote);
-    expect(view.container.querySelector("mark")).toBeNull();
-    expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
     await view.click("Refresh");
     await view.click("Evidence");
     expect(view.container.textContent).toContain("candidate-1");
     expect(view.container.querySelector('section[aria-label="candidate-1"]')).toBeNull();
-    await view.click("candidate-1");
-    await view.expand("Source excerpt");
-    await vi.waitFor(() =>
-      expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote),
-    );
-    expect(api.getById).toHaveBeenCalledTimes(2);
+    expect(view.container.textContent).toContain("candidate-1");
   },
 );
 
 it.each(["recruiting reads", "memory reads"])(
-  "clears opened evidence when %s deny access after a sibling already failed offline",
+  "clears the shown people when %s deny access after a sibling already failed offline",
   async (boundary) => {
-    const f = artifactSourceFixture();
-    api.listAssessments.mockResolvedValue([
-      { ...assessment, assessment: { ...assessment.assessment, sourceRefs: [f.source] } },
-    ]);
-    api.getById.mockResolvedValue(f.artifact);
     const view = await mounted("thread-1", "owner-bot");
     await view.click("Evidence");
-    await view.click("candidate-1");
-    await view.expand("Source excerpt");
-    await vi.waitFor(() =>
-      expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote),
-    );
+    expect(view.container.textContent).toContain("candidate-1");
     let deny!: (error: ORPCError<"NOT_FOUND", unknown>) => void;
     const laterDenial = new Promise((_, reject) => {
       deny = reject;
     });
     if (boundary === "recruiting reads") {
       api.listResearch.mockRejectedValueOnce(new Error("offline"));
-      api.listAssessments.mockReturnValueOnce(laterDenial);
+      api.listCandidates.mockReturnValueOnce(laterDenial);
     } else {
       api.list.mockRejectedValueOnce(new Error("offline")).mockReturnValueOnce(laterDenial);
     }
     await view.click("Refresh");
     expect(view.container.textContent).toContain("Could not load recruiting");
-    expect(view.container.querySelector("mark")?.textContent).toBe(f.source.quote);
+    expect(view.container.textContent).toContain("candidate-1");
     await act(async () => {
       deny(new ORPCError("NOT_FOUND"));
     });
-    expect(view.container.querySelector("mark")).toBeNull();
-    expect(view.container.querySelector("[data-artifact-id]")).toBeNull();
     expect(view.container.textContent).not.toContain("candidate-1");
-    expect(view.container.textContent).not.toContain(f.source.quote);
   },
 );
 
-it("shows unassessed raw provider rows from saved Artifacts without creating an assessment or search", async () => {
+it("shows raw provider rows from saved Artifacts without creating a search", async () => {
   const f = rawResultsFixture();
-  api.listAssessments.mockResolvedValue([]);
+  savedPeople();
   api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.getById.mockResolvedValue(f.artifact);
   const view = await mounted();
@@ -7592,7 +6911,6 @@ it("shows unassessed raw provider rows from saved Artifacts without creating an 
   expect(
     view.container.querySelector('[data-research-action="raw-action"] > summary')?.textContent,
   ).toBe("Raw search results · continue · Role · Outdated");
-  expect(view.container.textContent).not.toContain("Unassessed");
   expect(view.container.textContent).toContain("Research findings");
   expect(view.container.textContent).toContain("Strong Match");
   expect(view.container.textContent).toContain("https://example.test/profile");
@@ -7641,7 +6959,7 @@ it("discards a pending result when refresh replaces that action's output referen
     "current-output",
   );
   let finish!: (artifact: typeof f.artifact) => void;
-  api.listAssessments.mockResolvedValue([]);
+  savedPeople();
   api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.getById.mockImplementation(({ artifactId }) =>
     artifactId === f.artifact.id
@@ -7683,7 +7001,7 @@ it("keeps different rows snapshots at the same cursor while excluding status rec
     "status-output",
   );
   const outputs = [f, changed, status];
-  api.listAssessments.mockResolvedValue([]);
+  savedPeople();
   api.listResearch.mockResolvedValue({
     observations: [],
     tasks: [f.task],
@@ -7726,7 +7044,7 @@ it.each(["hash", "action", "artifact", "access"])(
       artifact = foreign.artifact;
     }
     if (boundary === "artifact") artifact = { ...artifact, id: "foreign-artifact" };
-    api.listAssessments.mockResolvedValue([]);
+    savedPeople();
     api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
     if (boundary === "access") api.getById.mockRejectedValue(new Error("Private source details"));
     else api.getById.mockResolvedValue(artifact);
@@ -7744,7 +7062,7 @@ it.each(["hash", "action", "artifact", "access"])(
 it("discards a late original action Artifact after navigation to another thread", async () => {
   const f = rawResultsFixture();
   let finish!: (artifact: typeof f.artifact) => void;
-  api.listAssessments.mockResolvedValue([]);
+  savedPeople();
   api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations: [] });
   api.getById.mockReturnValueOnce(
     new Promise((resolve) => {
@@ -7761,134 +7079,6 @@ it("discards a late original action Artifact after navigation to another thread"
   });
   expect(view.container.textContent).not.toContain("Synthetic raw candidate");
   expect(view.container.textContent).not.toContain("Raw search results");
-});
-
-const nativeQuestion = {
-  effectId: "question-effect",
-  roleId: role.id,
-  roleRevisionId: revision.id,
-  target: {
-    kind: "candidate",
-    candidateKey: "candidate-1",
-    assessmentVersion: 1,
-    criterionIds: ["criterion-1"],
-  },
-  threadId: "origin-thread",
-  botId: "origin-bot",
-  groupId: "origin-group",
-  runId: "origin-run",
-  messageId: "origin-question",
-  askIndex: 0,
-  block: {
-    kind: "ask",
-    text: "Which component did the candidate implement?",
-    status: "pending",
-    actions: [
-      { id: "choice-1", label: "Coordinate transforms" },
-      { id: "choice-2", label: "Need more evidence" },
-    ],
-  },
-  expiresAt: "2026-10-31T12:00:00.000Z",
-  runStatus: "waiting_input",
-  isCurrent: true,
-  canAnswer: true,
-} satisfies RecruitingQuestion;
-
-it("answers the original native group question and reloads its persisted answered state", async () => {
-  api.listQuestions.mockResolvedValue({ questions: [nativeQuestion] });
-  const view = await mounted("thread-1", "current-bot");
-  expect(api.listQuestions).toHaveBeenCalledWith({ threadId: "thread-1", roleId: role.id });
-  await view.click("Missing info");
-  await act(async () => {
-    await vi.dynamicImportSettled();
-  });
-  expect(view.container.textContent).toContain(nativeQuestion.block.text);
-  expect(view.container.textContent).toContain("candidate-1");
-  api.listQuestions.mockResolvedValue({
-    questions: [
-      {
-        ...nativeQuestion,
-        block: { ...nativeQuestion.block, status: "answered", answer: "choice-1" },
-        runStatus: "queued",
-        canAnswer: false,
-      },
-    ],
-  });
-  await view.click("Coordinate transforms");
-  expect(api.answer).toHaveBeenCalledExactlyOnceWith({
-    groupId: "origin-group",
-    runId: "origin-run",
-    messageId: "origin-question",
-    answer: "choice-1",
-  });
-  expect(api.listQuestions).toHaveBeenCalledTimes(2);
-  expect(view.container.textContent).toContain("Answered: Coordinate transforms");
-  await view.click("Open original question");
-  expect(view.reveal).toHaveBeenCalledExactlyOnceWith({
-    groupId: "origin-group",
-    messageId: "origin-question",
-  });
-});
-
-it("submits custom input to the native originating bot without creating a new task", async () => {
-  api.listQuestions.mockResolvedValue({ questions: [{ ...nativeQuestion, groupId: null }] });
-  const view = await mounted();
-  await view.click("Missing info");
-  await act(async () => {
-    await vi.dynamicImportSettled();
-  });
-  const answer = " \n  Implemented the geometry library in C++ 😀\n  ";
-  const input = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]')!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
-      input,
-      answer,
-    );
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  await view.click("Send answer");
-  expect(api.answer).toHaveBeenCalledExactlyOnceWith({
-    botId: "origin-bot",
-    runId: "origin-run",
-    messageId: "origin-question",
-    answer,
-  });
-  expect(api.createRole).not.toHaveBeenCalled();
-  expect(api.bindRole).not.toHaveBeenCalled();
-  expect(api.search).not.toHaveBeenCalled();
-});
-
-it("keeps answered native questions visible and leaves stale cancelled cards inactive", async () => {
-  api.listQuestions.mockResolvedValue({
-    questions: [
-      {
-        ...nativeQuestion,
-        isCurrent: false,
-        canAnswer: false,
-        runStatus: "cancelled",
-      },
-      {
-        ...nativeQuestion,
-        effectId: "answered-effect",
-        messageId: "answered-question",
-        block: { ...nativeQuestion.block, status: "answered", answer: "choice-2" },
-        isCurrent: false,
-        canAnswer: false,
-        runStatus: "completed",
-      },
-    ],
-  });
-  const view = await mounted();
-  await view.click("Missing info");
-  expect(view.container.textContent).toContain("No longer active");
-  expect(view.container.textContent).toContain("Answered: Need more evidence");
-  expect(view.container.textContent).toContain("Outdated");
-  expect(
-    [...view.container.querySelectorAll("button")].some(
-      (button) => button.textContent === "Coordinate transforms",
-    ),
-  ).toBe(false);
-  expect(api.answer).not.toHaveBeenCalled();
 });
 
 it("distinguishes an empty shortlist from the saved pool and browses all candidates without selecting anyone", async () => {
@@ -7911,54 +7101,20 @@ it("distinguishes an empty shortlist from the saved pool and browses all candida
   expect(api.answer).not.toHaveBeenCalled();
 });
 
-it("shows native answer failures without marking a question answered", async () => {
-  api.listQuestions.mockResolvedValue({ questions: [nativeQuestion] });
-  api.answer.mockRejectedValueOnce(new Error("This prompt is no longer awaiting an answer"));
-  const view = await mounted();
-  await view.click("Missing info");
-  await view.click("Need more evidence");
-  expect(view.container.textContent).toContain("This prompt is no longer awaiting an answer");
-  expect(view.container.textContent).not.toContain("Answered: Need more evidence");
-  expect(api.listQuestions).toHaveBeenCalledOnce();
-});
-
-it("does not publish questions from a role changed while the read was pending", async () => {
-  let finish!: (value: { questions: (typeof nativeQuestion)[] }) => void;
-  api.listQuestions.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const view = await mounted();
-  const nextRole = { ...role, id: "role-2", currentRevisionId: "revision-next" };
-  api.getWorkspace.mockResolvedValue({
-    role: nextRole,
-    revision: { ...revision, id: nextRole.currentRevisionId, roleId: nextRole.id },
-  });
-  await act(async () => finish({ questions: [nativeQuestion] }));
-  await view.click("Missing info");
-  expect(view.container.textContent).not.toContain(nativeQuestion.block.text);
-  expect(api.listQuestions).toHaveBeenLastCalledWith({ threadId: "thread-1", roleId: nextRole.id });
-});
 it("reads the native five views and lazily resolves memory history and Artifact references", async () => {
   const view = await mounted();
   expect(view.container.textContent).toContain("Systems engineer");
   expect(view.container.textContent).toContain("Version 2");
   expect(api.getWorkspace).toHaveBeenCalledWith({ threadId: "thread-1" });
-  expect(api.listAssessments).toHaveBeenCalledWith({ roleId: role.id });
   expect(api.listResearch).toHaveBeenCalledWith({ roleId: role.id });
   expect(api.list).toHaveBeenCalledExactlyOnceWith({ scope: "user" });
   expect(api.history).not.toHaveBeenCalled();
   expect(api.getById).not.toHaveBeenCalled();
   expect(api.get).not.toHaveBeenCalled();
   await view.click("Evidence");
-  expect(view.container.textContent).toContain("Outdated");
-  await view.click("candidate-1");
-  expect(view.container.textContent).toContain("Unknown");
-  expect(view.container.textContent).toContain("Built a compiler");
+  expect(view.container.textContent).toContain("candidate-1");
   await view.click("Missing info");
   expect(view.container.textContent).toContain("Which location?");
-  expect(view.container.textContent).toContain("Which component?");
   await view.click("Memory");
   await view.expand("preferences.md");
   await view.click("History");
@@ -8025,46 +7181,9 @@ it("restores only the native panel preference and still performs reads only", as
     expect(method).not.toHaveBeenCalled();
   expect(localStorage.getItem("layout")).toBe('{"panel":"recruiting"}');
 });
-it("distinguishes empty saved assessments from a successful candidate search", async () => {
-  api.listAssessments.mockResolvedValue([]);
-  const view = await mounted();
-  await view.click("Evidence");
-  expect(view.container.textContent).toContain("No candidates yet");
-  expect(api.search).not.toHaveBeenCalled();
-});
-it("keeps saved facts and sources inspectable even before a criterion judgment exists", async () => {
-  api.listAssessments.mockResolvedValue([
-    {
-      ...assessment,
-      assessment: {
-        ...assessment.assessment,
-        judgments: { ...assessment.assessment.judgments, atoms: [], criteria: [] },
-        sourceRefs: [
-          assessmentSource,
-          {
-            ...assessmentSource,
-            id: "source-2",
-            quote: "Additional material",
-            selection: {
-              kind: "message_text",
-              blockIndex: 1,
-              start: 0,
-              end: "Additional material".length,
-            },
-          },
-        ],
-      },
-    },
-  ]);
-  const view = await mounted();
-  await view.click("Evidence");
-  await view.click("candidate-1");
-  expect(view.container.textContent).toContain("Built a compiler");
-  expect(view.container.textContent).toContain("Additional material");
-});
 it("discards late evidence reads from a previously selected thread", async () => {
-  let finish!: (value: (typeof assessment)[]) => void;
-  api.listAssessments.mockReturnValueOnce(
+  let finish!: (value: ReturnType<typeof candidatePage>) => void;
+  api.listCandidates.mockReturnValueOnce(
     new Promise((resolve) => {
       finish = resolve;
     }),
@@ -8072,7 +7191,7 @@ it("discards late evidence reads from a previously selected thread", async () =>
   const view = await mounted();
   api.getWorkspace.mockResolvedValue(null);
   await view.render("thread-2");
-  await act(async () => finish([assessment]));
+  await act(async () => finish(candidatePage()));
   expect(view.container.textContent).toContain("No role linked");
   await view.click("Evidence");
   expect(view.container.textContent).toContain("No role linked");
@@ -8098,13 +7217,15 @@ it("never guesses a native message route for material from another chat", async 
   expect(roleSources.querySelector("button")).toBeNull();
   expect(roleSources.querySelector('a[href*="?m="]')).toBeNull();
 });
-it("reloads the same thread on native invalidation and rejects its old delayed assessments", async () => {
-  let finish!: (value: (typeof assessment)[]) => void;
-  const pending = new Promise<(typeof assessment)[]>((resolve) => {
+it("reloads the same thread on native invalidation and rejects its old delayed people", async () => {
+  let finish!: (value: ReturnType<typeof candidatePage>) => void;
+  const pending = new Promise<ReturnType<typeof candidatePage>>((resolve) => {
     finish = resolve;
   });
-  api.listAssessments.mockImplementation(({ roleId }: { roleId: string }) =>
-    roleId === role.id ? pending : Promise.resolve([]),
+  api.listCandidates.mockImplementation(({ roleId }: { roleId: string }) =>
+    roleId === role.id
+      ? pending
+      : Promise.resolve({ ...candidatePage([]), roleId, roleRevisionId: "revision-b" }),
   );
   const view = await mounted();
   const next = {
@@ -8114,7 +7235,7 @@ it("reloads the same thread on native invalidation and rejects its old delayed a
   api.getWorkspace.mockResolvedValue(next);
   await view.render("thread-1", 1);
   expect(view.container.textContent).toContain("Hardware engineer");
-  await act(async () => finish([assessment]));
+  await act(async () => finish(candidatePage()));
   expect(view.container.textContent).not.toContain(role.title);
   await view.click("Evidence");
   expect(view.container.textContent).not.toContain("candidate-1");
@@ -8129,12 +7250,17 @@ it("rechecks the binding and revision after reading lists before publishing them
     revision: { ...revision, id: "revision-3", revision: 3 },
   };
   api.getWorkspace.mockResolvedValueOnce({ role, revision }).mockResolvedValue(next);
-  api.listAssessments.mockResolvedValueOnce([assessment]).mockResolvedValue([]);
+  api.listCandidates.mockImplementation(async () => {
+    const workspace = await api.getWorkspace.mock.results.at(-1)?.value;
+    return workspace?.revision.id === next.revision.id
+      ? { ...candidatePage([]), roleRevisionId: next.revision.id }
+      : candidatePage();
+  });
   const view = await mounted();
   expect(view.container.textContent).toContain("Version 3");
   await view.click("Evidence");
   expect(view.container.textContent).toContain("No candidates yet");
-  expect(api.listAssessments).toHaveBeenCalledTimes(2);
+  expect(view.container.textContent).not.toContain("candidate-1");
 });
 it("drops cached Artifact metadata when its exact reference changes", async () => {
   const next = artifactSourceFixture('{"next":true}', "application/json", "request-2");
@@ -8186,279 +7312,6 @@ it("states which memory scopes a group actually queries", async () => {
   expect(api.list).toHaveBeenCalledExactlyOnceWith({ scope: "user" });
 });
 
-it.each([60, null])(
-  "renders the saved unknown hard gate, preferred verdict and employment upper bound %s without recomputing qualification",
-  async (upperMonths) => {
-    const qualificationDefinition = "Full-time relevant systems work";
-    const preferred = {
-      ...revision.criteria[0]!,
-      id: "preferred-criterion",
-      priority: "preferred" as const,
-      expression: { kind: "atom" as const, id: "preferred-atom", statement: "Compiler experience" },
-      definitionQuestions: [],
-    };
-    api.getWorkspace.mockResolvedValue({
-      role,
-      revision: { ...revision, criteria: [...revision.criteria, preferred] },
-    });
-    const quote = "  Built a compiler.\r\n";
-    const saved = {
-      ...assessment.assessment,
-      roleRevisionId: revision.id,
-      facts: [
-        ...assessment.assessment.facts,
-        {
-          kind: "employment",
-          id: "job-1",
-          statement: "Worked on infrastructure",
-          sourceRefIds: [source.id],
-          employmentType: "full-time",
-          start: { precision: "year", year: 2020 },
-          end: "present",
-        },
-      ],
-      sourceRefs: [
-        {
-          ...assessmentSource,
-          quote,
-          selection: { kind: "message_text", blockIndex: 0, start: 3, end: 3 + quote.length },
-        },
-      ],
-      judgments: {
-        atoms: [
-          ...assessment.assessment.judgments.atoms,
-          {
-            atomId: "preferred-atom",
-            verdict: "met",
-            factIds: ["fact-1"],
-            evidence: [source.id],
-            missing: [],
-          },
-        ],
-        employment: [
-          {
-            atomId: "atom-1",
-            intervals: [
-              {
-                factId: "job-1",
-                qualifyingFullTime: "unknown",
-                evidence: [source.id],
-                missing: ["Confirm full-time work"],
-              },
-            ],
-            historyCompletenessFactId: null,
-            evidence: [source.id],
-            missing: ["Complete the work history"],
-            cutoff: { precision: "day", year: 2026, month: 10, day: 16 },
-            minimumMonths: 84,
-            countingRule: "complete_calendar_months",
-            qualificationDefinition,
-            lowerMonths: 36,
-            upperMonths,
-            verdict: "unknown",
-            factIds: ["job-1"],
-          },
-        ],
-        criteria: [
-          ...assessment.assessment.judgments.criteria,
-          {
-            criterionId: preferred.id,
-            verdict: "met",
-            factIds: ["fact-1"],
-            evidence: [source.id],
-            missing: [],
-          },
-        ],
-        hardGate: "unknown",
-      },
-    } satisfies RecruitingAssessment;
-    api.listAssessments.mockResolvedValue([
-      {
-        ...assessment,
-        assessment: saved,
-        isCurrent: true,
-        roleRevision: { ...revision, criteria: [...revision.criteria, preferred] },
-      },
-    ]);
-    const view = await mounted();
-    await view.click("Evidence");
-    await view.click("candidate-1");
-    const gate = [...view.container.querySelectorAll("p")].find(
-      (item) => item.textContent === "Hard criteriaUnknown",
-    );
-    expect(gate).toBeDefined();
-    const preferredSummary = [...view.container.querySelectorAll("summary")].find((item) =>
-      item.textContent?.includes(preferred.expression.statement),
-    );
-    expect(preferredSummary?.textContent).toContain("Met");
-    expect(view.container.textContent).toContain(`${36}–${upperMonths ?? "?"} months`);
-    expect(view.container.textContent).toContain("≥ 84");
-    expect(view.container.textContent).toContain("2026-10-16");
-    expect(view.container.textContent).toContain(qualificationDefinition);
-    expect(
-      [...view.container.querySelectorAll("blockquote")].some((item) => item.textContent === quote),
-    ).toBe(true);
-    await view.click("Missing info");
-    expect(view.container.textContent).toContain("Which component?");
-  },
-);
-
-it("switches Cards/Table with one original-revision detail, preserves a refreshed candidate and rejects late data from another role", async () => {
-  const additionalSource = {
-    ...assessmentSource,
-    id: "source-2",
-    anchor: { ...source.anchor, messageId: "message-2", locator: "Additional evidence" },
-    quote: "Independent source",
-    selection: { ...assessmentSource.selection, end: "Independent source".length },
-  };
-  const original = {
-    ...assessment,
-    assessment: {
-      ...assessment.assessment,
-      facts: [
-        ...assessment.assessment.facts,
-        {
-          kind: "statement",
-          id: "fact-2",
-          statement: "Maintained a compiler",
-          sourceRefIds: [additionalSource.id],
-        },
-      ],
-      sourceRefs: [...assessment.assessment.sourceRefs, additionalSource],
-      judgments: {
-        ...assessment.assessment.judgments,
-        criteria: [
-          {
-            ...assessment.assessment.judgments.criteria[0]!,
-            factIds: ["fact-1", "fact-2"],
-            evidence: [source.id, additionalSource.id],
-          },
-        ],
-      },
-    },
-    roleRevision: {
-      ...assessment.roleRevision,
-      criteria: [{ ...assessment.roleRevision.criteria[0]!, priority: "hard" as const }],
-    },
-  } satisfies RecruitingAssessmentSnapshot;
-  const second = {
-    ...assessment,
-    assessment: {
-      ...assessment.assessment,
-      candidateKey: "candidate-2",
-      facts: [{ ...assessment.assessment.facts[0]!, statement: "Second candidate evidence" }],
-    },
-    sourceMessageTargets: [
-      {
-        messageId: source.anchor.messageId,
-        threadId: "second-material-thread",
-        target: { botId: "second-material-bot" },
-      },
-    ],
-  };
-  api.listAssessments.mockResolvedValue([original, second]);
-  const view = await mounted();
-  await view.click("Evidence");
-  await view.click("Cards");
-  expect(view.container.querySelector("table")).toBeNull();
-  await view.click("candidate-1");
-  const condition = [...view.container.querySelectorAll("details")].find((element) =>
-    element.querySelector("summary")?.textContent?.includes("Original systems requirement"),
-  );
-  expect(condition).toBeDefined();
-  expect(condition?.querySelector("summary")?.textContent).toContain("Hard criteria");
-  expect([...condition!.querySelectorAll("blockquote")].map((item) => item.textContent)).toEqual([
-    source.quote,
-    additionalSource.quote,
-  ]);
-  expect(condition?.textContent).toContain("Built a compiler");
-  expect(condition?.textContent).toContain("Maintained a compiler");
-  expect(view.container.textContent).not.toContain("revision-1");
-  expect(view.container.textContent).toContain("Role · Version 1");
-  await view.click("Message");
-  expect(view.reveal).toHaveBeenCalledExactlyOnceWith({
-    groupId: "material-group",
-    messageId: source.anchor.messageId,
-  });
-  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
-  await view.click("Table");
-  expect(view.container.querySelector("table caption")?.textContent).toBe("Saved candidates");
-  expect(
-    [...view.container.querySelectorAll("th[scope=col]")].map((element) => element.textContent),
-  ).toEqual([
-    "Candidate",
-    "Role",
-    "Title",
-    "Company",
-    "Location",
-    "Profile",
-    "Research match",
-    "Internal assessment",
-    "Discoveries",
-    "Shortlist",
-  ]);
-  await view.click("candidate-1");
-  expect(view.container.textContent).toContain("Original systems requirement");
-  await view.click("Close");
-  await view.click("candidate-2");
-  expect(view.container.textContent).toContain("Second candidate evidence");
-  expect(view.container.textContent).not.toContain("Built a compiler");
-  const refreshed = {
-    ...second,
-    assessment: {
-      ...second.assessment,
-      version: 2,
-      basedOnVersion: 1,
-      facts: [{ ...second.assessment.facts[0]!, statement: "Second candidate updated evidence" }],
-    },
-  };
-  api.listAssessments.mockResolvedValue([original, refreshed]);
-  await view.click("Refresh");
-  expect(view.container.querySelector("table")).not.toBeNull();
-  expect(view.container.textContent).toContain("Second candidate updated evidence");
-  await view.click("Close");
-  await view.click("Cards");
-  expect(view.container.querySelector("table")).toBeNull();
-  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
-  await view.click("candidate-2");
-  expect(view.container.textContent).toContain("Second candidate updated evidence");
-  await view.click("Message");
-  expect(view.reveal).toHaveBeenLastCalledWith({
-    botId: "second-material-bot",
-    messageId: source.anchor.messageId,
-  });
-  expect(view.container.querySelector('[role="dialog"]')).toBeNull();
-  let finish!: (value: (typeof assessment)[]) => void;
-  const pending = new Promise<(typeof assessment)[]>((resolve) => {
-    finish = resolve;
-  });
-  api.listAssessments.mockReturnValueOnce(pending);
-  await view.click("Refresh");
-  const nextRole = { ...role, id: "role-next", currentRevisionId: "revision-next" };
-  const nextRevision = { ...revision, id: nextRole.currentRevisionId, roleId: nextRole.id };
-  api.getWorkspace.mockResolvedValue({ role: nextRole, revision: nextRevision });
-  api.listAssessments.mockResolvedValue([
-    {
-      ...second,
-      assessment: {
-        ...second.assessment,
-        roleId: nextRole.id,
-        roleRevisionId: nextRevision.id,
-        facts: [{ ...second.assessment.facts[0]!, statement: "Different role evidence" }],
-      },
-      roleRevision: nextRevision,
-      isCurrent: true,
-    },
-  ]);
-  await view.render("thread-1", 1);
-  await act(async () => finish([original]));
-  expect(view.container.textContent).not.toContain("Second candidate updated evidence");
-  expect(view.container.textContent).not.toContain("Different role evidence");
-  await view.click("candidate-2");
-  expect(view.container.textContent).toContain("Different role evidence");
-  expect(view.container.textContent).not.toContain("Built a compiler");
-});
-
 it("shows sourced brief prose and unresolved confirmation questions in Role and Missing info", async () => {
   const brief = {
     fields: [
@@ -8503,7 +7356,6 @@ it("shows sourced brief prose and unresolved confirmation questions in Role and 
     ],
     rules: [],
     searchFilters: [],
-    confirmation: null,
   };
   api.getWorkspace.mockResolvedValue({
     role,
@@ -8532,11 +7384,6 @@ it("shows sourced brief prose and unresolved confirmation questions in Role and 
   expect(view.container.textContent).toContain("Assumption");
   expect(view.container.textContent).toContain(brief.questions[0]!.question);
   expect(view.container.textContent).toContain(brief.questions[1]!.question);
-  expect(
-    [...view.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Confirm brief",
-    )?.disabled,
-  ).toBe(true);
   await view.click("Missing info");
   const definition = [...view.container.querySelectorAll("h3")].find(
     (item) => item.textContent === "Role definition",
@@ -8544,13 +7391,11 @@ it("shows sourced brief prose and unresolved confirmation questions in Role and 
   expect([...definition.querySelectorAll("p")].map((item) => item.textContent)).toEqual([
     brief.questions[0]!.question,
     brief.questions[1]!.question,
-    "What location or remote work scope applies?",
   ]);
   await view.click("Role");
   await view.render("thread-1", 0, true);
   expect(view.container.textContent).toContain("python_stack");
   expect(view.container.textContent).toContain("sourcing_quantity_scope");
-  expect(api.confirmBrief).not.toHaveBeenCalled();
 });
 
 it("names known brief details and asks their missing question without requesting another question", async () => {
@@ -8590,7 +7435,6 @@ it("names known brief details and asks their missing question without requesting
         questions: [],
         rules: [],
         searchFilters: [],
-        confirmation: null,
       },
     },
   });
@@ -8607,7 +7451,6 @@ it("names known brief details and asks their missing question without requesting
   expect(definition.textContent).not.toContain("company_deck");
   expect(definition.textContent).not.toContain("salary_range");
   expect(definition.textContent).not.toContain("What salary range may be stated in outreach?");
-  expect(api.confirmBrief).not.toHaveBeenCalled();
 });
 
 it.each(["missing", "conflict", "known"] as const)(
@@ -8654,16 +7497,10 @@ it.each(["missing", "conflict", "known"] as const)(
           questions: [],
           rules: [],
           searchFilters: [],
-          confirmation: null,
         },
       },
     });
     const view = await mounted("thread-1", undefined, false);
-    expect(
-      [...view.container.querySelectorAll("button")].find(
-        (button) => button.textContent === "Confirm brief",
-      )?.disabled,
-    ).toBe(true);
     await view.click("Missing info");
     const definition = [...view.container.querySelectorAll("h3")].find(
       (item) => item.textContent === "Role definition",
@@ -8684,68 +7521,8 @@ it.each(["missing", "conflict", "known"] as const)(
     expect(definition.textContent).not.toContain("No saved questions");
     expect(definition.textContent).not.toContain(key);
     expect(definition.textContent).not.toContain(key.replaceAll("_", " "));
-    expect(api.confirmBrief).not.toHaveBeenCalled();
   },
 );
-
-it("renders saved compound requirements with the same nested groups in Role and assessment", async () => {
-  const expression = {
-    kind: "all" as const,
-    items: [
-      { kind: "atom" as const, id: "atom-1", statement: "Build systems" },
-      {
-        kind: "any" as const,
-        items: [
-          { kind: "atom" as const, id: "atom-2", statement: "Use compilers" },
-          {
-            kind: "not" as const,
-            item: { kind: "atom" as const, id: "atom-3", statement: "Only manage teams" },
-          },
-        ],
-      },
-    ],
-  };
-  api.getWorkspace.mockResolvedValue({
-    role,
-    revision: {
-      ...revision,
-      criteria: [{ ...revision.criteria[0]!, expression }],
-    },
-  });
-  api.listAssessments.mockResolvedValue([
-    {
-      ...assessment,
-      roleRevision: {
-        ...assessment.roleRevision,
-        criteria: [{ ...assessment.roleRevision.criteria[0]!, expression }],
-      },
-    },
-  ]);
-  const view = await mounted();
-  function check(container: Element) {
-    const groups = [...container.querySelectorAll("ul")].filter((list) =>
-      ["All of", "Any of", "Must not"].includes(list.previousElementSibling?.textContent ?? ""),
-    );
-    expect(groups).toHaveLength(3);
-    expect(groups[0]!.previousElementSibling?.textContent).toBe("All of");
-    expect(groups[1]!.previousElementSibling?.textContent).toBe("Any of");
-    expect(groups[2]!.previousElementSibling?.textContent).toBe("Must not");
-    expect(groups[0]!.children).toHaveLength(2);
-    expect(groups[1]!.children).toHaveLength(2);
-    expect(groups[2]!.children).toHaveLength(1);
-    expect(groups[0]!.children[1]!.contains(groups[1]!)).toBe(true);
-    expect(groups[1]!.children[1]!.contains(groups[2]!)).toBe(true);
-    expect(groups[2]!.textContent).toBe("Only manage teams");
-    expect(container.textContent).not.toContain(" AND ");
-    expect(container.textContent).not.toContain(" OR ");
-    expect(container.textContent).not.toContain("NOT (");
-  }
-  check(view.container);
-  await view.click("Evidence");
-  await view.click("candidate-1");
-  check(view.container.querySelector('[role="dialog"]')!);
-  expect(api.editCriteria).not.toHaveBeenCalled();
-});
 
 it("never asks for a salary the search does not need when saved questions are empty", async () => {
   api.getWorkspace.mockResolvedValue({
@@ -8768,126 +7545,17 @@ it("never asks for a salary the search does not need when saved questions are em
         questions: [],
         rules: [],
         searchFilters: [],
-        confirmation: null,
       },
     },
   });
   const view = await mounted("thread-1", undefined, false);
-  const confirm = [...view.container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Confirm brief",
-  )!;
-  expect(confirm.disabled).toBe(false);
   expect(view.container.textContent).not.toContain("What salary range may be stated in outreach?");
   expect(view.container.textContent).not.toContain("salary_range");
-  expect(api.confirmBrief).not.toHaveBeenCalled();
-});
-
-it("confirms only the reviewed brief revision through the human API", async () => {
-  const brief = {
-    fields: [
-      {
-        key: "location",
-        value: "Remote in the United Kingdom",
-        origin: "jd",
-        state: "known",
-        consequential: true,
-        sourceRefIds: [source.id],
-      },
-      {
-        key: "salary_range",
-        value: "GBP 90,000 to 120,000",
-        origin: "jd",
-        state: "known",
-        consequential: true,
-        sourceRefIds: [source.id],
-      },
-    ],
-    questions: [],
-    rules: [],
-    searchFilters: [],
-    confirmation: null,
-  };
-  api.getWorkspace.mockResolvedValue({
-    role,
-    revision: {
-      ...revision,
-      brief,
-      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
-    },
-  });
-  api.confirmBrief.mockResolvedValue({ role, revision });
-  const view = await mounted();
-  expect(api.confirmBrief).not.toHaveBeenCalled();
-  await view.click("Confirm brief");
-  expect(api.confirmBrief).toHaveBeenCalledWith({
-    threadId: "thread-1",
-    roleId: role.id,
-    expectedRevision: 2,
-  });
-});
-
-it("keeps an unresolved brief unconfirmed and preserves its view after a conflict", async () => {
-  const brief = {
-    fields: [
-      {
-        key: "salary_range",
-        value: null,
-        origin: "jd",
-        state: "conflict",
-        consequential: true,
-        sourceRefIds: [],
-      },
-      {
-        key: "location",
-        value: "Remote in the United Kingdom",
-        origin: "jd",
-        state: "known",
-        consequential: true,
-        sourceRefIds: [source.id],
-      },
-    ],
-    questions: [],
-    rules: [],
-    searchFilters: [],
-    confirmation: null,
-  };
-  api.getWorkspace.mockResolvedValue({
-    role,
-    revision: {
-      ...revision,
-      brief,
-      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
-    },
-  });
-  const view = await mounted();
-  const button = [...view.container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Confirm brief",
-  );
-  expect(button?.disabled).toBe(true);
-  brief.fields[0] = {
-    ...brief.fields[0]!,
-    state: "known",
-    value: "GBP 90,000 to 120,000",
-  } as never;
-  api.getWorkspace.mockResolvedValue({
-    role,
-    revision: {
-      ...revision,
-      brief,
-      criteria: revision.criteria.map((criterion) => ({ ...criterion, definitionQuestions: [] })),
-    },
-  });
-  await view.render("thread-1", 1);
-  api.confirmBrief.mockRejectedValueOnce(new Error("Revision changed"));
-  await view.click("Confirm brief");
-  expect(view.container.textContent).toContain("Brief changed or could not be confirmed");
-  expect(view.container.textContent).toContain("GBP 90,000 to 120,000");
-  expect(view.container.textContent).not.toContain("Brief confirmed");
 });
 
 it("renders the sourcing workspace from saved findings and uses native draft, shortlist and detail actions", async () => {
   const candidate = {
-    ...candidateFixture("workspace-person", false),
+    ...candidateFixture("workspace-person"),
     name: "Taylor Example",
     title: "Robotics engineer",
     company: "Example Robotics",
@@ -8922,7 +7590,6 @@ it("renders the sourcing workspace from saved findings and uses native draft, sh
       },
     },
   };
-  api.listAssessments.mockResolvedValue([]);
   api.listCandidates.mockResolvedValue(candidatePage([candidate]));
   api.setCandidateShortlist.mockResolvedValue({ ...candidate, shortlisted: true, revision: 1 });
   const view = await mounted("thread-1", undefined, false, undefined, {
@@ -8967,9 +7634,7 @@ it("renders the sourcing workspace from saved findings and uses native draft, sh
 });
 
 it("keeps workspace shortlist and contacts navigation out of saved filters and candidate mutations", async () => {
-  api.listAssessments.mockResolvedValue([]);
-  const page = candidatePage([{ ...candidateFixture("nav-person", false), name: "Nav Person" }]);
-  page.counts.assessed = 0;
+  const page = candidatePage([{ ...candidateFixture("nav-person"), name: "Nav Person" }]);
   api.listCandidates.mockResolvedValue(page);
   const view = await mounted("thread-1", undefined, false, undefined, {
     presentation: "workspace",
@@ -9011,7 +7676,7 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
 });
 
 it("does not display the Contacts pool as a pending Shortlist query and retains only an identical warm query", async () => {
-  const candidate = { ...candidateFixture("contact-person", false), name: "Saved contact person" };
+  const candidate = { ...candidateFixture("contact-person"), name: "Saved contact person" };
   const page = candidatePage([candidate]);
   api.listCandidates.mockResolvedValue(page);
   const navigation = {
@@ -9101,7 +7766,7 @@ function mockLinkedCrmRole() {
 it("shows a linked role's agent results and its stored CRM records in one workbench", async () => {
   mockLinkedCrmRole();
   api.listCandidates.mockResolvedValue(
-    candidatePage([{ ...candidateFixture("agent-person", false), name: "Agent candidate" }]),
+    candidatePage([{ ...candidateFixture("agent-person"), name: "Agent candidate" }]),
   );
   const browse = {
     selection: linkedSelection,
@@ -9190,12 +7855,11 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
   expect(api.crmData).not.toHaveBeenCalled();
 });
 
-it("shows Autumn's criterion states, evidence, source round and saved decision for every returned candidate", async () => {
-  api.listAssessments.mockResolvedValue([]);
+it("shows the search's criterion states, evidence, source round and saved decision for every returned candidate", async () => {
   api.listCandidates.mockResolvedValue(
     candidatePage(
       Array.from({ length: 12 }, (_, index) => ({
-        ...candidateFixture(`person-${index}`, false),
+        ...candidateFixture(`person-${index}`),
         name: `Person ${index}`,
         decision: index === 0 ? ("hold" as const) : null,
         decisionReason: index === 0 ? "Wait for the client" : null,
@@ -9230,7 +7894,6 @@ it("shows Autumn's criterion states, evidence, source round and saved decision f
     ),
   );
   const page = await api.listCandidates();
-  page.counts.assessed = 0;
   api.listCandidates.mockResolvedValue(page);
   const view = await mounted("thread-1", undefined, false, undefined, {
     presentation: "workspace",
@@ -9307,9 +7970,7 @@ it.each(["contacts", "shortlist"] as const)(
 it("uses the actual native shortlist even before its CRM target is bound", async () => {
   api.getWorkspace.mockResolvedValue({ role, revision, crmTarget: null });
   api.listCandidates.mockResolvedValue(
-    candidatePage([
-      { ...candidateFixture("native-picked", true), name: "Actual native selection" },
-    ]),
+    candidatePage([{ ...candidateFixture("native-picked"), name: "Actual native selection" }]),
   );
   const view = await mounted("thread-1", undefined, false, undefined, {
     groupId: "group-1",
@@ -9327,9 +7988,7 @@ it("uses the actual native shortlist even before its CRM target is bound", async
 });
 
 it("uses only the Shell navigation's fresh workspace and waits for its next refresh generation", async () => {
-  const page = candidatePage([
-    { ...candidateFixture("shared-person", false), name: "Shared person" },
-  ]);
+  const page = candidatePage([{ ...candidateFixture("shared-person"), name: "Shared person" }]);
   api.readView.mockImplementation(async (input) => ({
     kind: input.kind,
     workspace: { role, revision },

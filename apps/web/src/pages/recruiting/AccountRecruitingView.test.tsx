@@ -3,10 +3,11 @@
 import { ORPCError } from "@orpc/client";
 import type {
   GlobalRecruitingInboxOutput,
+  Group,
   RecruitingAccountViewOutput,
   RecruitingCorrespondence,
 } from "@rakazo/contracts";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
@@ -27,6 +28,8 @@ const listContacts = vi.hoisted(() => vi.fn());
 const contactFacets = vi.hoisted(() => vi.fn());
 const updateTags = vi.hoisted(() => vi.fn());
 const listServers = vi.hoisted(() => vi.fn());
+const threadHead = vi.hoisted(() => vi.fn());
+const subscribe = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/auth", () => ({ authClient: { useSession: () => ({ data: null }) } }));
 vi.mock("../../lib/rpc", () => ({
   rpc: {
@@ -37,6 +40,7 @@ vi.mock("../../lib/rpc", () => ({
       contacts: { list: listContacts, facets: contactFacets, updateTags },
     },
     mcp: { servers: { list: listServers } },
+    threads: { head: threadHead, subscribe },
   },
 }));
 vi.mock("./RecruitingRoutines", () => ({ RecruitingRoutines: () => null }));
@@ -69,7 +73,7 @@ const correspondence = (id: string) => ({
       end: "2026-10-30T15:00:00Z",
       timeZone: "UTC",
       attendees: [],
-      status: "confirmed",
+      status: "booked" as const,
       location: null,
       url: null,
     },
@@ -85,6 +89,7 @@ const indexPage = (
   partial = false,
 ): GlobalRecruitingInboxOutput => ({
   roles,
+  conversations: [],
   items: emails.map((email) => ({
     roleId: "one",
     key: `message:${email.id}`,
@@ -295,7 +300,11 @@ it.each([
             <AccountRecruitingView
               spaceId="space"
               accountKey="user-space"
-              groups={[]}
+              groups={[
+                { id: "recruiting-global-abc" } as ComponentProps<
+                  typeof AccountRecruitingView
+                >["groups"][number],
+              ]}
               bots={[]}
               refreshSignal={0}
               onOpenNavigation={() => {}}
@@ -305,6 +314,7 @@ it.each([
         ),
       );
       expect(container.textContent?.includes("No emails yet.")).toBe(empty);
+      expect(container.textContent?.includes("Find candidates with Kruit")).toBe(empty);
       expect(container.textContent?.includes("Could not load recruiting records.")).toBe(retry);
       expect(container.textContent).not.toContain("0 replies");
       expect(container.textContent).not.toContain("0 unread");
@@ -355,6 +365,54 @@ it("pages saved mail by number and reads only the chosen page", async () => {
       expect.objectContaining({ offset: 30 }),
       expect.anything(),
     );
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("reads the open Inbox again when Kruit's main conversation says mail was saved", async () => {
+  threadHead.mockResolvedValue({ threadId: "global-thread", cursor: 4 });
+  let announce: (() => void) | undefined;
+  subscribe.mockImplementation(async (_input: unknown, { signal }: { signal: AbortSignal }) => ({
+    async *[Symbol.asyncIterator]() {
+      await new Promise<void>((resolve) => (announce = resolve));
+      yield {
+        id: "event-5",
+        seq: 5,
+        threadId: "global-thread",
+        spaceId: "space",
+        type: "recruiting.changed",
+        payload: { roleId: "one" },
+        createdAt: "2026-11-16T05:57:40Z",
+      };
+      await new Promise((resolve) => signal.addEventListener("abort", resolve));
+    },
+  }));
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[{ id: "recruiting-global-user" } as Group]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(subscribe).toHaveBeenCalledWith(
+      { groupId: "recruiting-global-user", cursor: 4 },
+      expect.anything(),
+    );
+    const reads = globalRead.mock.calls.length;
+    await act(async () => announce?.());
+    expect(globalRead.mock.calls.length).toBeGreaterThan(reads);
   } finally {
     await act(async () => pageRoot.unmount());
   }
@@ -615,6 +673,59 @@ it("loads the next interview page into the calendar without losing previous even
   }
 });
 
+it("lists mail sent from a conversation outside a role under that conversation", async () => {
+  // A one-off email from Kruit's main chat and its answer appeared on no page.
+  const page = indexPage([
+    {
+      id: "mail:reply",
+      direction: "received",
+      sender: "ada@example.test",
+      subject: "Re: Data role",
+      body: "Not looking right now.",
+      recipients: ["me@example.test"],
+      date: "2026-10-30T11:00:00Z",
+      sourceName: "Mailbox",
+      sourceId: "mail",
+      providerMessageId: "reply",
+      savedRead: null,
+      snippet: false,
+      url: null,
+    },
+  ]);
+  mockIndex({
+    ...page,
+    conversations: [{ id: "main", title: "Kruit", threadId: "main", groupId: "group-main" }],
+    items: page.items.map((item) => ({ ...item, roleId: "main" })),
+  });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    const inbox = container.querySelector('[data-testid="account-inbox"]')!;
+    expect(inbox.textContent).toContain("Re: Data role");
+    expect(inbox.textContent).toContain("Kruit");
+    expect(inbox.textContent).not.toContain("Role unavailable");
+    // Only a role opens a role page.
+    expect(inbox.textContent).not.toContain("Open role");
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
 it("does not invent zero replies from an email whose direction is unknown", async () => {
   read.mockResolvedValue({
     roles,
@@ -837,7 +948,7 @@ it("lists every role's people in one server-paged table", async () => {
     linkedinUrl: null,
     email: null,
     status: "shortlisted",
-    noteKey: `autumn:${key}`,
+    noteKey: `sourced:${key}`,
     roles: [
       {
         id: "one",
@@ -1035,6 +1146,72 @@ it("keeps Work secondary links scoped and opens the existing global chat", async
       ["Tasks", "/app?view=tasks&role=two"],
       ["Routines", "/app?view=routines&role=two"],
     ]);
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("asks to reconnect an expired calendar, and a closed connections panel refreshes Gmail", async () => {
+  read.mockResolvedValue({
+    roles,
+    items: [
+      {
+        roleId: "one",
+        correspondence: {
+          ...correspondence("one"),
+          events: [],
+          status: "ready",
+          connections: [
+            { name: "CRM", status: "configured", checkIssue: null },
+            {
+              name: "Google Calendar",
+              status: "needs_connection",
+              reconnect: true,
+              checkIssue: null,
+            },
+          ],
+        },
+      },
+    ],
+    nextCursor: null,
+  });
+  listServers.mockResolvedValue([
+    { enabled: true, endpoint: "https://gmailmcp.googleapis.com/mcp/v1", oauthStatus: "reconnect" },
+  ]);
+  const connect = vi.fn();
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  const view = (path: string, refreshSignal: number) => (
+    <MemoryRouter key={path} initialEntries={[path]}>
+      <AccountRecruitingView
+        spaceId="space"
+        accountKey="user-space"
+        groups={[]}
+        bots={[]}
+        refreshSignal={refreshSignal}
+        onOpenNavigation={() => {}}
+        onOpenConnections={connect}
+      />
+    </MemoryRouter>
+  );
+  const button = (text: string) =>
+    [...container.querySelectorAll("button")].find((node) => node.textContent === text);
+  try {
+    await act(async () => pageRoot.render(view("/app?view=interview&role=all", 0)));
+    await act(async () => button("Reconnect Google Calendar")?.click());
+    expect(connect).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain("Could not");
+    await act(async () => pageRoot.render(view("/app?view=inbox&role=all", 0)));
+    expect(button("Reconnect Gmail")).toBeTruthy();
+    listServers.mockResolvedValue([
+      {
+        enabled: true,
+        endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+        oauthStatus: "connected",
+      },
+    ]);
+    await act(async () => pageRoot.render(view("/app?view=inbox&role=all", 1)));
+    expect(button("Reconnect Gmail")).toBeUndefined();
   } finally {
     await act(async () => pageRoot.unmount());
   }

@@ -19,7 +19,6 @@ import type {
   RemoteConnectorDependencies,
 } from "@rakazo/adapters";
 import {
-  AutumnFileConnector,
   applyMessagingOutboundStatus,
   assertHomeStorageConfiguration,
   ChatSdkMessagingSurface,
@@ -30,6 +29,7 @@ import {
   createBackgroundJobHandlers,
   createCloudAgentConnection,
   createConnectorStack,
+  createExaPageReader,
   createJobReconciler,
   createMessagingContextLoader,
   createMessagingTeamChatSender,
@@ -173,6 +173,7 @@ export interface AppHandles {
   messaging?: MessagingSurface;
   email?: TransactionalEmailProvider;
   executor: ReturnType<typeof createRunExecutor>;
+  judgeSettings: JudgeSettings;
   runtime: AgentRuntime;
   awaitIdle?: () => Promise<void>;
   backgroundFailures?: () => Array<{ name: string; count: number }>;
@@ -444,7 +445,6 @@ export async function createApp(
       .providers()
       .filter((provider) => !composioOverride || provider.describe().id !== "composio"),
     mcp,
-    new AutumnFileConnector(prisma, secrets, artifacts, remoteConnectors),
   ]);
   const connector = stack.destination;
   await connector.start();
@@ -547,13 +547,14 @@ export async function createApp(
   // One cache serves models.list, selection validation, and run-time model
   // resolution alike, so a list call warms the run path in this process.
   const codexCatalog = new CodexCatalogCache();
+  const judgeSettings = new JudgeSettings(prisma, secrets);
   const executor = createRunExecutor({
+    judge: judgeSettings,
     contextStrategy,
     prisma,
     runtime,
     codexCatalog,
     replySuggestions: true,
-    quickReplies: true,
     sandbox,
     memory,
     memoryProviders,
@@ -593,6 +594,7 @@ export async function createApp(
     ticketBoardEnabled,
     messaging: messaging ? createMessagingContextLoader(prisma) : undefined,
     web: createWebProvider(),
+    profileReader: createExaPageReader(),
     cloudAgent,
     shutdownSignal: shutdown.signal,
   });
@@ -613,6 +615,7 @@ export async function createApp(
     messaging,
     cloudAgent,
     connector: stack.connector,
+    artifacts,
     shutdownSignal: shutdown.signal,
   });
   if (inMemoryJobs) {
@@ -672,7 +675,7 @@ export async function createApp(
     secrets,
     oauthLogins,
     integrationSettings,
-    judgeSettings: new JudgeSettings(prisma, secrets),
+    judgeSettings,
     mcpOAuth,
     composio: stack.composio,
     connectors: stack.connector,
@@ -704,6 +707,7 @@ export async function createApp(
       imageTag: env.imageTag,
       integrationsCatalogUrl: env.integrationsCatalogUrl,
       mcpAllowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
+      faultInjection: env.faultInjection,
       firstPartyMcpUrl: env.firstPartyMcpUrl,
       firstPartySession: env.firstPartySession,
       oidc: env.oidc ? { issuer: env.oidc.issuer, clientId: env.oidc.clientId } : undefined,
@@ -1164,6 +1168,7 @@ export async function createApp(
   return {
     app,
     prisma,
+    judgeSettings,
     jobs,
     sandbox,
     connector,

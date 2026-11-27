@@ -132,13 +132,17 @@ function mailReplyHistoryText(reply: MailReply): string {
       ? `${reply.body.slice(0, MAIL_REPLY_HISTORY_BODY_CHARS)}…`
       : reply.body;
   return [
-    `Reply draft to ${[...reply.to, ...reply.cc].join(", ")}; subject: ${reply.subject}`,
+    `${reply.status === "sent" ? "Reply sent" : "Reply draft"} to ${[...reply.to, ...reply.cc].join(", ")}; subject: ${reply.subject}`,
     `Body: ${body}`,
     ...(reply.status === "needs_approval" ? [] : [`Mail status: ${reply.status}`]),
   ].join("\n");
 }
 
+const ASK_HISTORY_DETAIL_CHARS = 2_000;
+
 export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
+  // A role team's card copied here carries a link back to its role: no role was opened here.
+  const copiedCard = blocks.some((block) => block.kind === "ask" && block.answerTarget);
   return blocks
     .map((block) => {
       if (block.kind === "text") {
@@ -153,7 +157,7 @@ export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
           : withRole;
       }
       if (block.kind === "chart") return `[chart: ${block.name}]`;
-      if (block.kind === "role_link") return `[opened role: ${block.title}]`;
+      if (block.kind === "role_link") return copiedCard ? "" : `[opened role: ${block.title}]`;
       // The id lets another assistant vote; the count tells a later turn how it went.
       if (block.kind === "canvas")
         return `[canvas ${block.canvasId}: ${block.title}, revision ${block.revision}]`;
@@ -175,9 +179,12 @@ export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
       // Without the answer a later turn sees the question as still open and asks it again.
       if (block.kind === "ask") {
         // A reply card's title alone ("Confirm reply") cannot tell one draft from another.
+        // Nor can its title alone say what a send card showed: "not this subject" needs the subject.
         const text = block.mailReply
           ? `${block.text}\n${mailReplyHistoryText(block.mailReply)}`
-          : block.text;
+          : block.detail
+            ? `${block.text}\n${block.detail.length > ASK_HISTORY_DETAIL_CHARS ? `${block.detail.slice(0, ASK_HISTORY_DETAIL_CHARS)}…` : block.detail}`
+            : block.text;
         // An approval card that reads like a request must not read like a granted one.
         if (block.approvalEffectId && block.status !== "answered")
           return `${text}\n(${block.status === "expired" ? "Approval card closed unanswered" : "Approval card waiting for the user; not answered"})`;

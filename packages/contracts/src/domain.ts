@@ -672,7 +672,7 @@ export const AgentSkillCatalogEntrySchema = AgentSkillSchema.pick({
   source: true,
   readOnly: true,
 }).extend({
-  /** A requirement the skill declares that this account is missing, e.g. "needs connection autumn". */
+  /** A requirement the skill declares that this account is missing, e.g. "needs connection gmail". */
   unavailable: z.string().optional(),
 });
 export type AgentSkillCatalogEntry = z.infer<typeof AgentSkillCatalogEntrySchema>;
@@ -1047,7 +1047,6 @@ export const WorkMetricsSchema = z.object({
     unansweredInputs: z.number().int(),
     inputs: z.number().int(),
   }),
-  memory: z.object({ correctedAfterCompaction: RatioSchema }),
   collaboration: z.object({
     handoffs: z.number().int(),
     teammateTurns: z.number().int(),
@@ -1184,7 +1183,7 @@ export type BackgroundWorkTiming = z.infer<typeof BackgroundWorkTimingSchema>;
 
 export const ThreadBackgroundTaskSchema = z.object({
   id: Id,
-  kind: z.enum(["research", "cloud_agent", "run", "agent_run"]),
+  kind: z.enum(["cloud_agent", "run", "agent_run"]),
   status: z.enum(["running", "cancelling"]),
   /** When the work was first seen running; optional for older servers. */
   startedAt: IsoDate.optional(),

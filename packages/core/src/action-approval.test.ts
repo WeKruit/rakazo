@@ -22,7 +22,7 @@ import {
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   UNATTENDED_MEMORY_WRITE_REFUSAL,
-  unattendedMemoryWriteRefusal,
+  unattendedMemoryWrite,
   unattendedTriggerToolRequiresApproval,
   withoutHiddenTools,
 } from "./action-approval.js";
@@ -223,17 +223,6 @@ describe("toolRequiresApproval", () => {
         },
       ),
     ).toBe(false);
-  });
-
-  it("requires explicit human approval of recruiting packages even with an always-allow rule", () => {
-    const toolName = "recruiting_request_approval";
-    const rules: ActionApprovalRule[] = [
-      { effect: "always_allow", matchKind: "tool", matchValue: toolName },
-    ];
-
-    expect(resolveActionApprovalDetail({ toolName, rules }).source).toBe("always_allow");
-    expect(toolRequiresApproval(toolName, false)).toBe(true);
-    expect(toolRequiresExplicitApproval(toolName)).toBe(true);
   });
 
   it.each([
@@ -514,14 +503,14 @@ describe("externalTextTriggerToolRefusal", () => {
   });
 });
 
-describe("unattendedMemoryWriteRefusal", () => {
+describe("unattendedMemoryWrite", () => {
   const refusal = (
     trigger: string,
     toolName: string,
     readExternalText: boolean,
     preference = false,
   ) =>
-    unattendedMemoryWriteRefusal({
+    unattendedMemoryWrite({
       trigger,
       toolName,
       preference,
@@ -533,9 +522,15 @@ describe("unattendedMemoryWriteRefusal", () => {
     expect(await refusal("bot_message", "recruiting_feedback", true, true)).toBeUndefined();
   });
 
-  it.each(["routine", "tickets", "recruiting_research", "cloud_agent"])(
+  it.each([
+    ["recruiting_checkin", { confirm: true }],
+    ["routine", { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL }],
+    ["tickets", { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL }],
+    ["recruiting_research", { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL }],
+    ["cloud_agent", { refusal: UNATTENDED_MEMORY_WRITE_REFUSAL }],
+  ])(
     "holds memory, preference and skill writes in a %s run after external text",
-    async (trigger) => {
+    async (trigger, held) => {
       for (const name of [
         "remember",
         "save_shared_memory",
@@ -544,16 +539,16 @@ describe("unattendedMemoryWriteRefusal", () => {
         "skill_update",
         "skill_delete",
       ])
-        expect(await refusal(trigger, name, true)).toBe(UNATTENDED_MEMORY_WRITE_REFUSAL);
-      expect(await refusal(trigger, "recruiting_feedback", true, true)).toBe(
-        UNATTENDED_MEMORY_WRITE_REFUSAL,
-      );
+        expect(await refusal(trigger, name, true)).toEqual(held);
+      expect(await refusal(trigger, "recruiting_feedback", true, true)).toEqual(held);
       expect(await refusal(trigger, "remember", false)).toBeUndefined();
     },
   );
 
-  it.each(["webhook", "messaging"])("treats a %s prompt as external text", async (trigger) => {
-    expect(await refusal(trigger, "remember", false)).toBe(UNATTENDED_MEMORY_WRITE_REFUSAL);
+  it.each(["webhook", "messaging"])("refuses a %s prompt's memory write", async (trigger) => {
+    expect(await refusal(trigger, "remember", false)).toEqual({
+      refusal: UNATTENDED_MEMORY_WRITE_REFUSAL,
+    });
   });
 
   it("keeps business records autonomous and attended runs unchanged", async () => {

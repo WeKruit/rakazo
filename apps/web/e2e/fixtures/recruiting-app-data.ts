@@ -63,7 +63,6 @@ export const revision: RecruitingRoleRevision = {
       },
     ],
     searchFilters: [],
-    confirmation: null,
   },
   criteria: [
     {
@@ -116,7 +115,6 @@ export const candidates: RecruitingCandidate[] = people.map((person, index) => (
   discoveryCount: 1,
   firstDiscoveredAt: checkedAt,
   lastDiscoveredAt: checkedAt,
-  latestAssessment: null,
   crm: null,
   latestSource: {
     providerTaskId: "fixture-task",
@@ -376,7 +374,7 @@ export async function mockRecruitingApp(
     emptyMail?: boolean;
     multipleCampaigns?: boolean;
     sequenceDraft?: boolean;
-    calendarStatus?: "accepted" | "confirmed";
+    calendarStatus?: "booked" | "pending";
     candidateReport?: RecruitingCandidateReport;
     workingRole?: boolean;
     kruitHandoff?: boolean;
@@ -503,7 +501,7 @@ export async function mockRecruitingApp(
           item.candidates.items[0] = {
             ...item.candidates.items[0],
             key: `crm:${people[0]!.candidateId}`,
-            autumn: null,
+            sourced: null,
             crm: {
               serverId: source.serverId,
               organizationId: source.organizationId,
@@ -617,7 +615,7 @@ export async function mockRecruitingApp(
                 : accountItem(role, 0).correspondence!.events.map((event) => ({
                     ...event,
                     title: "Avery · Platform interview",
-                    status: options.calendarStatus ?? "confirmed",
+                    status: options.calendarStatus ?? "booked",
                   })),
               bookingUnknown: false,
             },
@@ -856,7 +854,6 @@ export async function mockRecruitingApp(
     else if (method === "recruiting/workEstimate") value = null;
     else if (method === "recruiting/searchQuality")
       value = { rounds: [], goodExample: 0, notFit: 0 };
-    else if (method === "recruiting/roleSetup") value = { ready: true, attention: null, items: [] };
     else if (method === "recruiting/listCandidates") {
       const items = candidates
         .map((candidate, index) =>
@@ -887,8 +884,6 @@ export async function mockRecruitingApp(
           sourceRows: 3,
           candidates: 3,
           identifiedCandidates: 3,
-          unassessed: 3,
-          assessed: 0,
           shortlisted: 1,
         },
       };
@@ -899,7 +894,7 @@ export async function mockRecruitingApp(
               {
                 name: "Avery Example",
                 email: "avery@example.test",
-                autumn: { candidateKey: "fixture-native-candidate" },
+                sourced: { candidateKey: "fixture-native-candidate" },
               },
             ]
           : [],
@@ -910,8 +905,7 @@ export async function mockRecruitingApp(
       };
     else if (method === "recruiting/listResearch")
       value = { observations: [], tasks: [], actions: [] };
-    else if (method === "recruiting/listQuestions") value = { questions: [] };
-    else if (["recruiting/listAssessments", "recruiting/listFeedback"].includes(method)) value = [];
+    else if (method === "recruiting/listFeedback") value = [];
     else if (method === "recruiting/listCandidateSources")
       value = {
         roleId: role.id,
@@ -1108,7 +1102,7 @@ export async function mockRecruitingApp(
                 start: "2026-10-23T14:00:00Z",
                 end: "2026-10-23T14:45:00Z",
                 timeZone: "America/New_York",
-                status: options.calendarStatus ?? "confirmed",
+                status: options.calendarStatus ?? "booked",
                 attendees: [people[0]!.email, "recruiter@example.test"],
                 location: "Video call",
                 url: "https://calendar.example.test/event/fixture",

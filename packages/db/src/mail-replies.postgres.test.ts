@@ -7,10 +7,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Prisma, type PrismaClient } from "./client.js";
 import { answerRunInput } from "./events.js";
 import {
+  confirmedSendRecipients,
+  earlierConfirmedSends,
   findSameMailReply,
   findWaitingCampaignSend,
+  otherCampaignsThatEmailed,
   projectMailReplyCards,
   publishMailReplyCard,
+  roleRepliesCampaignMailbox,
 } from "./mail-replies.js";
 import { createThreadMessage } from "./messages.js";
 import { provisionMessagingIdentity } from "./messaging.js";
@@ -386,6 +390,133 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
       await answerRunInput(prisma, { ...second.input, answer: { ...answer, body: "Another" } }),
     ).toBeTruthy();
   });
+  it("finds people this account already sent a confirmed first email to from another campaign", async () => {
+    const earlier = await fixture(true);
+    await prisma.externalEffect.update({
+      where: { id: earlier.effect.id },
+      data: {
+        kind: "mcp__mail__native_instantly_activate_campaign",
+        status: "completed",
+        result: {
+          structuredContent: {
+            result: {
+              activated: true,
+              campaignId: "campaign-a",
+              recipients: ["Noah@Example.test"],
+            },
+          },
+        },
+      },
+    });
+    const found = await earlierConfirmedSends(prisma, identity.spaceId, "campaign-b", [
+      "noah@example.test",
+      "ada@example.test",
+    ]);
+    expect([...found.keys()]).toEqual(["noah@example.test"]);
+    // A role whose campaign emailed Noah finds the other campaign his reply may be filed under,
+    // never its own, never for someone else, and never another user's.
+    const owner = { spaceId: identity.spaceId, userId: identity.userId };
+    expect(
+      await otherCampaignsThatEmailed(prisma, owner, ["campaign-b"], [" NOAH@example.test"], 10),
+    ).toEqual(["campaign-a"]);
+    expect(
+      await otherCampaignsThatEmailed(prisma, owner, ["campaign-a"], ["noah@example.test"], 10),
+    ).toEqual([]);
+    expect(
+      await otherCampaignsThatEmailed(prisma, owner, ["campaign-b"], ["ada@example.test"], 10),
+    ).toEqual([]);
+    expect(
+      await otherCampaignsThatEmailed(
+        prisma,
+        { ...owner, userId: "someone-else" },
+        ["campaign-b"],
+        ["noah@example.test"],
+        10,
+      ),
+    ).toEqual([]);
+    // Which of these people a confirmed send of this user from these campaigns emailed.
+    expect([
+      ...(await confirmedSendRecipients(
+        prisma,
+        owner,
+        ["campaign-a"],
+        ["noah@example.test", "ada@example.test"],
+      )),
+    ]).toEqual(["noah@example.test"]);
+    expect(
+      (await confirmedSendRecipients(prisma, owner, ["campaign-b"], ["noah@example.test"])).size,
+    ).toBe(0);
+    expect(
+      (
+        await confirmedSendRecipients(
+          prisma,
+          { ...owner, userId: "someone-else" },
+          ["campaign-a"],
+          ["noah@example.test"],
+        )
+      ).size,
+    ).toBe(0);
+    // A reply in another campaign this user created is the role's when the role emailed the sender.
+    const tag = `${Date.now()}`;
+    for (const [key, request, result] of [
+      ["role", { roleId: "role-x", serverId: "mail" }, { campaignId: "campaign-a" }],
+      [
+        "one-off",
+        { serverId: "mail", direct: true },
+        { campaignId: "campaign-c", eaccount: "Me@Example.test" },
+      ],
+    ] as const)
+      await prisma.externalEffect.create({
+        data: {
+          spaceId: identity.spaceId,
+          runId: earlier.effect.runId,
+          kind: "instantly_role_campaign",
+          idempotencyKey: `test-${key}-${tag}`,
+          status: "completed",
+          request,
+          result,
+        },
+      });
+    const reply = {
+      serverId: "mail",
+      roleId: "role-x",
+      threadId: identity.threadId,
+      campaignId: "campaign-c",
+      senders: ["Noah@example.test"],
+    };
+    expect(await roleRepliesCampaignMailbox(prisma, owner, reply)).toBe("me@example.test");
+    expect(
+      await roleRepliesCampaignMailbox(prisma, owner, { ...reply, senders: ["ada@example.test"] }),
+    ).toBeNull();
+    expect(
+      await roleRepliesCampaignMailbox(prisma, owner, { ...reply, roleId: "another-role" }),
+    ).toBeNull();
+    expect(
+      await roleRepliesCampaignMailbox(prisma, { ...owner, userId: "someone-else" }, reply),
+    ).toBeNull();
+    // The same campaign sending its own people again is not a second first email.
+    expect(
+      (await earlierConfirmedSends(prisma, identity.spaceId, "campaign-a", ["noah@example.test"]))
+        .size,
+    ).toBe(0);
+    // A send the mail service refused left no receipt, though its result names the people.
+    await prisma.externalEffect.update({
+      where: { id: earlier.effect.id },
+      data: {
+        result: {
+          error: "refused",
+          structuredContent: {
+            result: { campaignId: "campaign-a", recipients: ["noah@example.test"] },
+          },
+        },
+      },
+    });
+    expect(
+      (await earlierConfirmedSends(prisma, identity.spaceId, "campaign-b", ["noah@example.test"]))
+        .size,
+    ).toBe(0);
+  });
+
   it("shows one card per campaign send: a second agent sending the same people finds the first", async () => {
     const first = await fixture();
     const second = await fixture(true);
@@ -423,5 +554,57 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
       data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
     });
     expect(await waiting(third.effect.id)).toBeUndefined();
+  });
+
+  it("does not ask again for a campaign send the recruiter declined until they write", async () => {
+    const declined = await fixture();
+    const retry = await fixture(true);
+    await prisma.externalEffect.updateMany({
+      where: { id: { in: [declined.effect.id, retry.effect.id] } },
+      data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
+    });
+    const card = { sendNow: false, recipients: [{ email: "ada@example.test" }], firstEmail: "a" };
+    const waiting = (effectId: string, shown: unknown = card) =>
+      prisma.$transaction((tx) =>
+        findWaitingCampaignSend(tx, {
+          spaceId: identity.spaceId,
+          effectId,
+          campaignId: "campaign-declined",
+          card: shown,
+        }),
+      );
+    expect(await waiting(declined.effect.id)).toBeUndefined();
+    await prisma.externalEffect.update({
+      where: { id: declined.effect.id },
+      data: { status: "denied" },
+    });
+    // Another agent's run asking with the same email before the recruiter writes is refused.
+    expect(await waiting(retry.effect.id)).toEqual({ declined: true });
+    // So is one Kruit changed on its own guess (deny-then-change-and-send on 2a781497: four cards
+    // with subjects nobody asked for); the recruiter says what to change first.
+    expect(await waiting(retry.effect.id, { ...card, firstEmail: "b" })).toEqual({
+      declined: true,
+    });
+    // Once the recruiter writes, the same email is refused once so a change they asked for
+    // gets saved first (deny-then-change-and-send 11-21), then asked again if it is unchanged.
+    await createThreadMessage(prisma, {
+      threadId: identity.threadId,
+      role: "user",
+      blocks: [{ kind: "text", text: "send it after all" }],
+    });
+    const later = await fixture(true);
+    await prisma.externalEffect.update({
+      where: { id: later.effect.id },
+      data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
+    });
+    expect(await waiting(later.effect.id)).toEqual({ unchanged: true });
+    expect(await waiting(later.effect.id)).toBeUndefined();
+    // A changed email after the recruiter writes gets its card at once.
+    const changed = await fixture(true);
+    await prisma.externalEffect.update({
+      where: { id: changed.effect.id },
+      data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
+    });
+    expect(await waiting(changed.effect.id, { ...card, firstEmail: "c" })).toBeUndefined();
   });
 });

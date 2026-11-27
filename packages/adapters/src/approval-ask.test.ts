@@ -1,4 +1,3 @@
-import { RecruitingApprovalToolInputSchema } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
@@ -14,41 +13,6 @@ describe("buildApprovalAskBlock", () => {
       { id: "deny", label: "Change the address", outcome: "cancelled" },
     ]);
     expect(JSON.stringify(block)).not.toMatch(/instantly|always/i);
-  });
-  it("confirms exact server-owned requirements in the original one-time card without model display fields", () => {
-    const request = RecruitingApprovalToolInputSchema.parse({
-      stage: "brief",
-      roleId: "internal-role",
-      expectedRoleRevision: 3,
-    });
-    const requirements = `Salary range: GBP 90,000 to 120,000\n${"Exact saved requirement. ".repeat(220)}`;
-    const block = buildApprovalAskBlock(
-      "original-effect",
-      "recruiting_request_approval",
-      request,
-      [],
-      {
-        reviewReason: "Model-supplied substitute requirements",
-        recruiting: { roleTitle: "Platform engineer", requirements },
-      },
-    );
-    expect(block.text).toBe("Role requirements");
-    expect(block.actions).toEqual([
-      { id: "allow", label: "Looks good, start searching" },
-      { id: "deny", label: "Needs changes" },
-    ]);
-    expect(block.detail).toBe(`Role: Platform engineer\n${requirements}`);
-    expect(block.detail).not.toContain("internal-role");
-    expect(block.detail!.length).toBeGreaterThan(4_000);
-    expect(() =>
-      buildApprovalAskBlock("original-effect", "recruiting_request_approval", request, []),
-    ).toThrow(/verified/i);
-    expect(
-      RecruitingApprovalToolInputSchema.safeParse({
-        ...request,
-        requirements: "Model-supplied substitute",
-      }).success,
-    ).toBe(false);
   });
   it.each([false, true])("shows the complete trusted routine update (%s)", (active) => {
     const prompt = `  Exact instruction.\n${"Keep this paragraph. ".repeat(240)}Ending token-secret  `;
@@ -541,6 +505,51 @@ describe("buildApprovalAskBlock", () => {
     expect(card(null)).toContain("Body: no email content yet");
   });
 
+  it("shows every email the send approves, each person's as they get it, in plain words", () => {
+    // Audit 11-26: follow-ups were never on the card, and it showed raw stored states.
+    const block = buildApprovalAskBlock("e", "instantly__demo__activate_campaign", {}, [], {
+      oneTimeOnly: true,
+      instantlyActivation: {
+        senderState: { state: "active", warmup: "active", readyAt: null },
+        campaignName: "Founding Engineer",
+        status: "Paused",
+        mailbox: "team@example.test",
+        recipients: [
+          {
+            name: "Ada Lovelace",
+            email: "ada@example.test",
+            firstEmail: { subject: "Founding role", body: "<p>Hi Ada</p>" },
+            followUps: [{ after: "3 days after the email before", subject: "", body: "<p>Ada?</p>" }],
+          },
+        ],
+        recipientCount: 1,
+        stopOnReply: true,
+        schedule: "now",
+      },
+    });
+    expect(block.detail).toBe(
+      [
+        "Role: Founding Engineer",
+        "From: team@example.test",
+        "Sending address: ready to send",
+        "Warmup: warming up",
+        "To (1):",
+        "- Ada Lovelace <ada@example.test>",
+        "  Subject: Founding role",
+        "  Body:",
+        "  Hi Ada",
+        "  Follow-up 1, 3 days after the email before:",
+        "  Subject: (a reply in the same thread)",
+        "  Body:",
+        "  Ada?",
+        "Send time: now",
+        "Campaign: paused; this send resumes it",
+        "",
+        "Confirm sending these emails to these recipients",
+      ].join("\n"),
+    );
+  });
+
   it("shows a vendor-free reply card that sends only on confirmation", () => {
     const block = buildApprovalAskBlock(
       "reply-effect",
@@ -573,6 +582,24 @@ describe("buildApprovalAskBlock", () => {
     );
     expect(`${block.text}\n${block.detail}`).not.toContain("Instantly");
     expect(block.detail).not.toContain("7a0a8e6e");
+    const copied = buildApprovalAskBlock(
+      "reply-effect",
+      "instantly__demo__reply_to_email",
+      { reply_to_uuid: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69", body: { text: "Thanks" } },
+      [],
+      {
+        oneTimeOnly: true,
+        instantlyReply: {
+          to: "ada@example.test",
+          cc: ["lead@client.test"],
+          from: "team@example.test",
+          subject: "Re: Founding Engineer",
+          inReplyTo: null,
+          body: "Thanks",
+        },
+      },
+    );
+    expect(copied.detail).toContain("To: ada@example.test\nCc: lead@client.test\n");
     expect(block.actions).toEqual([
       { id: "allow", label: "Confirm and send" },
       { id: "deny", label: "Cancel" },
@@ -624,12 +651,12 @@ describe("buildApprovalAskBlock", () => {
     expect(block.text).toBe("Confirm interview booking → Adam Test");
     expect(block.detail).toBe(
       [
-        "Candidate: Adam Test <adam@example.test>",
+        "Guests: Adam Test <adam@example.test>",
         "When: Tue, Nov 3, 2026, 2:00 PM CST (America/Chicago)",
         "Length: 30 min",
         "Title: Interview – Front Desk Supervisor",
         "",
-        "The candidate gets a calendar invitation once you confirm.",
+        "Every guest gets a calendar invitation once you confirm.",
       ].join("\n"),
     );
     expect(`${block.text}\n${block.detail}`).not.toMatch(/google|Google|primary/);
@@ -650,6 +677,127 @@ describe("buildApprovalAskBlock", () => {
     );
     expect(block.detail).toContain("When: Wed, Nov 4, 2026, 2:00 PM CST (America/Chicago)");
     expect(block.detail).toContain("Length: 30 min");
+  });
+
+  it("lists every guest of a calendar booking and what the calendar already holds then", () => {
+    const block = buildApprovalAskBlock(
+      "event-guests",
+      "mcp__google-calendar__create_event",
+      {
+        summary: "Ethan Park · Senior Data Engineer",
+        startTime: "2026-12-01T14:00:00",
+        endTime: "2026-12-01T14:30:00",
+        timeZone: "America/Chicago",
+        attendees: [
+          { email: "ethan@candidate.example.test", displayName: "Ethan Park" },
+          { email: "priya@client.example.test" },
+        ],
+        calendarConflicts: [{ start: "2026-12-01T20:15:00Z", end: "2026-12-01T21:00:00Z" }],
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview booking → Ethan Park");
+    expect(block.detail).toBe(
+      [
+        "Guests: Ethan Park <ethan@candidate.example.test>, priya@client.example.test",
+        "When: Tue, Dec 1, 2026, 2:00 PM CST (America/Chicago)",
+        "Length: 30 min",
+        "Title: Ethan Park · Senior Data Engineer",
+        "Already busy then: Tue, Dec 1, 2026, 2:15 PM CST (America/Chicago) – Tue, Dec 1, 2026, 3:00 PM CST (America/Chicago)",
+        "",
+        "Every guest gets a calendar invitation once you confirm.",
+      ].join("\n"),
+    );
+  });
+
+  it("says when the calendar could not be checked for other events", () => {
+    const block = buildApprovalAskBlock(
+      "event-unchecked",
+      "mcp__google-calendar__create_event",
+      {
+        summary: "Interview",
+        startTime: "2026-12-01T20:00:00Z",
+        endTime: "2026-12-01T20:30:00Z",
+        attendees: [{ email: "ethan@candidate.example.test" }],
+        calendarConflicts: null,
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.detail).toContain(
+      "Your calendar could not be checked for other events at this time.",
+    );
+  });
+
+  it("shows a calendar move as the current time and the new one, with the event's guests", () => {
+    const block = buildApprovalAskBlock(
+      "event-move",
+      "mcp__google-calendar__update_event",
+      {
+        eventId: "event-1",
+        startTime: "2026-12-02T20:00:00Z",
+        endTime: "2026-12-02T20:30:00Z",
+        removedAttendeeEmails: ["priya@client.example.test"],
+        addedAttendees: [{ email: "sam@client.example.test" }],
+        originalEvent: {
+          summary: "Interview",
+          start: "2026-12-01T20:00:00.000Z",
+          end: "2026-12-01T20:30:00.000Z",
+          timeZone: "America/Chicago",
+          attendees: [
+            { email: "ethan@candidate.example.test", displayName: "Ethan Park" },
+            { email: "priya@client.example.test" },
+          ],
+        },
+        calendarConflicts: [],
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview change → Ethan Park");
+    expect(block.detail).toBe(
+      [
+        "Guests: Ethan Park <ethan@candidate.example.test>, sam@client.example.test",
+        "Adding: sam@client.example.test",
+        "Removing: priya@client.example.test",
+        "From: Tue, Dec 1, 2026, 2:00 PM CST (America/Chicago)",
+        "To: Wed, Dec 2, 2026, 2:00 PM CST (America/Chicago)",
+        "Length: 30 min",
+        "Title: Interview",
+        "Your calendar is free then.",
+        "",
+        "Every guest gets the change once you confirm.",
+      ].join("\n"),
+    );
+  });
+
+  it("shows what a calendar cancellation cancels and who is told", () => {
+    const block = buildApprovalAskBlock(
+      "event-cancel",
+      "mcp__google-calendar__delete_event",
+      {
+        eventId: "event-1",
+        originalEvent: {
+          summary: "Interview",
+          start: "2026-12-01T20:00:00.000Z",
+          end: "2026-12-01T20:30:00.000Z",
+          timeZone: "America/Chicago",
+          attendees: [{ email: "ethan@candidate.example.test", displayName: "Ethan Park" }],
+        },
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview cancellation → Ethan Park");
+    expect(block.detail).toBe(
+      [
+        "Cancel: Interview, Tue, Dec 1, 2026, 2:00 PM CST (America/Chicago)",
+        "Guests: Ethan Park <ethan@candidate.example.test>",
+        "",
+        "Every guest is told it is cancelled once you confirm.",
+      ].join("\n"),
+    );
   });
 
   it("shows an interview change as who, from and to, then the original booking", () => {
@@ -903,116 +1051,6 @@ describe("buildApprovalAskBlock", () => {
     });
     if (block.kind !== "ask") throw new Error("expected ask block");
     expect(block.detail).toContain("stay separate from other spaces");
-  });
-
-  it("offers only one-time approval or denial of the exact document package", () => {
-    const request = RecruitingApprovalToolInputSchema.parse({
-      stage: "documents",
-      roleId: "role",
-      expectedRoleRevision: 3,
-      documents: {
-        jdText: { artifactId: "jd", sha256: "a".repeat(64) },
-        namedPdf: { artifactId: "named-pdf", sha256: "b".repeat(64) },
-        anonymousPdf: null,
-        deck: null,
-      },
-    });
-    const block = buildApprovalAskBlock(
-      "documents-effect",
-      "recruiting_request_approval",
-      request,
-      [],
-    );
-
-    expect(block).toMatchObject({
-      kind: "ask",
-      approvalEffectId: "documents-effect",
-      text: "Approve documents",
-      actions: [
-        { id: "allow", label: "Approve documents" },
-        { id: "deny", label: "Deny" },
-      ],
-      detail: [
-        "Role version: 3",
-        "Job description: attached",
-        "Named JD PDF: attached",
-        "Anonymous JD PDF: not provided",
-        "Deck: not provided",
-      ].join("\n"),
-    });
-    if (block.kind !== "ask") throw new Error("expected ask block");
-    for (const value of [request.roleId, "named-pdf", "a".repeat(64), "b".repeat(64)])
-      expect(block.detail).not.toContain(value);
-  });
-
-  it("shows all ten calibration profiles and every rule beyond the generic detail limit", () => {
-    const request = RecruitingApprovalToolInputSchema.parse({
-      stage: "calibration",
-      roleId: "role",
-      expectedRoleRevision: 3,
-      documentsApprovalEffectId: "documents-effect",
-      profiles: Array.from({ length: 10 }, (_, index) => ({
-        candidateKey: `candidate-${index}`,
-        source: {
-          effectId: "saved-page",
-          rowIndex: index,
-          providerTaskId: "task",
-          roleRevisionId: "revision",
-          artifactRef: { artifactId: "artifact", sha256: "a".repeat(64) },
-        },
-        linkedinUrl: `https://www.linkedin.com/in/candidate-${index}`,
-        evidenceUrl: `https://example.test/evidence/${index}?source=${"context".repeat(80)}`,
-      })),
-      ruleChanges: Array.from(
-        { length: 5 },
-        (_, index) => `Rule ${index}: ${"retain exact evidence; ".repeat(30)}token-secret`,
-      ),
-    });
-    if (request.stage !== "calibration") throw new Error("expected calibration request");
-    const block = buildApprovalAskBlock(
-      "calibration-effect",
-      "recruiting_request_approval",
-      request,
-      ["token-secret"],
-      {
-        recruiting: {
-          roleTitle: "Systems engineer",
-          profiles: request.profiles.map((profile, index) => ({
-            name: `Verified person ${index}`,
-            linkedinUrl: profile.linkedinUrl,
-            evidenceUrl: profile.evidenceUrl,
-          })),
-        },
-      },
-    );
-
-    expect(block).toMatchObject({
-      kind: "ask",
-      approvalEffectId: "calibration-effect",
-      text: "Approve calibration",
-      actions: [
-        { id: "allow", label: "Approve calibration" },
-        { id: "deny", label: "Deny" },
-      ],
-    });
-    if (block.kind !== "ask") throw new Error("expected ask block");
-    expect(block.detail?.length).toBeGreaterThan(4_000);
-    expect(block.detail).toContain("Role version: 3");
-    expect(block.detail).not.toContain("token-secret");
-    expect(block.detail).not.toContain("documents-effect");
-    expect(block.detail).not.toContain("candidateKey");
-    expect(block.detail).toContain("Role: Systems engineer");
-    for (let index = 0; index < 10; index++)
-      expect(block.detail).toContain(`Verified person ${index}`);
-    for (const internal of ["saved-page", "artifact", "providerTaskId", "roleRevisionId"])
-      expect(block.detail).not.toContain(internal);
-    for (const profile of request.profiles) {
-      expect(block.detail).toContain(profile.linkedinUrl);
-      expect(block.detail).toContain(profile.evidenceUrl);
-      expect(block.detail).not.toContain("Assessment version");
-    }
-    for (const rule of request.ruleChanges)
-      expect(block.detail).toContain(rule.replace("token-secret", "[redacted]"));
   });
 
   it("shows a send from the recruiter's own mailbox as the email itself, confirmed once", () => {

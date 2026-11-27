@@ -27,6 +27,7 @@ const round = (approvedAt: string | null = null): RecruitingCalibrationRound => 
   createdAt: "2026-10-23T16:00:00.000Z",
   approvedAt,
   candidates: Array.from({ length: 10 }, (_, index) => ({
+    number: index + 1,
     candidateKey: `person-${index}`,
     name: `Person ${index}`,
     title: "Warehouse operations manager",
@@ -63,7 +64,6 @@ function type(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
 
 it("sends feedback on a few people and the direction as one message", async () => {
   const { onSendFeedback } = await mount(round());
-  expect(container!.textContent).toContain("Round 2 · 10 people");
   const send = button("Send feedback");
   expect(send.disabled).toBe(true);
   await act(async () => button("Good example: Person 1").click());
@@ -98,4 +98,13 @@ it("shows an accepted round without feedback controls", async () => {
   expect(container!.textContent).toContain("Accepted. Finding more people.");
   expect(container!.querySelector("form")).toBeNull();
   expect(container!.querySelectorAll("a")).toHaveLength(10);
+});
+
+it("marks a person the recruiter already passed on", async () => {
+  const value = round();
+  value.candidates[3] = { ...value.candidates[3]!, decision: "pass" };
+  await mount(value);
+  const rows = [...container!.querySelectorAll("li")];
+  expect(rows[3]!.textContent).toContain("Passed");
+  expect(rows.filter((row) => row.textContent?.includes("Passed"))).toHaveLength(1);
 });

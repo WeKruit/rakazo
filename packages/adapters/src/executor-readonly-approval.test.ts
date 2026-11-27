@@ -1,4 +1,3 @@
-import { validateToolArguments } from "@earendil-works/pi-ai";
 import type {
   AgentRunRequest,
   AgentRuntimeEvent,
@@ -7,7 +6,8 @@ import type {
   ConnectorEvent,
   ConnectorTool,
 } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MEMORY_REVISION_CONFLICT_ERROR, MemoryRevisionConflictError } from "@rakazo/adapter-kit";
+import type * as CoreModule from "@rakazo/core";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { UNATTENDED_MEMORY_WRITE_REFUSAL } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
@@ -16,21 +16,21 @@ import type { PauseRunForInput } from "@rakazo/db";
 import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
-import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
+import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
+import { changedPaths, sendCard } from "./campaign-send-card.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
-import { parametersFor } from "./pi-runtime.js";
-import type * as RecruitingAssessmentModule from "./recruiting-assessment.js";
+import type * as RecruitingCandidatesToolModule from "./recruiting-candidates-tool.js";
+import { withOpenQuestions } from "./reply-open-questions.js";
 import type * as ScheduleToolsModule from "./schedule-tools.js";
 import { RoutineUpdateError } from "./schedule-tools.js";
 
 const candidateReads = vi.hoisted(() => vi.fn());
-vi.mock("./recruiting-assessment.js", async (original) => ({
-  ...(await original<typeof RecruitingAssessmentModule>()),
+vi.mock("./recruiting-candidates-tool.js", async (original) => ({
+  ...(await original<typeof RecruitingCandidatesToolModule>()),
   executeRecruitingCandidatesTool: candidateReads,
 }));
-const recruitingApproval = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
 const replyProof = vi.hoisted(() => vi.fn());
 const crmApprovalProof = vi.hoisted(() => vi.fn());
 const nativeShortlist = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
@@ -68,10 +68,13 @@ beforeEach(() => {
     result: { structuredContent: replyAnchor },
   }));
 });
+// The per-run outside-call window is module-wide; this file reuses one run id across many sends.
+vi.mock("@rakazo/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof CoreModule>()),
+  RUN_EGRESS_PER_MINUTE: Number.MAX_SAFE_INTEGER,
+}));
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
-  prepareRecruitingApproval: recruitingApproval.prepare,
-  executeRecruitingApproval: recruitingApproval.execute,
   getRecruitingCrmTarget: recruitingCrm.read,
   prepareRecruitingCrmBinding: recruitingCrm.prepare,
   executeRecruitingCrmBinding: recruitingCrm.bind,
@@ -166,8 +169,11 @@ function fixture({
   replyServerEndpoint = "https://mcp.instantly.ai/mcp",
   providerToolName,
   extraTools = [],
+  listed = [],
   connectorResults = {},
 }: {
+  /** Tools every turn lists next to the connector's own, such as the people search. */
+  listed?: ConnectorTool[];
   providerToolName?: string;
   extraTools?: ConnectorTool[];
   connectorResults?: Record<string, unknown>;
@@ -217,7 +223,7 @@ function fixture({
         request.expectedRevision !== undefined &&
         request.expectedRevision !== sharedMemoryState.revision
       ) {
-        throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
+        throw new MemoryRevisionConflictError();
       }
       sharedMemoryState.content = request.content;
       sharedMemoryState.revision = (sharedMemoryState.revision || 0) + 1;
@@ -242,19 +248,32 @@ function fixture({
     createdAt: new Date(),
   };
   const externalEffect = {
+    deleteMany: vi.fn(async ({ where }: { where: { id: string; status: string } }) => {
+      const index = effects.findIndex(
+        (effect) => effect.id === where.id && effect.status === where.status,
+      );
+      if (index >= 0) effects.splice(index, 1);
+      return { count: index >= 0 ? 1 : 0 };
+    }),
     findFirst: vi.fn(
-      async ({ where }: { where: { id?: string; status?: string } }) =>
+      async ({ where }: { where: { id?: string; status?: string; kind?: unknown } }) =>
         effects.find(
           (effect) =>
             (!where.id || effect.id === where.id) &&
-            (!where.status || effect.status === where.status),
+            (!where.status || effect.status === where.status) &&
+            (typeof where.kind !== "string" || effect.kind === where.kind),
         ) ?? null,
     ),
     findMany: vi.fn(
       async ({
         where,
       }: {
-        where?: { id?: string; runId?: string; status?: string | { in: string[] }; kind?: string };
+        where?: {
+          id?: string;
+          runId?: string;
+          status?: string | { in: string[] };
+          kind?: string | { endsWith: string };
+        };
       } = {}) =>
         effects.filter((effect) => {
           if (
@@ -264,7 +283,13 @@ function fixture({
               : where.status.in.includes(effect.status))
           )
             return false;
-          if (where?.kind && effect.kind !== where.kind) return false;
+          if (
+            where?.kind &&
+            (typeof where.kind === "string"
+              ? effect.kind !== where.kind
+              : !effect.kind.endsWith(where.kind.endsWith))
+          )
+            return false;
           if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
           if (where?.id && effect.id !== where.id) return false;
           return true;
@@ -302,6 +327,7 @@ function fixture({
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
       count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => []),
       updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(run, data);
         return { count: 1 };
@@ -439,8 +465,8 @@ function fixture({
     ...(artifacts ? { artifacts: { get: vi.fn() } } : {}),
     runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
     connector: {
-      discoverTools: async () =>
-        builtin
+      discoverTools: async () => [
+        ...(builtin
           ? providerToolName
             ? providerTools
             : []
@@ -453,7 +479,9 @@ function fixture({
                   route: { connectorId, toolName: "__catalog_execute" },
                 },
               ]
-            : [tool],
+            : [tool]),
+        ...listed,
+      ],
       resolveCall: async (call: ConnectorCall) =>
         catalog || call.route?.toolName === "__catalog_execute"
           ? resolveCatalogCall(call, catalogEntries(providerTools))
@@ -1517,6 +1545,308 @@ describe("native Instantly activation card", () => {
     expect(f.effects[0]?.status).toBe("intended");
   });
 
+  it("sends an approved card only while it still shows what would go out", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    const effect = f.effects[0]!;
+    const shown = (effect.result as { instantlyActivationCard?: string }).instantlyActivationCard;
+    expect(shown).toMatch(/^[0-9a-f]{64}$/);
+    // Sim 11-14: after this card was shown, a second card re-saved everyone's email.
+    effect.status = "approved";
+    effect.result = { instantlyActivationCard: "0".repeat(64) };
+    f.setCalls([]);
+    await f.run();
+    const prompt = () =>
+      (f.runtimeRun.mock.calls.at(-1)?.[0] as { prompt?: string } | undefined)?.prompt;
+    expect(prompt()).toContain("changed after this card was shown");
+    const sent = () =>
+      f.execute.mock.calls.filter(
+        (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+      );
+    expect(sent()).toEqual([]);
+    effect.result = { instantlyActivationCard: shown };
+    await f.run();
+    expect(sent()).toHaveLength(1);
+  });
+
+  it.each([{ catalog: false }, { catalog: true }])(
+    "sends an approved card as soon as the run resumes, without waiting for the model (%j)",
+    async ({ catalog }) => {
+      // Gate ce4a9c24, stop-after-approve: on resume the model called other tools first and the
+      // run failed "Approved tool requests were not fully replayed"; nothing was sent. Gate
+      // 245ab70b: the same through the tool catalog, where the card was approved via its wrapper.
+      const f = fixture({
+        name: "instantly__demo__activate_campaign",
+        route,
+        catalog,
+        connectorResults,
+        inputSchema,
+      });
+      f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+      await f.run();
+      f.effects[0]!.status = "approved";
+      f.setCalls([]);
+      await f.run();
+      const sent = f.execute.mock.calls.filter(
+        (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+      );
+      expect(sent).toHaveLength(1);
+      const prompt = f.runtimeRun.mock.calls.at(-1)?.[0] as { prompt?: string } | undefined;
+      expect(prompt?.prompt).toContain("already ran");
+    },
+  );
+
+  it("sends a card confirmed through the tool catalog when the next turn lists tools directly", async () => {
+    // Gate 06e70043: the card was approved through the catalog wrapper, the resumed turn offered
+    // the tools directly, and the send was refused "must be replayed before connectors_execute_tool".
+    const options = {
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    };
+    const shown = fixture({ ...options, catalog: true });
+    shown.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await shown.run();
+    const f = fixture(options);
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    Object.assign(f.effects[0]!, { status: "approved", request: shown.effects[0]!.request });
+    f.setCalls([]);
+    await f.run();
+    const sent = f.execute.mock.calls.filter(
+      (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0]![0].args).toMatchObject({ campaign_id: "c-1" });
+  });
+
+  it("sends a card confirmed through the tool catalog when the next turn hides the catalog", async () => {
+    // Gate 94b302cd: the card was made through the catalog before the role was linked; on
+    // resume the role had no round yet, so the turn hid the catalog wrapper and the send was
+    // refused "must be replayed via its catalog execute tool".
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+      catalog: true,
+      artifacts: true,
+      listed: [
+        {
+          name: "exa__web_search_advanced_exa",
+          description: "People search",
+          readOnly: true,
+          inputSchema: { type: "object" },
+        },
+      ],
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    expect(f.effects[0]?.kind).toBe("instantly__demo__activate_campaign");
+    Object.assign(f.prisma.thread, {
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: "thread-1",
+        groupId: null,
+        activeRecruitingRoleId: "role-1",
+      })),
+      findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role-1" })),
+      findFirst: vi.fn(async () => ({
+        id: "thread-1",
+        spaceId: "space-1",
+        userId: "user-1",
+        botId: "bot-1",
+        groupId: null,
+        externalConversationId: null,
+        activeRecruitingRoleId: null,
+      })),
+    });
+    Object.assign(f.prisma.bot, {
+      findFirst: vi.fn(async () => ({ spaceId: "space-1", userId: "user-1" })),
+    });
+    Object.assign(f.prisma, {
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+    });
+    f.effects[0]!.status = "approved";
+    f.setCalls([]);
+    await f.run();
+    const sent = f.execute.mock.calls.filter(
+      (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+    );
+    expect(sent).toHaveLength(1);
+    expect(f.effects[0]!.status).not.toBe("failed");
+  });
+
+  it("keeps the role's sending tools on a role that emails named people and has no round", async () => {
+    // Gate 44c1ad44: after the card, every turn of a role with no round hid the tool catalog, so
+    // the role could not save a corrected email ("I can't call save and resubmit here").
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+      catalog: true,
+      artifacts: true,
+      listed: [
+        {
+          name: "exa__web_search_advanced_exa",
+          description: "People search",
+          readOnly: true,
+          inputSchema: { type: "object" },
+        },
+      ],
+    });
+    Object.assign(f.prisma.thread, {
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: "thread-1",
+        groupId: null,
+        activeRecruitingRoleId: "role-1",
+      })),
+      findFirst: vi.fn(async () => ({
+        id: "thread-1",
+        spaceId: "space-1",
+        userId: "user-1",
+        botId: "bot-1",
+        groupId: null,
+        externalConversationId: null,
+        activeRecruitingRoleId: null,
+      })),
+    });
+    Object.assign(f.prisma.bot, {
+      findFirst: vi.fn(async () => ({ spaceId: "space-1", userId: "user-1" })),
+    });
+    Object.assign(f.prisma, {
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+    });
+    const listed = async () => {
+      f.setCalls([]);
+      await f.run();
+      const request = f.runtimeRun.mock.calls.at(-1)?.[0] as { tools?: { name: string }[] };
+      return request.tools?.some((tool) => tool.name === catalogExecuteToolName("mcp"));
+    };
+    // Before anything is set up for sending, the first round still skips the lookup step.
+    expect(await listed()).toBe(false);
+    f.effects.push({
+      id: "binding",
+      kind: "instantly_role_campaign",
+      idempotencyKey: "instantly-role-campaign:instantly-1:role-1",
+      status: "completed",
+      request: { roleId: "role-1", serverId: "instantly-1" },
+      result: { campaignId: "c-1" },
+      runId: "run-0",
+      spaceId: "space-1",
+    } as never);
+    expect(await listed()).toBe(true);
+  });
+
+  it("names which parts of a send card changed, without their values", () => {
+    const shown = {
+      sendNow: false,
+      recipients: [{ email: "a@x.test", name: "Ada" }, { email: "e@x.test" }],
+      firstEmail: null,
+    };
+    expect(changedPaths(shown, shown)).toEqual([]);
+    expect(
+      changedPaths(shown, {
+        ...shown,
+        recipients: [
+          { email: "a@x.test", name: "Ada Chen" },
+          { email: "e@x.test", emailType: "work" },
+        ],
+      }),
+    ).toEqual(["recipients[0].name", "recipients[1].emailType"]);
+    expect(changedPaths(undefined, shown)).toEqual(["card not recorded"]);
+  });
+
+  it("catches a follow-up changed after its send card was shown", () => {
+    // Audit 11-26: only the first email was compared, so later steps could change after approval.
+    const followUp = { after: "3 days after the email before", subject: "", body: "<p>Bump</p>" };
+    const display = {
+      campaignName: "Founding Engineer",
+      status: "Draft",
+      mailbox: "me@x.test",
+      recipients: [{ name: "Ada", email: "a@x.test" }],
+      recipientCount: 1,
+      stopOnReply: true,
+      schedule: "now",
+      firstEmail: { subject: "Hi", body: "<p>Hello</p>" },
+      followUps: [followUp],
+    };
+    expect(
+      changedPaths(
+        sendCard(display, false),
+        sendCard({ ...display, followUps: [{ ...followUp, body: "<p>Changed</p>" }] }, false),
+      ),
+    ).toEqual(["followUps[0].body"]);
+    expect(
+      changedPaths(
+        sendCard(display, false),
+        sendCard(
+          {
+            ...display,
+            followUps: undefined,
+            recipients: [{ name: "Ada", email: "a@x.test", followUps: [followUp] }],
+          },
+          false,
+        ),
+      ),
+    ).toEqual(["recipients[0].followUps", "followUps"]);
+  });
+
+  it("sends the card confirmed on a second identical call, not the first call's refusal", async () => {
+    // Gate 44c1ad44: the first activate_campaign was refused, the same call again made the card,
+    // and the confirmed replay found the first call's stored refusal, so nothing was sent.
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    const card = f.effects[0]!;
+    const firstKey = card.idempotencyKey;
+    Object.assign(card, { idempotencyKey: `${firstKey}:second`, status: "approved" });
+    f.effects.unshift({
+      ...card,
+      id: "refused",
+      idempotencyKey: firstKey,
+      status: "completed",
+      result: { error: "Nothing was sent and no card was shown: an earlier refusal." },
+    });
+    f.setCalls([]);
+    await f.run();
+    const sent = f.execute.mock.calls.filter(
+      (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+    );
+    expect(sent).toHaveLength(1);
+  });
+
+  it("closes a confirmed send that cannot start instead of failing the run", async () => {
+    // Gate 245ab70b: the confirmed send was left for the model, which never repeated it; every
+    // other call was refused and the run failed with nothing said or sent.
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    Object.assign(f.effects[0]!, { status: "approved", kind: "instantly__retired__activate" });
+    f.setCalls([]);
+    await f.run();
+    expect(f.effects[0]!.status).toBe("failed");
+    const prompt = f.runtimeRun.mock.calls.at(-1)?.[0] as { prompt?: string } | undefined;
+    expect(prompt?.prompt).toContain("could not start, so nothing was sent");
+  });
+
   it("resolves the role's bound campaign when campaign_id is omitted", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",
@@ -1675,7 +2005,7 @@ describe("native Instantly activation card", () => {
     expect(card(f).detail).not.toMatch(/ada@x\.test|bob@x\.test/);
   });
 
-  it("shows no card when resuming would also email people who were not named", async () => {
+  it("lists on the card who a paused campaign never emailed and this send takes out", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",
       route,
@@ -1685,8 +2015,8 @@ describe("native Instantly activation card", () => {
     bindRole(f);
     f.setCalls([{ args: { recipients: ["ada@x.test"] }, executionId: "activate" }]);
     await f.run();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("would also email") });
+    expect(card(f).detail).toContain("To (1):");
+    expect(card(f).detail).toContain("Taken out of the queue, not emailed: bob@x.test");
   });
 });
 
@@ -1766,6 +2096,81 @@ describe.each([
   }
 });
 
+describe.each([false, true])("a reply to a candidate (catalog: %s)", (catalog) => {
+  const replyFixture = () =>
+    fixture({
+      name: "renamed_reply",
+      catalog,
+      readOnly: false,
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "reply_to_email",
+      },
+      // The schema the connector lists for a reply: the open questions are required.
+      inputSchema: withOpenQuestions({ type: "object" }),
+    });
+
+  it("shows the questions the recruiter never answered on its card, and still drafts it", async () => {
+    const f = replyFixture();
+    f.setCalls([
+      {
+        args: { ...replyArgs, open_questions: ["Do you offer relocation?"] },
+        executionId: "reply",
+      },
+    ]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            mailReply: expect.objectContaining({ openQuestions: ["Do you offer relocation?"] }),
+          }),
+        ],
+      }),
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it("goes to its card when none is open, and the mail service never sees the field", async () => {
+    const f = replyFixture();
+    f.setCalls([{ args: { ...replyArgs, open_questions: [] }, executionId: "reply" }]);
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    f.effects[0]!.status = "approved";
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual(replyArgs);
+  });
+
+  it("shows one card at a time when a step asks for two confirmations together", async () => {
+    // Play fix-all/play-2: a reply and a calendar invite in one step; the second failed with
+    // "Could not pause this run for approval" and was lost.
+    const f = replyFixture();
+    const call = (body: string) => {
+      const args = { ...replyArgs, body_text: body, open_questions: [] };
+      return catalog ? { id: catalogEntries([f.providerTools[0]!])[0]?.id, arguments: args } : args;
+    };
+    f.runtimeRun.mockImplementationOnce(async function* (request: AgentRunRequest) {
+      const tool = catalog ? catalogExecuteToolName("mcp") : "renamed_reply";
+      f.results.push(
+        ...(await Promise.all([
+          request.executeTool!(tool, call("First draft."), "first"),
+          request.executeTool!(tool, call("Second draft."), "second"),
+        ])),
+      );
+      if (!f.results.some((result) => isApprovalPausedResult(result)))
+        yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.results.filter((result) => isApprovalPausedResult(result))).toHaveLength(1);
+    expect(JSON.stringify(f.results)).toContain("Not run yet");
+    expect(f.effects).toHaveLength(1);
+  });
+});
+
 const sendActions = [
   { id: "allow", label: "Send" },
   { id: "deny", label: "Discard" },
@@ -1781,17 +2186,13 @@ describe("recruiter-instructed email send", () => {
     instruction = "可以，发吧",
     rules: ActionApprovalRule[] = [],
     args: Record<string, unknown> = replyArgs,
+    route = { connectorId: "mcp", toolName: "reply_to_email" },
   ) {
     const f = fixture({
-      name: "reply_to_email",
+      name: route.toolName,
       rules,
       readOnly: false,
-      route: {
-        connectorId: "mcp",
-        resourceId: "resource-1",
-        resourceRevision: 1,
-        toolName: "reply_to_email",
-      },
+      route: { ...route, resourceId: "resource-1", resourceRevision: 1 },
       inputSchema: { type: "object" },
     });
     Object.assign(await f.prisma.run.findUnique(), { sourceMessageId: "human-1" });
@@ -1826,6 +2227,27 @@ describe("recruiter-instructed email send", () => {
     expect(f.execute).not.toHaveBeenCalled();
   });
 
+  // "先发给我看看" (send it to me first) read as an order to send it to the candidate: every
+  // send of a new email waits for its own card, whatever the recruiter's words were.
+  it.each(["先发给我看看", "发吧"])(
+    "keeps the card for a new email after %s",
+    async (instruction) => {
+      const f = await instructedSend(
+        "To: candidate@example.test\nSubject: Seattle role\n\nPublic synthetic draft.",
+        instruction,
+        [],
+        {
+          recipient_email: "candidate@example.test",
+          subject: "Seattle role",
+          body: "Public synthetic draft.",
+        },
+        { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
+      );
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    },
+  );
+
   it("keeps the card when the exact text was never shown", async () => {
     const f = await instructedSend("我会回复他周二可以。");
     expect(f.execute).not.toHaveBeenCalled();
@@ -1839,7 +2261,7 @@ describe("recruiter-instructed email send", () => {
   });
 
   // A candidate's reply can ask the agent to "also bcc" an outside address.
-  it("keeps the card for an injected bcc, even with send when I say send saved", async () => {
+  it("keeps the card for an injected bcc, even with an always-allow rule saved", async () => {
     const f = await instructedSend(
       "收件人：candidate@example.test\n草稿：\n> Public synthetic draft.",
       "发吧",
@@ -2362,6 +2784,61 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
         blocks: [],
       }),
     );
+  });
+
+  it("gives the agent a turn to save the recruiter's answers once a reply listing open questions is sent", async () => {
+    const editedBody = "Relocation is up to $10,000.";
+    const f = replyFixture({ structuredContent: { ...sentEmail, body: { text: editedBody } } });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    effect.request = editMailReplyRequest(effect.request, draft, {
+      action: "send",
+      body: editedBody,
+      cc: [],
+    });
+    effect.result = {
+      mailReplyApproval: {
+        ...draft,
+        body: editedBody,
+        openQuestions: ["Do you offer relocation?"],
+        status: "sending",
+      },
+    };
+    effect.status = "approved";
+    f.runtimeRun.mockClear();
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.runtimeRun).toHaveBeenCalledOnce();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain('"Do you offer relocation?"');
+    // The recruiter's edit is what went out, not the draft in the agent's own call.
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
+      `Sent body: ${JSON.stringify(editedBody)}`,
+    );
+  });
+
+  it("also does when the recruiter discarded the card that listed them and answered in words", async () => {
+    const f = replyFixture({ structuredContent: sentEmail });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    f.effects.unshift({
+      ...effect,
+      id: "discarded-card",
+      kind: "instantly__demo__reply_to_email",
+      runId: "earlier-run",
+      idempotencyKey: "earlier-card",
+      status: "denied",
+      result: { mailReplyApproval: { ...draft, openQuestions: ["Can you transfer my H-1B?"] } },
+    });
+    effect.status = "approved";
+    effect.result = { mailReplyApproval: { ...draft, status: "sending" } };
+    f.runtimeRun.mockClear();
+    await f.run();
+    expect(f.runtimeRun).toHaveBeenCalledOnce();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain('"Can you transfer my H-1B?"');
   });
 
   it.each([
@@ -3462,230 +3939,24 @@ describe("candidate-linked native reply", () => {
   });
 });
 
-describe("native recruiting package approval", () => {
-  const args = {
-    stage: "documents",
-    roleId: "role-example",
-    expectedRoleRevision: 2,
-    documents: {
-      jdText: { artifactId: "jd-text", sha256: "a".repeat(64) },
-      namedPdf: { artifactId: "jd-pdf", sha256: "b".repeat(64) },
-      anonymousPdf: null,
-      deck: null,
-    },
-  };
-  const file = {
-    kind: "file",
-    artifactId: "jd-pdf",
-    mimeType: "application/pdf",
-    name: "JD.pdf",
-    size: 128,
-  };
-  beforeEach(() => {
-    recruitingApproval.prepare
-      .mockReset()
-      .mockResolvedValue({ files: [file], roleTitle: "Verified role" });
-    recruitingApproval.execute.mockReset();
-    reviewMock.mockReset();
-  });
-  function approvalFixture() {
-    const f = fixture({
-      name: "recruiting_request_approval",
-      builtin: true,
-      artifacts: true,
-      autoReview: true,
-      rules: [
-        { effect: "always_allow", matchKind: "tool", matchValue: "recruiting_request_approval" },
-      ],
-    });
-    f.setCalls([{ args, executionId: "approval-1" }]);
-    return f;
-  }
-  it("never opens an approval card for role documents", async () => {
-    const f = approvalFixture();
-    await f.run();
-    expect((f.results.at(-1) as { error: string }).error).toContain(
-      "Role documents never use an approval card",
-    );
-    expect(f.effects).toHaveLength(0);
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(recruitingApproval.prepare).not.toHaveBeenCalled();
-    expect(recruitingApproval.execute).not.toHaveBeenCalled();
-  });
-  it("never opens an approval card for a calibration round", async () => {
-    const keys = Array.from({ length: 10 }, (_, index) => `linkedin:example-${index}`);
-    const profiles = keys.map((candidateKey, index) => ({
-      candidateKey,
-      linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-      evidenceUrl: `https://example.test/evidence/${index}`,
-      source: {
-        effectId: "raw-read",
-        rowIndex: index,
-        roleRevisionId: "role-revision",
-        providerTaskId: "provider-task",
-        artifactRef: { artifactId: "raw-artifact", sha256: "a".repeat(64) },
-      },
-    }));
-    const base = { stage: "calibration", roleId: "role-example", expectedRoleRevision: 2 };
-    for (const [round, request, expected] of [
-      [null, base, "Record the ten with recruiting_research calibration_round"],
-      [{ approvedAt: null, candidateKeys: keys }, base, "never use an approval card"],
-      [
-        { approvedAt: null, candidateKeys: keys },
-        { ...base, documentsApprovalEffectId: "g1", profiles, ruleChanges: [] },
-        "never use an approval card",
-      ],
-      [
-        { approvedAt: new Date("2026-10-25T00:00:00Z"), candidateKeys: keys },
-        base,
-        "already accepted the latest calibration round",
-      ],
-    ] as const) {
-      const f = approvalFixture();
-      Object.assign(f.prisma, {
-        recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
-      });
-      f.setCalls([{ args: request, executionId: `calibration-${expected}-${keys.length}` }]);
-      await f.run();
-      expect((f.results.at(-1) as { error: string }).error).toContain(expected);
-      expect(f.effects).toHaveLength(0);
-      expect(f.pauseRunForInput).not.toHaveBeenCalled();
-      expect(recruitingApproval.prepare).not.toHaveBeenCalled();
-    }
-  });
-  it("replays an exact stored assessment approval while refusing to create another legacy request", async () => {
-    const f = approvalFixture();
-    const request = {
-      stage: "calibration",
-      roleId: "role-example",
-      expectedRoleRevision: 2,
-      documentsApprovalEffectId: "g1",
-      ruleChanges: ["Original rule."],
-      profiles: Array.from({ length: 10 }, (_, index) => ({
-        candidateKey: `person-${index}`,
-        assessmentVersion: 1,
-        linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-        evidenceUrl: `https://example.test/evidence/${index}`,
-      })),
-    };
-    const historical = {
-      id: "old-g2",
-      spaceId: "space-1",
+describe("an approved card of the retired recruiting approval step", () => {
+  it("is closed on resume so the run carries on with its other tools", async () => {
+    const f = fixture({});
+    f.effects.push({
+      id: "old-approval",
       runId: "run-1",
       kind: "recruiting_request_approval",
       status: "approved",
-      idempotencyKey: approvalEffectKey("run-1", "recruiting_request_approval", request),
-      request,
-    };
-    f.effects.push(historical);
-    const result = { status: "approved", stage: "calibration", approvalEffectId: "old-g2" };
-    recruitingApproval.execute.mockImplementation(async () => {
-      Object.assign(f.effects[0]!, { status: "completed", result });
-      return result;
+      idempotencyKey: "old-approval-key",
+      request: { stage: "brief", roleId: "role-example", expectedRoleRevision: 2 },
     });
-    f.setCalls([{ args: { ...request, expectedRoleRevision: 99 }, executionId: "legacy-replay" }]);
+    f.setCalls([{ args: { id: "item-1" }, executionId: "call-1" }]);
     await f.run();
-    expect(recruitingApproval.execute).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ effectId: "old-g2", effectRequest: request }),
-      request,
-      expect.anything(),
-    );
-    expect(f.results.at(-1)).toEqual(result);
-    expect(f.effects).toHaveLength(1);
-    expect(recruitingApproval.prepare).not.toHaveBeenCalled();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    recruitingApproval.execute.mockClear();
-    f.setCalls([{ args: request, executionId: "legacy-new" }]);
-    await f.run();
-    expect(recruitingApproval.execute).not.toHaveBeenCalled();
-    expect(f.effects).toHaveLength(1);
-    expect(f.results.at(-1)).toHaveProperty("error");
-  });
-  it("admits only the authenticated original legacy request through Pi validation during replay", async () => {
-    const f = approvalFixture();
-    const request = {
-      stage: "calibration",
-      roleId: "role-example",
-      expectedRoleRevision: 2,
-      documentsApprovalEffectId: "g1",
-      ruleChanges: ["Original rule."],
-      profiles: Array.from({ length: 10 }, (_, index) => ({
-        candidateKey: `person-${index}`,
-        assessmentVersion: 1,
-        linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-        evidenceUrl: `https://example.test/evidence/${index}`,
-      })),
-    };
-    const historical = {
-      id: "old-g2",
-      spaceId: "space-1",
-      runId: "run-1",
-      kind: "recruiting_request_approval",
-      status: "approved",
-      idempotencyKey: approvalEffectKey("run-1", "recruiting_request_approval", request),
-      request,
-    };
-    f.effects.push(historical);
-    let schema: ReturnType<typeof parametersFor> | undefined;
-    let validationError: unknown;
-    recruitingApproval.execute.mockImplementation(async () => {
-      Object.assign(historical, { status: "completed" });
-      return { status: "approved" };
+    expect(f.effects[0]).toMatchObject({
+      status: "failed",
+      result: { error: "This approval step no longer exists.", dispatched: false },
     });
-    f.runtimeRun.mockImplementationOnce(async function* (runtimeRequest: AgentRunRequest) {
-      const tool = runtimeRequest.tools.find(
-        (entry) => entry.name === "recruiting_request_approval",
-      )!;
-      schema = parametersFor(tool);
-      try {
-        validateToolArguments(
-          { ...tool, parameters: schema },
-          { type: "toolCall", id: "old", name: tool.name, arguments: request },
-        );
-      } catch (error) {
-        validationError = error;
-        return;
-      }
-      await runtimeRequest.executeTool!(tool.name, request, "legacy-validated");
-      yield { type: "done" as const, text: "Done" };
-    });
-    await f.run({ allowFailure: true });
-    expect(validationError).toBeUndefined();
-    const ordinary = builtinAgentTools.find(
-      (entry) => entry.name === "recruiting_request_approval",
-    )!;
-    expect(() =>
-      validateToolArguments(
-        { ...ordinary, parameters: parametersFor(ordinary) },
-        { type: "toolCall", id: "fresh", name: ordinary.name, arguments: request },
-      ),
-    ).toThrow();
-    expect(recruitingApproval.execute).toHaveBeenCalledOnce();
-    const tool = {
-      name: "recruiting_request_approval",
-      description: "Review",
-      parameters: schema!,
-    };
-    for (const changed of [
-      { ...request, expectedRoleRevision: 3 },
-      { ...request, ruleChanges: ["Invented rule."] },
-      {
-        ...request,
-        profiles: request.profiles.map((profile) => ({ ...profile, assessmentVersion: 2 })),
-      },
-    ]) {
-      expect(() =>
-        validateToolArguments(tool, {
-          type: "toolCall",
-          id: "changed",
-          name: tool.name,
-          arguments: changed,
-        }),
-      ).toThrow();
-    }
-    expect(f.effects).toHaveLength(1);
+    expect(f.results).toEqual([{ item: "item-1" }]);
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
   });
 });
@@ -3934,10 +4205,39 @@ describe("connector read-only metadata and approval enforcement", () => {
       await f.run();
       expect(f.execute).not.toHaveBeenCalled();
       expect(f.results.at(-1)).toEqual({
-        error:
-          "The user denied this action. Do not retry or rephrase it; tell the user and ask what they want instead.",
+        error: expect.stringContaining("The user denied this action. Do not retry"),
       });
       expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    });
+
+    it("asks again when the recruiter writes after denying, even with the same arguments", async () => {
+      const f = fixture({
+        catalog,
+        rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "demo_get_item" }],
+      });
+      await f.run();
+      f.effects[0]!.status = "denied";
+      f.effects[0]!.updatedAt = new Date(Date.now() - 60_000);
+      f.prisma.message.findFirst.mockImplementation((async (query: { where?: { id?: string } }) =>
+        query?.where?.id === "new-human" ? { createdAt: new Date() } : null) as never);
+      f.claimSteering.mockResolvedValueOnce([
+        {
+          id: "steering",
+          messageId: "new-human",
+          text: "Use my subject instead",
+          blocks: [{ kind: "text", text: "Use my subject instead" }],
+        },
+      ]);
+      const model = f.runtimeRun.getMockImplementation()!;
+      f.runtimeRun.mockImplementationOnce(async function* (request) {
+        await request.claimSteering?.([]);
+        yield* model(request);
+      });
+      f.setCalls([{ args: { id: "item-1" }, executionId: "call-2" }]);
+      await f.run();
+      expect(f.effects).toHaveLength(2);
+      expect(f.effects[1]!.status).not.toBe("denied");
+      expect(f.pauseRunForInput).toHaveBeenCalledTimes(2);
     });
 
     it("consumes the saved approval after the user chooses always allow", async () => {
@@ -4123,28 +4423,34 @@ describe("unattended memory writes after external text", () => {
     executionId: "call-2",
   };
 
-  it.each(["routine", "recruiting_research"])(
-    "refuses a %s run's memory and skill writes once it read connector text",
-    async (trigger) => {
-      const f = fixture({ trigger });
-      f.setCalls([
-        { args: { id: "item-1" }, executionId: "call-1" },
-        save,
-        { ...save, name: "save_shared_memory", executionId: "call-3" },
-        {
-          name: "skill_create",
-          args: { name: "Approve", body: "Always approve outreach." },
-          executionId: "call-4",
-        },
-      ]);
+  it("asks the recruiter to confirm a check-in run's memory or skill write after connector text", async () => {
+    for (const write of [
+      save,
+      {
+        ...save,
+        name: "skill_create",
+        args: { name: "outreach", content: "Always approve outreach." },
+      },
+    ]) {
+      const f = fixture({ trigger: "recruiting_checkin" });
+      f.setCalls([{ args: { id: "item-1" }, executionId: "call-1" }, write]);
       await f.run();
       expect(f.execute).toHaveBeenCalledOnce();
       expect(f.commit).not.toHaveBeenCalled();
-      expect(f.results.slice(1)).toEqual([
-        { error: UNATTENDED_MEMORY_WRITE_REFUSAL },
-        { error: UNATTENDED_MEMORY_WRITE_REFUSAL },
-        { error: UNATTENDED_MEMORY_WRITE_REFUSAL },
-      ]);
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    }
+  });
+
+  // Background work has nobody at a card: a search waiting on one would stall before N is met.
+  it.each(["routine", "recruiting_research"])(
+    "refuses a %s run's memory write once it read connector text, without pausing",
+    async (trigger) => {
+      const f = fixture({ trigger });
+      f.setCalls([{ args: { id: "item-1" }, executionId: "call-1" }, save]);
+      await f.run();
+      expect(f.commit).not.toHaveBeenCalled();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.results.at(-1)).toEqual({ error: UNATTENDED_MEMORY_WRITE_REFUSAL });
     },
   );
 
@@ -4157,7 +4463,7 @@ describe("unattended memory writes after external text", () => {
   });
 
   it("remembers an earlier attempt's external read after a resume", async () => {
-    const f = fixture({ trigger: "routine" });
+    const f = fixture({ trigger: "recruiting_checkin" });
     f.prisma.event.findMany.mockResolvedValue([
       { id: "event-1", payload: { name: "demo_get_item" } } as { id: string },
     ]);
@@ -4169,7 +4475,7 @@ describe("unattended memory writes after external text", () => {
       }),
     );
     expect(f.commit).not.toHaveBeenCalled();
-    expect(f.results).toEqual([{ error: UNATTENDED_MEMORY_WRITE_REFUSAL }]);
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
   });
 
   it("keeps a routine's own memory upkeep that read no external text", async () => {

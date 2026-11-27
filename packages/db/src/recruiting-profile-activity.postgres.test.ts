@@ -33,7 +33,7 @@ database("profile activity (local PostgreSQL)", () => {
   let otherRoleId: string;
   let threadId: string;
   let botId: string;
-  const target = () => ({ roleId, candidateKey: "autumn:person" });
+  const target = () => ({ roleId, candidateKey: "sourced:person" });
 
   beforeAll(async () => {
     const db = createDb(databaseUrl!);
@@ -183,7 +183,7 @@ database("profile activity (local PostgreSQL)", () => {
       [{ ...actor, userId: otherUser }, target()],
       [{ ...actor, spaceId: "another-space" }, target()],
       [actor, { ...target(), roleId: otherRoleId }],
-      [actor, { ...target(), candidateKey: "autumn:missing" }],
+      [actor, { ...target(), candidateKey: "sourced:missing" }],
       [actor, { ...target(), candidateKey: "crm:00000000-0000-4000-8000-000000000001" }],
     ] as const) {
       await expect(listRecruitingProfileActivity(prisma, identity, input)).rejects.toBeInstanceOf(

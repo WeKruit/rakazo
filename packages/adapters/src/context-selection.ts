@@ -292,7 +292,7 @@ function shortenStructuredResult(source: string, size: number): string | undefin
     if (!largest) break; // Required metadata alone may still need explicit budget failure.
     const value = (largest.parent as Record<string, unknown>)[largest.key] as string;
     const keep = Math.max(8, Math.floor(value.length / 4));
-    const shortened = `${value.slice(0, keep)}\n[Tool result truncated to fit context; omitted evidence is unavailable.]\n${value.slice(-keep)}`;
+    const shortened = `${value.slice(0, keep)}\n[Tool result truncated to fit context; check any full copy named below.]\n${value.slice(-keep)}`;
     if (shortened.length >= value.length) break;
     (largest.parent as Record<string, unknown>)[largest.key] = shortened;
     // String encoding deltas preserve the budget without reencoding untouched structure.

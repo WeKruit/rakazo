@@ -351,7 +351,7 @@ describe("recruiting reply draft translation", () => {
     ).toMatchObject({ status: "blocked", reasons: ["crm_review_rejected"] });
   });
 
-  it("preflights a canonical CRM member without an Autumn import or an unrelated mailbox", async () => {
+  it("preflights a canonical CRM member without a search import or an unrelated mailbox", async () => {
     const membership = {
       membership_id: otherId,
       organization_id: orgId,
@@ -430,7 +430,7 @@ describe("recruiting reply draft translation", () => {
 });
 
 describe("fresh CRM and Instantly reply preflight", () => {
-  it("does current fixed reads and exposes limited coverage rather than full G4", async () => {
+  it("does current fixed reads and exposes limited coverage rather than full coverage", async () => {
     const f = fixture();
     const result = await f.run();
     expect(result).toMatchObject({

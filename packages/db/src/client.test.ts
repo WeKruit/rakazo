@@ -14,6 +14,7 @@ import {
   createDb,
   createPool,
   isTooManyDatabaseConnections,
+  LOST_REPLY_MS,
   Prisma,
   parsePositiveInteger,
   retryOnTooManyConnections,
@@ -310,6 +311,42 @@ describe("retryOnTooManyConnections", () => {
         throw error;
       }),
     ).rejects.toBe(error);
+  });
+});
+
+describe("lost database replies", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("drops a session whose statement never answers, so the caller fails instead of waiting forever", async () => {
+    vi.useFakeTimers({ now: 0 });
+    installLogger(createLogger({ service: "rakazo-test", sinks: [createTestSink()] }));
+    const pool = createPool("postgres://rakazo:rakazo@127.0.0.1:9/rakazo");
+    pools.push(pool);
+    const destroy = vi.fn();
+    // A half-open socket after a pooler failover: the statement is sent and nothing ever comes back.
+    const lost = Object.assign(new EventEmitter(), {
+      connection: { stream: { destroy } },
+      query: (_text: string) => new Promise(() => undefined),
+    });
+    const healthy = Object.assign(new EventEmitter(), {
+      connection: { stream: { destroy: vi.fn() } },
+      query: (_text: string) => new Promise((resolve) => setTimeout(resolve, 60_000)),
+    });
+    pool.emit("connect", lost);
+    pool.emit("connect", healthy);
+
+    void lost.query("select 1");
+    const answered = healthy.query("select 1");
+    await vi.advanceTimersByTimeAsync(60_000);
+    await answered;
+    // Postgres ends any statement at its own statement_timeout; past that, the reply is not coming.
+    await vi.advanceTimersByTimeAsync(LOST_REPLY_MS - 60_000 - 1);
+    expect(destroy).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(healthy.connection.stream.destroy).not.toHaveBeenCalled();
   });
 });
 

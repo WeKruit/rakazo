@@ -17,6 +17,8 @@ export interface AdapterContext {
   runId?: string;
   /** Internal lifecycle CAS captured after claiming suspending; never accepted from RPC input. */
   homeLifecycleClaim?: { computerId: string; providerRef: string | null; updatedAt: Date };
+  /** Trusted: the run is in the account-wide conversation above the role teams. */
+  accountWideConversation?: boolean;
   /** Trusted in-process scheduling confirmation binding; never a provider argument. */
   schedulingConfirmationEffectId?: string;
   /** Trusted native approval for creating/selecting a sending identity; never an RPC/tool argument. */
@@ -308,6 +310,8 @@ export interface MemorySnapshot {
     id: string;
     path: string;
     content: string;
+    /** The structured form saved with the document, when its writer saved one. */
+    data?: unknown;
     revision: number;
     updatedAt?: string;
   }>;
@@ -329,6 +333,15 @@ export interface MemorySearchResult {
 export const MEMORY_REVISION_CONFLICT_ERROR =
   "Memory changed since it was read. Read the latest version and save again.";
 
+export class MemoryRevisionConflictError extends Error {
+  constructor() {
+    super(MEMORY_REVISION_CONFLICT_ERROR);
+  }
+}
+
+/** A file or response larger than the byte limit the caller set. */
+export class ByteLimitError extends Error {}
+
 export interface MemoryCommitRequest {
   scope: MemoryDocumentScope;
   botId?: string;
@@ -336,6 +349,11 @@ export interface MemoryCommitRequest {
   groupId?: string;
   path: string;
   content: string;
+  /**
+   * The structured form of this content, for a document the server reads back. A save without
+   * it clears the stored one, so data never outlives the text it described.
+   */
+  data?: unknown;
   /** Revision used to prepare this replacement; 0 creates a new document. */
   expectedRevision: number;
   sourceRunId?: string;
@@ -517,6 +535,8 @@ export interface AgentRunRequest {
     content: string;
     /** Proven current-task context must survive history windows and context selection. */
     requiredForRun?: true;
+    /** Stands in for older messages (a compaction summary or recalled memory). */
+    summary?: true;
     /** Images attached to this message, hydrated only for recent user turns. */
     images?: AgentInputImage[];
     /** The model's own reasoning behind this reply; replayed only to the same model. */
@@ -562,10 +582,7 @@ export interface AgentRunRequest {
    * the run then continues with it instead of asking again. `{ instead }` returns that text to
    * the model in place of the card, for a question the run may not ask yet.
    */
-  beforeAsk?: (
-    question: string,
-    plannedSearches?: string[],
-  ) => Promise<string | { instead: string } | undefined>;
+  beforeAsk?: (question: string) => Promise<string | { instead: string } | undefined>;
   /** The arguments of a tool call parsed so far while the model is still writing them. */
   onToolCallDelta?: (call: { id: string; name: string; args: Record<string, unknown> }) => void;
   /** Called after a tool returns; implementations must not persist raw result contents. */
@@ -674,8 +691,6 @@ export type AgentRuntimeEvent =
       /** The person may pick several of the actions. */
       multiple?: boolean;
       requestedSchema?: AskRequestedSchema;
-      /** People-search queries planned on the last recruiting intake question. */
-      plannedSearches?: string[];
     }
   | { type: "takeover"; reason: string }
   /** The reasoning behind the latest assistant message, for that model's next turn. */
@@ -702,7 +717,7 @@ export type AgentRuntimeEvent =
       progress?: string;
       result?: string;
     }
-  | { type: "done"; text?: string };
+  | { type: "done"; text?: string; failed?: true };
 
 export interface AgentRuntimeCapabilities {
   streaming: boolean;
@@ -778,10 +793,6 @@ export interface BackgroundJobPayloads {
   "messaging.deliver": { runId?: string };
   /** Reconcile durable remote-agent intent; scope is loaded from the database. */
   "cloud_agent.poll": { agentId: string };
-  /** Check one active recruiting research task at the provider; scope is loaded from the database. */
-  "recruiting_research.poll": { taskId: string; attempt?: number };
-  /** Hand a role conversation's newly found, ungraded people to the research service. */
-  "recruiting_grade.start": { threadId: string; attempt?: number };
   /** Look for new candidate replies on a role conversation and tell the recruiter about them. */
   "recruiting_checkin.start": { threadId: string };
   /** Bring a people-search agent run that outlived its turn back to the agent that started it. */

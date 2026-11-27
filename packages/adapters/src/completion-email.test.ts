@@ -4,11 +4,6 @@ import {
   recordCompletionEmailChoice,
   sendCompletionEmailIfDone,
 } from "./completion-email.js";
-import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
-
-vi.mock("./recruiting-research-poll.js", () => ({
-  recruitingResearchInFlight: vi.fn(async () => false),
-}));
 
 const turn = {
   id: "run-final",
@@ -75,19 +70,16 @@ describe("completion email", () => {
     );
   });
 
-  it("waits while a teammate or research is still running, or the turn carries on", async () => {
+  it("waits while a teammate is still running, or the turn carries on", async () => {
     const busy = harness({ busy: 1 });
     await sendCompletionEmailIfDone(busy.deps, turn, ended);
     const continuing = harness();
     await sendCompletionEmailIfDone(continuing.deps, turn, { ...ended, continuing: true });
-    vi.mocked(recruitingResearchInFlight).mockResolvedValueOnce(true);
-    const researching = harness();
-    await sendCompletionEmailIfDone(researching.deps, turn, ended);
     const sameTurn = harness({ armed: { id: "effect-1", runId: turn.id } });
     await sendCompletionEmailIfDone(sameTurn.deps, turn, ended);
     const unasked = harness({ armed: null });
     await sendCompletionEmailIfDone(unasked.deps, turn, ended);
-    for (const { send, claim } of [busy, continuing, researching, sameTurn, unasked]) {
+    for (const { send, claim } of [busy, continuing, sameTurn, unasked]) {
       expect(send).not.toHaveBeenCalled();
       expect(claim).not.toHaveBeenCalled();
     }

@@ -7,6 +7,7 @@ import { expect, it } from "vitest";
 import type { InstantlyRest } from "./instantly-native-writes.js";
 import { ownedInstantly, requireReplySendingMailboxReady } from "./instantly-native-writes.js";
 import { ensureSendingIdentity } from "./instantly-senders.js";
+import { oneAtATime } from "./one-at-a-time.js";
 
 const url = process.env.DATABASE_URL;
 it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
@@ -345,4 +346,43 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
     }
   },
   60_000,
+);
+
+it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
+  "runs work with the same key one at a time, and different keys side by side",
+  async () => {
+    const db = createDb(url!);
+    const key = [`one-at-a-time-${randomUUID()}`];
+    const log: string[] = [];
+    const step = (name: string, ms: number) => async () => {
+      log.push(`${name} start`);
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      log.push(`${name} end`);
+    };
+    try {
+      await Promise.all([
+        oneAtATime(db.prisma, key, step("a", 300)),
+        oneAtATime(db.prisma, key, step("b", 10)),
+      ]);
+      expect([log.slice(0, 2), log.slice(2)]).toEqual(
+        log[0] === "a start"
+          ? [
+              ["a start", "a end"],
+              ["b start", "b end"],
+            ]
+          : [
+              ["b start", "b end"],
+              ["a start", "a end"],
+            ],
+      );
+      log.length = 0;
+      await Promise.all([
+        oneAtATime(db.prisma, [...key, "x"], step("x", 300)),
+        oneAtATime(db.prisma, [...key, "y"], step("y", 10)),
+      ]);
+      expect(log.slice(0, 2).sort()).toEqual(["x start", "y start"]);
+    } finally {
+      await db.prisma.$disconnect();
+    }
+  },
 );

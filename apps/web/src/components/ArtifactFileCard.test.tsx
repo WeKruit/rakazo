@@ -240,3 +240,38 @@ it("does not carry a late diagnostics download error into the business source ca
   expect(container.textContent).not.toContain("internal-material");
   expect(container.querySelector('[role="alert"]')).toBeNull();
 });
+
+it("shows a Word file like other files, without its raw file type, and downloads it", async () => {
+  files.downloadArtifact.mockResolvedValue(undefined);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  cleanup = async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  };
+  const docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  await act(async () => {
+    root.render(
+      <ArtifactFileCard
+        target={{ groupId: "group-1" }}
+        artifactId="file-2"
+        name="work_history.docx"
+        mimeType={docx}
+        size={1024}
+      />,
+    );
+  });
+  expect(container.textContent).toBe("work_history.docx1.0 KB");
+  expect(container.querySelector("svg")).not.toBeNull();
+  const download = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Download work_history.docx"]',
+  );
+  await act(async () => download!.click());
+  expect(files.downloadArtifact).toHaveBeenCalledExactlyOnceWith(
+    { groupId: "group-1" },
+    "file-2",
+    "work_history.docx",
+    docx,
+  );
+});

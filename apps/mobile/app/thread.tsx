@@ -42,6 +42,7 @@ import {
   plainTextFromMarkdown,
   projectMessageReactions,
   reconcileThreadScrollState,
+  reopenedAskMessageIds,
   replyAttachment,
   resolveComposerSendPlan,
   resolvePersonaColorDef,
@@ -52,7 +53,6 @@ import {
   stuckWorkExpiresAt,
   threadTailPhase,
   threadWindowMessages,
-  timedOutAskMessageId,
   timeSeparatorIds,
   trackWork,
   userVisibleMessages,
@@ -203,7 +203,7 @@ import {
   threadSpaceRequest,
   threadSpaceSwitchResult,
 } from "../lib/notification-open";
-import type { PickedAttachment } from "../lib/pick-attachments";
+import type { PickedAttachment, PickSkip } from "../lib/pick-attachments";
 import { pickDocuments, pickFromLibrary, takePhoto } from "../lib/pick-attachments";
 import { threadRefreshDelayMs } from "../lib/refresh";
 import {
@@ -286,16 +286,13 @@ function formatApprovalAnswer(
   return t("Answered: {answer}", { answer: selectedAskActionLabel(answer, actions) });
 }
 
-function formatAttachmentSkip(item: { name: string; reason: string }): string {
+function formatAttachmentSkip(item: PickSkip): string {
   const name = item.name === "camera" ? t("Camera") : item.name;
+  if (item.reason === "max attachments")
+    return t("{name} (max {count} attachments)", { name, count: String(item.max) });
   if (item.reason === "permission denied") return t("{name} (permission denied)", { name });
   if (item.reason === "over 10 MiB") return t("{name} (over 10 MiB)", { name });
-  if (item.reason === "unsupported type") return t("{name} (unsupported type)", { name });
-  const maxMatch = /^max (\d+) attachments$/.exec(item.reason);
-  if (maxMatch) {
-    return t("{name} (max {count} attachments)", { name, count: maxMatch[1] ?? "" });
-  }
-  return `${name} (${item.reason})`;
+  return t("{name} (unsupported type)", { name });
 }
 
 function isWorkingStatus(status: string | undefined): boolean {
@@ -308,13 +305,11 @@ function isWorkingStatus(status: string | undefined): boolean {
   );
 }
 
-const ATTACHMENT_PLACEHOLDER_LINE = /^\[(?:image|file|chart): .*\]$/;
-
 function speakableMessageText(message: MobileMessage): string {
-  return blockText(message)
+  return blockText(message, { attachments: false })
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !ATTACHMENT_PLACEHOLDER_LINE.test(line))
+    .filter((line) => line.length > 0)
     .join("\n");
 }
 
@@ -1682,14 +1677,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       hasAttachments: attachments.length > 0,
     });
     if (plan.isNoOp) return;
-    const typedSwitch =
-      initialBotTarget && attachments.length === 0
-        ? findSwitchTarget(plan.trimmed, mentionBotsRef.current)
-        : undefined;
-    if (typedSwitch && typedSwitch.id !== initialBotTarget) {
-      openBotChat(typedSwitch, false);
-      return;
-    }
     preparingSend.current = true;
     try {
       await prepareUnsentSends();
@@ -2051,7 +2038,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   async function addAttachments(
     picker: (existingCount: number) => Promise<{
       attachments: PickedAttachment[];
-      skipped: Array<{ name: string; reason: string }>;
+      skipped: PickSkip[];
     }>,
   ) {
     const targetKey = groupId ?? botId;
@@ -2076,11 +2063,8 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     );
   }
 
-  // A card whose wait timed out still takes an answer until the person says something else.
-  const timedOutAskId = timedOutAskMessageId(snap);
-  const answerableAskIds = timedOutAskId
-    ? [...answerableAskMessageIds(snap), timedOutAskId]
-    : answerableAskMessageIds(snap);
+  // A timed-out question, or a connect card, still takes an answer after its wait ended.
+  const answerableAskIds = [...answerableAskMessageIds(snap), ...reopenedAskMessageIds(snap)];
   const runErrorNeedsReconnect = Boolean(
     snap?.run?.error && runRecoveryAction(snap.run.error) === "model_connection",
   );

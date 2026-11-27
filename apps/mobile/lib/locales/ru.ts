@@ -15,6 +15,7 @@ export const RU_MESSAGES: Record<string, string> = {
   "Address change requested": "Запрошено изменение адреса",
   "View email": "Показать письмо",
   "Hide email": "Скрыть письмо",
+  "The candidate asked what you haven't told me. Answer it in the reply:": "Кандидат спросил то, чего вы мне ещё не сказали. Ответьте в письме:",
   "Reply draft": "Черновик ответа",
   "Needs approval": "Требуется подтверждение",
   Discarded: "Отклонено",
@@ -65,7 +66,6 @@ export const RU_MESSAGES: Record<string, string> = {
   "Reconnect your model to continue.": "Подключите модель снова, чтобы продолжить.",
   "Stop everything": "Остановить всё",
   "Stop following": "Прекратить отслеживание",
-  "Stop research updates": "Остановить обновления исследования",
   "Task transcript": "История задачи",
   "The computer could not start. Reset it to continue.":
     "Компьютер не запустился. Сбросьте его, чтобы продолжить.",
@@ -877,7 +877,6 @@ export const RU_MESSAGES: Record<string, string> = {
   "Worked for {duration}": "Работа заняла {duration}",
   "Step failed": "Шаг не выполнен",
   "Finding candidates": "Поиск кандидатов",
-  "Checking candidates": "Проверка кандидатов",
   "Preparing outreach": "Подготовка рассылки",
   "Scheduling interviews": "Планирование собеседований",
   "Delegated task": "Поручённая задача",

@@ -1,19 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DECLINE_RETRY_NOTE,
-  declinedSentence,
-  declineRetry,
-  questionStatesWork,
-  REPORT_BEFORE_ASK,
-  restatesUpdate,
-  readsOnly,
-  CLAIMS_CARD_PENDING,
-  retryReason,
-  TEXT_QUESTION_NOTE,
-  TurnReportLedger,
-  turnReportText,
-  turnWork,
-} from "./turn-report.js";
+import { readsOnly, TurnReportLedger, turnReportText, turnWork } from "./turn-report.js";
 
 describe("turnWork", () => {
   it("counts searches, saves and business changes, never reads or failures", () => {
@@ -48,11 +34,24 @@ describe("turnWork", () => {
         { ok: true, readOnly: false, result: { structuredContent: { created: false } } },
       ),
     ).toBeUndefined();
-    // A send returns only after its card was confirmed: it went out, it is no draft.
+    // A direct send returns only after its card was confirmed: it went out, it is no draft.
     const sentCall = { ok: true, readOnly: false } as const;
-    expect(turnWork("instantly__mail__activate_campaign", {}, sentCall)).toBe("sent");
-    expect(turnWork("native_instantly_activate_campaign", {}, sentCall)).toBe("sent");
     expect(turnWork("mcp__gmail__send_message", {}, sentCall)).toBe("sent");
+    // Audit 11-26: a campaign send only starts the emails, and the mail service can hold them;
+    // the report says what the send's result recorded, never "sent".
+    const started = (delivery: string) => ({
+      ok: true,
+      readOnly: false,
+      result: { structuredContent: { result: { activated: true, delivery } } },
+    });
+    expect(turnWork("instantly__mail__activate_campaign", {}, started("on_its_way"))).toBe(
+      "send_queued",
+    );
+    expect(turnWork("native_instantly_activate_campaign", {}, started("scheduled"))).toBe(
+      "send_queued",
+    );
+    expect(turnWork("native_instantly_activate_campaign", {}, started("held"))).toBe("send_held");
+    expect(turnWork("native_instantly_activate_campaign", {}, sentCall)).toBe("send_queued");
     expect(turnWork("cal__main__create_booking", {}, { ok: true, readOnly: false })).toBe(
       "scheduling",
     );
@@ -105,31 +104,12 @@ describe("TurnReportLedger", () => {
     expect(ledger.lastWork()).toBe("people_saved");
   });
 
-  it("treats a recorded round and shown picks as their own report", () => {
+  it("treats a recorded round as its own report", () => {
     const ledger = new TurnReportLedger(true);
     ledger.tool("1", "exa__web_search_advanced_exa", { query: "x" });
-    ledger.tool("2", "recruiting_research", { operation: "show_picks" });
-    ledger.settle("2", { ok: true });
-    expect(ledger.owed()).toEqual([]);
     ledger.tool("3", "recruiting_research", { operation: "calibration_round" });
     expect(ledger.owed()).toEqual([]);
     expect(ledger.lastWork()).toBe("round");
-  });
-
-  it("bounces one unreported question per attempt, never one that states the work", () => {
-    const ledger = new TurnReportLedger(true);
-    ledger.tool("1", "recruiting_crm_target", { operation: "update" });
-    expect(ledger.bounceAsk("The pool is now 139 people. Keep going?")).toBeUndefined();
-    expect(ledger.bounceAsk("What next?")).toBe(REPORT_BEFORE_ASK);
-    expect(ledger.bounceAsk("What next?")).toBeUndefined();
-  });
-
-  it("lets intake ask right after saving the role or the recruiter's answers", () => {
-    const ledger = new TurnReportLedger(true);
-    ledger.tool("1", "recruiting_role", { operation: "update" });
-    ledger.tool("2", "recruiting_feedback", { operation: "record" });
-    expect(ledger.bounceAsk("Which city?")).toBeUndefined();
-    expect(ledger.owed()).toEqual(["role", "feedback"]);
   });
 
   it("owes nothing when disabled (routines, silent wakes)", () => {
@@ -150,18 +130,18 @@ describe("TurnReportLedger", () => {
 });
 
 describe("turnReportText", () => {
-  it("names the work and the saved count", () => {
-    expect(turnReportText(["people_search", "people_search", "people_saved"], 139)).toBe(
-      "Done: searched for people, saved people to the role. 139 people are saved for this role.",
+  it("names the work and no head count", () => {
+    expect(turnReportText(["people_search", "people_search", "people_saved"])).toBe(
+      "Done: searched for people, saved people to the role.",
     );
     expect(turnReportText(["draft"])).toBe("Done: saved the email draft.");
   });
 
   it("reports in Chinese to a recruiter writing Chinese", () => {
-    expect(turnReportText(["feedback", "people_search"], 12, true)).toBe(
-      "已完成：记下了你的反馈、搜索了候选人。这个岗位现在存了 12 人。",
+    expect(turnReportText(["feedback", "people_search"], true)).toBe(
+      "已完成：记下了你的反馈、搜索了候选人。",
     );
-    expect(turnReportText(["feedback"], 12, true)).not.toMatch(/[A-Za-z]/);
+    expect(turnReportText(["feedback"], true)).not.toMatch(/[A-Za-z]/);
   });
 
   // 11-12: "查了联系方式、在已连接的应用里做了修改" told the recruiter nothing.
@@ -177,372 +157,8 @@ describe("turnReportText", () => {
         },
       ),
     ).toBe("sender");
-    expect(turnReportText(["contacts", "connected"], undefined, true)).toBe(
-      "已完成：查了联系方式。",
-    );
+    expect(turnReportText(["contacts", "connected"], true)).toBe("已完成：查了联系方式。");
     expect(turnReportText(["connected"])).toBe("Done: made changes in a connected app.");
-  });
-});
-
-it("questionStatesWork", () => {
-  expect(questionStatesWork("What next?")).toBe(false);
-  expect(questionStatesWork("Added 70 people. Keep going?")).toBe(true);
-});
-
-describe("declinedSentence", () => {
-  // Final replies seen in dispatch acceptance runs and earlier recruiter chats.
-  const declines: [string, string][] = [
-    [
-      "I can't verify whether other contact details are saved from the records available here.",
-      "decline",
-    ],
-    [
-      "I can't safely use the available approval flow for a send to Abe alone because it would include the other recipients.",
-      "decline",
-    ],
-    [
-      "I can't find the original email thread or the saved outreach record, so I can't prepare a send-ready message or approval card yet.",
-      "decline",
-    ],
-    ["Not ready to send: contact history and suppression unknown.", "decline"],
-    ["我无法确认这些人的邮箱是否已保存。", "decline"],
-    ["我不能直接发送这封邮件。", "decline"],
-    ["我没法查到他的联系方式。", "decline"],
-    // 11-12: a one-off email outside a role, blamed on a permission.
-    ["当前权限不支持创建一次性邮件，因此无法提交发送确认。", "decline"],
-    ["需要开通支持单封邮件发送的权限后才能完成。", "decline"],
-    ["I'm not permitted to send a one-off email from this conversation.", "decline"],
-    ["I haven't looked up their emails yet. Do you want me to do that now?", "defer"],
-    ["Would you like me to draft the first email?", "defer"],
-    ["Want me to book Wednesday afternoon?", "defer"],
-    ["需要你先确认收件人，我再准备邮件。", "defer"],
-    ["要不要我先帮你查一下他们的邮箱？", "defer"],
-    ["Which people should I send this to?", "pick"],
-    ["Which people?", "pick"],
-    ["Which of them do you want me to email?", "pick"],
-    ["你想发给哪些人？", "pick"],
-  ];
-  it.each(declines)("flags %s", (reply, kind) => {
-    expect(declinedSentence(reply)?.kind).toBe(kind);
-  });
-
-  // Reports, results and real questions that are not a decline.
-  const reports = [
-    "Added 70 people. The pool is now 139.",
-    "I didn't send anything.",
-    "Nothing was sent.",
-    "No emails were sent yet; the send card is waiting for you.",
-    "Found emails for 4 of the first 5 people; Dana Li has none on file.",
-    "Here are the ten for this round.",
-    "已为前5个人找到邮箱，其中1人没有找到。",
-    "Booked Wednesday at 2 PM; the confirmation card is above.",
-    "已发起连接请求，授权后就能读取你的日历。",
-    "The send card is above; once you confirm, the five emails go out.",
-  ];
-  it.each(["Which of these look closest to what you want?", "下周三约哪天下午比较方便？"])(
-    "reads %s as a question for a card, not a refusal",
-    (reply) => {
-      expect(declinedSentence(reply)?.kind).toBe("text_question");
-    },
-  );
-  it.each(reports)("leaves %s alone", (reply) => {
-    expect(declinedSentence(reply)).toBeUndefined();
-  });
-  it("reads only the reply's own words before a drafted email", () => {
-    const draft = (intro: string) =>
-      `${intro}\n\n**Email 1 — Day 0**\n**Subject:** TikTok LIVE role\n\nHi Adrian,\n\nWould you be open to a brief conversation?\n\nSubject: Following up\n\nCan't make it this week?`;
-    expect(declinedSentence(draft("The three-email sequence is prepared."))).toBeUndefined();
-    expect(declinedSentence(draft("I can't find the saved draft."))?.kind).toBe("decline");
-  });
-
-  it("returns the declining sentence itself", () => {
-    expect(
-      declinedSentence("Added 20 people. I can't verify tenure for three of them.")?.sentence,
-    ).toBe("I can't verify tenure for three of them.");
-  });
-});
-
-describe("declineRetry", () => {
-  const replyThread =
-    "I can't send this message through the available approval flow: it requires replying to an existing email.";
-  const notReady = "Not ready to send: contact history and suppression unknown.";
-
-  it("asks for a best-guess action or one question card, never a decline", () => {
-    const retry = declineRetry({ reply: notReady, request: "send it", tools: [], teammates: [] });
-    expect(retry?.note).toContain(DECLINE_RETRY_NOTE);
-    expect(DECLINE_RETRY_NOTE).toContain("Do not decline or defer");
-    expect(DECLINE_RETRY_NOTE).toContain("ask one clear question with ask_user");
-    expect(DECLINE_RETRY_NOTE).toContain("the recipients, the email, the time");
-    expect(DECLINE_RETRY_NOTE).toContain("shows its own card");
-  });
-
-  it("names calendar tools for a booking, not routine schedules", () => {
-    const retry = declineRetry({
-      reply: "I can't book this interview yet.",
-      request: "帮第一个人约下周三下午的面试",
-      tools: [{ name: "schedule_create" }, { name: "cal__main__create_booking" }],
-      teammates: [],
-    });
-    expect(retry?.note).toContain("cal__main__create_booking");
-    expect(retry?.note).not.toContain("schedule_create");
-  });
-
-  it("names this bot's own tool first", () => {
-    const retry = declineRetry({
-      reply: replyThread,
-      request: "send this email to them",
-      tools: [{ name: "recruiting_role" }, { name: "instantly__mail__activate_campaign" }],
-      teammates: [],
-    });
-    expect(retry?.note).toContain("instantly__mail__activate_campaign");
-  });
-
-  it("sends a clarifying question typed into the reply to a question card", () => {
-    const reply =
-      "The draft is a three-email sequence for 16 recipients.\n\nWhich do you mean?\n- Start it for all 16\n- Send a one-off email instead";
-    expect(declinedSentence(reply)?.kind).toBe("text_question");
-    const retry = declineRetry({ reply, request: "发一下", tools: [], teammates: [] });
-    expect(retry?.note).toContain("Ask it with ask_user");
-    // After real work, a closing question stands.
-    expect(
-      declineRetry({ reply, request: "发一下", tools: [], teammates: [], worked: true }),
-    ).toBeUndefined();
-  });
-
-  it("does not read a lookup that rules out sending as a send request", () => {
-    const reply =
-      "Found 9 saved emails and checked the one gap.\n\nNo email was sent or activated.";
-    expect(
-      retryReason(reply, "Look up emails for the first 10 people. Do not send anything."),
-    ).toBeUndefined();
-    expect(retryReason(reply, "找邮箱，先不要发")).toBeUndefined();
-    // A coordinator's handoff words its limit in other ways.
-    for (const request of [
-      "Goal: find contacts for the ten. No emails will be sent yet.",
-      "Look up contact details; nothing should be sent.",
-      "Find their emails before anything is sent.",
-      "Get contacts. No outreach or sending.",
-      "找联系方式，不发邮件",
-    ])
-      expect(retryReason(reply, request)).toBeUndefined();
-    expect(retryReason(reply, "send them the email")?.kind).toBe("decline");
-    expect(retryReason(reply, "Find contacts, then send them the email")?.kind).toBe("decline");
-    // A teammate's brief that mentions sending is read against the recruiter's own words.
-    const brief = "Goal: find contacts for the ten so we can send outreach after review.";
-    expect(
-      retryReason("Found 7 emails. No messages were sent.", brief, "找contact"),
-    ).toBeUndefined();
-    expect(retryReason("Found 7 emails. No messages were sent.", brief, "发20个人")?.kind).toBe(
-      "decline",
-    );
-  });
-
-  it("does not read a question about interviews as a booking request", () => {
-    const reply =
-      "Two interviews are coming up: Ana on Tuesday at 10:00 and Li on Thursday at 14:00. No invitation is sent.";
-    for (const request of [
-      "what interviews are coming up",
-      "When is she available?",
-      "show me my calendar this week",
-      "下周有哪些面试",
-    ])
-      expect(retryReason(reply, request)).toBeUndefined();
-    for (const request of [
-      "schedule an interview with Ana",
-      "cancel the interview",
-      "reschedule Li to Friday",
-      "book Ana for Tuesday",
-      "帮我约她下周面试",
-      "取消这个面试",
-    ])
-      expect(retryReason(reply, request)?.kind).toBe("decline");
-  });
-
-  it("catches a past-tense refusal of a send", () => {
-    expect(
-      declinedSentence(
-        "I couldn’t stage the exact one-off email for approval: Aiyi is already in the role’s existing email sequence.",
-      ),
-    ).toBeDefined();
-    expect(
-      declinedSentence("I couldn’t check for an existing draft, so this is newly prepared here."),
-    ).toBeUndefined();
-    // An honest shortfall is a report, not a refusal.
-    expect(
-      declinedSentence("I couldn't find anyone new in Austin, so the total is still 40."),
-    ).toBeUndefined();
-  });
-
-  it("points a contact decline at the saved-email lookup, which reuses earlier results", () => {
-    const retry = declineRetry({
-      reply:
-        "I can't verify whether other contact details are saved from the records available here.",
-      request: "前5个人的contact",
-      tools: [{ name: "mcp__wekruit__find_emails" }],
-      teammates: [],
-    });
-    expect(retry?.note).toContain("mcp__wekruit__find_emails");
-  });
-
-  it("hands off to a teammate who can", () => {
-    const retry = declineRetry({
-      reply: notReady,
-      request: "把这封邮件发给他",
-      tools: [{ name: "recruiting_role" }],
-      teammates: [
-        { id: "bot-s", name: "Scheduler", about: "Interview scheduling" },
-        { id: "bot-o", name: "Outreach", about: "Contacts, email drafts and sends" },
-      ],
-    });
-    expect(retry?.note).toContain("handoff_to_bot (bot_id bot-o)");
-  });
-
-  it("retries a vague ask the agent deferred or handed back as a pick", () => {
-    expect(
-      declineRetry({
-        reply: "Which people should I contact?",
-        request: "处理一下前几个",
-        tools: [],
-        teammates: [],
-      })?.note,
-    ).toMatch(/^Your reply asked the user to choose/);
-    expect(
-      declineRetry({
-        reply: "I haven't drafted it yet. Do you want me to?",
-        request: "改一下邮件",
-        tools: [],
-        teammates: [],
-      })?.note,
-    ).toMatch(/^Your reply deferred the request/);
-  });
-
-  it("keeps a worked answer about upcoming interviews, whatever its coverage aside", () => {
-    const retry = (request: string) =>
-      declineRetry({
-        reply:
-          "No confirmed interviews are booked. Google Calendar isn’t connected, so I can’t verify interviews outside the connected scheduling records.",
-        request,
-        tools: [],
-        teammates: [],
-        worked: true,
-      });
-    expect(retry("What interviews do I have coming up?")).toBeUndefined();
-    expect(retry("Book an interview with Ana for Tuesday at 2 pm")?.note).toMatch(/declined/);
-  });
-
-  it("keeps an answer read for a question that asks for nothing to be done", () => {
-    const retry = (request: string, read: boolean) =>
-      declineRetry({
-        reply:
-          "No confirmed interviews are booked. Google Calendar is not connected, so I can’t verify your full calendar.",
-        request,
-        tools: [],
-        teammates: [],
-        read,
-      });
-    expect(retry("What interviews do I have coming up?", true)).toBeUndefined();
-    expect(retry("What interviews do I have coming up?", false)?.note).toMatch(/declined/);
-    expect(retry("Find 20 more people for this role", true)?.note).toMatch(/declined/);
-  });
-
-  it("keeps a reply that shows the drafted email, whatever its aside", () => {
-    expect(
-      declineRetry({
-        reply:
-          "The separate draft search wasn't available, so I can't confirm whether an older draft exists.\n\n**Email 1 — Day 0**\nSubject: TikTok LIVE role\n\nHi Adrian,",
-        request: "The recruiter's exact words are “来个campign draft看看”.",
-        tools: [],
-        teammates: [],
-      }),
-    ).toBeUndefined();
-  });
-
-  it("moves a closing question after a shown draft to a card, keeping the draft", () => {
-    const draft =
-      "Here is the saved draft.\n\nSubject: TikTok LIVE role\n\nHi Abe,\n\nWould you be open to a brief conversation?\n\nBest,\nRecruiting Team";
-    const retry = declineRetry({
-      reply: `${draft}\n\nWhat would you like changed? For example: shorter, or a different tone.`,
-      request: "改一下邮件",
-      tools: [],
-      teammates: [],
-    });
-    expect(retry?.note).toContain(TEXT_QUESTION_NOTE);
-    expect(retry?.keep).toBe(draft);
-    // The candidate's own question closing the draft is not one for the recruiter.
-    expect(declineRetry({ reply: draft, request: "改一下邮件", tools: [], teammates: [] })).toBe(
-      undefined,
-    );
-  });
-
-  it("reads a choice asked as an instruction as a question for a card", () => {
-    expect(
-      declinedSentence(
-        "“Arrange it” doesn’t specify which slot, so please choose a 30-minute time: 11:00, 11:30 or 12:00 p.m.",
-      )?.kind,
-    ).toBe("text_question");
-  });
-
-  it("retries a send that ended without its card however the reply words it", () => {
-    const reply =
-      "I couldn’t find a saved email draft for Acery to send. I haven’t sent anything. Please provide or save the intended draft, and I can present it for approval.";
-    expect(declinedSentence(reply)).toBeUndefined();
-    const retry = declineRetry({
-      reply,
-      request: "send this email to them",
-      tools: [{ name: "activate_campaign" }],
-      teammates: [],
-      worked: true,
-    });
-    expect(retry?.note).toContain("the one written in this conversation");
-    // Not a send or booking request: the same words stand.
-    expect(
-      declineRetry({ reply, request: "这个人怎么样", tools: [], teammates: [] }),
-    ).toBeUndefined();
-  });
-
-  it("retries a send that ended without its card, even after other work", () => {
-    expect(
-      declineRetry({
-        reply:
-          "The saved pool has 134 people, so I can't treat all 20 as eligible by default. I need the original ordered first-20 list.",
-        request: "发20个人的先",
-        tools: [{ name: "activate_campaign" }],
-        teammates: [],
-        worked: true,
-      })?.note,
-    ).toContain("activate_campaign");
-  });
-
-  it("keeps an aside or an offer after real work", () => {
-    // The declined sentence is about verification, not the requested search.
-    expect(
-      declineRetry({
-        reply: "Added 20 people. I can't verify tenure for three of them.",
-        request: "find 20 more",
-        tools: [{ name: "exa__web_search_advanced_exa" }],
-        teammates: [],
-        worked: true,
-      }),
-    ).toBeUndefined();
-    expect(
-      declineRetry({
-        reply: "Added 20 people; the pool is now 70. Want me to find 30 more?",
-        request: "find 20 more",
-        tools: [{ name: "exa__web_search_advanced_exa" }],
-        teammates: [],
-        worked: true,
-      }),
-    ).toBeUndefined();
-    // Refusing the asked kind of work is retried even after other work.
-    expect(
-      declineRetry({
-        reply: "Drafted the email. I can't send it from here.",
-        request: "send this email to them",
-        tools: [{ name: "activate_campaign" }],
-        teammates: [],
-        worked: true,
-      })?.note,
-    ).toContain("activate_campaign");
   });
 });
 
@@ -552,62 +168,6 @@ describe("readsOnly", () => {
     expect(readsOnly("recruiting_role", { operation: "update" })).toBe(false);
     expect(readsOnly("mcp__instantly__list_campaigns", {})).toBe(true);
     expect(readsOnly("mcp__instantly__activate_campaign", {})).toBe(false);
-  });
-});
-
-describe("CLAIMS_CARD_PENDING", () => {
-  // Staging 11-12: after the recruiter confirmed the Send card and the email went out.
-  it("reads a reply that says the card still waits or the email is not sent", () => {
-    expect(
-      CLAIMS_CARD_PENDING.test(
-        "已核实：当前的审批卡仍待你确认；审批未完成前我不会重复创建或发送。",
-      ),
-    ).toBe(true);
-    expect(CLAIMS_CARD_PENDING.test("核对结果：没有可确认的发送回执，目前状态为**未发送**。")).toBe(
-      true,
-    );
-    expect(CLAIMS_CARD_PENDING.test("初次联系邮件已发出，收件人仅为 Noah Test。")).toBe(false);
-  });
-});
-
-describe("restatesUpdate", () => {
-  const update =
-    "The search has brought the role’s Results pool to 122 people, above your target of 100. I included San Francisco Bay Area profiles as a preferred search segment while keeping Atlanta onsite as the role’s primary location.";
-
-  it("drops a final reply that says the same thing again", () => {
-    expect(
-      restatesUpdate(
-        "The search now has **122 people** in Results, exceeding your target of 100. I included San Francisco Bay Area profiles as a preferred search segment and kept Atlanta onsite as the primary location.",
-        update,
-      ),
-    ).toBe(true);
-    // A first round finished in the background said it once before its final reply.
-    expect(
-      restatesUpdate(
-        "Recorded the first 10-person review set and saved the role brief, including **Chinese preferred; English assumed**. The candidates and their profile passages are shown above.",
-        "Recorded the first 10-person review set for the Atlanta on-site Warehouse Operations Manager role, with Chinese preferred and English assumed. The role brief is saved; the first review set includes the candidates and profile passages shown above.",
-      ),
-    ).toBe(true);
-    // The update already asked the question; the final reply asks it again.
-    expect(
-      restatesUpdate(
-        "Which candidates should I email, and what should the email be about?",
-        "I checked your active roles and existing outreach, and there are no candidates or prior emails available in this conversation to act on. Which candidates should I email, and what should the email be about?",
-      ),
-    ).toBe(true);
-  });
-
-  it("keeps a reply with new content or no update before it", () => {
-    expect(
-      restatesUpdate("Here is the draft email for Ada: Hi Ada, I saw your work at DHL.", update),
-    ).toBe(false);
-    expect(
-      restatesUpdate(
-        `${update} Here is the full list of all 122 people with their titles, locations, evidence and what is still unverified for each of them.`,
-        update,
-      ),
-    ).toBe(false);
-    expect(restatesUpdate("Found 122 people.", undefined)).toBe(false);
   });
 });
 

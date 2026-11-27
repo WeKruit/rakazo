@@ -33,7 +33,6 @@ const role = (id: string, userId = actor.userId, spaceId = actor.spaceId) => ({
   id,
   title: `Role ${id}`,
   sourceThreadId: `thread-${id}`,
-  playbookStage: "outreach",
   userId,
   spaceId,
   archivedAt: null,
@@ -81,7 +80,7 @@ const match = (row: ReturnType<typeof role>, where: Record<string, unknown>) =>
   (!where.id ||
     (typeof where.id === "string"
       ? row.id === where.id
-      : row.id > (where.id as { gt: string }).gt));
+      : row.id < (where.id as { lt: string }).lt));
 function fixture() {
   const prisma = {
     routine: {
@@ -132,9 +131,12 @@ function fixture() {
     },
     recruitingRole: {
       findFirst: vi.fn(async ({ where }) => rows.find((row) => match(row, where)) ?? null),
-      findMany: vi.fn(async ({ where, skip = 0, take }) =>
+      findMany: vi.fn(async ({ where, orderBy, skip = 0, take }) =>
         rows
           .filter((row) => match(row, where))
+          .sort((a, b) =>
+            orderBy?.id === "desc" ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id),
+          )
           .slice(skip, take === undefined ? undefined : skip + take),
       ),
       count: vi.fn(async ({ where }) => rows.filter((row) => match(row, where)).length),
@@ -216,7 +218,7 @@ describe("account recruiting reads", () => {
   it("pages all native recruiting routines across distinct bots including global Main in one owned query", async () => {
     const { deps, prisma } = fixture();
     const first = await readRecruitingAccountView(deps, actor, { view: "routines", limit: 2 });
-    expect(first.roles.map((role) => role.id)).toEqual(["a", "b", "c"]);
+    expect(first.roles.map((role) => role.id)).toEqual(["c", "b", "a"]);
     expect(first.routines?.map((item) => item.id)).toEqual(["routine-a", "routine-b"]);
     expect(first.nextCursor).toBe("routine-b");
     expect(first.routines?.[0]).toMatchObject({
@@ -280,15 +282,15 @@ describe("account recruiting reads", () => {
   it("paginates active roles while retaining a full owned role picker", async () => {
     const { deps } = fixture();
     const first = await readRecruitingAccountView(deps, actor, { view: "roles", limit: 2 });
-    expect(first.roles.map((role) => role.id)).toEqual(["a", "b", "c"]);
-    expect(first.items.map((item) => item.roleId)).toEqual(["a", "b"]);
+    expect(first.roles.map((role) => role.id)).toEqual(["c", "b", "a"]);
+    expect(first.items.map((item) => item.roleId)).toEqual(["c", "b"]);
     expect(first.nextCursor).toBe("b");
     const second = await readRecruitingAccountView(deps, actor, {
       view: "roles",
       limit: 2,
       cursor: first.nextCursor!,
     });
-    expect(second.items.map((item) => item.roleId)).toEqual(["c"]);
+    expect(second.items.map((item) => item.roleId)).toEqual(["a"]);
     expect(second.nextCursor).toBeNull();
     expect(first.total).toBe(3);
     expect(second.total).toBeUndefined();
@@ -297,7 +299,7 @@ describe("account recruiting reads", () => {
       limit: 2,
       offset: 2,
     });
-    expect(jumped.items.map((item) => item.roleId)).toEqual(["c"]);
+    expect(jumped.items.map((item) => item.roleId)).toEqual(["a"]);
     expect(jumped.total).toBe(3);
     await expect(
       readRecruitingAccountView(deps, actor, {
@@ -310,8 +312,16 @@ describe("account recruiting reads", () => {
   });
   it("reports each role's status from saved records for the global agent", async () => {
     const { deps, prisma } = fixture();
-    const view = await readRecruitingAccountView(deps, actor, { view: "roles", limit: 2 });
+    const view = await readRecruitingAccountView(deps, actor, {
+      view: "roles",
+      limit: 2,
+      offset: 1,
+    });
     expect(view.items).toEqual([
+      {
+        roleId: "b",
+        status: { savedPeople: 0, shortlisted: 0, lastActivityAt: null, waitingOnYou: null },
+      },
       {
         roleId: "a",
         status: {
@@ -320,10 +330,6 @@ describe("account recruiting reads", () => {
           lastActivityAt: "2026-10-30T12:00:00.000Z",
           waitingOnYou: { kind: "question", text: "Approve the first email?" },
         },
-      },
-      {
-        roleId: "b",
-        status: { savedPeople: 0, shortlisted: 0, lastActivityAt: null, waitingOnYou: null },
       },
     ]);
     // Every status read stays inside this user's Space.
@@ -437,7 +443,7 @@ describe("account recruiting reads", () => {
       "inbox",
       undefined,
       undefined,
-      { limit: 50, cursor: "200" },
+      expect.objectContaining({ ...{ limit: 50, cursor: "200" }, workspace: expect.anything() }),
       expect.anything(),
       expect.anything(),
     );
@@ -457,7 +463,7 @@ describe("account recruiting reads", () => {
       "interview",
       undefined,
       undefined,
-      { limit: 200, cursor: "200" },
+      expect.objectContaining({ ...{ limit: 200, cursor: "200" }, workspace: expect.anything() }),
       expect.anything(),
       expect.anything(),
     );
@@ -486,10 +492,40 @@ describe("account recruiting reads", () => {
         : workspace(prisma, owner, input),
     );
     const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
-    expect(result.items.map((item) => item.roleId)).toEqual(["a", "c"]);
+    expect(result.items.map((item) => item.roleId)).toEqual(["c", "a"]);
     await expect(
       readRecruitingAccountView(deps, actor, { view: "shortlist", roleId: "b", limit: 20 }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  it("still skips a moved conversation when its workspace read, started alongside, also fails", async () => {
+    const { deps } = fixture();
+    vi.mocked(db.createRepos).mockReturnValue({
+      getBot: async (_actor: Actor, id: string) => ({
+        id,
+        thread: { id: id === "bot-b" ? "thread-moved" : `thread-${id.slice(4)}` },
+      }),
+    } as never);
+    const workspace = vi.mocked(db.getRecruitingWorkspace).getMockImplementation()!;
+    vi.mocked(db.getRecruitingWorkspace).mockImplementation(async (prisma, owner, input) => {
+      if (input.threadId === "thread-b") throw new Error("isolation");
+      return workspace(prisma, owner, input);
+    });
+    const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
+    expect(result.items.map((item) => item.roleId)).toEqual(["c", "a"]);
+  });
+  it("skips one role whose agent was removed instead of failing every role", async () => {
+    const { deps } = fixture();
+    vi.mocked(db.createRepos).mockReturnValue({
+      getBot: async (_actor: Actor, id: string) => {
+        if (id === "bot-b") throw new db.IsolationError();
+        return { id, thread: { id: `thread-${id.slice(4)}` } };
+      },
+    } as never);
+    const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
+    expect(result.items.map((item) => item.roleId)).toEqual(["c", "a"]);
+    await expect(
+      readRecruitingAccountView(deps, actor, { view: "shortlist", roleId: "b", limit: 20 }),
+    ).rejects.toThrow("Resource not found");
   });
   it("filters shortlist dates before paging instead of hiding rows after the page", async () => {
     const { deps } = fixture();

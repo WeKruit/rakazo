@@ -5,6 +5,7 @@ import {
   historyCompactJob,
   historyCompactJobKey,
   messagingDeliverJob,
+  routineWakeupJob,
   runContinueJob,
 } from "@rakazo/adapter-kit";
 import { createLogger, createTestSink, installLogger, wrapJobPayload } from "@rakazo/logging";
@@ -38,8 +39,6 @@ function handlers(): BackgroundJobHandlers {
     "history.compact": vi.fn(async () => undefined),
     "messaging.deliver": vi.fn(async () => undefined),
     "cloud_agent.poll": vi.fn(async () => undefined),
-    "recruiting_research.poll": vi.fn(async () => undefined),
-    "recruiting_grade.start": vi.fn(async () => undefined),
     "recruiting_checkin.start": vi.fn(async () => undefined),
     "recruiting_agent_run.wait": vi.fn(async () => undefined),
     "recruiting_profile.project": vi.fn(async () => undefined),
@@ -149,8 +148,9 @@ describe("GraphileJobPublisher.enqueue", () => {
     const publisher = new GraphileJobPublisher({} as Pool);
     await publisher.enqueue(runContinueJob("run-routine"));
     await publisher.enqueue(runContinueJob("run-user"));
+    await publisher.enqueue(routineWakeupJob("routine-1", new Date("2026-11-16T08:00:00Z")));
     const priorities = addJob.mock.calls.map((call) => (call[2] as { priority?: number }).priority);
-    expect(priorities).toEqual([10, undefined]);
+    expect(priorities).toEqual([10, undefined, 10]);
     expect(query.mock.calls[0]?.[1]).toEqual(["run-routine", expect.arrayContaining(["routine"])]);
     await publisher.close();
   });
@@ -258,20 +258,20 @@ describe("GraphileJobPublisher.enqueue", () => {
     const runAt = new Date("2030-01-01T00:00:00.000Z");
     const lockedAt = new Date("2029-12-31T23:59:00.000Z");
     const jobs = new Map<string, Job>([
-      ["recruiting_grade.start:thread-1", { attempts: 1, maxAttempts: 25, runAt, lockedAt }],
+      ["recruiting_checkin.start:thread-1", { attempts: 1, maxAttempts: 25, runAt, lockedAt }],
     ]);
     const { publisher, addJob } = publisherOver(jobs);
     const nextAt = new Date("2030-01-01T00:00:30.000Z");
     await publisher.enqueue({
-      name: "recruiting_grade.start",
+      name: "recruiting_checkin.start",
       payload: { threadId: "thread-1" },
-      replaceKey: "recruiting_grade.start:thread-1",
+      replaceKey: "recruiting_checkin.start:thread-1",
       availableAt: nextAt,
       keepExisting: true,
     });
     const options = addJob.mock.calls[0]?.[2] as { jobKeyMode?: string } | undefined;
     expect(options?.jobKeyMode).toBeUndefined();
-    expect(jobs.get("recruiting_grade.start:thread-1")).toEqual({
+    expect(jobs.get("recruiting_checkin.start:thread-1")).toEqual({
       attempts: 0,
       maxAttempts: 25,
       runAt: nextAt,
@@ -484,6 +484,14 @@ describe("GraphileJobWorkerHost runner lifecycle", () => {
         "job.attempts": HISTORY_COMPACT_MAX_ATTEMPTS,
         "job.max_attempts": HISTORY_COMPACT_MAX_ATTEMPTS,
         error: expect.objectContaining({ message: "The operation was aborted due to timeout" }),
+      }),
+      // Any other job that used its last attempt leaves one line to alert on.
+      expect.objectContaining({
+        level: "error",
+        message: "job.exhausted",
+        "job.type": "run.continue",
+        "job.attempts": 25,
+        error: expect.objectContaining({ message: "handler failed" }),
       }),
     ]);
   });

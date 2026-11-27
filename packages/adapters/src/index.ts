@@ -6,12 +6,12 @@ export * from "./artifact-read.js";
 export * from "./artifacts.js";
 export * from "./auto-review.js";
 export * from "./auto-review-factory.js";
-export * from "./autumn-files.js";
 export * from "./background-job-handlers.js";
 export * from "./billing-emulator.js";
 export * from "./bot-avatar.js";
 export * from "./bot-messages.js";
 export {
+  BotSecretInputError,
   forgetBotSecret,
   getBotSecretMetadata,
   listBotSecretMetadata,
@@ -73,6 +73,7 @@ export * from "./fake-web.js";
 export * from "./favicon.js";
 export * from "./fish-audio-voice.js";
 export * from "./github-webhook-emulator.js";
+export * from "./google-calendar-emulator.js";
 export * from "./graphql-connectors.js";
 export * from "./group-handoff.js";
 export * from "./home.js";
@@ -132,7 +133,6 @@ export {
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
 } from "./recruiting-agent-run-wait.js";
 export * from "./recruiting-global-inbox.js";
-export { scheduleRecruitingGrading } from "./recruiting-grading.js";
 export {
   fillRecruitingRoleProfiles,
   projectRecruitingCandidateProfiles,
@@ -143,7 +143,6 @@ export {
   isRecruitingCandidateReportField,
   projectRecruitingCandidateReport,
 } from "./recruiting-research.js";
-export { recruitingResearchWakeNonce } from "./recruiting-research-poll.js";
 export * from "./recruiting-sequences.js";
 export * from "./release-watch.js";
 export * from "./remote-mcp.js";
@@ -163,6 +162,7 @@ export * from "./secrets.js";
 export * from "./sendblue-emulator.js";
 export { SerenityMemoryProvider } from "./serenity-memory-provider.js";
 export * from "./session-admission-runtime.js";
+export { blockNewConnections } from "./shared-dispatcher.js";
 export * from "./skill-tools.js";
 export * from "./slot-replacement.js";
 export * from "./smtp-email.js";

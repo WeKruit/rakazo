@@ -1,7 +1,8 @@
 const MAX_TRANSACTION_ATTEMPTS = 3;
 const RETRYABLE_DATABASE_CODES = new Set(["40001", "40P01"]);
 
-function isRetryableTransactionConflict(error: unknown): boolean {
+/** A deadlock or serialization failure: the transaction rolled back and may simply run again. */
+export function isRetryableTransactionConflict(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const prismaError = error as {
     code?: unknown;
@@ -27,6 +28,10 @@ export async function withTransactionRetry<T>(operation: () => Promise<T>): Prom
       if (!isRetryableTransactionConflict(error) || attempt >= MAX_TRANSACTION_ATTEMPTS) {
         throw error;
       }
+      // Jittered backoff so the transactions that collided do not collide again at once.
+      await new Promise((resolve) =>
+        setTimeout(resolve, 25 * 2 ** attempt * (0.5 + Math.random())),
+      );
     }
   }
 }

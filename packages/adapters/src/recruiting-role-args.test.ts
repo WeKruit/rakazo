@@ -1,7 +1,6 @@
-import { IsolationError, RecruitingIntentQuoteError } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
 import {
-  createAsUpdate,
   normalizeRecruitingRoleArgs,
   repairedRoleSave,
 } from "./recruiting-tools.js";
@@ -23,6 +22,17 @@ describe("normalizeRecruitingRoleArgs", () => {
     ).toEqual({
       operation: "read",
     });
+  });
+
+  // Branch play 11-26: a create written with the update's criteria shape, or without the empty
+  // lists, was refused and cost the role's first reply a second model step.
+  it("puts a create's lists into the create shape", () => {
+    expect(
+      normalizeRecruitingRoleArgs(
+        { operation: "create", title: "Data Engineer", criteria: { upsert: [], remove: [] } },
+        now,
+      ),
+    ).toMatchObject({ criteria: [], sourceRefs: [], preferences: [], definitionQuestions: [] });
   });
 
   it("fills a missing read time on references", () => {
@@ -163,7 +173,14 @@ describe("normalizeRecruitingRoleArgs", () => {
         { operation: "create", brief: { fields: [] } },
         now,
       ),
-    ).toEqual({ operation: "create", brief: { fields: [] } });
+    ).toEqual({
+      operation: "create",
+      brief: { fields: [] },
+      sourceRefs: [],
+      criteria: [],
+      preferences: [],
+      definitionQuestions: [],
+    });
     const archive = { operation: "archive", roleId: "r1", expectedRevision: 2 };
     expect(normalizeRecruitingRoleArgs(archive, now)).toEqual(archive);
   });
@@ -286,17 +303,6 @@ describe("repairedRoleSave", () => {
     });
   });
 
-  it("uses the recruiter's own words when the intent quote was mistyped", () => {
-    const repeat = repairedRoleSave(
-      { ...args, sourceRefs: [], criteria: [] },
-      new RecruitingIntentQuoteError("然后呢 继续找吗？"),
-    );
-    expect(repeat?.intent).toEqual({
-      basis: "direct",
-      quote: "然后呢 继续找吗？",
-    });
-  });
-
   it("does not repeat a conflict, a read or a save it would not change", () => {
     expect(
       repairedRoleSave(args, new Error("Recruiting revision changed")),
@@ -310,44 +316,5 @@ describe("repairedRoleSave", () => {
         new IsolationError(),
       ),
     ).toBeUndefined();
-  });
-});
-
-// 2026-11-12 staging gate (jd-zh-must-have): the model created the role a second time right after
-// the server saved it with the recruiter's must-haves; the empty duplicate took its place.
-describe("createAsUpdate", () => {
-  it("writes a second create to the saved role and keeps its saved criteria", () => {
-    const criterion = { id: "lang", priority: "hard" };
-    expect(
-      createAsUpdate(
-        {
-          operation: "create",
-          title: "华东区销售总监",
-          brief: null,
-          criteria: [criterion],
-          intent: { basis: "direct", quote: "新岗位" },
-        },
-        { id: "role-1", revision: 1 },
-      ),
-    ).toEqual({
-      operation: "update",
-      roleId: "role-1",
-      expectedRevision: 1,
-      title: "华东区销售总监",
-      brief: null,
-      criteria: { upsert: [criterion] },
-      intent: { basis: "direct", quote: "新岗位" },
-    });
-    expect(
-      createAsUpdate(
-        { operation: "create", title: "T", criteria: [] },
-        { id: "r", revision: 2 },
-      ),
-    ).toEqual({
-      operation: "update",
-      roleId: "r",
-      expectedRevision: 2,
-      title: "T",
-    });
   });
 });

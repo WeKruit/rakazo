@@ -20,7 +20,7 @@ const actor: Actor = {
   email: "owner@example.test",
   isDeploymentOwner: false,
 };
-const target = { roleId: "role", candidateKey: "autumn:person" };
+const target = { roleId: "role", candidateKey: "sourced:person" };
 const input = { ...target, viewId: "00000000-0000-4000-8000-000000000001" };
 const event = {
   roleTitle: "Synthetic role",

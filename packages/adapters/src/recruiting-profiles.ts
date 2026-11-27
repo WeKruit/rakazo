@@ -15,6 +15,7 @@ import {
   listRunToolResults,
   saveRecruitingSavedProfile,
   saveRecruitingSavedProfiles,
+  withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { inlineProfilePhotos, linkedinPhotoUrl } from "./profile-photo.js";
@@ -318,6 +319,11 @@ export type PeopleSearchRow = {
   location?: string;
   /** A short passage of the profile the search matched, so the pick can quote the work. */
   snippet?: string;
+  /** The search's own sentence on why this person fits what was asked, from the same request. */
+  why_recommended?: string;
+  /** The search's own grade of this person for what was asked, when the request returned one. */
+  match_score?: number;
+  match_tier?: string;
   /** Positions newest first, one per line: "Title | Company | | Start – End | Location". */
   experience?: string;
   /** Schools, one per line: "School | Degree | Start – End". */
@@ -331,6 +337,8 @@ export type PeopleSearchRow = {
   /** Exact normalized facts stay in the immutable receipt without becoming report findings. */
   _profile?: Facts;
   _profile_image_source_url?: string | null;
+  /** The profile's full text as the search returned it, kept for the requirement check. */
+  _profile_text?: string;
 };
 
 type SearchJob = {
@@ -366,7 +374,11 @@ function experienceText(jobs: readonly SearchJob[]): string | undefined {
   return lines.length ? lines.join("\n") : undefined;
 }
 
-const SNIPPET_LENGTH = 300;
+// The search is asked for up to 900 characters of evidence per person; the saved profile keeps
+// all of it. Cut to 300, the check found "Spark in production not shown" on people whose
+// evidence said so, and re-read the raw search page for the rest (s65, 11-24).
+const SNIPPET_LENGTH = 900;
+const WHY_RECOMMENDED_LENGTH = 600;
 
 /** Plain profile prose: no headings, links or counters, cut to a short passage. */
 function snippetOf(text: string): string | undefined {
@@ -425,6 +437,12 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     if (company) row.current_company = company.slice(0, 200);
     if (location) row.location = location.slice(0, 200);
     if (typeof record.snippet === "string") row.snippet = record.snippet;
+    if (typeof record.why_recommended === "string" && record.why_recommended)
+      row.why_recommended = record.why_recommended;
+    if (typeof record.match_tier === "string" && Number.isFinite(record.match_score)) {
+      row.match_tier = record.match_tier;
+      row.match_score = Number(record.match_score);
+    }
     if (typeof record.experience === "string" && record.experience)
       row.experience = record.experience;
     if (typeof record.education === "string" && record.education) row.education = record.education;
@@ -438,6 +456,8 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     row.website_url = retained?.websiteUrl ?? contacts.websiteUrl;
     row.stackoverflow_url = retained?.stackOverflowUrl ?? contacts.stackOverflowUrl;
     if (retained) row._profile = retained;
+    if (typeof record._profile_text === "string" && record._profile_text)
+      row._profile_text = record._profile_text;
     const photo = linkedinPhotoUrl(
       record.profile_image_url ??
         record.profile_picture_url ??
@@ -602,6 +622,7 @@ function peopleFromAgentRun(parsed: unknown): Record_[] {
                     typeof item.current_company === "string" ? item.current_company : null,
                   location: typeof item.location === "string" ? item.location : null,
                   snippet: typeof item.evidence === "string" ? snippetOf(item.evidence) : undefined,
+                  why_recommended: text(item.fit_reasons),
                   ...(Array.isArray(item.education) && item.education.some(isRecord)
                     ? {}
                     : { education: educationText(item.education) }),
@@ -703,6 +724,7 @@ function peopleFromResults(body: string): Record_[] {
       {
         ...contactFacts({ ...item, ...person }),
         ...(fullProfile ? { _profile: fullProfile } : {}),
+        ...(typeof item.text === "string" && item.text ? { _profile_text: item.text } : {}),
         full_name: name,
         linkedin_url: item.url,
         image: item.image,
@@ -710,6 +732,10 @@ function peopleFromResults(body: string): Record_[] {
         company_name: typeof job?.company?.name === "string" ? job.company.name : null,
         location: typeof person.location === "string" ? person.location : null,
         snippet: snippetOf(highlights),
+        why_recommended:
+          typeof item.summary === "string" && item.summary.trim()
+            ? item.summary.replace(/\s+/g, " ").trim().slice(0, WHY_RECOMMENDED_LENGTH)
+            : undefined,
         experience: experienceText(
           jobs.flatMap((entry): SearchJob[] =>
             typeof entry?.title === "string" || typeof entry?.company?.name === "string"
@@ -920,9 +946,24 @@ export function factsFromSearchRow(row: PeopleSearchRow): Facts | null {
   };
 }
 
+/**
+ * Every string made storable in a JSON column: an emoji cut in half by a length limit (a lone
+ * surrogate) failed the whole save on staging 11-14 ("invalid input syntax for type json").
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+function storable<T>(value: T): T {
+  if (typeof value === "string") return value.replace(LONE_SURROGATE, "") as T;
+  if (Array.isArray(value)) return value.map(storable) as T;
+  if (isRecord(value))
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, storable(item)]),
+    ) as T;
+  return value;
+}
+
 /** The existing native save lane retains canonical supplied facts before a later grading row. */
 export function prepareRecruitingProfileRows(rows: readonly unknown[]) {
-  const prepared = rows.map((value) => (isRecord(value) ? { ...value } : value));
+  const prepared = rows.map((value) => storable(isRecord(value) ? { ...value } : value));
   const people = prepared.flatMap((value) => {
     if (!isRecord(value)) return [];
     const retained = factsSchema.safeParse(value._profile).data ?? coresignalProfile(value);
@@ -1051,36 +1092,46 @@ export async function projectRecruitingCandidateProfiles(
       : [];
   });
   const key = `recruiting-profile-project:${page.effectId}:${page.artifactHash}`;
-  const authorized = async (tx: Pick<PrismaClient, "$queryRaw">) => {
+  // The transaction that appends the change event updates the conversation row, so it takes
+  // that row's write lock up front. Either way the conversation is locked in its own statement
+  // before the role: a shared lock upgraded later, or one statement locking the role before the
+  // conversation, deadlocked against live runs appending events and role writes, which lock the
+  // conversation first (staging 11-26).
+  const authorized = async (tx: Pick<PrismaClient, "$queryRaw">, appendsEvent = false) => {
+    await (appendsEvent
+      ? tx.$queryRaw`SELECT id FROM threads WHERE id=${run.threadId} AND "userId"=${userId} AND "spaceId"=${spaceId} FOR NO KEY UPDATE`
+      : tx.$queryRaw`SELECT id FROM threads WHERE id=${run.threadId} AND "userId"=${userId} AND "spaceId"=${spaceId} FOR SHARE`);
     const rows = await tx.$queryRaw<
       Array<{ id: string }>
-    >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,t,sm`;
+    >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,sm`;
     return rows.length === 1;
   };
   // Membership and the current role stay locked only for writes, never while fetching pixels.
-  const marker = await prisma.$transaction(async (tx) => {
-    if (!(await authorized(tx))) return null;
-    const marker = await tx.externalEffect.upsert({
-      where: { idempotencyKey: key },
-      create: {
-        spaceId,
-        runId: run.id,
-        kind: "recruiting_profile_projection",
-        idempotencyKey: key,
-        status: "executing",
-        request: {
-          pageEffectId: page.effectId,
-          roleId: page.roleId,
-          roleRevisionId: page.roleRevisionId,
-          artifactHash: page.artifactHash,
+  const marker = await withTransactionRetry(() =>
+    prisma.$transaction(async (tx) => {
+      if (!(await authorized(tx))) return null;
+      const marker = await tx.externalEffect.upsert({
+        where: { idempotencyKey: key },
+        create: {
+          spaceId,
+          runId: run.id,
+          kind: "recruiting_profile_projection",
+          idempotencyKey: key,
+          status: "executing",
+          request: {
+            pageEffectId: page.effectId,
+            roleId: page.roleId,
+            roleRevisionId: page.roleRevisionId,
+            artifactHash: page.artifactHash,
+          },
         },
-      },
-      update: {},
-    });
-    if (marker.status === "completed") return null;
-    await saveRecruitingSavedProfiles(tx, actor, run.id, entries);
-    return marker;
-  });
+        update: {},
+      });
+      if (marker.status === "completed") return null;
+      await saveRecruitingSavedProfiles(tx, actor, run.id, entries);
+      return marker;
+    }),
+  );
   if (!marker) return;
   const profiles = entries.length
     ? await prisma.recruitingSavedProfile.findMany({
@@ -1118,29 +1169,31 @@ export async function projectRecruitingCandidateProfiles(
       ? [{ ...item, photo: item.profile_image_url }]
       : [],
   );
-  const event = await prisma.$transaction(async (tx) => {
-    if (!(await authorized(tx))) return null;
-    if (copied.length)
-      await tx.$executeRaw`UPDATE recruiting_saved_profiles p SET profile=jsonb_set(p.profile,'{profileImageUrl}',to_jsonb(copy.photo)),"updatedAt"=now() FROM jsonb_to_recordset(${JSON.stringify(copied)}::jsonb) AS copy("personKey" text,"sourceEffectId" text,"fetchedAt" text,source text,photo text) WHERE p."ownerUserId"=${userId} AND p."spaceId"=${spaceId} AND p."personKey"=copy."personKey" AND p."sourceEffectId"=copy."sourceEffectId" AND p."fetchedAt"=copy."fetchedAt"::timestamp AND p.profile->>'profileImageUrl'=copy.source`;
-    await tx.externalEffect.update({
-      where: { id: marker.id },
-      data: {
-        status: "completed",
-        result: {
-          projected: entries.length,
-          copied: copied.length,
-          sourcePreserved: copies.length - copied.length,
+  const event = await withTransactionRetry(() =>
+    prisma.$transaction(async (tx) => {
+      if (!(await authorized(tx, true))) return null;
+      if (copied.length)
+        await tx.$executeRaw`UPDATE recruiting_saved_profiles p SET profile=jsonb_set(p.profile,'{profileImageUrl}',to_jsonb(copy.photo)),"updatedAt"=now() FROM jsonb_to_recordset(${JSON.stringify(copied)}::jsonb) AS copy("personKey" text,"sourceEffectId" text,"fetchedAt" text,source text,photo text) WHERE p."ownerUserId"=${userId} AND p."spaceId"=${spaceId} AND p."personKey"=copy."personKey" AND p."sourceEffectId"=copy."sourceEffectId" AND p."fetchedAt"=copy."fetchedAt"::timestamp AND p.profile->>'profileImageUrl'=copy.source`;
+      await tx.externalEffect.update({
+        where: { id: marker.id },
+        data: {
+          status: "completed",
+          result: {
+            projected: entries.length,
+            copied: copied.length,
+            sourcePreserved: copies.length - copied.length,
+          },
         },
-      },
-    });
-    return appendEventInTransaction(tx, {
-      spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      type: "recruiting.changed",
-      payload: { roleId: page.roleId },
-    });
-  });
+      });
+      return appendEventInTransaction(tx, {
+        spaceId,
+        threadId: run.threadId,
+        botId: run.botId,
+        type: "recruiting.changed",
+        payload: { roleId: page.roleId },
+      });
+    }),
+  );
   if (event) await deps.events.notify(run.threadId, event.seq);
 }
 

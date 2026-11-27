@@ -15,6 +15,7 @@ import {
   createGroupRepos,
   createRepos,
   getRecruitingWorkspace,
+  IsolationError,
   listRecruitingFeedback,
   listRecruitingReminders,
   listRecruitingSchedulingPlans,
@@ -24,6 +25,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
+import { openRecruitingRoles } from "./open-recruiting-roles.js";
 import type { CrmMembershipReads, PhaseTimer, RecruitingThreadTarget } from "./recruiting-reads.js";
 import {
   authenticated,
@@ -134,15 +136,8 @@ export async function readRecruitingAccountView(
     };
     await guard();
     const scope = {
-      userId: actor.userId,
-      spaceId: actor.spaceId,
-      archivedAt: null,
+      ...openRecruitingRoles(actor),
       activeThreads: { some: { userId: actor.userId, spaceId: actor.spaceId } },
-      sourceThread: {
-        userId: actor.userId,
-        spaceId: actor.spaceId,
-        OR: [{ group: { archivedAt: null } }, { bot: { archivedAt: null } }],
-      },
     };
     if (input.roleId && input.groupId) throw new ORPCError("BAD_REQUEST");
     if (input.groupId) {
@@ -196,16 +191,18 @@ export async function readRecruitingAccountView(
       where: {
         ...listed,
         ...(input.roleId ? { id: input.roleId } : {}),
-        ...(input.cursor && input.view !== "routines" ? { id: { gt: input.cursor } } : {}),
+        ...(input.cursor && input.view !== "routines" ? { id: { lt: input.cursor } } : {}),
       },
-      orderBy: { id: "asc" },
+      // Newest first, as role and mail lists everywhere are: oldest first put a just-opened role
+      // past the first page on an account with many roles, and the main chat handed "3 more" to an
+      // older role with a near-identical title (stage 3a3ee156, stressed-point-few-meet).
+      orderBy: { id: "desc" },
       ...(input.offset ? { skip: input.offset } : {}),
       take: input.limit + 1,
       select: {
         id: true,
         title: true,
         sourceThreadId: true,
-        playbookStage: true,
         sourceThread: {
           select: {
             id: true,
@@ -220,12 +217,11 @@ export async function readRecruitingAccountView(
     const page = rows.slice(0, input.limit);
     const catalog = await deps.prisma.recruitingRole.findMany({
       where: scope,
-      orderBy: { id: "asc" },
+      orderBy: { id: "desc" },
       select: {
         id: true,
         title: true,
         sourceThreadId: true,
-        playbookStage: true,
         sourceThread: { select: { groupId: true, botId: true } },
       },
     });
@@ -235,7 +231,6 @@ export async function readRecruitingAccountView(
       threadId: row.sourceThreadId,
       groupId: row.sourceThread.groupId,
       ...(row.sourceThread.botId ? { botId: row.sourceThread.botId } : {}),
-      stage: row.playbookStage,
     }));
     if (input.view === "routines") {
       const threadId = input.roleId
@@ -302,11 +297,12 @@ export async function readRecruitingAccountView(
         return { kind: "bot", botId: bot.id, threadId: thread.id };
       };
       if (input.view === "roles") return { roleId: row.id, status: statuses.get(row.id) };
+      // Each database round trip is slow, so the workspace read starts with the check; the check's
+      // answer still comes first, so a role whose conversation moved is skipped as before.
+      const reading = getRecruitingWorkspace(deps.prisma, actor, { threadId: thread.id });
+      reading.catch(() => undefined);
       const target = await authorize();
-      timer.mark("authorizeMs");
-      const workspace = await getRecruitingWorkspace(deps.prisma, actor, {
-        threadId: thread.id,
-      });
+      const workspace = await reading;
       timer.mark("workspaceMs");
       if (workspace?.role.id !== row.id) throw new ORPCError("NOT_FOUND");
       const bound = workspace.crmTarget?.target;
@@ -476,6 +472,7 @@ export async function readRecruitingAccountView(
               : undefined),
           deps.oauth,
           {
+            workspace,
             // The inbox shows its newest mail first and pages the rest.
             limit: input.view === "inbox" ? 50 : 200,
             ...(input.itemCursor && (input.view === "inbox" || input.view === "interview")
@@ -526,8 +523,10 @@ export async function readRecruitingAccountView(
             items[index] = await readItem(row).catch((error: unknown) => {
               // One role whose conversation moved or was removed must not hide every other
               // role from an account-wide read; a named role still reports it.
-              if (input.roleId || !(error instanceof ORPCError) || error.code !== "NOT_FOUND")
-                throw error;
+              const gone =
+                error instanceof IsolationError ||
+                (error instanceof ORPCError && error.code === "NOT_FOUND");
+              if (input.roleId || !gone) throw error;
               getLogger().warn("recruiting.role_read.skipped", { "recruiting.role_id": row.id });
               return undefined;
             });

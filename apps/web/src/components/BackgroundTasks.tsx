@@ -74,7 +74,7 @@ export function BackgroundTasks({
                 <li key={task.id} className="flex items-center justify-between gap-3">
                   <span className="flex min-w-0 flex-col">
                     <span>
-                      {task.kind === "research" || task.kind === "agent_run"
+                      {task.kind === "agent_run"
                         ? t`Finding candidates`
                         : task.kind === "run"
                           ? t`Background task`
@@ -92,9 +92,7 @@ export function BackgroundTasks({
                       ? t`Cancelling…`
                       : task.kind === "agent_run"
                         ? t`Stop following`
-                        : task.kind === "research"
-                          ? t`Stop updates`
-                          : t`Cancel task`}
+                        : t`Cancel task`}
                   </Button>
                 </li>
               );

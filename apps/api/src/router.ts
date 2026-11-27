@@ -12,6 +12,7 @@ import type {
   UsageOperationKind,
 } from "@rakazo/adapter-kit";
 import {
+  ByteLimitError,
   computerControlExpireJobKey,
   discoveryWarmJob,
   messagingDeliverJob,
@@ -47,6 +48,8 @@ import {
   archiveBot,
   assertSafeRemoteUrl,
   bindImportedCampaigns,
+  BotSecretInputError,
+  blockNewConnections,
   buildMcpCredentialBlob,
   buildModelConnectPlaintext,
   CHATGPT_OAUTH_PROVIDER,
@@ -133,7 +136,6 @@ import {
   savePushToken,
   scheduleComputerControlExpiry,
   scheduleComputerSleep,
-  scheduleRecruitingGrading,
   screenLeaseIdForRun,
   scriptedCatalogEntry,
   selectDefaultCredentialId,
@@ -149,6 +151,7 @@ import {
   validateModelAuthAvailability,
   validateStoredModelAuth,
   verifyMcpInstall,
+  WorkspacePathError,
 } from "@rakazo/adapters";
 import type { CrmMembershipReads, CrmRoleListReads } from "@rakazo/adapters/recruiting-reads";
 import type { Auth, FirstPartySessionConfig, OidcConfig } from "@rakazo/auth";
@@ -254,6 +257,7 @@ import {
   lockOwnedGroup,
   mapRoutine,
   markRecruitingInbox,
+  mirroredAskSource,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
   openVerifiedRecruitingCrmWorkspace,
@@ -293,6 +297,7 @@ import {
   touchGroupUpdatedAt,
   updateRecruitingContactTags,
   upgradeRecruitingWorkspace,
+  usageRemaining,
   votePoll,
   withDatabaseActor,
 } from "@rakazo/db";
@@ -353,27 +358,22 @@ import {
   approveRecruitingCalibrationRound,
   archiveRecruitingRole,
   bindRecruitingRole,
-  confirmRecruitingBrief,
   createRecruitingCandidateNote,
   createRecruitingReminder,
   createRecruitingRole,
   deleteRecruitingCandidateNote,
   deleteRecruitingReminder,
   editRecruitingCriteria,
-  getRecruitingAssessment,
   getRecruitingCorrespondence,
   getRecruitingCrmData,
   getRecruitingRoleCampaign,
   getRecruitingRoleCandidates,
-  getRecruitingRoleSetup,
   getRecruitingWorkspace,
-  listRecruitingAssessments,
   listRecruitingCandidateNotes,
   listRecruitingCandidateSources,
   listRecruitingCandidates,
   listRecruitingFeedback,
   listRecruitingProfileActivity,
-  listRecruitingQuestions,
   listRecruitingReminders,
   listRecruitingResearch,
   notifyRecruitingChange,
@@ -754,6 +754,7 @@ export interface RouterDeps {
     imageTag?: string;
     integrationsCatalogUrl?: string;
     mcpAllowPrivateEndpoint?: boolean;
+    faultInjection?: boolean;
     firstPartyMcpUrl?: string;
     firstPartySession?: FirstPartySessionConfig;
     oidc?: Pick<OidcConfig, "issuer" | "clientId">;
@@ -794,21 +795,10 @@ function mapSpaceLifecycleError(error: unknown): unknown {
   return error;
 }
 
-const BOT_SECRET_INPUT_ERRORS = [
-  "Invalid credential destination",
-  "Invalid credential length",
-  "Credential cannot be used with this authentication method",
-  "Remove the existing credential before changing its destination",
-  "Credential limit reached",
-];
-
 /** Map credential validation failures to a bad request without echoing the submitted value. */
 function mapBotSecretStoreError(error: unknown): unknown {
   if (error instanceof ORPCError) return error;
-  if (
-    error instanceof Error &&
-    BOT_SECRET_INPUT_ERRORS.some((prefix) => error.message.startsWith(prefix))
-  ) {
+  if (error instanceof BotSecretInputError) {
     return new ORPCError("BAD_REQUEST", { message: error.message });
   }
   // Login decoding failures: a JSON parse message can quote the submitted value, so never forward it.
@@ -1476,13 +1466,12 @@ export function createRouter(deps: RouterDeps) {
           sandboxKind: deps.env.sandboxProvider,
           firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
         });
-      // Additive setup for older crews runs beside the reads below; it changes no field this
-      // returns, and a failure must not block sign-in.
-      const platformServices = input.offset
-        ? Promise.resolve()
-        : ensurePlatformServices(deps.prisma, actor, {
-            sandboxKind: deps.env.sandboxProvider,
-          }).catch((error: unknown) => getLogger().error("platform service setup failed", error));
+      // Additive setup for older crews runs in the background: it changes no field this returns,
+      // takes about 30 sequential reads, and a failure must not block sign-in.
+      if (!input.offset)
+        void ensurePlatformServices(deps.prisma, actor).catch((error: unknown) =>
+          getLogger().error("platform service setup failed", error),
+        );
       // Fire-and-forget: wake a paused Team Computer so the first run skips the ~5 s wake.
       if (!input.offset) void prewarmTeamComputer(deps, actor).catch(() => undefined);
       const [me, navigation, archivedBots, archivedGroups, groupThread, active] = await Promise.all(
@@ -1499,7 +1488,8 @@ export function createRouter(deps: RouterDeps) {
                 limit: 200,
                 offset: input.offset ?? 0,
               }),
-          input.groupId
+          // The open chat comes with the first page only; later navigation pages discard it.
+          input.groupId && !input.offset
             ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
                 threadSnapshot(deps, target),
               )
@@ -1521,13 +1511,14 @@ export function createRouter(deps: RouterDeps) {
         ? [groupThread, []]
         : active
           ? await Promise.all([
-              resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
-                threadSnapshot(deps, target),
-              ),
+              input.offset
+                ? null
+                : resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
+                    threadSnapshot(deps, target),
+                  ),
               listRoutinesDto(deps.prisma, actor, { botId: active.id, offset: input.offset ?? 0 }),
             ])
           : [null, []];
-      await platformServices;
       return {
         me,
         bots,
@@ -1678,6 +1669,12 @@ export function createRouter(deps: RouterDeps) {
           return { userId: user.id, mailbox };
         },
       ),
+      networkBlip: authed.deployment.networkBlip.handler(async ({ context, input }) => {
+        if (!context.actor.isDeploymentOwner || deps.env.faultInjection !== true)
+          throw new ORPCError("FORBIDDEN");
+        const until = await blockNewConnections(input.seconds);
+        return { until: until.toISOString() };
+      }),
     },
     updater: {
       status: authed.updater.status.handler(async ({ context }) => {
@@ -3313,6 +3310,33 @@ export function createRouter(deps: RouterDeps) {
           username: input.username,
         });
         if (!answered) {
+          // A role team's card copied here answers the team's own card.
+          const source = await mirroredAskSource(deps.prisma, {
+            spaceId: context.actor.spaceId,
+            userId: context.actor.userId,
+            threadId: target.threadId,
+            messageId: input.messageId,
+          });
+          if (source) {
+            const answeredSource = await deps.events.answerRunInput({
+              spaceId: context.actor.spaceId,
+              threadId: source.threadId,
+              runId: source.runId,
+              messageId: source.messageId,
+              answeredByUserId: context.actor.userId,
+              answer: input.answer,
+              clientNonce: input.clientNonce,
+              username: input.username,
+            });
+            if (!answeredSource)
+              throw new ORPCError("CONFLICT", {
+                message: "This prompt is no longer awaiting an answer",
+              });
+            await deps.jobs.enqueue(runContinueJob(source.runId)).catch((error) => {
+              getLogger().error("thread answer enqueue", error);
+            });
+            return { ok: true as const };
+          }
           if (MailReplySendAnswerSchema.safeParse(input.answer).success)
             throw new ORPCError("CONFLICT", {
               message: "This reply is no longer awaiting approval",
@@ -3876,7 +3900,7 @@ export function createRouter(deps: RouterDeps) {
               maxBytes: MAX_COMPUTER_TEXT_FILE_BYTES,
             });
           } catch (error) {
-            if (error instanceof Error && error.message.startsWith("agent home file exceeds ")) {
+            if (error instanceof ByteLimitError) {
               throw new ORPCError("BAD_REQUEST", { message: "file is too large to preview" });
             }
             throw error;
@@ -3906,7 +3930,7 @@ export function createRouter(deps: RouterDeps) {
             { maxBytes: ATTACHMENT_MAX_BYTES },
           )
           .catch((error: unknown) => {
-            if (error instanceof Error && /exceeds|too large/i.test(error.message)) {
+            if (error instanceof ByteLimitError) {
               throw new ORPCError("BAD_REQUEST", { message: "File is too large to download." });
             }
             throw error;
@@ -3935,7 +3959,7 @@ export function createRouter(deps: RouterDeps) {
         try {
           storedPath = resolveBotUploadPath(parseComputerMode(computer.scope), bot.id, input.path);
         } catch (error) {
-          if (error instanceof Error && /escapes/i.test(error.message)) {
+          if (error instanceof WorkspacePathError) {
             throw new ORPCError("BAD_REQUEST", { message: error.message });
           }
           throw error;
@@ -4103,6 +4127,7 @@ export function createRouter(deps: RouterDeps) {
             prisma: deps.prisma,
             connectors: deps.connectors,
             jobs: deps.jobs,
+            artifacts: deps.artifacts,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,
           },
@@ -4275,20 +4300,6 @@ export function createRouter(deps: RouterDeps) {
           },
         ),
       ),
-      roleSetup: authed.recruiting.roleSetup.handler(async ({ context, input }) =>
-        getRecruitingRoleSetup(
-          {
-            prisma: deps.prisma,
-            connectors: deps.connectors,
-            signal: context.signal,
-            stillAuthorized: context.stillAuthorized,
-            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
-            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
-          },
-          context.actor,
-          await resolveThreadTarget(deps.prisma, context.actor, input),
-        ),
-      ),
       readSource: authed.recruiting.readSource.handler(({ context, input }) =>
         readRecruitingSource(deps, context.actor, input),
       ),
@@ -4446,20 +4457,6 @@ export function createRouter(deps: RouterDeps) {
         await notifyRecruitingChange(deps, context.actor, input.threadId);
         return saved;
       }),
-      confirmBrief: authed.recruiting.confirmBrief.handler(async ({ context, input }) => {
-        const saved = await confirmRecruitingBrief(deps.prisma, context.actor, input, {
-          artifacts: deps.artifacts,
-          context: connectionContext(context.actor, randomUUID()),
-        });
-        await notifyRecruitingChange(deps, context.actor, input.threadId);
-        return saved;
-      }),
-      listQuestions: authed.recruiting.listQuestions.handler(({ context, input }) =>
-        listRecruitingQuestions(deps.prisma, context.actor, {
-          ...input,
-          offset: input.offset ?? 0,
-        }),
-      ),
       createRole: authed.recruiting.createRole.handler(async ({ context, input }) => {
         const saved = await createRecruitingRole(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
@@ -4474,13 +4471,7 @@ export function createRouter(deps: RouterDeps) {
         return saved;
       }),
       getWorkspace: authed.recruiting.getWorkspace.handler(async ({ context, input }) => {
-        const workspace = await getRecruitingWorkspace(deps.prisma, context.actor, input);
-        // Opening a role makes sure everyone in it gets the research service's grade.
-        if (workspace)
-          void scheduleRecruitingGrading(deps.jobs, input.threadId).catch((error) =>
-            getLogger().warn("recruiting grade schedule", { error: String(error) }),
-          );
-        return workspace;
+        return getRecruitingWorkspace(deps.prisma, context.actor, input);
       }),
       reviseRole: authed.recruiting.reviseRole.handler(async ({ context, input }) => {
         const saved = await reviseRecruitingRole(deps.prisma, context.actor, input, {
@@ -4535,12 +4526,6 @@ export function createRouter(deps: RouterDeps) {
           recordRecruitingProfileView(deps.prisma, context.actor, input),
         ),
       },
-      listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>
-        listRecruitingAssessments(deps.prisma, context.actor, {
-          ...input,
-          offset: input.offset ?? 0,
-        }),
-      ),
       calibrationRound: authed.recruiting.calibrationRound.handler(async ({ context, input }) =>
         readRecruitingCalibrationRound(deps.prisma, context.actor, {
           threadId: (await resolveThreadTarget(deps.prisma, context.actor, input)).threadId,
@@ -4558,9 +4543,6 @@ export function createRouter(deps: RouterDeps) {
       ),
       searchQuality: authed.recruiting.searchQuality.handler(({ context, input }) =>
         readRecruitingSearchQuality(deps.prisma, context.actor, input),
-      ),
-      getAssessment: authed.recruiting.getAssessment.handler(({ context, input }) =>
-        getRecruitingAssessment(deps.prisma, context.actor, input),
       ),
       listResearch: authed.recruiting.listResearch.handler(async ({ context, input }) => {
         const result = await listRecruitingResearch(deps.prisma, context.actor, {
@@ -7308,6 +7290,9 @@ export function createRouter(deps: RouterDeps) {
         summarizeUsageCosts(deps.prisma, context.actor, {
           priceTokens: estimateCatalogTokenCostUsd,
         }),
+      ),
+      remaining: authed.usage.remaining.handler(({ context }) =>
+        usageRemaining(deps.prisma, context.actor, { priceTokens: estimateCatalogTokenCostUsd }),
       ),
       internalCosts: authed.usage.internalCosts.handler(async ({ context }) => {
         if (!(await seesOperatorSpend(deps.prisma, context.actor.userId)))

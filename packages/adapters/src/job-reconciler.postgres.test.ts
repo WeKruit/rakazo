@@ -29,6 +29,38 @@ describePostgres("job reconciliation leadership (PostgreSQL contract)", () => {
       await pool.end();
     }
   });
+
+  // 2026-11-14 staging: a replaced worker kept the lock's session open and no one reconciled
+  // for 20 minutes, so three runs stayed orphaned.
+  it("ends a leader whose lock session has gone silent and takes over", async () => {
+    const pool = new Pool({ connectionString: databaseUrl!, max: 3 });
+    pool.on("error", () => undefined);
+    const lockId = -Math.min(process.pid, 2_000_000_000) - 1;
+    const silent = createPostgresReconciliationLeadership(pool, { lockId });
+    const follower = createPostgresReconciliationLeadership(pool, {
+      lockId,
+      staleLeaderSeconds: 1,
+    });
+    try {
+      await expect(silent.tryAcquire()).resolves.toBe(true);
+      await expect(follower.tryAcquire()).resolves.toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await expect(follower.tryAcquire()).resolves.toBe(false);
+      // The ended session lets go of its lock a moment later; the next tick takes it.
+      let acquired = false;
+      for (let tick = 0; tick < 20 && !acquired; tick++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        acquired = await follower.tryAcquire();
+      }
+      expect(acquired).toBe(true);
+      // The old leader finds its session gone on its next tick and stops leading.
+      await expect(silent.tryAcquire()).resolves.toBe(false);
+    } finally {
+      await silent.release();
+      await follower.release();
+      await pool.end();
+    }
+  });
 });
 
 const profileDatabaseUrl = process.env.RECRUITING_PROFILE_TEST_DATABASE_URL;

@@ -8,9 +8,9 @@ import {
   currentSuggestion,
   isActive,
   isApprovalAskBlock,
+  reopenedAskMessageIds,
   retryMessageText,
   threadTailPhase,
-  timedOutAskMessageId,
   writesChinese,
 } from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
@@ -52,10 +52,6 @@ import {
 import { KruitWorkMenu } from "../recruiting/KruitWorkMenu";
 import { RetryNotice } from "../recruiting/RetryNotice";
 import { RoleDetailsMenu } from "../recruiting/RoleDetailsMenu";
-
-const RoleSetupCard = lazyPanel(() =>
-  import("../recruiting/RoleSetup").then((m) => m.RoleSetupCard),
-);
 
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
 import { TabLoading, useKeyedRead } from "../recruiting/shared";
@@ -262,13 +258,13 @@ export function ShellConversation({
     if (emptyCrmChat) onAttachmentPick(files, composerDraftKey);
     else onAttachmentPick(files);
   };
-  // A card whose wait timed out still takes an answer until the recruiter says something else.
-  const timedOutAskId = timedOutAskMessageId(
+  // A timed-out question, or a connect card, still takes an answer after its wait ended.
+  const reopenedAskKey = reopenedAskMessageIds(
     activeSnapshot ? { ...activeSnapshot, messages: transcriptMessages } : null,
-  );
+  ).join(",");
   const transcriptAskIds = useMemo(
-    () => (timedOutAskId ? [...answerableAskIds, timedOutAskId] : answerableAskIds),
-    [answerableAskIds, timedOutAskId],
+    () => [...answerableAskIds, ...(reopenedAskKey ? reopenedAskKey.split(",") : [])],
+    [answerableAskIds, reopenedAskKey],
   );
   // The card after a calibration round takes votes on its people right in the chat.
   const latestAskId = inGroup && !emptyCrmChat ? transcriptAskIds.at(-1) : undefined;
@@ -364,14 +360,6 @@ export function ShellConversation({
         !activeSnapshot &&
         !(workspaceCandidates && knownThreadId) ? (
         <MessageSkeleton label={t`Loading…`} />
-      ) : null}
-      {!primaryPage && roleChatWorkspace && (inGroup ? groupId : active?.id) ? (
-        <RoleSetupCard
-          conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
-          refreshSignal={recruitingRefresh}
-          readCache={recruitingReadCache.current}
-          readCacheScope={recruitingCacheScope}
-        />
       ) : null}
       {openingCrmRole ? (
         <div className="px-6 py-3">
@@ -480,6 +468,10 @@ export function ShellConversation({
                         : undefined
                     }
                     onAskChat={(text) => openRoleChat(text)}
+                    onSendChat={(text) => {
+                      openRoleChat();
+                      void sendRoleText(text);
+                    }}
                     roleId={currentBindingRead.workspace.role.id}
                     spaceId={currentBindingRead.workspace.role.spaceId}
                     conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
@@ -575,12 +567,6 @@ export function ShellConversation({
               onDiscussCandidate={discussCandidate}
               onCandidateFeedback={feedbackCandidate}
               candidateFeedbackRecipients={candidateFeedbackRecipients}
-              onRevealMessage={(target) =>
-                navigate({
-                  pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
-                  search: `?${new URLSearchParams({ view: "conversation", m: target.messageId })}`,
-                })
-              }
             />
             <div className="flex justify-end py-4">
               <Button variant="outline" onClick={() => openRoleChat()}>

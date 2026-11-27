@@ -40,7 +40,7 @@ const message = (id: string, text: string) => ({
   blocks: [{ kind: "text" as const, text }],
 });
 
-it("re-renders only the streaming message, not the whole transcript", async () => {
+function setup() {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -67,19 +67,18 @@ it("re-renders only the streaming message, not the whole transcript", async () =
   Element.prototype.scrollTo ??= function scrollTo() {};
   const scrollRef = createRef<HTMLDivElement>();
   const artifactTarget = {} as never;
-  const older = Array.from({ length: 20 }, (_, i) => message(`m${i}`, `old ${i}`));
-  const view = (live: string) => (
+  const view = (messages: unknown[], answerableAskMessageIds: string[] = []) => (
     <Transcript
       narrow={false}
       visible
       scrollRef={scrollRef}
       scrollRequest={null}
       artifactTarget={artifactTarget}
-      messages={[...older, message("live", live)] as never}
+      messages={messages as never}
       showToolActivity={false}
       olderCursor={null}
       loadingOlder={false}
-      answerableAskMessageIds={[]}
+      answerableAskMessageIds={answerableAskMessageIds}
       waitingRuns={[]}
       running
       tailPhase={null}
@@ -93,11 +92,41 @@ it("re-renders only the streaming message, not the whole transcript", async () =
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root!.render(view("Lis")));
+  return view;
+}
+
+it("re-renders only the streaming message, not the whole transcript", async () => {
+  const view = setup();
+  const older = Array.from({ length: 20 }, (_, i) => message(`m${i}`, `old ${i}`));
+  const at = (live: string) => view([...older, message("live", live)]);
+  await act(async () => root!.render(at("Lis")));
   await vi.waitFor(() => expect(rendered.get("live")).toBeGreaterThan(0));
   const before = new Map(rendered);
   for (const text of ["Lisbon", "Lisbon is", "Lisbon is the capital"])
-    await act(async () => root!.render(view(text)));
+    await act(async () => root!.render(at(text)));
   expect(rendered.get("live")).toBe((before.get("live") ?? 0) + 3);
   for (const old of older) expect(rendered.get(old.id)).toBe(before.get(old.id));
+});
+
+// Gate df83586a first-timer: a Connect card left open moved under each later answer, so the
+// recruiter saw the same card "posted again". It stays where it was asked; other cards still
+// follow the conversation.
+it("keeps an open connect card where it was asked, and moves other open cards to the end", async () => {
+  const view = setup();
+  const ask = (id: string, extra: Record<string, unknown>) => ({
+    ...message(id, ""),
+    blocks: [{ kind: "ask", status: "pending", question: id, ...extra }],
+  });
+  const messages = [
+    ask("connect", { connection: { provider: "gmail" } }),
+    ask("approve", {}),
+    message("later", "later answer"),
+  ];
+  await act(async () => root!.render(view(messages, ["connect", "approve"])));
+  await vi.waitFor(() => expect(host!.querySelectorAll("p").length).toBe(3));
+  expect([...host!.querySelectorAll("p")].map((p) => p.textContent)).toEqual([
+    "connect",
+    "later",
+    "approve",
+  ]);
 });

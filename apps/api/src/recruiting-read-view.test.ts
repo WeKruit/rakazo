@@ -3,7 +3,11 @@ import { ReadRecruitingViewInput } from "@rakazo/contracts";
 import { beforeEach, expect, it, vi } from "vitest";
 import { readRecruitingView } from "./recruiting-read-view.js";
 
-const reads = vi.hoisted(() => ({ workspace: vi.fn(), candidates: vi.fn(), research: vi.fn() }));
+const reads = vi.hoisted(() => ({
+  workspace: vi.fn(),
+  candidates: vi.fn(),
+  research: vi.fn(),
+}));
 vi.mock("./recruiting.js", () => ({
   getRecruitingWorkspace: reads.workspace,
   listRecruitingCandidates: reads.candidates,

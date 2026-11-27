@@ -21,6 +21,10 @@ msgstr " (अपठित)"
 msgid " and {more} more"
 msgstr ""
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid " and {moreEmailed} more"
+msgstr ""
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -201,10 +205,6 @@ msgstr ""
 #: src/lib/relative-time.ts
 msgid "{days}d ago"
 msgstr "{days} दिन पहले"
-
-#: src/pages/recruiting/SendQueue.tsx
-msgid "{emailed} emailed"
-msgstr ""
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
@@ -468,14 +468,6 @@ msgid "All contacts"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal assessments"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal verdicts"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All matches"
 msgstr ""
 
@@ -616,11 +608,11 @@ msgstr ""
 
 #. placeholder {0}: workspace.role.title
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review all {count} shortlisted candidates for {0} using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
+msgid "Re-check all {count} shortlisted candidates for {0} against this role's latest requirements. Save the results; do not send outreach or change approvals."
 msgstr ""
 
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review only these {count} selected candidates using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
+msgid "Re-check only these {count} selected candidates against this role's latest requirements. Save the results; do not send outreach or change approvals."
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -843,6 +835,7 @@ msgid "Calibration round"
 msgstr ""
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Can't reach the server."
 msgstr "सर्वर तक नहीं पहुंचा जा सका।"
 
@@ -1185,6 +1178,10 @@ msgstr ""
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "कंप्यूटर बंद हैं। SANDBOX_PROVIDER=docker और SANDBOX_SUPERVISOR_TOKEN सेट करें, या SANDBOX_PROVIDER को e2b, daytona, या box पर सेट कर उसका API key दें। .env बदलने के बाद स्टैक फिर बनाएँ।"
 
+#: src/pages/recruiting/shared.tsx
+msgid "Configured"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "पासवर्ड की पुष्टि करें"
@@ -1198,6 +1195,10 @@ msgstr "पुष्टि करें कि यह URL इस ब्राउ
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Connect"
 msgstr "कनेक्ट करें"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Connect account"
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Connect an app"
@@ -1282,10 +1283,6 @@ msgstr "कॉपी करें"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
-msgstr ""
-
-#: src/pages/WorkMetricsSettingsPanel.tsx
-msgid "Corrected after compaction"
 msgstr ""
 
 #: src/pages/InternalCostsSettingsPanel.tsx
@@ -1825,6 +1822,10 @@ msgstr ""
 msgid "Direct MCP"
 msgstr ""
 
+#: src/pages/recruiting/shared.tsx
+msgid "Disabled"
+msgstr ""
+
 #: src/components/MailReplyAskContent.tsx
 msgid "Discard"
 msgstr ""
@@ -2026,6 +2027,10 @@ msgstr "ईमेल सत्यापन आवश्यक है"
 msgid "Email: {0}"
 msgstr ""
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Emailed: {emailedNames}"
+msgstr ""
+
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Emails"
@@ -2033,6 +2038,10 @@ msgstr ""
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Employment rule"
+msgstr ""
+
+#: src/pages/recruiting/shared.tsx
+msgid "Enable for this role"
 msgstr ""
 
 #: src/pages/recruiting/SequenceRuns.tsx
@@ -2176,6 +2185,10 @@ msgstr ""
 
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Filter by saved contact…"
+msgstr ""
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Find candidates with Kruit"
 msgstr ""
 
 #. placeholder {0}: chosen.length
@@ -2473,34 +2486,6 @@ msgstr ""
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Interjection picked up p50 · p95"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: current"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: outdated"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: met"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unknown"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unmet"
 msgstr ""
 
 #: src/pages/shell/ShellConversation.tsx
@@ -2817,7 +2802,6 @@ msgid "Meeting completed"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
-#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Memory"
 msgstr "मेमोरी"
 
@@ -2974,11 +2958,7 @@ msgstr ""
 msgid "Needs a closer look"
 msgstr ""
 
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Needs a new review"
-msgstr ""
-
+#: src/components/InactiveAsk.tsx
 #: src/lib/roster-status.ts
 #: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
@@ -3037,10 +3017,6 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Next: {next}"
-msgstr ""
-
 #: src/pages/recruiting/AllContacts.tsx
 msgid "No"
 msgstr ""
@@ -3073,6 +3049,7 @@ msgstr ""
 msgid "No breakdown"
 msgstr ""
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No candidates yet"
@@ -3125,10 +3102,6 @@ msgstr ""
 msgid "No evidence provided."
 msgstr ""
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "No internal assessment"
-msgstr ""
-
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No loaded candidates match these filters."
 msgstr ""
@@ -3137,7 +3110,7 @@ msgstr ""
 msgid "No loaded candidates match this date filter."
 msgstr ""
 
-#: src/components/MailReplyAskContent.tsx
+#: src/components/InactiveAsk.tsx
 msgid "No longer active"
 msgstr "अब सक्रिय नहीं"
 
@@ -3296,6 +3269,10 @@ msgstr ""
 msgid "Not a fit: {name}"
 msgstr ""
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Not emailed yet: {waitingNames}"
+msgstr ""
+
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Not interested"
 msgstr ""
@@ -3363,12 +3340,17 @@ msgid "On a call with {0}"
 msgstr "{0} के साथ कॉल पर"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "On hold"
 msgstr ""
 
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Only the start of this email is shown."
 msgstr ""
 
 #: src/components/markdown-link-prompt.tsx
@@ -3588,6 +3570,7 @@ msgid "Partial saved-history coverage. Replies follow the original observed cont
 msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Passed"
 msgstr ""
@@ -3697,10 +3680,6 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Preview only · variables remain unfilled"
-msgstr ""
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. The complete message has not loaded."
 msgstr ""
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
@@ -3824,6 +3803,7 @@ msgstr ""
 msgid "Recipients will be associated with {0}."
 msgstr ""
 
+#: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Reconnect"
 msgstr ""
@@ -3834,6 +3814,7 @@ msgid "Reconnect your model to continue."
 msgstr ""
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Reconnecting"
 msgstr "पुनः कनेक्ट हो रहा है"
 
@@ -4264,10 +4245,6 @@ msgstr ""
 msgid "Role pages"
 msgstr ""
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Role stage"
-msgstr ""
-
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Role unavailable"
 msgstr ""
@@ -4293,7 +4270,7 @@ msgstr ""
 #. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
-msgid "Round {0} · {1} people"
+msgid "Round {0} · Review these {1} first"
 msgstr ""
 
 #. placeholder {0}: round.round
@@ -4704,6 +4681,7 @@ msgstr "भेजा जा रहा है…"
 
 #: src/components/MailReplyAskContent.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -5108,10 +5086,6 @@ msgstr "बोलना रोकें"
 msgid "Stop teaching"
 msgstr "सिखाना रोकें"
 
-#: src/components/BackgroundTasks.tsx
-msgid "Stop updates"
-msgstr ""
-
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Stop-on-reply behavior is not reported."
 msgstr ""
@@ -5223,6 +5197,10 @@ msgstr ""
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Teamwork"
+msgstr ""
+
+#: src/pages/recruiting/shared.tsx
+msgid "Temporarily unavailable"
 msgstr ""
 
 #: src/components/computer/ComputerWorkspace.tsx

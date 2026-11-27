@@ -11,11 +11,12 @@ import {
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
+  adoptAssignedSenders,
   adoptLegacySender,
-  asksSenderCompanyName,
   defaultSendingMailbox,
   ensureSendingIdentity,
   isSenderRead,
+  ownMailboxSendingAllowed,
   requireSendingMailboxReady,
   sendingMailboxState,
 } from "./instantly-senders.js";
@@ -699,31 +700,27 @@ it("tells a self-signup account without a mailbox to send from its own email", a
   });
   expect(read).toMatchObject({ senders: [], next: expect.stringContaining("own connected email") });
   expect(JSON.stringify(read)).not.toContain("cannot email candidates yet");
-  // 11-11 staging: "no sending mailbox" was said three times; the Gmail card is the one ask.
-  expect(read).toMatchObject({ next: expect.stringContaining("request_connection once") });
   expect(JSON.stringify(read)).not.toContain("Integrations");
-  // 11-13 staging: "I have no Gmail" ended on "nothing for you to do".
-  expect(read).toMatchObject({ next: expect.stringContaining("Never say there is nothing to do") });
-  // 11-13 staging: "can't connect" got "no other way", and "is the draft kept" got "can't confirm".
-  expect(read).toMatchObject({ next: expect.stringContaining("ready to copy") });
-  expect(read).toMatchObject({
-    next: expect.stringContaining("the draft is kept, it is the email above"),
-  });
-  // 11-13 staging: the draft was pasted four times and "which mailbox sends" got "Google 邮箱".
-  // 11-13 round 8: 「直接发」 got a re-check and the whole draft again, reworded.
-  expect(read).toMatchObject({ next: expect.stringContaining("it has not gone out yet") });
-  expect(read).toMatchObject({ next: expect.stringContaining("with no part of the email, not even reworded") });
-  // 11-13 staging: "I can't sign in to Gmail" got 「我已按原稿发起连接请求」 then "no sender mailbox".
-  expect(read).toMatchObject({
-    next: expect.stringContaining("Never say you started, sent or made a connection request"),
-  });
 });
 
-it("asks no company name until the turn read the sending email", () => {
-  // Kruit once asked "which company name" first on an account that cannot set one up.
-  expect(asksSenderCompanyName("请提供用于准备发件地址的公司名称")).toBe(true);
-  expect(asksSenderCompanyName("Which company name should candidates see?")).toBe(true);
-  expect(asksSenderCompanyName("这个岗位的地点是？")).toBe(false);
+it("does not send a credit account with a hand-assigned mailbox to its own Gmail", async () => {
+  // gate 63c860bb, send-through-blip: a new account's first line said Gmail was needed while its
+  // assigned mailbox, adopted later that turn, sent the campaign.
+  const prisma = (assigned: number) => ({
+    user: {
+      findUnique: vi.fn(async () => ({
+        usageCreditLimit: 10_000,
+        _count: { sendingMailboxAssignments: assigned },
+      })),
+    },
+    externalEffect: { findMany: vi.fn(async () => []) },
+  });
+  const scope = { userId: "user", spaceId: "space" };
+  expect(await ownMailboxSendingAllowed(prisma(1) as never, scope)).toBe(false);
+  expect(await ownMailboxSendingAllowed(prisma(0) as never, scope)).toBe(true);
+});
+
+it("recognizes a read of the sending email and tells the model to read first", () => {
   expect(isSenderRead("instantly__mail__ensure_sender", { operation: "read" })).toBe(true);
   expect(
     isSenderRead("connectors_execute_tool", {
@@ -793,6 +790,26 @@ it("adopts every mailbox the owner assigned, keeping each one's name when none i
   );
   expect(f.rows.filter((row) => row.kind === "instantly_sender_account")).toHaveLength(3);
   expect(f.accounts.get("liu@b.test")?.first_name).toBe("Noah");
+});
+it("still hands back an assigned mailbox a parallel call of this account just recorded", async () => {
+  // stop-after-approve 11-21: two mail calls in one turn both adopted the new account's mailbox;
+  // the one that lost the race got none, so its save was refused as "not this account's mailbox".
+  const f = fixture(2, false);
+  const email = "new@product.test";
+  f.accounts.set(email, { email, first_name: "Noah", status: 1, setup_pending: false });
+  f.assignments.push({ email, userId: "owner", displayName: "", createdAt: new Date() });
+  f.rows.push({
+    id: "parallel",
+    kind: "instantly_sender_account",
+    status: "completed",
+    idempotencyKey: `instantly-sender-mailbox:${email}`,
+    result: { email, displayName: "Noah", domain: "product.test", attached: true },
+    request: { serverId: "source", adopted: "owner_assignment" },
+    run: { userId: context.userId, spaceId: context.spaceId },
+    spaceId: context.spaceId,
+  });
+  expect(await adoptAssignedSenders(f.prisma, f.rest, context, "source")).toEqual([email]);
+  expect(f.rows.filter((row) => row.kind === "instantly_sender_account")).toHaveLength(1);
 });
 it("never adopts an assigned mailbox another account already holds", async () => {
   const f = fixture(2, false);

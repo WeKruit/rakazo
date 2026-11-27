@@ -1,4 +1,5 @@
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
+import { lookup } from "node:dns/promises";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
@@ -10,6 +11,9 @@ loadRootEnv();
 
 const integration = process.argv.includes("--integration");
 const e2e = process.argv.includes("--e2e");
+// The e2e stack (API with the emulated email and connectors, a fresh database) kept running for a
+// branch's own simulated-customer plays instead of the Playwright suite.
+const serveMode = process.argv.includes("--serve");
 const sandboxArg = process.argv.find((arg) => arg.startsWith("--sandbox="));
 const specArg = process.argv.find((arg) => arg.startsWith("--spec="));
 const grepArg = process.argv.find((arg) => arg.startsWith("--grep="));
@@ -19,11 +23,16 @@ const e2eSpec = specArg?.slice("--spec=".length);
 const e2eGrep = grepArg?.slice("--grep=".length);
 const agentRuntime = runtimeArg?.slice("--runtime=".length) ?? "scripted";
 
-if (Number(integration) + Number(e2e) !== 1) {
-  throw new Error("Pass exactly one of --integration or --e2e");
+if (Number(integration) + Number(e2e) + Number(serveMode) !== 1) {
+  throw new Error("Pass exactly one of --integration, --e2e or --serve");
 }
-if (!["fake", "e2b", "daytona", "box"].includes(sandboxProvider)) {
-  throw new Error('Sandbox must be "fake", "e2b", "daytona", or "box"');
+// "desktop" runs the agent's commands as host processes: only for --serve on a branch backend,
+// whose own Modal Sandbox is the boundary, so the agent's code really runs in plays.
+if (
+  !["fake", "e2b", "daytona", "box"].includes(sandboxProvider) &&
+  !(serveMode && sandboxProvider === "desktop")
+) {
+  throw new Error('Sandbox must be "fake", "e2b", "daytona", or "box" ("desktop" with --serve)');
 }
 if (integration && sandboxProvider !== "fake") {
   throw new Error("Integration tests only support the fake sandbox");
@@ -42,18 +51,20 @@ if (sandboxProvider === "box" && !process.env.BOX_API_KEY) {
 }
 
 async function main() {
-  const mode = integration ? "integration" : "e2e";
+  const mode = integration ? "integration" : serveMode ? "serve" : "e2e";
   const reportDir = path.resolve("test-report", mode);
   await mkdir(reportDir, { recursive: true });
   const container =
-    integration && process.env.INTEGRATION_DATABASE_URL
+    (integration || serveMode) && process.env.INTEGRATION_DATABASE_URL
       ? localDatabase(process.env.INTEGRATION_DATABASE_URL)
       : await new PostgreSqlContainer("postgres:16-alpine").start();
   try {
     const databaseUrl = container.getConnectionUri();
     const apiPort = Number(process.env.API_PORT ?? 3110);
     const webPort = Number(process.env.WEB_PORT ?? 5180);
-    const webOrigin = `http://127.0.0.1:${webPort}`;
+    // A branch backend serving its web pages through a tunnel signs in from that public origin.
+    const webOrigin =
+      (serveMode && process.env.HARNESS_WEB_ORIGIN) || `http://127.0.0.1:${webPort}`;
 
     process.env.DATABASE_URL = databaseUrl;
     process.env.REALTIME_DATABASE_URL = databaseUrl;
@@ -79,8 +90,11 @@ async function main() {
     process.env.PLAYWRIGHT_BASE_URL = webOrigin;
     process.env.DATA_DIR = path.join(reportDir, "data");
     process.env.SIGNUPS_ENABLED = "true";
-    process.env.SIGNUP_ALLOWLIST = "";
+    // A served backend may be reachable from outside, so it keeps the caller's signup allowlist.
+    process.env.SIGNUP_ALLOWLIST = serveMode ? (process.env.SIGNUP_ALLOWLIST ?? "") : "";
     process.env.CI = "1";
+    // A served backend plays send journeys on the emulated outreach mail service, which takes any key.
+    if (serveMode) process.env.INSTANTLY_API_KEY = "emulated-outreach-mail";
 
     execSync("pnpm --filter @rakazo/db generate", { stdio: "inherit", env: process.env });
     execSync("pnpm --filter @rakazo/db exec prisma migrate deploy", {
@@ -175,6 +189,10 @@ async function main() {
     ] = await Promise.all([import("@rakazo/adapters"), import("../../../../apps/api/src/app.ts")]);
     const { serve } = await import("@hono/node-server");
     const thirdParties = new ThirdPartyConnectorEmulator();
+    // The mailboxes a branch backend's send plays get, one per play (RAKAZO_FRESH_SENDER).
+    if (serveMode)
+      for (let n = 1; n <= 100; n++)
+        thirdParties.instantly.addMailbox({ email: `sender${n}@branch-mail.example.test` });
     const journey = e2eSpec?.includes("recruiting-global-journey")
       ? new (
           await import("../recruiting-global-journey-fixture.js")
@@ -204,13 +222,36 @@ async function main() {
       pipedream,
       email,
       ...(journey ? { runtime: journey } : {}),
-      remoteConnectors: {
-        fetch: journey ? journey.fetch(thirdParties.fetch) : thirdParties.fetch,
-        resolveHostname: thirdParties.resolveHostname,
-      },
+      remoteConnectors: liveConnectors(
+        journey ? journey.fetch(thirdParties.fetch) : thirdParties.fetch,
+        thirdParties.resolveHostname,
+      ),
       integrationsCatalogUrl: "https://catalog.example.test/",
     });
     journey?.bind(handles.prisma);
+    // A branch backend given the judge's key checks people the way a deployment does.
+    if (serveMode && process.env.TYPESAFE_API_KEY)
+      await handles.judgeSettings
+        .save(
+          {
+            provider: "typesafe",
+            apiKey: process.env.TYPESAFE_API_KEY,
+            ...(process.env.RAKAZO_LANGUAGE_CHECK_URL
+              ? { languageUrl: process.env.RAKAZO_LANGUAGE_CHECK_URL }
+              : {}),
+          },
+          {
+            operationId: "harness.judge",
+            traceId: "harness.judge",
+            spaceId: "",
+            userId: "",
+            signal: AbortSignal.timeout(30_000),
+          },
+        )
+        .then(
+          () => console.log("judge saved"),
+          (error) => console.log(`judge not saved: ${String(error)}`),
+        );
     let activeRequests = 0;
     const requestWaiters = new Set<() => void>();
     const server = serve({
@@ -219,6 +260,41 @@ async function main() {
           return Response.json(journey.records);
         if (new URL(request.url).pathname === "/__e2e/emails") {
           return Response.json(email.sent, { headers: { "cache-control": "no-store" } });
+        }
+        // A served backend's outreach mail: the simulated candidates read what reached them and
+        // answer it (POST {replyTo, text}), as a person replying in their own mail client.
+        if (serveMode && new URL(request.url).pathname === "/__e2e/outreach") {
+          if (request.method !== "POST")
+            return Response.json(thirdParties.instantly.outbox(), {
+              headers: { "cache-control": "no-store" },
+            });
+          const body = (await request.json()) as { replyTo?: string; text?: string };
+          try {
+            return Response.json(
+              thirdParties.instantly.receive({
+                replyTo: String(body.replyTo ?? ""),
+                text: String(body.text ?? ""),
+              }),
+            );
+          } catch (error) {
+            return Response.json({ message: String(error) }, { status: 404 });
+          }
+        }
+        // A served backend's calendar: a play allows access on the emulated consent screen (POST
+        // {authorizationUrl} → the redirect back with its code) and reads what was booked (GET).
+        if (serveMode && new URL(request.url).pathname === "/__e2e/calendar") {
+          if (request.method !== "POST")
+            return Response.json(thirdParties.googleCalendar.events(), {
+              headers: { "cache-control": "no-store" },
+            });
+          const body = (await request.json()) as { authorizationUrl?: string };
+          try {
+            return Response.json({
+              redirect: thirdParties.googleCalendar.consent(String(body.authorizationUrl ?? "")),
+            });
+          } catch (error) {
+            return Response.json({ message: String(error) }, { status: 400 });
+          }
         }
         activeRequests += 1;
         try {
@@ -232,11 +308,28 @@ async function main() {
         }
       },
       port: apiPort,
-      hostname: "127.0.0.1",
+      // A served backend in a remote sandbox is reached through its tunnel, not loopback.
+      hostname: process.env.HARNESS_HOST ?? "127.0.0.1",
     });
     await waitForHealth(`http://127.0.0.1:${apiPort}/health`, 15_000);
 
     try {
+      if (serveMode) {
+        // Pages already built into apps/web/dist, served on the tunnelled origin like staging's.
+        const pages = process.env.HARNESS_WEB_ORIGIN
+          ? spawn("pnpm", ["--filter", "@rakazo/web", "exec", "vite", "preview", "--strictPort"], {
+              stdio: "inherit",
+              env: { ...process.env, RAKAZO_ALLOWED_HOSTS: new URL(webOrigin).host },
+            })
+          : undefined;
+        console.log(`SERVING api=http://127.0.0.1:${apiPort}`);
+        await new Promise<void>((resolve) => {
+          process.once("SIGINT", resolve);
+          process.once("SIGTERM", resolve);
+        });
+        pages?.kill();
+        return;
+      }
       try {
         await runProcess(
           "pnpm",
@@ -321,6 +414,35 @@ async function main() {
 }
 
 type AppHandles = Awaited<ReturnType<typeof createApp>>;
+
+/**
+ * A branch backend reaches the real services named in HARNESS_LIVE_HOSTS (such as the people
+ * search), with the keys its caller passed; every other connector host stays emulated.
+ */
+function liveConnectors(
+  fetch: typeof globalThis.fetch,
+  resolveHostname: (hostname: string) => Promise<{ address: string; family: number }[]>,
+) {
+  const live = new Set(
+    (serveMode ? (process.env.HARNESS_LIVE_HOSTS ?? "") : "")
+      .split(",")
+      .map((host) => host.trim())
+      .filter(Boolean),
+  );
+  if (!live.size) return { fetch, resolveHostname };
+  const hostOf = (input: string | URL | Request) =>
+    new URL(typeof input === "string" || input instanceof URL ? input : input.url).hostname;
+  return {
+    fetch: ((input, init) =>
+      live.has(hostOf(input))
+        ? globalThis.fetch(input, init)
+        : fetch(input, init)) as typeof globalThis.fetch,
+    resolveHostname: (hostname: string) =>
+      live.has(hostname)
+        ? lookup(hostname, { all: true, verbatim: true })
+        : resolveHostname(hostname),
+  };
+}
 
 async function managedComputers(handles: AppHandles) {
   if (!["e2b", "daytona", "box"].includes(sandboxProvider)) return [];

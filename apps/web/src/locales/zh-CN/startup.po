@@ -21,6 +21,10 @@ msgstr "（未读）"
 msgid " and {more} more"
 msgstr " 等 {more} 人"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid " and {moreEmailed} more"
+msgstr " 等 {moreEmailed} 人"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -201,10 +205,6 @@ msgstr "{count} 年"
 #: src/lib/relative-time.ts
 msgid "{days}d ago"
 msgstr "{days} 天前"
-
-#: src/pages/recruiting/SendQueue.tsx
-msgid "{emailed} emailed"
-msgstr "已发送 {emailed} 人"
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
@@ -468,14 +468,6 @@ msgid "All contacts"
 msgstr "全部联系人"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal assessments"
-msgstr "全部内部评估"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal verdicts"
-msgstr "全部内部结论"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All matches"
 msgstr "全部匹配"
 
@@ -616,12 +608,12 @@ msgstr "请助手起草此邮件序列，或改写当前打开的邮件。"
 
 #. placeholder {0}: workspace.role.title
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review all {count} shortlisted candidates for {0} using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
-msgstr "请评审助手根据此岗位已保存的标准和证据，评审 {0} 的全部 {count} 位入选候选人。保存评审结果，不发送邀约，也不更改审批。"
+msgid "Re-check all {count} shortlisted candidates for {0} against this role's latest requirements. Save the results; do not send outreach or change approvals."
+msgstr "请按「{0}」最新的要求重新核对全部 {count} 位入围候选人，保存结果；不要发送外联，也不要改动审批。"
 
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review only these {count} selected candidates using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
-msgstr "请评审助手仅根据此岗位已保存的标准和证据，评审这 {count} 位已选候选人。保存评审结果，不发送邀约，也不更改审批。"
+msgid "Re-check only these {count} selected candidates against this role's latest requirements. Save the results; do not send outreach or change approvals."
+msgstr "请按这个岗位最新的要求只重新核对这 {count} 位选中的候选人，保存结果；不要发送外联，也不要改动审批。"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
@@ -843,6 +835,7 @@ msgid "Calibration round"
 msgstr "校准轮次"
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Can't reach the server."
 msgstr "无法连接服务器。"
 
@@ -1185,6 +1178,10 @@ msgstr "电脑已可用。请刷新或打开一个助手继续。"
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "电脑未开启。请设置 SANDBOX_PROVIDER=docker 并提供 SANDBOX_SUPERVISOR_TOKEN，或将 SANDBOX_PROVIDER 设为 e2b、daytona 或 box 并提供对应 API 密钥。更改 .env 后请重建环境。"
 
+#: src/pages/recruiting/shared.tsx
+msgid "Configured"
+msgstr "已配置"
+
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "确认密码"
@@ -1198,6 +1195,10 @@ msgstr "请确认此浏览器会话可以访问该 URL，然后重新测试。"
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Connect"
 msgstr "连接"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Connect account"
+msgstr "连接账号"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Connect an app"
@@ -1283,10 +1284,6 @@ msgstr "复制"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
 msgstr "复制 .env 示例"
-
-#: src/pages/WorkMetricsSettingsPanel.tsx
-msgid "Corrected after compaction"
-msgstr "压缩后已纠正"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Cost"
@@ -1802,6 +1799,10 @@ msgid "Delivery is not confirmed. Check the conversation before trying again."
 msgstr "送达尚未确认。请先查看对话，再决定是否重试。"
 
 #: src/components/MailReplyAskContent.tsx
+msgid "The candidate asked what you haven't told me. Answer it in the reply:"
+msgstr "候选人问了你还没告诉我的事，请在回复里答上："
+
+#: src/components/MailReplyAskContent.tsx
 msgid "Delivery unconfirmed"
 msgstr "发送结果待确认"
 
@@ -1824,6 +1825,10 @@ msgstr "维度"
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Direct MCP"
 msgstr "直连 MCP"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Disabled"
+msgstr "已停用"
 
 #: src/components/MailReplyAskContent.tsx
 msgid "Discard"
@@ -2026,6 +2031,10 @@ msgstr "需要验证邮箱"
 msgid "Email: {0}"
 msgstr "邮箱：{0}"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Emailed: {emailedNames}"
+msgstr "已发送：{emailedNames}"
+
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Emails"
@@ -2034,6 +2043,10 @@ msgstr "邮件"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Employment rule"
 msgstr "在职规则"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Enable for this role"
+msgstr "为这个岗位启用"
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Engagement"
@@ -2177,6 +2190,10 @@ msgstr "按已存联系人筛选"
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Filter by saved contact…"
 msgstr "按已存联系人筛选…"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Find candidates with Kruit"
+msgstr "让 Kruit 帮你找候选人"
 
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
@@ -2474,34 +2491,6 @@ msgstr "感兴趣"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Interjection picked up p50 · p95"
 msgstr "插话响应 p50 · p95"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment"
-msgstr "内部评估"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: current"
-msgstr "内部评估：最新"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: outdated"
-msgstr "内部评估：已过期"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict"
-msgstr "内部结论"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: met"
-msgstr "内部结论：符合"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unknown"
-msgstr "内部结论：未知"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unmet"
-msgstr "内部结论：不符合"
 
 #: src/pages/shell/ShellConversation.tsx
 msgid "Interrupted, resuming…"
@@ -2817,7 +2806,6 @@ msgid "Meeting completed"
 msgstr "面试已完成"
 
 #: src/pages/RecruitingPanel.tsx
-#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Memory"
 msgstr "记忆"
 
@@ -2974,11 +2962,7 @@ msgstr "姓名：{0}"
 msgid "Needs a closer look"
 msgstr "需要再看看"
 
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Needs a new review"
-msgstr "需要重新评估"
-
+#: src/components/InactiveAsk.tsx
 #: src/lib/roster-status.ts
 #: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
@@ -3037,10 +3021,6 @@ msgstr "下一步"
 msgid "Next page"
 msgstr "下一页"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Next: {next}"
-msgstr "下一步：{next}"
-
 #: src/pages/recruiting/AllContacts.tsx
 msgid "No"
 msgstr "否"
@@ -3073,6 +3053,7 @@ msgstr "没有匹配的助手"
 msgid "No breakdown"
 msgstr "不分组"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No candidates yet"
@@ -3125,10 +3106,6 @@ msgstr "还没有发出邮件。"
 msgid "No evidence provided."
 msgstr "未提供证据。"
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "No internal assessment"
-msgstr "暂无内部评估"
-
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No loaded candidates match these filters."
 msgstr "已加载的候选人中没有符合这些筛选条件的结果。"
@@ -3137,7 +3114,7 @@ msgstr "已加载的候选人中没有符合这些筛选条件的结果。"
 msgid "No loaded candidates match this date filter."
 msgstr "没有已加载的候选人符合这个日期筛选。"
 
-#: src/components/MailReplyAskContent.tsx
+#: src/components/InactiveAsk.tsx
 msgid "No longer active"
 msgstr "已停用"
 
@@ -3296,6 +3273,10 @@ msgstr "不合适"
 msgid "Not a fit: {name}"
 msgstr "不合适：{name}"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Not emailed yet: {waitingNames}"
+msgstr "还没收到：{waitingNames}"
+
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Not interested"
 msgstr "不感兴趣"
@@ -3363,6 +3344,7 @@ msgid "On a call with {0}"
 msgstr "正在与 {0} 通话"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "On hold"
 msgstr "暂缓"
@@ -3370,6 +3352,10 @@ msgstr "暂缓"
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "只能删除空的空间。请先删除其中的助手和群组。"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Only the start of this email is shown."
+msgstr "只显示了这封邮件的开头。"
 
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/shell/KruitDock.tsx
@@ -3588,6 +3574,7 @@ msgid "Partial saved-history coverage. Replies follow the original observed cont
 msgstr "已保存历史的覆盖不完整。回复按原始观测到的联系群体归属。"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Passed"
 msgstr "不合适"
@@ -3698,10 +3685,6 @@ msgstr "仅预览"
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Preview only · variables remain unfilled"
 msgstr "仅供预览 · 变量尚未填入"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. The complete message has not loaded."
-msgstr "仅为预览，完整邮件还没加载。"
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Preview steps"
@@ -3824,6 +3807,7 @@ msgstr "收件人不可用"
 msgid "Recipients will be associated with {0}."
 msgstr "收件人将关联到 {0}。"
 
+#: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Reconnect"
 msgstr "重新连接"
@@ -3834,6 +3818,7 @@ msgid "Reconnect your model to continue."
 msgstr "请重新连接模型以继续。"
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Reconnecting"
 msgstr "正在重新连接"
 
@@ -4264,10 +4249,6 @@ msgstr "新邮件序列所属职位"
 msgid "Role pages"
 msgstr "职位列表分页"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Role stage"
-msgstr "岗位阶段"
-
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Role unavailable"
 msgstr "岗位不可用"
@@ -4293,8 +4274,8 @@ msgstr "岗位"
 #. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
-msgid "Round {0} · {1} people"
-msgstr "第 {0} 轮 · {1} 人"
+msgid "Round {0} · Review these {1} first"
+msgstr "第 {0} 轮 · 先看这 {1} 人"
 
 #. placeholder {0}: round.round
 #: src/pages/recruiting/CalibrationRound.tsx
@@ -4704,6 +4685,7 @@ msgstr "正在发送…"
 
 #: src/components/MailReplyAskContent.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -5108,10 +5090,6 @@ msgstr "停止朗读"
 msgid "Stop teaching"
 msgstr "停止示范"
 
-#: src/components/BackgroundTasks.tsx
-msgid "Stop updates"
-msgstr "停止更新"
-
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Stop-on-reply behavior is not reported."
 msgstr "未提供收到回复后的停止设置。"
@@ -5224,6 +5202,10 @@ msgstr "同事回复"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Teamwork"
 msgstr "协作"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Temporarily unavailable"
+msgstr "暂时不可用"
 
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Terminal"

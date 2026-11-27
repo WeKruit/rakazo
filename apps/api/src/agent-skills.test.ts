@@ -11,7 +11,11 @@ const actor: Actor = {
   email: "user@rakazo.test",
   isDeploymentOwner: true,
 };
-const productBuiltins = [...RECRUITING_DEFAULT_SKILLS, MEMORY_TIDY_SKILL].map(({ name }) =>
+const productBuiltins = [
+  ...RECRUITING_DEFAULT_SKILLS,
+  MEMORY_TIDY_SKILL,
+  { name: "Work with data using code" },
+].map(({ name }) =>
   expect.objectContaining({ id: `builtin:${name}`, source: "builtin", readOnly: true }),
 );
 
@@ -61,17 +65,16 @@ function setup(rows: ReturnType<typeof savedSkill>[] = []) {
 
 describe("built-in skill precedence in the API", () => {
   it.each(RECRUITING_DEFAULT_SKILLS)(
-    "preserves private changes to the default $name skill",
+    "serves the released $name skill even when the user has a copy with its name",
     async ({ name }) => {
+      // Every account follows the released recruiting skills (maintainer decision 11-26).
       const { service } = setup([savedSkill(name)]);
       const catalog = await service.list(actor);
       expect(catalog.filter((skill) => skill.name === name)).toEqual([
-        expect.objectContaining({ id: "saved-1", source: "user", readOnly: false }),
+        expect.objectContaining({ id: `builtin:${name}`, source: "builtin", readOnly: true }),
       ]);
-      expect(catalog.some((skill) => skill.id === `builtin:${name}`)).toBe(false);
       await expect(service.get(actor, { name })).resolves.toMatchObject({
-        id: "saved-1",
-        content: expect.stringContaining("Saved steps"),
+        id: `builtin:${name}`,
       });
     },
   );
@@ -136,8 +139,6 @@ describe("built-in skill precedence in the API", () => {
 });
 
 it.each([
-  { directory: "scheduling", name: "Coordinate interview" },
-  { directory: "email-outreach", name: "Review recruiting draft" },
   { directory: "interview-materials", name: "Interview materials" },
   { directory: "post-interview", name: "Interview follow-through" },
 ])(
@@ -160,17 +161,13 @@ it.each([
 describe("bounded agent skill catalog", () => {
   it("continues across builtins and 1000 saved skills without missing overridden names", async () => {
     const rows = Array.from({ length: 1000 }, (_, index) => ({
-      ...savedSkill(
-        index === 0
-          ? " Recruitment intake and handoff "
-          : `Skill ${String(index).padStart(4, "0")}`,
-      ),
+      ...savedSkill(index === 0 ? " Interrogate " : `Skill ${String(index).padStart(4, "0")}`),
       id: `saved-${index}`,
     }));
     const findMany = vi.fn(async ({ skip = 0, take }: { skip?: number; take?: number }) =>
       rows.slice(skip, take === undefined ? undefined : skip + take),
     );
-    const query = vi.fn(async () => [{ name: "recruitment intake and handoff" }]);
+    const query = vi.fn(async () => [{ name: "interrogate" }]);
     const service = createAgentSkillsService({
       agentSkill: { findMany },
       $queryRaw: query,

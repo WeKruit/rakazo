@@ -8,6 +8,7 @@ import type { SchedulingPlanHandoff } from "./SchedulingPlan";
 import { SchedulingPlanHistory } from "./SchedulingPlan";
 import type { RecruitingTabProps } from "./shared";
 import {
+  ConnectionState,
   CrmGate,
   crmRoleKey,
   formatDate,
@@ -129,8 +130,13 @@ export function InterviewTab({
         .filter((connection) => connection.status !== "configured" || connection.checkIssue)
         .map((connection, index) => (
           <p key={`${index}:${connection.name}`} className="text-sm text-muted-foreground">
-            {connection.name} · {statusText(connection.status)}
-            {connection.checkIssue ? ` · ${statusText(connection.checkIssue.status)}` : ""}
+            {connection.name} · <ConnectionState connection={connection} />
+            {connection.checkIssue?.status === "failed" ? (
+              <>
+                {" · "}
+                <Trans>A saved check failed.</Trans>
+              </>
+            ) : null}
           </p>
         ))}
       {!calendar.failed &&

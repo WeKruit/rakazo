@@ -56,6 +56,7 @@ vi.mock("react-native", () => ({
 vi.mock("../components/native-symbol", () => ({ NativeSymbol: () => null }));
 vi.mock("./native", () => ({ useMobileTokens: () => ({}) }));
 vi.mock("./i18n", () => ({
+  getActiveUiLocale: () => "en",
   t: (text: string) => text,
   useI18n: () => ({ t: (text: string) => text }),
 }));

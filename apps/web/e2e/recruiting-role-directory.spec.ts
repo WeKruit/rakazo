@@ -10,7 +10,6 @@ for (const width of [1440, 390]) {
       title: `Role ${String(index).padStart(3, "0")}`,
       threadId: `directory-thread-${index}`,
       groupId: index === 0 ? appGroupId : `directory-group-${index}`,
-      stage: "intake",
     }));
     await page.route("**/rpc/recruiting/accountView", (route) =>
       route.fulfill({ json: { json: { roles, items: [], nextCursor: null } } }),

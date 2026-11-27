@@ -25,6 +25,7 @@ import type {
   ScreenSession,
   TerminalRequest,
 } from "@rakazo/adapter-kit";
+import { ByteLimitError } from "@rakazo/adapter-kit";
 import { boundedSandboxCommandTimeoutMs } from "@rakazo/core";
 import { boxResponseError, wrapBoxCall } from "./box-errors.js";
 import { normalizeWorkspacePath, shellQuote, workspacePath } from "./computer-support.js";
@@ -567,7 +568,7 @@ export class BoxSandboxProvider implements SandboxProvider {
     let size = 0;
     try {
       if (maxBytes !== undefined && Number(response.headers.get("content-length")) > maxBytes) {
-        throw new Error(`computer file exceeds ${maxBytes} bytes`);
+        throw new ByteLimitError(`computer file exceeds ${maxBytes} bytes`);
       }
       if (!reader) return new Uint8Array();
       while (true) {
@@ -575,7 +576,7 @@ export class BoxSandboxProvider implements SandboxProvider {
         if (done) break;
         size += value.byteLength;
         if (maxBytes !== undefined && size > maxBytes) {
-          throw new Error(`computer file exceeds ${maxBytes} bytes`);
+          throw new ByteLimitError(`computer file exceeds ${maxBytes} bytes`);
         }
         chunks.push(value);
       }

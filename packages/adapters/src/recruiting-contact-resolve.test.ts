@@ -1,5 +1,4 @@
 import type { ConnectorCall } from "@rakazo/adapter-kit";
-import { RECRUITING_DEFAULT_BOTS } from "@rakazo/core";
 import type * as Database from "@rakazo/db";
 import { listRecruitingCandidates } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -158,6 +157,15 @@ describe("resolveRecruitingContact", () => {
     expect((await f.resolve("JOSE@example.test")).matches).toHaveLength(1);
   });
 
+  it("states a missing email as data, with no instruction of its own (replay handoff6)", async () => {
+    // A "next" line told Kruit's main chat to open its reply with the missing email and offer a
+    // lookup, so it asked the recruiter for an address twice instead of handing the email over.
+    const f = fixture([], [{ name: "Bhargav P", linkedinUrl: "https://www.linkedin.com/in/b" }]);
+    const result = await f.resolve("Bhargav");
+    expect(result).toMatchObject({ status: "resolved", matches: [{ email: null }] });
+    expect(result).not.toHaveProperty("next");
+  });
+
   it("uses the lead address stored when a saved person was added to the role's campaign", async () => {
     const f = fixture([], [{ name: "Adam Test", linkedinUrl: "https://www.linkedin.com/in/adam" }]);
     f.leadBindings.push({
@@ -180,15 +188,6 @@ describe("resolveRecruitingContact", () => {
       "sumeetparekh1@gmail.com",
       "sumeet.shah@example.test",
     ]);
-  });
-
-  it("tells agents to resolve through role records and never guess an email", () => {
-    // The quality check never talks about people by name, so it carries no contact rules.
-    for (const bot of RECRUITING_DEFAULT_BOTS.filter((role) => role.key !== "reviewer"))
-      expect(bot.instructions).toContain(
-        "Resolve a person named in chat through the role's contacts and saved pool first",
-      );
-    expect(RECRUITING_DEFAULT_BOTS[0].instructions).toContain("never invent or guess an email");
   });
 
   it("resolves Sumeet without a thread role through the user's Data Infra role", async () => {
@@ -235,6 +234,68 @@ describe("resolveRecruitingContact", () => {
     expect(unresolvedContactEmailError("run-roleless", "sumeetparekh1@gmail.com", "Sumeet")).toBe(
       null,
     );
+  });
+
+  it("still resolves when another role's conversation was removed (simulated 2026-11-16, team-has-no-email)", async () => {
+    const f = fixture([crmRow("4", "Sumeet Parekh", "sumeetparekh1@gmail.com")]);
+    const { IsolationError } = await vi.importActual<typeof Database>("@rakazo/db");
+    vi.mocked(listRecruitingCandidates).mockImplementation(async (_prisma, _actor, input) => {
+      if (input.roleId === "removed") throw new IsolationError();
+      return {
+        crmTarget: input.roleId === "data-infra" ? { bindingEffectId: "b", target } : null,
+        items: [],
+        nextCursor: null,
+      } as never;
+    });
+    const result = await resolveRecruitingContactAcrossRoles(
+      {
+        prisma: {
+          recruitingRole: {
+            findMany: async () => [
+              { id: "removed", title: "Removed" },
+              { id: "data-infra", title: "Data Infra" },
+            ],
+          },
+          externalEffect: { findMany: async () => [] },
+        } as never,
+        connector: f.connector,
+      },
+      actor,
+      "sumeet",
+      { runId: "run-roleless", operationId: "op", signal: new AbortController().signal } as never,
+    );
+    expect(result).toMatchObject({
+      status: "resolved",
+      matches: [{ name: "Sumeet Parekh", roleId: "data-infra" }],
+    });
+  });
+
+  it("says what this account sent when nobody by the name is saved (simulated 2026-11-16, did-you-really-send)", async () => {
+    const f = fixture([]);
+    const queryRaw = vi.fn(async (..._query: unknown[]) => [{ sent: 0, waiting: 0, unknown: 0 }]);
+    const deps = {
+      prisma: {
+        recruitingRole: { findMany: async () => [] },
+        externalEffect: { findMany: async () => [] },
+        $queryRaw: queryRaw,
+      } as never,
+      connector: f.connector,
+    };
+    const context = {
+      runId: "run-roleless",
+      operationId: "op",
+      signal: new AbortController().signal,
+    } as never;
+    const none = await resolveRecruitingContactAcrossRoles(deps, actor, "Wang Lei", context);
+    expect(none).toMatchObject({
+      status: "not_found",
+      sends: { sent: 0, waitingForCard: 0, unknown: 0 },
+    });
+    expect(queryRaw.mock.calls[0]!.slice(1, 4)).toEqual(["w1", "w1", "u1"]);
+    queryRaw.mockResolvedValueOnce([{ sent: 3, waiting: 0, unknown: 0 }]);
+    const some = await resolveRecruitingContactAcrossRoles(deps, actor, "Wang Lei", context);
+    expect(some).toMatchObject({ sends: { sent: 3 } });
+    expect((some as { note: string }).note).not.toBe((none as { note: string }).note);
   });
 });
 
@@ -366,12 +427,5 @@ describe("first campaign email", () => {
     // Staging 11-14 gate: a new reply request got no card after an earlier one was discarded.
     const reply = nativeInstantlyWrites.find((t) => t.name === "reply_to_email")!;
     expect(reply.description).toContain("Every new request to reply gets its own call and card");
-    const role = (key: string) => RECRUITING_DEFAULT_BOTS.find((b) => b.key === key)!;
-    expect(role("main").instructions).toContain(
-      "then activate_campaign with any people they named as recipients (and its campaign_id); its confirmation card is the one-time approval",
-    );
-    expect(role("outreach").instructions).toContain(
-      "then call activate_campaign (recipients: the named people), whose card lists every recipient and is the one confirmation",
-    );
   });
 });

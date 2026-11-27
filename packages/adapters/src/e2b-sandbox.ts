@@ -17,6 +17,7 @@ import type {
   ScreenSession,
   TerminalRequest,
 } from "@rakazo/adapter-kit";
+import { ByteLimitError } from "@rakazo/adapter-kit";
 import { boundedSandboxCommandTimeoutMs } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { sandboxIdleMs } from "./computer-idle.js";
@@ -25,7 +26,7 @@ import {
   PORTABLE_TRANSFER_BATCH_BYTES,
   shouldSkipPortableWorkspaceFile,
 } from "./computer-workspace.js";
-import { LinuxDesktop, PREPARE_LINUX_DESKTOP } from "./linux-desktop.js";
+import { LinuxDesktop, PREPARE_LINUX_BASE, PREPARE_LINUX_DESKTOP } from "./linux-desktop.js";
 import { sandboxCommandArgv } from "./sandbox-command-environment.js";
 
 const E2B_WORKSPACE = "/home/user/rakazo-home";
@@ -108,6 +109,7 @@ export class E2BSandboxProvider implements SandboxProvider {
     },
     screenUrl: async (computer, port) =>
       `https://${(await this.box(computer)).getHost(port)}/vnc.html`,
+    installDesktop: PREPARE_LINUX_DESKTOP,
   });
   private readonly boxes = new Map<string, Sandbox>();
   private readonly connections = new Map<string, Promise<Sandbox>>();
@@ -219,7 +221,8 @@ export class E2BSandboxProvider implements SandboxProvider {
     const desktop = await this.box(computer);
     const connectedAt = performance.now();
     if (computer.fresh) await desktop.files.makeDir(E2B_WORKSPACE);
-    const result = await this.runSetupCommand(desktop, PREPARE_LINUX_DESKTOP, _context.signal);
+    // Desktop packages wait for the first screen; most runs only use files and the shell.
+    const result = await this.runSetupCommand(desktop, PREPARE_LINUX_BASE, _context.signal);
     getLogger().info("computer.prepare.timing", {
       operationId: _context.operationId,
       runId: _context.runId,
@@ -240,15 +243,51 @@ export class E2BSandboxProvider implements SandboxProvider {
     const desktop = await this.box(computer);
     const cmd = sandboxCommandArgv(request).map(shellQuote).join(" ");
     const timeoutMs = boundedSandboxCommandTimeoutMs(request.timeoutMs);
-    let result: CommandResult;
-    try {
-      result = await desktop.commands.run(cmd, {
+    // Output streams as the command prints it (the SDK's onStdout/onStderr), so a reader of
+    // live output, such as code calling the run's tools, sees it before the command ends.
+    const streamed: ProcessEvent[] = [];
+    let wake: (() => void) | undefined;
+    const push = (type: "stdout" | "stderr") => (data: string) => {
+      if (!data) return;
+      streamed.push({ type, data });
+      wake?.();
+    };
+    let sawOutput = false;
+    let settled = false;
+    const run = desktop.commands
+      .run(cmd, {
         cwd: e2bCwd(request.cwd),
         envs: request.env,
         signal: context.signal,
         timeoutMs,
+        onStdout: push("stdout"),
+        onStderr: push("stderr"),
+      })
+      .then(
+        (result): { result: CommandResult } | { error: unknown } => ({ result }),
+        (error: unknown) => ({ error }),
+      )
+      .finally(() => {
+        settled = true;
+        wake?.();
       });
-    } catch (error) {
+    while (!settled || streamed.length) {
+      const next = streamed.shift();
+      if (next) {
+        sawOutput = true;
+        yield next;
+        continue;
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        if (settled || streamed.length) resolve();
+      });
+      wake = undefined;
+    }
+    const outcome = await run;
+    let result: CommandResult;
+    if ("error" in outcome) {
+      const { error } = outcome;
       if (error instanceof TimeoutError) {
         yield {
           type: "stderr",
@@ -259,9 +298,11 @@ export class E2BSandboxProvider implements SandboxProvider {
       }
       if (!(error instanceof CommandExitError)) throw error;
       result = error;
+    } else result = outcome.result;
+    if (!sawOutput) {
+      if (result.stdout) yield { type: "stdout", data: result.stdout };
+      if (result.stderr) yield { type: "stderr", data: result.stderr };
     }
-    if (result.stdout) yield { type: "stdout", data: result.stdout };
-    if (result.stderr) yield { type: "stderr", data: result.stderr };
     yield { type: "exit", code: result.exitCode ?? 0 };
   }
 
@@ -334,7 +375,7 @@ export class E2BSandboxProvider implements SandboxProvider {
         signal: context.signal,
       });
       if (info.size > options.maxBytes) {
-        throw new Error(`computer file exceeds ${options.maxBytes} bytes`);
+        throw new ByteLimitError(`computer file exceeds ${options.maxBytes} bytes`);
       }
     }
     return desktop.files.read(target, {

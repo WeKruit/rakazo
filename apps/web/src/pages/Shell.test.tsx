@@ -221,6 +221,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
     voice: { status: vi.fn().mockResolvedValue(null) },
     messaging: { status: vi.fn().mockResolvedValue({ enabled: false, providers: [] }) },
     usage: {
+      remaining: vi.fn().mockResolvedValue({ remaining: null }),
       costs: vi.fn().mockResolvedValue({
         total: { credits: 0, calls: 0, tokens: 0 },
         month: { credits: 0, calls: 0, tokens: 0 },
@@ -598,7 +599,6 @@ async function renderFeedbackShell(
         title: group.name,
         threadId: thread.threadId,
         groupId: group.id,
-        stage: "intake",
       },
     ],
     items: [
@@ -6484,6 +6484,7 @@ it("retries a failed reply without sending or clearing the recruiter's new draft
     interrupt: true,
     clientNonce: expect.any(String),
     addressing: "coordinator",
+    uiLocale: "en",
   });
   expect(shellApi.createArtifact).not.toHaveBeenCalled();
   expect(

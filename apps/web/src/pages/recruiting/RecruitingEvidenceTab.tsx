@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { ListRecruitingCandidatesInput, Verdict } from "@rakazo/contracts";
+import type { ListRecruitingCandidatesInput } from "@rakazo/contracts";
 import {
   Button,
   Checkbox,
@@ -67,7 +67,6 @@ export function RecruitingEvidenceTab({
     shortlistPending,
     shortlistFailed,
     workspace,
-    showInternalAssessments,
     candidateFresh,
     selectCandidate,
     discussCandidate,
@@ -166,9 +165,6 @@ export function RecruitingEvidenceTab({
               <NativeSelectOption value="uncertain">
                 <Trans>Needs a closer look</Trans>
               </NativeSelectOption>
-              <NativeSelectOption value="outdated">
-                <Trans>Needs a new review</Trans>
-              </NativeSelectOption>
               <NativeSelectOption value="unreviewed">
                 <Trans>Not reviewed yet</Trans>
               </NativeSelectOption>
@@ -176,61 +172,6 @@ export function RecruitingEvidenceTab({
                 <Trans>Not rated yet</Trans>
               </NativeSelectOption>
             </NativeSelect>
-            {showInternalAssessments ? (
-              <>
-                <NativeSelect
-                  aria-label={t`Internal assessment`}
-                  value={candidateFilters.assessmentState ?? "all"}
-                  onChange={(event) =>
-                    setCandidateFilters((current) => ({
-                      ...current,
-                      assessmentState:
-                        event.target.value === "all"
-                          ? undefined
-                          : (event.target
-                              .value as ListRecruitingCandidatesInput["assessmentState"]),
-                    }))
-                  }
-                >
-                  <NativeSelectOption value="all">
-                    <Trans>All internal assessments</Trans>
-                  </NativeSelectOption>
-                  <NativeSelectOption value="unassessed">
-                    <Trans>No internal assessment</Trans>
-                  </NativeSelectOption>
-                  <NativeSelectOption value="current">
-                    <Trans>Internal assessment: current</Trans>
-                  </NativeSelectOption>
-                  <NativeSelectOption value="outdated">
-                    <Trans>Internal assessment: outdated</Trans>
-                  </NativeSelectOption>
-                </NativeSelect>
-                <NativeSelect
-                  aria-label={t`Internal verdict`}
-                  value={candidateFilters.verdict ?? "all"}
-                  onChange={(event) =>
-                    setCandidateFilters((current) => ({
-                      ...current,
-                      verdict:
-                        event.target.value === "all" ? undefined : (event.target.value as Verdict),
-                    }))
-                  }
-                >
-                  <NativeSelectOption value="all">
-                    <Trans>All internal verdicts</Trans>
-                  </NativeSelectOption>
-                  <NativeSelectOption value="met">
-                    <Trans>Internal verdict: met</Trans>
-                  </NativeSelectOption>
-                  <NativeSelectOption value="unmet">
-                    <Trans>Internal verdict: unmet</Trans>
-                  </NativeSelectOption>
-                  <NativeSelectOption value="unknown">
-                    <Trans>Internal verdict: unknown</Trans>
-                  </NativeSelectOption>
-                </NativeSelect>
-              </>
-            ) : null}
             {candidatePage ? (
               <NativeSelect
                 aria-label={t`Candidate sort`}
@@ -369,7 +310,7 @@ export function RecruitingEvidenceTab({
               refreshSignal={(refreshSignal ?? 0) + refresh}
               readCache={readCache}
               readCacheScope={readCacheScope}
-              autumn={{
+              sourced={{
                 items: candidatePage?.items ?? [],
                 loading: candidateLoading && !candidatePage,
                 failed: candidateFailed,
@@ -383,9 +324,7 @@ export function RecruitingEvidenceTab({
                     candidateFilters.rankingGroup === "unscored") &&
                   !candidateFilters.shortlisted &&
                   !candidateFilters.actionId &&
-                  !candidateFilters.sourceEffectId &&
-                  !candidateFilters.assessmentState &&
-                  !candidateFilters.verdict,
+                  !candidateFilters.sourceEffectId,
                 query: candidateFilters.query,
                 selectedKey: selection?.candidateKey,
                 ready: candidateFresh && shortlistPending === null,

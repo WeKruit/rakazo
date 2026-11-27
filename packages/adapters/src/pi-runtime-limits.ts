@@ -1,4 +1,9 @@
-import { DEFAULT_COMPACTION_SETTINGS } from "@earendil-works/pi-agent-core";
+import {
+  DEFAULT_COMPACTION_SETTINGS,
+  formatSize,
+  truncateHead,
+  utf8ByteLength,
+} from "@earendil-works/pi-agent-core";
 import { DEFAULT_MODEL_MAX_TOKENS } from "@rakazo/contracts";
 
 /** Hung completions must fail before the typical 5-minute run lease. */
@@ -148,7 +153,15 @@ export type ToolOutputStore = (text: string) => Promise<StoredToolOutput | undef
 
 /** Pointer the model sees after a clipped result; the full text stays readable on demand. */
 export function fullToolOutputPointer(stored: StoredToolOutput): string {
-  return `\n[Output clipped. The complete ${stored.length}-character result is saved; read it with artifact_read artifactId "${stored.artifactId}" using offset and limit.]`;
+  return `\n[Output clipped. The complete ${stored.length}-character result is saved; read it with artifact_read artifactId "${stored.artifactId}" using offset and limit. ${codeOverSavedResult(stored.artifactId)}]`;
+}
+
+/**
+ * Claude Code and Pi keep an oversized result as a file the agent works on with code. Ours is
+ * an account-scoped artifact; write_file copies it onto the bot's computer for the same work.
+ */
+function codeOverSavedResult(artifactId: string): string {
+  return `To count, filter, sort or join it, copy it to your computer with write_file artifactId "${artifactId}" and work on that file with code in shell (python3), printing only what you need.`;
 }
 
 /**
@@ -189,6 +202,56 @@ export async function clipContentWithFullOutput<T>(
   const stored = await store(texts.join("\n")).catch(() => undefined);
   if (!stored) return clipped;
   return [...clipped, { type: "text", text: fullToolOutputPointer(stored) } as T];
+}
+
+/**
+ * A required (never shortened) result above this share of the model window cannot stay whole in
+ * context. Bytes per token is the estimator's rough 4.
+ */
+const REQUIRED_RESULT_WINDOW_SHARE = 0.25;
+
+/**
+ * Pi's spill pattern for a required tool result too large for the context: keep the complete
+ * result as an artifact and give the model Pi's head preview (truncateHead, its default limits)
+ * with the totals and where to read the rest. Nothing is dropped silently: without storage, or
+ * when the store refuses, the result stays whole as before.
+ */
+export async function spillRequiredResult<T extends { content: unknown[] }>(
+  result: T,
+  store: ToolOutputStore | undefined,
+  contextWindow: number,
+): Promise<T> {
+  if (!store || !Array.isArray(result?.content)) return result;
+  const texts: string[] = [];
+  for (const part of result.content) {
+    if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "text")
+      return result;
+    texts.push(String((part as { text?: unknown }).text ?? ""));
+  }
+  const text = texts.join("\n");
+  const limit = Math.floor(contextWindow * 4 * REQUIRED_RESULT_WINDOW_SHARE);
+  if (!(limit > 0) || utf8ByteLength(text) <= limit) return result;
+  // Serialized JSON is one line and Pi keeps whole lines, so indent it to give the head lines.
+  let full = text;
+  try {
+    full = JSON.stringify(JSON.parse(text), null, 1);
+  } catch {
+    // Not JSON: keep the text as it is.
+  }
+  const stored = await store(full).catch(() => undefined);
+  if (!stored) return result;
+  const head = truncateHead(full);
+  const nextOffset = Array.from(head.content).length;
+  const preview = {
+    contextTruncated: true,
+    fullResultArtifactId: stored.artifactId,
+    totalChars: stored.length,
+    totalLines: head.totalLines,
+    nextOffset,
+    note: `Showing lines 1-${head.outputLines} of ${head.totalLines} (${formatSize(head.maxBytes)} limit) of the complete ${formatSize(head.totalBytes)} result. Read the rest with artifact_read artifactId "${stored.artifactId}" from offset ${nextOffset}, continuing with nextOffset until hasMore is false. ${codeOverSavedResult(stored.artifactId)}`,
+    preview: head.content,
+  };
+  return { ...result, content: [{ type: "text", text: JSON.stringify(preview) }] };
 }
 
 /** Compact once the context passes about 80% of the window, so a long run never hits the provider's limit. */

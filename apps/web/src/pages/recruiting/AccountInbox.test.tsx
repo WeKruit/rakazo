@@ -146,7 +146,7 @@ it("joins one explicit email to saved summary facts and never joins mismatched C
     location: "Austin",
     email: "first@example.test",
     linkedinUrl: null,
-    autumn: {
+    sourced: {
       candidateKey: "person",
       score: 4,
       rank: 1,
@@ -282,21 +282,20 @@ it("joins one explicit email to saved summary facts and never joins mismatched C
   }
 });
 
-it("keeps the exact requested sent original without exposing other sent-only threads", async () => {
-  const sent = { ...email("sent-original", "source-one"), direction: "sent" as const };
+it("lists sent emails nobody has answered yet, named by their recipient", async () => {
+  const sent = {
+    ...email("sent-original", "source-one"),
+    direction: "sent" as const,
+    sender: "recruiter@example.test",
+    recipients: ["ada@example.test"],
+  };
   const other = { ...email("other-sent", "source-two"), direction: "sent" as const };
-  const records: Item[] = [item("one", []), item("two", [])];
+  const records: Item[] = [item("one", [])];
   records[0]!.correspondence!.emails = [sent, other];
-  records[1]!.correspondence!.emails = [sent];
-  expect(accountInboxThreads(records)).toEqual([]);
-  const rows = accountInboxThreads(records, {
-    roleId: "one",
-    emailId: sent.id,
-    sourceId: sent.sourceId,
-  });
-  expect(rows).toHaveLength(1);
-  expect(rows[0]?.roleId).toBe("one");
-  expect(rows[0]?.emails.map((entry) => entry.id)).toEqual(["sent-original"]);
+  expect(accountInboxThreads(records).map((row) => row.emails[0]?.id)).toEqual([
+    "sent-original",
+    "other-sent",
+  ]);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -327,13 +326,14 @@ it("keeps the exact requested sent original without exposing other sent-only thr
       ),
     );
     expect(container.querySelector("article")?.textContent).toContain(sent.body);
-    expect(container.textContent).not.toContain(other.body);
+    const card = container.querySelector('button[aria-label^="ada@example.test"]');
+    expect(card?.textContent).toContain("Sent");
+    expect(card?.textContent).not.toContain("Received");
   } finally {
     await act(async () => root.unmount());
     vi.unstubAllGlobals();
   }
 });
-
 it("keeps loaded mail readable after history paging fails and retries the same cursor", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const first = email("first", "source-one");

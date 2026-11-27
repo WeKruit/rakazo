@@ -371,6 +371,17 @@ describe("account preferences", () => {
     expect(f.routines).not.toHaveBeenCalled();
   });
 
+  it("reads the selected chat once, with the first navigation page only", async () => {
+    const f = groupBootstrapDeps();
+    // A large account's navigation arrives in several pages; only the first carries the chat.
+    await expect(f.client.bootstrap({ groupId: "group-1", offset: 200 })).resolves.toMatchObject({
+      thread: null,
+    });
+    expect(f.snapshot).not.toHaveBeenCalled();
+    await f.client.bootstrap({ groupId: "group-1" });
+    expect(f.snapshot).toHaveBeenCalledOnce();
+  });
+
   it("loads the selected group snapshot while navigation is still loading", async () => {
     const f = groupBootstrapDeps();
     const memberships = await f.deps.prisma.spaceMember.findMany();
@@ -1230,7 +1241,7 @@ describe("MCP loopback endpoints", () => {
   };
 
   it("reports platform configuration without credentials or overriding a personal connection", async () => {
-    vi.stubEnv("AUTUMN_API_KEY", "test-platform-credential-not-for-clients");
+    vi.stubEnv("EXA_API_KEY", "test-platform-credential-not-for-clients");
     vi.stubEnv("FULLENRICH_API_KEY", "");
     try {
       const { list, handler } = mcpDeps();
@@ -1241,7 +1252,7 @@ describe("MCP loopback endpoints", () => {
         name: "Recruiting research",
         description: "",
         transport: "streamable_http",
-        endpoint: "https://api.autumn.ai/mcp",
+        endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
         command: null,
         args: [],
         env: {},
@@ -1254,7 +1265,7 @@ describe("MCP loopback endpoints", () => {
       };
       list.mockResolvedValue([
         server,
-        { ...server, id: "other-endpoint", endpoint: "https://api.autumn.ai/mcp?other=1" },
+        { ...server, id: "other-endpoint", endpoint: "https://mcp.exa.ai/mcp?other=1" },
         { ...server, id: "unconfigured-service", endpoint: "https://mcp.fullenrich.com/mcp" },
         { ...server, id: "stdio-service", transport: "stdio" },
         { ...server, id: "personal-service", secretId: "personal-secret" },

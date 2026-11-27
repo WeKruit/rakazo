@@ -1,6 +1,7 @@
 import type {
   AgentHomeStore,
   AgentRuntime,
+  ArtifactStore,
   BackgroundJobHandlers,
   ConnectorProvider,
   JobPublisher,
@@ -20,18 +21,14 @@ import { performComputerUpdate } from "./computer-update.js";
 import { warmBotDiscovery } from "./discovery-prewarm.js";
 import type { createRunExecutor } from "./executor.js";
 import { sendRunNotification } from "./executor.js";
-import { reportStalledGroupStage } from "./group-handoff.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
 import { closePollAndWake } from "./poll-close.js";
 import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import { startRecruitingCheckin } from "./recruiting-checkin.js";
-import { startRecruitingGrading } from "./recruiting-grading.js";
 import { projectRecruitingCandidateProfiles } from "./recruiting-profiles.js";
 import { projectRecruitingInboxJob } from "./recruiting-reads.js";
-import { pollRecruitingResearch } from "./recruiting-research-poll.js";
-import { checkThreadReplied } from "./reply-check.js";
 import {
   pauseRoutineAfterRepeatedFailures,
   skipRoutineWithoutNewActivity,
@@ -65,6 +62,8 @@ export function createBackgroundJobHandlers(deps: {
   cloudAgent?: CloudAgentConnection | null;
   /** The native MCP connector; without it research tasks are not polled in the background. */
   connector?: ConnectorProvider;
+  /** Saved files; a reply's attachments read in the background are kept here. */
+  artifacts?: ArtifactStore;
   /**
    * Most worker slots scheduled runs may hold at once in this process, so a burst of routines
    * cannot take every slot from people chatting. Unset means no limit.
@@ -161,20 +160,6 @@ export function createBackgroundJobHandlers(deps: {
         payload,
       );
     },
-    "recruiting_research.poll": async (payload) => {
-      await pollRecruitingResearch(
-        {
-          prisma: deps.prisma,
-          jobs: deps.jobs,
-          connector: deps.connector,
-          onStalled: (run) => reportStalledGroupStage(deps, run),
-        },
-        payload,
-      );
-    },
-    "recruiting_grade.start": async (payload) => {
-      await startRecruitingGrading({ prisma: deps.prisma, jobs: deps.jobs }, payload);
-    },
     "recruiting_inbox.project": async (payload) => {
       await projectRecruitingInboxJob({ prisma: deps.prisma, events: deps.events }, payload);
     },
@@ -207,15 +192,16 @@ export function createBackgroundJobHandlers(deps: {
         payload,
       );
     },
-    "thread.reply_check": async (payload) => {
-      await checkThreadReplied(
-        { prisma: deps.prisma, events: deps.events, jobs: deps.jobs },
-        payload,
-      );
-    },
+    // Retired: checks already queued before the upgrade finish without pushing the agent.
+    "thread.reply_check": async () => {},
     "recruiting_checkin.start": async (payload) => {
       await startRecruitingCheckin(
-        { prisma: deps.prisma, jobs: deps.jobs, connector: deps.connector },
+        {
+          prisma: deps.prisma,
+          jobs: deps.jobs,
+          connector: deps.connector,
+          artifacts: deps.artifacts,
+        },
         payload,
       );
     },

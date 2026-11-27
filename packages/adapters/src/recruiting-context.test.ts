@@ -1,17 +1,13 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
-import {
-  RECRUITING_CALIBRATION_QUICK_SEARCH,
-  RECRUITING_MISSED_REQUIREMENT,
-  RECRUITING_PDF_RENDERING,
-  RECRUITING_ROUND_NEXT_STEP,
-  RECRUITING_SCALE_START,
-} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
-import { loadRecruitingRunContext } from "./recruiting-context.js";
+import {
+  loadRecruitingRunContext,
+  RECRUITING_PRESENTATION_INSTRUCTION,
+} from "./recruiting-context.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
 const db = vi.hoisted(() => ({
@@ -22,6 +18,10 @@ const db = vi.hoisted(() => ({
   feedback: vi.fn(),
   quality: vi.fn(),
   patterns: vi.fn(),
+}));
+vi.mock("./recruiting-round-check.js", async (original) => ({
+  ...(await original<object>()),
+  requestCounts: async () => ({ counted: 0, turnedDown: 0, fitNotShownYet: 0, notGradedYet: 0 }),
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
@@ -283,15 +283,6 @@ describe("recruiting run context", () => {
         ],
         rules: [],
         questions: [],
-        confirmation:
-          salary === "ready"
-            ? {
-                revision: 1,
-                userId: run.userId,
-                messageId: "confirmed",
-                confirmedAt: "2026-10-20T00:00:00.000Z",
-              }
-            : null,
       };
       const current = { ...workspace, revision: { ...workspace.revision, brief } };
       const savedBefore = JSON.stringify(current);
@@ -329,7 +320,7 @@ describe("recruiting run context", () => {
             : [
                 {
                   fieldKey: "salary_range",
-                  question: "What salary range may be stated in outreach?",
+                  question: "Please clarify the unresolved role detail.",
                 },
               ],
         );
@@ -491,7 +482,7 @@ describe("recruiting run context", () => {
   );
 
   it.each(["instructions", "tool_result", "steering"] as const)(
-    "distinguishes authorized exploration and continuation from formal calibration gates in %s context",
+    "carries the role as data in %s context",
     async (placement) => {
       const { deps } = fixture();
       const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
@@ -499,43 +490,7 @@ describe("recruiting run context", () => {
         placement,
       });
       const text = loaded!.manifest.roleText;
-      expect(text).toContain(
-        "Intake, company/JD research and recovery reads do not require redundant confirmation",
-      );
-      expect(text).toContain("Calibration rounds start right after G0 (the confirmed brief)");
-      expect(text).toContain("never with an approval card");
-      expect(text).toContain("Reconfirm materially revised requirements or JD/deck");
-      expect(text).toContain(
-        "Outside formal calibration or scale, small-scale exploration or same-task feedback/more results explicitly authorized by the current human request do not require G0/G1",
-      );
-      expect(text).toContain("follow the requested scope and usage limits");
-      expect(text).toContain("reuse the same verified provider task for continuation");
-      expect(text).toContain("Keep unknowns and pending cards");
-      expect(text).toContain(
-        "this does not approve requirements, JD/deck, business policies, calibration or scale",
-      );
-      expect(text).toContain("never recast changed qualification as round-only scope");
-      expect(text).toContain(
-        "The recruiter's acceptance of a calibration round is required before scale",
-      );
-      expect(text).toContain("never a second confirmation or a separate ten-profile approval card");
-      expect(text).toContain("These formal calibration/scale gates apply to native MCP too");
-      expect(text).toContain(
-        "ordinary continuation does not require saved-workspace research actions",
-      );
-      expect(text).toContain("Scheduling and outbound require their native approvals");
-      expect(text).toContain("Internal record keeping does not require human approval by default");
-      for (const rule of [
-        RECRUITING_CALIBRATION_QUICK_SEARCH,
-        RECRUITING_ROUND_NEXT_STEP,
-        RECRUITING_SCALE_START,
-        RECRUITING_PDF_RENDERING,
-        // A missed requirement is redone at every stage, not only right after the first ten.
-        RECRUITING_MISSED_REQUIREMENT,
-      ])
-        expect(text).toContain(rule);
-      expect(text).not.toContain("research requires G0 on the current brief revision");
-      expect(text).not.toContain("Candidate sourcing requires actual human G0 approval");
+      expect(text).toContain("<recruiting_role>");
       expect(loaded!.text).toContain(text);
       expect(loaded!.manifest.placement).toBe(placement);
       expect(loaded!.workspace).toBe(workspace);
@@ -578,12 +533,6 @@ describe("recruiting run context", () => {
         },
       ],
       questions: [],
-      confirmation: {
-        revision: 1,
-        userId: "owner",
-        messageId: "confirmation",
-        confirmedAt: "2026-10-16T00:00:00Z",
-      },
     };
     const current = {
       ...workspace,
@@ -606,7 +555,6 @@ describe("recruiting run context", () => {
         brief: {
           ...brief,
           searchFilters: [],
-          confirmation: { ...brief.confirmation, revision: 2 },
         },
       },
     };
@@ -660,9 +608,7 @@ describe("recruiting run context", () => {
     expect(result!.workspace).toEqual(workspace);
     expect(result!.text).toContain("Seven years; [redacted]");
     expect(result!.text).toContain("Bay Area first");
-    expect(result!.text).not.toContain(
-      "Internal routing identifiers belong only in tool arguments",
-    );
+    expect(result!.text).not.toContain(RECRUITING_PRESENTATION_INSTRUCTION);
     expect(result!.text).toContain(memory.text);
     expect(result!.text).not.toContain("secret-value");
     const stored = bytes.get("blob-1")!;

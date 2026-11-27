@@ -77,6 +77,15 @@ suite("first-batch RLS with a real restricted role", () => {
       "utf8",
     );
     await sql.query(projectionMigration.slice(projectionMigration.indexOf("DO $rls$")));
+    // Mail a conversation sent outside a role then extends the same policy, as deploys apply it.
+    const conversationMigration = await readFile(
+      new URL(
+        "../prisma/migrations/20261126170000_recruiting_inbox_conversation_mail/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    await sql.query(conversationMigration.slice(conversationMigration.indexOf("DO $rls$")));
     await sql.query("DROP POLICY rakazo_actor_isolation ON recruiting_inbox_index_progress");
     await sql.query("ALTER TABLE recruiting_inbox_index_progress DISABLE ROW LEVEL SECURITY");
     const indexMigration = await readFile(
@@ -188,6 +197,7 @@ suite("first-batch RLS with a real restricted role", () => {
         await db.$executeRaw`INSERT INTO recruiting_inbox_cursors (user_id, space_id, thread_key) VALUES (${id}, ${spaceId}, 'synthetic')`;
         await db.$executeRaw`INSERT INTO recruiting_overview_snapshots (user_id, space_id, roles) VALUES (${id}, ${spaceId}, '[]'::jsonb)`;
         await db.$executeRaw`INSERT INTO recruiting_inbox_messages (id,user_id,space_id,role_id,origin_key,dedupe_key,source_id,source_kind,observed_at,search_text,email) VALUES (${id},${id},${spaceId},${id},'synthetic','synthetic','synthetic','observed',CURRENT_TIMESTAMP,'synthetic','{}'::jsonb)`;
+        await db.$executeRaw`INSERT INTO recruiting_inbox_messages (id,user_id,space_id,thread_id,origin_key,dedupe_key,source_id,source_kind,observed_at,search_text,email) VALUES (${`${id}-conversation`},${id},${spaceId},${id},'synthetic','synthetic','synthetic','observed',CURRENT_TIMESTAMP,'synthetic','{}'::jsonb)`;
         await db.task.create({
           data: { id, ...owner, botId: id, threadId: id, prompt: "Synthetic", status: "completed" },
         });

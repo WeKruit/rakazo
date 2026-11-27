@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   detail: vi.fn(),
   thread: vi.fn(),
   group: vi.fn(),
+  bindings: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof import("@rakazo/db")>()),
@@ -61,12 +62,17 @@ const input: GlobalRecruitingInboxInput = {
   limit: 1,
 };
 const deps = () => ({
-  prisma: { thread: { findFirst: mocks.thread } } as never,
+  prisma: {
+    thread: { findFirst: mocks.thread },
+    externalEffect: { findMany: mocks.bindings },
+  } as never,
   connectors: { execute: vi.fn() } as never,
   jobs: { enqueue: vi.fn() } as never,
+  artifacts: { put: vi.fn() } as never,
 });
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.bindings.mockResolvedValue([]);
   mocks.read.mockResolvedValue(page());
   mocks.thread.mockResolvedValue({ botId: null });
   mocks.group.mockResolvedValue({
@@ -98,7 +104,8 @@ it("resolves the exact owned stored message and current role before its targeted
     undefined,
     undefined,
     { message: email },
-    expect.objectContaining({ jobs: expect.anything() }),
+    // The account Inbox keeps a reply's attachments (a résumé) as the role's Inbox does.
+    expect.objectContaining({ jobs: expect.anything(), artifacts: expect.anything() }),
   );
   expect(result.items[0]!.email.body).toBe("The actual complete body");
 });
@@ -137,4 +144,27 @@ it("does not publish a body if the role group changes while the provider read is
     })
     .mockResolvedValueOnce({ id: "group", thread: { id: "other-thread" }, members: [] });
   await expect(getGlobalRecruitingInbox(deps(), actor, input)).rejects.toThrow();
+});
+// Gate b2005684, send-at-night: both emails had gone out and showed in the role's inbox, while the
+// account Inbox, stored only from earlier reads, was empty.
+it("reads the newest mail of a sending role behind the list, at most once in two minutes", async () => {
+  mocks.bindings.mockResolvedValue([{ request: { roleId: "role" } }]);
+  mocks.detail.mockResolvedValue({ emails: [] });
+  const list = { ...page(), roles: [{ ...page().roles[0]!, id: "role-sending" }, ...page().roles] };
+  mocks.read.mockResolvedValue(list);
+  await getGlobalRecruitingInbox(deps(), { ...actor, userId: "sender" }, { limit: 20 });
+  await vi.waitFor(() => expect(mocks.detail).toHaveBeenCalledTimes(1));
+  expect(mocks.detail).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ userId: "sender" }),
+    expect.objectContaining({ threadId: "role-thread" }),
+    "inbox",
+    undefined,
+    undefined,
+    { limit: 50 },
+    expect.objectContaining({ connectors: expect.anything(), artifacts: expect.anything() }),
+  );
+  await getGlobalRecruitingInbox(deps(), { ...actor, userId: "sender" }, { limit: 20 });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(mocks.detail).toHaveBeenCalledTimes(1);
 });

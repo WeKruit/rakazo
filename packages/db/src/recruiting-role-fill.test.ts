@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fillRecruitingRoleArgs } from "./recruiting.js";
+import { citeRecruiterMessages, fillRecruitingRoleArgs } from "./recruiting.js";
 
 const actor = { spaceId: "space-1", userId: "user-1", email: "", isDeploymentOwner: false };
 const hash = "a".repeat(64);
@@ -18,11 +18,15 @@ const human = (id: string, text: string) => ({
   blocks: [{ kind: "text", text }],
 });
 
+// The note that hands the recruiter's words to a role team: a "user" row no recruiter typed.
+const note = { kind: "bot_message_received", text: "The recruiter wrote, word for word: go on" };
+
 function prisma({
   activeRoleId = null as string | null,
   events = [receipt] as unknown[],
   messages = [] as unknown[],
   outside = [] as string[],
+  notes = [] as string[],
 } = {}) {
   return {
     thread: {
@@ -38,10 +42,11 @@ function prisma({
       // An id lookup finds every message in this conversation except the ones named outside.
       findMany: vi.fn(async ({ where }: { where: { id?: { in: string[] } } }) =>
         where.id
-          ? where.id.in.filter((id) => !outside.includes(id)).map((id) => ({ id }))
+          ? where.id.in
+              .filter((id) => !outside.includes(id))
+              .map((id) => (notes.includes(id) ? { ...human(id, ""), blocks: [note] } : human(id, "")))
           : messages,
       ),
-      findFirst: vi.fn(async () => ({ id: "latest-human" })),
     },
     recruitingRole: { findFirst: vi.fn(async () => null) },
     recruitingRoleRevision: { findUnique: vi.fn(async () => null) },
@@ -83,6 +88,24 @@ describe("fillRecruitingRoleArgs", () => {
         },
       },
     ]);
+  });
+
+  it("reads a mistyped file id as the one real file the save cites (staging 2026-11-26, jd-upload-pdf)", async () => {
+    const typo = {
+      ...jd,
+      id: "jd-2",
+      anchor: { kind: "artifact", artifact: { artifactId: "artifact-f1", sha256: hash } },
+    };
+    const filled = await fillRecruitingRoleArgs(prisma(), actor, context, {
+      operation: "create",
+      sourceRefs: [jd, typo],
+      criteria: [],
+    });
+    expect(
+      (filled.sourceRefs as { anchor: { artifact: { artifactId: string } } }[]).map(
+        (source) => source.anchor.artifact.artifactId,
+      ),
+    ).toEqual(["artifact-1", "artifact-1"]);
   });
 
   it("acts on the conversation's role when the model mistypes its id", async () => {
@@ -206,7 +229,7 @@ describe("fillRecruitingRoleArgs", () => {
       quote: "US$51K–68K",
     };
     const filled = await fillRecruitingRoleArgs(
-      prisma({ events: [], outside: ["human-salary"] }),
+      prisma({ events: [], outside: ["human-salary"], messages: [human("latest-human", "pay")] }),
       actor,
       context,
       { operation: "create", sourceRefs: [made], criteria: [] },
@@ -218,6 +241,49 @@ describe("fillRecruitingRoleArgs", () => {
         anchor: { kind: "message", messageId: "latest-human", locator: "blocks[0].text" },
       },
     ]);
+  });
+
+  it("re-points a citation of the hand-off note to the recruiter's own latest message (staging 2026-11-27)", async () => {
+    const cited = {
+      id: "location_src",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "handoff", locator: "blocks[0].text" },
+      readState: "read",
+    };
+    const filled = await fillRecruitingRoleArgs(
+      prisma({
+        events: [],
+        notes: ["handoff"],
+        messages: [{ ...human("handoff", ""), blocks: [note] }, human("jd-message", "Seattle")],
+      }),
+      actor,
+      context,
+      { operation: "create", sourceRefs: [cited], criteria: [] },
+    );
+    expect(filled.sourceRefs).toEqual([
+      { ...cited, anchor: { kind: "message", messageId: "jd-message", locator: "blocks[0].text" } },
+    ]);
+  });
+
+  it("re-points a made-up message id on a preference save (staging 2026-11-27)", async () => {
+    const args = {
+      target: "preference",
+      operation: "add",
+      sourceRefs: [
+        {
+          id: "ask",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: "made-up", locator: "blocks[0].text" },
+          readState: "read",
+        },
+      ],
+    };
+    const filled = await citeRecruiterMessages(
+      prisma({ outside: ["made-up"], messages: [human("typed", "always write in English")] }),
+      "thread-1",
+      args,
+    );
+    expect(filled.sourceRefs[0]!.anchor.messageId).toBe("typed");
   });
 
   // 2026-10-26: roles with several page excerpts, or a JD pasted as a message, left JD facts uncited.

@@ -9,7 +9,7 @@ import {
 describe("recruiting candidate note contracts", () => {
   it("parses list/create/update inputs", () => {
     expect(
-      ListRecruitingCandidateNotesInput.parse({ candidateKeys: ["autumn:k1", "crm:42"] }),
+      ListRecruitingCandidateNotesInput.parse({ candidateKeys: ["sourced:k1", "crm:42"] }),
     ).toBeTruthy();
     expect(
       CreateRecruitingCandidateNoteInput.parse({ candidateKey: "crm:42", body: "Prefers remote" }),

@@ -211,6 +211,48 @@ export function catalogApprovalInnerArgs(catalog: {
   return inner as Record<string, unknown>;
 }
 
+/**
+ * From when another run's cancelled cards are news to this run: since the recruiter's previous
+ * message, and once this run has been resumed after a card, only those cancelled after it began
+ * (it was told about older ones when it started).
+ */
+export function deniedCardsSince(
+  previousHuman: Date | undefined,
+  runStarted: Date | undefined,
+  resumed: boolean,
+): Date {
+  const since = previousHuman ?? new Date(0);
+  return resumed && runStarted && runStarted > since ? runStarted : since;
+}
+
+/**
+ * What a run resumed after a denied card is told, oldest first: the paused call's result stays "Waiting for
+ * approval.", so without this the model read the recruiter's next words with no sign the card was
+ * cancelled (deny plays 11-21: "标题不对" renamed the role two seconds after the cancel).
+ */
+export function deniedContinuationNote(
+  effects: readonly { kind: string; status: string; result?: unknown }[],
+): string | undefined {
+  const notes = effects.flatMap((effect, index) => {
+    if (effect.status !== "denied") return [];
+    // A later card of the same kind was approved, so this run already acted on the cancel (deny
+    // 11-21: told again after the new card's approval, it saved and sent the email once more).
+    if (
+      effects
+        .slice(index + 1)
+        .some((later) => later.kind === effect.kind && later.status === "approved")
+    )
+      return [];
+    const gate = resolveDuplicateEffectGate(effect, effect.kind);
+    const error =
+      gate.action === "return" && gate.result && typeof gate.result === "object"
+        ? (gate.result as { error?: unknown }).error
+        : undefined;
+    return typeof error === "string" ? [`Card answered for ${effect.kind}: ${error}`] : [];
+  });
+  return notes.length ? notes.join("\n\n") : undefined;
+}
+
 export function approvalPausedToolResult(): ApprovalPausedToolResult {
   return {
     kind: "agent_tool_result",
@@ -258,6 +300,29 @@ export type ExternalEffectStore = {
   };
 };
 
+const DENIED_ACTION =
+  "The user denied this action. Do not retry it unchanged. If the user has written since and asks for a change (such as a new subject, wording or people), save that change and ask again, which shows a new card; never say it is changed before the tool that saves it succeeds. Do not show again what the card showed (an email, its subject or people): a copy goes stale once they change it.";
+const DENIED_OTHERWISE =
+  "Otherwise tell the user in one line, in their language, that it was not done and ask what they want instead.";
+/** Deny plays 11-20/21: "标题不对" after a cancelled send card was put on the role's name. */
+const DENIED_SEND =
+  "A 标题, title or subject they give now is this email's subject line, never the role's name. Save the whole email with it the way this campaign got its email (a role's campaign: ensure_role_campaign steps; a one-off campaign from create_campaign: a new create_campaign with the new email, add_leads with the same people, then activate_campaign on that new campaign_id), then call activate_campaign for a new card. Until they write, only say in one line that it was not sent; do not ask a question, since they usually write the change next. Reply in the language of the recruiter's last message.";
+
+/** The send card's own subject beside the reading of a new title, when the card was a send. */
+function sendCard(result: unknown, toolName: string) {
+  const shown =
+    result && typeof result === "object" && !Array.isArray(result)
+      ? (result as { instantlyActivationShown?: unknown }).instantlyActivationShown
+      : undefined;
+  if (!shown && !toolName.endsWith("activate_campaign")) return "";
+  const card = (shown ?? {}) as {
+    firstEmail?: { subject?: unknown } | null;
+    recipients?: { firstEmail?: { subject?: unknown } }[];
+  };
+  const subject = card.firstEmail?.subject ?? card.recipients?.[0]?.firstEmail?.subject;
+  return `${typeof subject === "string" ? `The cancelled card's subject was "${subject.slice(0, 200)}". ` : ""}${DENIED_SEND}`;
+}
+
 export function resolveDuplicateEffectGate(
   effect: { status: string; result?: unknown },
   toolName: string,
@@ -283,8 +348,7 @@ export function resolveDuplicateEffectGate(
     return {
       action: "return",
       result: {
-        error:
-          "The user denied this action. Do not retry or rephrase it; tell the user and ask what they want instead.",
+        error: `${DENIED_ACTION} ${sendCard(effect.result, toolName) || DENIED_OTHERWISE}`,
       },
     };
   }
@@ -400,4 +464,61 @@ export async function replaceCompletedExternalEffectResult(
     data: { result: result as never },
   });
   return replaced.count === 1;
+}
+
+export const DENIED_THIS_TURN_RESULT = {
+  error:
+    "The user already denied this kind of action in this turn. Do not ask again with changed content; tell the user it was not done and ask what they want instead.",
+  dispatched: false,
+} as const;
+
+/**
+ * Whether the person denied an action of this kind earlier in this turn and has not written
+ * since. send-through-blip 11-16: denied, the turn rewrote the email and asked again on a new
+ * card, because a changed request is a new approval. A message from the person lifts it.
+ */
+export async function deniedEarlierThisTurn(
+  prisma: {
+    externalEffect: {
+      findFirst: (args: {
+        where: { runId: string; kind: string; status: "denied"; id: { not: string } };
+        orderBy: { updatedAt: "desc" };
+        select: { updatedAt: true };
+      }) => Promise<{ updatedAt: Date } | null>;
+    };
+    message: {
+      findFirst: (args: {
+        where: {
+          threadId: string;
+          role: "user";
+          createdAt: { gt: Date };
+          OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: string } } }];
+        };
+        select: { id: true };
+      }) => Promise<{ id: string } | null>;
+    };
+  },
+  input: { threadId: string; effect: { id: string; runId: string; kind: string } },
+): Promise<boolean> {
+  const denied = await prisma.externalEffect.findFirst({
+    where: {
+      runId: input.effect.runId,
+      kind: input.effect.kind,
+      status: "denied",
+      id: { not: input.effect.id },
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+  if (!denied) return false;
+  const spoke = await prisma.message.findFirst({
+    where: {
+      threadId: input.threadId,
+      role: "user",
+      createdAt: { gt: denied.updatedAt },
+      OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
+    },
+    select: { id: true },
+  });
+  return !spoke;
 }

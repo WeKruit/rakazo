@@ -24,13 +24,13 @@ import {
   TabNotice,
   useSavedCorrespondence,
 } from "./shared";
-import type { AutumnCandidatesRead, RoleCandidate } from "./useRoleCandidates";
+import type { RoleCandidate, SourcedCandidatesRead } from "./useRoleCandidates";
 import { useRoleCandidates } from "./useRoleCandidates";
 
 type SavedContact = RecruitingCorrespondence["contacts"][number];
 
-/** What only the workbench that owns Autumn results can do for one of them. */
-export type AutumnCandidateActions = {
+/** What only the workbench that owns search results can do for one of them. */
+export type SourcedCandidateActions = {
   /** Writes are allowed only while the shown results are the validated current read. */
   ready: boolean;
   shortlistFailedKey: string | null;
@@ -44,13 +44,13 @@ export type AutumnCandidateActions = {
 };
 
 /**
- * The role's one candidate list: Autumn search results and the role's CRM contacts with the same
+ * The role's one candidate list: search results and the role's CRM contacts with the same
  * columns and one row per person. Each source renders when it loads and retries on its own; a row
  * opens the person in the detail panel beside the page.
  */
 export function ContactsTab(
   props: RecruitingTabProps & {
-    autumn?: AutumnCandidatesRead & AutumnCandidateActions;
+    sourced?: SourcedCandidatesRead & SourcedCandidateActions;
     shortlistWeekFilter?: ShortlistWeekFilter;
     onClearShortlistWeekFilter?: () => void;
     criterionRevision?: ProfileCriterionRevision;
@@ -61,7 +61,7 @@ export function ContactsTab(
   const { t } = useLingui();
   const detail = useRecruitingDetail();
   const importInput = useRef<HTMLInputElement>(null);
-  const { autumn } = props;
+  const { sourced } = props;
   const [lookupReload, setLookupReload] = useState(0);
   const saved = useSavedCorrespondence(
     { ...props, refreshSignal: (props.refreshSignal ?? 0) + lookupReload },
@@ -70,15 +70,15 @@ export function ContactsTab(
   const lookups = saved.data?.contacts ?? [];
   const lookupsFor = (row: RoleCandidate): SavedContact[] =>
     lookups.filter((contact) =>
-      row.autumn
-        ? contact.candidateKey === row.autumn.candidateKey
+      row.sourced
+        ? contact.candidateKey === row.sourced.candidateKey
         : linkedinIdentity(contact.linkedinUrl) !== null &&
           linkedinIdentity(contact.linkedinUrl) === linkedinIdentity(row.linkedinUrl),
     );
   const list = useRoleCandidates({
     ...props,
-    autumn: autumn && {
-      ...autumn,
+    sourced: sourced && {
+      ...sourced,
       ...(props.shortlistWeekFilter ? { includeCrm: false } : {}),
       email: (candidate) =>
         lookups.find((contact) => contact.candidateKey === candidate.candidateKey)?.emails[0]
@@ -92,15 +92,15 @@ export function ContactsTab(
         ? list.rows.filter(
             (row) =>
               props.roleId === filter.roleId &&
-              row.autumn?.roleId === filter.roleId &&
-              isInShortlistWeek(row.autumn, filter),
+              row.sourced?.roleId === filter.roleId &&
+              isInShortlistWeek(row.sourced, filter),
           )
         : list.rows,
     [list.rows, filter, props.roleId],
   );
   const loadedCount = rows.length;
   const total = filter
-    ? list.more.hasMore || list.autumn?.loading || list.autumn?.failed
+    ? list.more.hasMore || list.sourced?.loading || list.sourced?.failed
       ? null
       : rows.length
     : list.total;
@@ -110,8 +110,8 @@ export function ContactsTab(
         (contact) => !contact.imported && !rows.some((row) => lookupsFor(row).includes(contact)),
       );
   const failures = [
-    list.autumn?.failed ? (
-      <RetryNotice key="autumn" onRetry={list.autumn.retry}>
+    list.sourced?.failed ? (
+      <RetryNotice key="sourced" onRetry={list.sourced.retry}>
         <Trans>Could not load search results</Trans>
       </RetryNotice>
     ) : null,
@@ -127,7 +127,7 @@ export function ContactsTab(
     ) : null,
   ].filter(Boolean);
   // A failed read never sits next to a loading one: retry first, then rows fill in.
-  const loading = !failures.length && Boolean(list.autumn?.loading || list.crmRead.loading);
+  const loading = !failures.length && Boolean(list.sourced?.loading || list.crmRead.loading);
   const empty = !loading && !failures.length && !rows.length;
   const role = { roleId: props.roleId, spaceId: props.spaceId, conversation: props.conversation };
 
@@ -135,7 +135,7 @@ export function ContactsTab(
     const row = rows[index];
     if (!row) return undefined;
     const crm = row.crm;
-    const candidate = row.autumn;
+    const candidate = row.sourced;
     const rowLookups = lookupsFor(row);
     const sections = candidateSections(candidate?.latestSource?.report?.fields);
     return {
@@ -159,17 +159,17 @@ export function ContactsTab(
         contactStatus: crm?.contactStatus ?? null,
         outreachStatus: crm?.outreachStatus ?? null,
       },
-      ...(candidate && autumn
+      ...(candidate && sourced
         ? {
             actions: {
-              ...(autumn.sendEmail ? { emailDraft: () => autumn.sendEmail!(candidate) } : {}),
-              ...(autumn.findEmail ? { findEmail: () => autumn.findEmail!(candidate) } : {}),
+              ...(sourced.sendEmail ? { emailDraft: () => sourced.sendEmail!(candidate) } : {}),
+              ...(sourced.findEmail ? { findEmail: () => sourced.findEmail!(candidate) } : {}),
               shortlist: {
                 shortlisted: candidate.shortlisted,
-                disabled: !autumn.ready,
-                set: (value: boolean) => autumn.setShortlist(candidate, value),
+                disabled: !sourced.ready,
+                set: (value: boolean) => sourced.setShortlist(candidate, value),
               },
-              openEvidence: (trigger: HTMLElement) => autumn.openEvidence(candidate, trigger),
+              openEvidence: (trigger: HTMLElement) => sourced.openEvidence(candidate, trigger),
             },
           }
         : {}),
@@ -180,7 +180,7 @@ export function ContactsTab(
     const row = rows[index]!;
     const next = target(index);
     if (detail && next) detail.open(next);
-    else if (row.autumn) autumn?.openEvidence(row.autumn, trigger);
+    else if (row.sourced) sourced?.openEvidence(row.sourced, trigger);
   };
   const openId = detail?.current?.person.candidateId;
   // A shared or reloaded link reopens its person once the list shows them.
@@ -265,10 +265,10 @@ export function ContactsTab(
       {!rows.length && (props.onRefine || props.onImport) ? (
         <div className="mb-2">{toolbar}</div>
       ) : null}
-      {!autumn && list.crm.status !== "loading" && list.crm.status !== "failed" ? (
+      {!sourced && list.crm.status !== "loading" && list.crm.status !== "failed" ? (
         <CrmGate crm={list.crm} />
       ) : null}
-      {autumn && (saved.data?.partial || saved.data?.status === "unsupported") ? (
+      {sourced && (saved.data?.partial || saved.data?.status === "unsupported") ? (
         <p className="text-muted-foreground">
           <Trans>Some saved contact details could not be displayed.</Trans>
         </p>
@@ -286,19 +286,19 @@ export function ContactsTab(
           selectedKey={
             rows.find(
               (row) =>
-                openId === (row.crm?.candidateId ?? row.autumn?.candidateKey) ||
-                (!detail && row.autumn && autumn?.selectedKey === row.autumn.candidateKey),
+                openId === (row.crm?.candidateId ?? row.sourced?.candidateKey) ||
+                (!detail && row.sourced && sourced?.selectedKey === row.sourced.candidateKey),
             )?.key
           }
           onOpen={(_row, index, trigger) => openRow(index, trigger)}
           renderActions={(row, index) => {
-            const candidate = row.autumn;
+            const candidate = row.sourced;
             const person = row.crm;
             const name = row.name ?? t`Unnamed candidate`;
             return (
               <>
                 <span className="flex flex-wrap items-center gap-2">
-                  {candidate && autumn ? (
+                  {candidate && sourced ? (
                     <Button
                       size="sm"
                       variant="outline"
@@ -308,8 +308,8 @@ export function ContactsTab(
                           ? t`Remove ${name} from shortlist`
                           : t`Add ${name} to shortlist`
                       }
-                      disabled={!autumn.ready}
-                      onClick={() => autumn.setShortlist(candidate, !candidate.shortlisted)}
+                      disabled={!sourced.ready}
+                      onClick={() => sourced.setShortlist(candidate, !candidate.shortlisted)}
                     >
                       <Bookmark
                         size={14}
@@ -323,11 +323,11 @@ export function ContactsTab(
                       )}
                     </Button>
                   ) : null}
-                  {candidate && autumn?.sendEmail ? (
+                  {candidate && sourced?.sendEmail ? (
                     <Button
                       size="sm"
-                      disabled={!autumn.ready || (!candidate.name && !candidate.linkedinUrl)}
-                      onClick={() => autumn.sendEmail!(candidate)}
+                      disabled={!sourced.ready || (!candidate.name && !candidate.linkedinUrl)}
+                      onClick={() => sourced.sendEmail!(candidate)}
                     >
                       <ProfileMailIcon className="size-3.5" />
                       <Trans>Email draft</Trans>
@@ -345,7 +345,7 @@ export function ContactsTab(
                     </Button>
                   ) : null}
                 </span>
-                {candidate && autumn?.shortlistFailedKey === candidate.candidateKey ? (
+                {candidate && sourced?.shortlistFailedKey === candidate.candidateKey ? (
                   <p role="alert" className="mt-1 text-xs text-destructive">
                     <Trans>Could not save shortlist</Trans>
                   </p>
@@ -361,7 +361,7 @@ export function ContactsTab(
         <TabNotice>
           {filter ? (
             <Trans>No loaded candidates match this date filter.</Trans>
-          ) : autumn ? (
+          ) : sourced ? (
             <Trans>No candidates yet</Trans>
           ) : (
             <Trans>No contacts for this role yet.</Trans>

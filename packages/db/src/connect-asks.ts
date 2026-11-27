@@ -67,19 +67,54 @@ export async function findPendingConnectAsk(
   );
   for (const message of messages) {
     if (!message.runId || !waiting.has(message.runId)) continue;
-    const blocks = MessageBlockSchema.array().safeParse(message.blocks);
-    if (
-      blocks.success &&
-      blocks.data.some(
-        (block) =>
-          block.kind === "ask" &&
-          block.status !== "answered" &&
-          block.connection?.serverId === input.serverId,
-      )
-    )
+    if (holdsOpenConnectAsk(message.blocks, input.serverId))
       return { askId: message.id, runId: message.runId };
   }
   return null;
+}
+
+function holdsOpenConnectAsk(value: unknown, serverId: string) {
+  const blocks = MessageBlockSchema.array().safeParse(value);
+  return (
+    blocks.success &&
+    blocks.data.some(
+      (block) =>
+        block.kind === "ask" &&
+        block.status !== "answered" &&
+        block.connection?.serverId === serverId,
+    )
+  );
+}
+
+/**
+ * An unanswered connect card for this server in any of the user's conversations. Team-stuck
+ * 11-16: Kruit showed the calendar card, handed the booking to the role team, and the team showed
+ * its own card for the same calendar, which reached the recruiter as a second card.
+ */
+export async function findAccountConnectAsk(
+  db: Pick<Prisma.TransactionClient, "message" | "run">,
+  input: { spaceId: string; userId: string; serverId: string },
+) {
+  const runs = await db.run.findMany({
+    where: { spaceId: input.spaceId, userId: input.userId, status: "waiting_input" },
+    orderBy: { updatedAt: "desc" },
+    take: 20,
+    select: { id: true, threadId: true },
+  });
+  if (!runs.length) return null;
+  const messages = await db.message.findMany({
+    where: {
+      threadId: { in: [...new Set(runs.map((run) => run.threadId))] },
+      runId: { in: runs.map((run) => run.id) },
+      role: "bot",
+      blocks: { array_contains: [{ kind: "ask", connection: { serverId: input.serverId } }] },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+    select: { id: true, threadId: true, blocks: true },
+  });
+  const open = messages.find((message) => holdsOpenConnectAsk(message.blocks, input.serverId));
+  return open ? { askId: open.id, threadId: open.threadId } : null;
 }
 
 export function connectAskBlock(connection: AskConnection) {

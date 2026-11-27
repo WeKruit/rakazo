@@ -81,6 +81,36 @@ describe("E2B computer backend", () => {
     ]);
   });
 
+  it("streams output while the command is still running", async () => {
+    // Staging 11-20: output arrived only at exit, so code waiting on a printed tool call hung
+    // until the command timed out (about five minutes per call).
+    let seenLive!: () => void;
+    const consumerSaw = new Promise<void>((resolve) => {
+      seenLive = resolve;
+    });
+    const run = vi.fn(async (_cmd: string, opts: { onStdout: (data: string) => void }) => {
+      opts.onStdout("marker\n");
+      await consumerSaw;
+      return { stdout: "marker\ndone\n", stderr: "", exitCode: 0 };
+    });
+    const provider = new E2BSandboxProvider("test-key", {
+      connect: vi.fn(async () => ({ sandboxId: "existing", commands: { run } })),
+    } as unknown as E2BSandboxSdk);
+    const events = [];
+    for await (const event of provider.execute(
+      { id: "existing", providerRef: "existing", kind: "e2b", botId: "bot" },
+      { argv: ["python3", "script.py"] },
+      context,
+    )) {
+      events.push(event);
+      if (event.type === "stdout") seenLive();
+    }
+    expect(events).toEqual([
+      { type: "stdout", data: "marker\n" },
+      { type: "exit", code: 0 },
+    ]);
+  });
+
   it("still throws unknown execution errors even when they carry a result property", async () => {
     const failure = Object.assign(new Error("transport unavailable"), {
       result: { exitCode: 0, stdout: "", stderr: "" },
@@ -808,6 +838,35 @@ describe("E2B computer backend", () => {
     await expect(provider.connectScreen(computer, { view: "stream" }, context)).rejects.toThrow(
       Error,
     );
+  });
+
+  it("installs the desktop packages at the first screen, not when the computer starts", async () => {
+    const respond = desktopCommandResponder();
+    const command = vi.fn(
+      async (value: string) => respond(value) ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
+    const desktop = {
+      sandboxId: "fresh-e2b-box",
+      commands: { run: command },
+      getHost: (port: number) => `${port}-desktop.test`,
+      files: { makeDir: vi.fn(async () => true) },
+    } as unknown as Sandbox;
+    const sdk = { connect: vi.fn(async () => desktop) } as unknown as E2BSandboxSdk;
+    const provider = new E2BSandboxProvider("test-key", sdk);
+    const computer = {
+      id: "fresh-e2b-box",
+      providerRef: "fresh-e2b-box",
+      kind: "e2b" as const,
+      botId: "bot",
+    };
+    const installs = () => command.mock.calls.filter(([value]) => value.includes("Xvfb:xvfb"));
+
+    // Staging: a file write on a cold computer spent 12.8 s on apt for a screen it never opened.
+    await provider.prepare(computer, context);
+    expect(installs()).toHaveLength(0);
+    await provider.connectScreen(computer, { view: "stream" }, context);
+    await provider.connectScreen(computer, { view: "stream" }, context);
+    expect(installs()).toHaveLength(1);
   });
 
   it("prepares a reused computer idempotently", async () => {

@@ -1,6 +1,5 @@
 import type { Actor } from "@rakazo/contracts";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { guardRecruitingTurnEnd } from "../../adapters/src/turn-end-guard.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "./client.js";
 import { createDb } from "./client.js";
 import * as recruiting from "./index.js";
@@ -217,52 +216,8 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await expect(
       recordRound([...keys("first").slice(0, 9), "linkedin:/in/jp azevedo"]),
     ).rejects.toThrow(/Saved people not yet in this round.*Jp Azevedo( \([^)]*\))? = jp-1/);
-    expect(
-      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } })).playbookStage,
-    ).toBe("feedback");
 
-    const sendUserMessage = vi.fn(async () => ({
-      messageId: "synthetic",
-      seq: 99,
-      taskId: "synthetic",
-      runId: null,
-    }));
-    const deps = {
-      prisma,
-      events: { sendUserMessage },
-      jobs: { enqueue: vi.fn() },
-    } as unknown as Parameters<typeof guardRecruitingTurnEnd>[0];
-    const guardInput = {
-      run: { id: runId, spaceId, threadId, botId, userId, trigger: "user" },
-      roleId,
-      blocks: [{ kind: "text" as const, text: "本轮十人已展示在校准面板。" }],
-      handedOff: false,
-      pendingApproval: false,
-      postAssistant: vi.fn(),
-    };
-    // The actual save transaction produced the feedback panel and completed native effect.
-    await expect(guardRecruitingTurnEnd(deps, guardInput)).resolves.toEqual({
-      action: "ended",
-      classification: "question",
-    });
-    expect(sendUserMessage).not.toHaveBeenCalled();
-    // A later human turn must not stop on an old panel from a different run.
-    await expect(
-      guardRecruitingTurnEnd(deps, {
-        ...guardInput,
-        run: { ...guardInput.run, id: `${runId}-later` },
-      }),
-    ).resolves.toMatchObject({ action: "continued" });
-
-    // Already returned before round 1, even though never shown: refused.
-    await expect(
-      recordRound([...keys("first").slice(0, 8), "spare-0", "spare-1"]),
-    ).rejects.toBeInstanceOf(recruiting.RecruitingCalibrationRoundError);
     await savePage([...keys("second").slice(0, 8)]);
-    await expect(
-      recordRound([...keys("second").slice(0, 8), "spare-0", "spare-1"]),
-    ).rejects.toThrow(/2 of these ten were already returned before round 1/);
-
     await savePage(keys("second").slice(8));
     const second = await recordRound(keys("second"));
     expect(second).toMatchObject({ status: "saved", round: 2 });
@@ -276,9 +231,14 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       name: "Person second-0",
       linkedinUrl: "https://www.linkedin.com/in/second-0",
     });
+    // Staging 11-15: a grade saved after the round named another employer, and the page showed it
+    // while the round's list in chat showed the employer the search returned.
+    await savePage([keys("second")[0] ?? ""], ["Renamed by a later grade"]);
+    const again = await recruiting.readRecruitingCalibrationRound(prisma, actor, { threadId });
+    expect(again.round?.candidates[0]?.name).toBe("Person second-0");
   });
 
-  it("accepts a round from the recruiter's own words and then refuses more rounds", async () => {
+  it("accepts a round from the recruiter's own words and still records later rounds", async () => {
     const quote = "第 2 轮这批人可以，开始扩大搜索。";
     const sourceMessageId = await liveRun(quote);
     const approved = await recruiting.approveRecruitingCalibrationRoundFromMessage(prisma, actor, {
@@ -289,8 +249,6 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       expectedRoleRevision: 1,
     });
     expect(approved).toMatchObject({ round: 2, already: false });
-    const role = await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } });
-    expect(role.playbookStage).toBe("scale");
     const round = await prisma.recruitingCalibrationRound.findFirstOrThrow({
       where: { roleId, round: 2 },
     });
@@ -302,20 +260,7 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       recruiting.approveRecruitingCalibrationRound(prisma, actor, { threadId, round: 2 }),
     ).resolves.toMatchObject({ round: 2 });
     await savePage(keys("third"));
-    await expect(recordRound(keys("third"))).rejects.toThrow(/already approved/);
-  });
-
-  it("refuses a quote the recruiter did not write", async () => {
-    const sourceMessageId = await liveRun("第 3 位不太合适");
-    await expect(
-      recruiting.approveRecruitingCalibrationRoundFromMessage(prisma, actor, {
-        runId,
-        sourceMessageId,
-        intent: { basis: "direct", quote: "可以，开始扩大搜索" },
-        roleId,
-        expectedRoleRevision: 1,
-      }),
-    ).rejects.toThrow();
+    await expect(recordRound(keys("third"))).resolves.toMatchObject({ round: 3 });
   });
 
   it("counts the recruiter's latest verdict per person for each round", async () => {
@@ -369,9 +314,34 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       shown: 10,
       goodExample: 2,
       notFit: 2,
-      accepted: true,
+      accepted: false,
     });
+    // Only the round the recruiter accepted in their own words (round 2, above) is accepted.
+    expect(quality.rounds[1]).toMatchObject({ round: 2, accepted: true });
     expect(quality).toMatchObject({ goodExample: 2, notFit: 4 });
+
+    // The one record of what the recruiter saw: each person's round and latest verdict.
+    const seen = await recruiting.readRecruiterSeen(prisma, actor, {
+      roleId,
+      candidateKeys: ["first-0", "first-2", "second-0", "spare-0"],
+    });
+    expect(seen.latestRound).toMatchObject({ round: 3, people: expect.any(Number) });
+    expect(seen.people.get("first-0")).toMatchObject({ round: 1, verdict: "not_fit" });
+    expect(seen.people.get("first-2")).toMatchObject({ round: 1, verdict: "good_example" });
+    expect(seen.people.get("second-0")).toMatchObject({ round: 2, verdict: "not_fit" });
+    expect(seen.people.get("spare-0")).toMatchObject({ verdict: "not_fit" });
+    expect(seen.people.get("spare-0")?.round).toBeUndefined();
+
+    // Results' own marks for the whole role, whichever round is read.
+    const marks = await recruiting.readRecruitingResultsMarks(prisma, actor, { roleId });
+    expect(
+      Object.fromEntries(marks.map((person) => [person.candidateKey, [person.round, person.mark]])),
+    ).toEqual({
+      "first-0": [1, "not a fit"],
+      "first-1": [1, "not a fit"],
+      "second-0": [2, "not a fit"],
+      "spare-0": [undefined, "not a fit"],
+    });
 
     // What the praised and turned-down people share, from saved profiles or their search rows.
     await prisma.recruitingSavedProfile.create({

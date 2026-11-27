@@ -23,6 +23,7 @@ import type {
   ScreenSession,
   TerminalRequest,
 } from "@rakazo/adapter-kit";
+import { ByteLimitError } from "@rakazo/adapter-kit";
 import { boundedSandboxCommandTimeoutMs } from "@rakazo/core";
 import { screenSessionKey } from "./computer-screens.js";
 import { normalizeWorkspacePath, shellQuote, workspacePath } from "./computer-support.js";
@@ -262,7 +263,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     if (options?.maxBytes !== undefined) {
       const info = await sandbox.fs.getFileDetails(target);
       if (info.size > options.maxBytes) {
-        throw new Error(`computer file exceeds ${options.maxBytes} bytes`);
+        throw new ByteLimitError(`computer file exceeds ${options.maxBytes} bytes`);
       }
     }
     const content = await sandbox.fs.downloadFile(target);

@@ -15,6 +15,7 @@ export const DE_MESSAGES: Record<string, string> = {
   "Address change requested": "Adressänderung angefordert",
   "View email": "E-Mail anzeigen",
   "Hide email": "E-Mail ausblenden",
+  "The candidate asked what you haven't told me. Answer it in the reply:": "Die Person hat gefragt, was Sie mir noch nicht gesagt haben. Beantworten Sie es in der Antwort:",
   "Reply draft": "Antwortentwurf",
   "Needs approval": "Freigabe erforderlich",
   Discarded: "Verworfen",
@@ -65,7 +66,6 @@ export const DE_MESSAGES: Record<string, string> = {
   "Reconnect your model to continue.": "Verbinde dein Modell erneut, um fortzufahren.",
   "Stop everything": "Alles stoppen",
   "Stop following": "Nicht mehr verfolgen",
-  "Stop research updates": "Forschungsupdates stoppen",
   "Task transcript": "Aufgabenverlauf",
   "The computer could not start. Reset it to continue.":
     "Der Computer konnte nicht starten. Setze ihn zurück, um fortzufahren.",
@@ -874,7 +874,6 @@ export const DE_MESSAGES: Record<string, string> = {
   "Worked for {duration}": "Gearbeitet: {duration}",
   "Step failed": "Schritt fehlgeschlagen",
   "Finding candidates": "Kandidaten finden",
-  "Checking candidates": "Kandidaten prüfen",
   "Preparing outreach": "Ansprache vorbereiten",
   "Scheduling interviews": "Interviews planen",
   "Delegated task": "Übertragene Aufgabe",

@@ -261,6 +261,30 @@ describe("executeRecruitingProfilesTool", () => {
   });
 });
 
+describe("prepareRecruitingProfileRows", () => {
+  // Staging 11-14: save_search failed twice with "invalid input syntax for type json". An emoji
+  // cut in half (a lone surrogate) cannot be stored in a JSON column.
+  it("keeps every saved string storable, even an emoji cut in half", () => {
+    const [row] = prepareRecruitingProfileRows([
+      {
+        name: "Ada Example",
+        linkedin_url: "https://www.linkedin.com/in/ada-example",
+        current_title: `${"a".repeat(299)}😀`.slice(0, 300),
+        snippet: `Kafka in production ${String.fromCharCode(0xd83d)}`,
+      },
+    ]);
+    const strings: string[] = [];
+    JSON.stringify(row, (_key, value) => {
+      if (typeof value === "string") strings.push(value);
+      return value;
+    });
+    expect(strings.length).toBeGreaterThan(2);
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    expect(strings.filter((value) => lone.test(value))).toEqual([]);
+    expect(row).toMatchObject({ snippet: "Kafka in production " });
+  });
+});
+
 describe("peopleFromSearch", () => {
   it("reads the people a finished agent run returned, with their education", () => {
     const body = {
@@ -279,6 +303,9 @@ describe("peopleFromSearch", () => {
               location: "New York, NY",
               education: ["State University | BS, Computer Science | 2012 – 2016"],
               evidence: "Built the ledger service in Go.",
+              match_score: 91,
+              match_tier: "Strong",
+              fit_reasons: "Six years on payment ledgers in Go.",
             },
             { name: "No Link", linkedin_url: null, evidence: "n/a" },
           ],
@@ -295,6 +322,10 @@ describe("peopleFromSearch", () => {
         location: "New York, NY",
         snippet: "Built the ledger service in Go.",
         education: "State University | BS, Computer Science | 2012 – 2016",
+        // The run graded her as it found her: the grade and its reason stay on the row.
+        match_score: 91,
+        match_tier: "Strong",
+        why_recommended: "Six years on payment ledgers in Go.",
       },
     ]);
     const running = { id: "agent_run_1", status: "running", outputReady: false };
@@ -439,6 +470,7 @@ describe("peopleFromSearch", () => {
           image:
             "https://media.licdn.com/dms/image/v2/X/profile-displayphoto-shrink_200_200/0/1?e=1",
           highlights: ["Ran a 120-person distribution center"],
+          summary: "Fits: runs a large distribution center in Atlanta.",
           entities: [
             {
               type: "person",
@@ -474,6 +506,7 @@ describe("peopleFromSearch", () => {
         current_title: "Warehouse Manager",
         current_company: "Delta Freight",
         location: "Atlanta Metropolitan Area",
+        why_recommended: "Fits: runs a large distribution center in Atlanta.",
         snippet: "Ran a 120-person distribution center",
         experience:
           "Warehouse Manager | Delta Freight |  | Feb 2020 – Present\nSupervisor | Old Co",

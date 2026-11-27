@@ -427,11 +427,10 @@ export function PluginsOverlay({
     const recipients = new Map<string, string[] | undefined>();
     if (endpoint === GMAIL_MCP_ENDPOINT) {
       recipients.set(coordinatorBotId, GMAIL_READ_TOOLS);
-      if (recruitingBotIds?.scheduling)
-        recipients.set(recruitingBotIds.scheduling, GMAIL_DRAFT_TOOLS);
-      // Outreach sends from the recruiter's own Gmail; every send waits for its own card.
-      if (recruitingBotIds?.outreach)
-        recipients.set(recruitingBotIds.outreach, [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS]);
+      // Outreach sends from the recruiter's own Gmail and Scheduling proposes times from it;
+      // every send waits for its own card.
+      for (const botId of [recruitingBotIds?.scheduling, recruitingBotIds?.outreach])
+        if (botId) recipients.set(botId, [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS]);
     } else if (endpoint === GOOGLE_CALENDAR_ENDPOINT) {
       recipients.set(coordinatorBotId, GOOGLE_CALENDAR_READ_TOOLS);
       if (recruitingBotIds?.scheduling)

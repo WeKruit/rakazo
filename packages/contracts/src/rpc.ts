@@ -109,12 +109,12 @@ import {
 } from "./domain.js";
 import {
   AskAnswerSchema,
-  AskBlockSchema,
   CanvasJsonSchema,
   ComputerCommandSchema,
   ProductEventSchema,
+  UiLocaleTag,
 } from "./events.js";
-import { Id, IsoDate, RunStatus } from "./ids.js";
+import { Id, IsoDate } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
@@ -123,7 +123,6 @@ import {
 import { McpOAuthConfigInput } from "./mcp.js";
 import { MessageReactionSchema } from "./reactions.js";
 import {
-  ConfirmRecruitingBriefInput,
   CreateRecruitingCandidateNoteInput,
   CreateRecruitingReminderInput,
   CreateRecruitingRoleInput,
@@ -143,8 +142,6 @@ import {
   ReadRecruitingSourceInput,
   ReadRecruitingViewInput,
   RecordRecruitingProfileViewInput,
-  RecruitingAssessmentAskTargetSchema,
-  RecruitingAssessmentSchema,
   RecruitingCalibrationRoundOutput,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateNoteSchema,
@@ -171,7 +168,6 @@ import {
   RecruitingRoleCandidatesOutputSchema,
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
-  RecruitingRoleSetupSchema,
   ReviseRecruitingRoleInput,
   SetRecruitingCandidateShortlistInput,
   SetRecruitingCandidateShortlistOutput,
@@ -245,49 +241,6 @@ const CompanySiteAnswer = z.object({
   retry: z.boolean().optional(),
 });
 
-export const RecruitingAssessmentSnapshotSchema = z
-  .strictObject({
-    assessment: RecruitingAssessmentSchema,
-    roleRevision: RecruitingRoleRevisionSchema,
-    isCurrent: z.boolean(),
-    sourceMessageTargets: z.array(
-      z.strictObject({
-        messageId: Id,
-        threadId: Id,
-        target: z.union([z.strictObject({ botId: Id }), z.strictObject({ groupId: Id })]),
-      }),
-    ),
-  })
-  .refine(
-    (snapshot) =>
-      snapshot.roleRevision.id === snapshot.assessment.roleRevisionId &&
-      snapshot.roleRevision.roleId === snapshot.assessment.roleId,
-    {
-      message: "Assessment role revision must match its saved snapshot",
-      path: ["roleRevision"],
-    },
-  );
-export type RecruitingAssessmentSnapshot = z.infer<typeof RecruitingAssessmentSnapshotSchema>;
-
-export const RecruitingQuestionSchema = z.strictObject({
-  effectId: RecruitingId,
-  roleId: RecruitingId,
-  roleRevisionId: RecruitingId,
-  target: RecruitingAssessmentAskTargetSchema,
-  threadId: Id,
-  botId: Id,
-  groupId: Id.nullable(),
-  runId: Id,
-  messageId: Id,
-  askIndex: z.number().int().nonnegative(),
-  block: AskBlockSchema,
-  expiresAt: z.string().nullable(),
-  runStatus: RunStatus,
-  isCurrent: z.boolean(),
-  canAnswer: z.boolean(),
-});
-export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
-
 export const MailReplyMessageFilterSchema = z
   .strictObject({
     sourceId: Id,
@@ -330,6 +283,8 @@ const threadSendInput = threadTarget
     text: z.string().optional(),
     correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
     recruitingContext: RecruitingChatContextSchema.optional(),
+    /** The sender's interface language, so replies can name controls as the screen shows them. */
+    uiLocale: UiLocaleTag.optional(),
     artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
     addressing: z.enum(["coordinator", "mentions"]).optional(),
     /** Steer the current reply, or wait until it has finished speaking. */
@@ -339,6 +294,8 @@ const threadSendInput = threadTarget
       .array(z.union([Id, structuredMentionTarget]))
       .max(64)
       .optional(),
+    /** Mentioned connectors that have no connection row yet, so no mention id: by display name. */
+    connectorNames: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
     replyToMessageId: Id.optional(),
     replyQuote: z.string().trim().min(1).max(REPLY_QUOTE_MAX_LENGTH).optional(),
     clientNonce: z.string().min(1).max(200).optional(),
@@ -500,6 +457,10 @@ export const appContract = {
         }),
       )
       .output(z.object({ userId: Id, mailbox: z.string() })),
+    /** Test environment only: new outside connections fail for this long, as in a network blip. */
+    networkBlip: oc
+      .input(z.object({ seconds: z.number().int().min(1).max(300) }))
+      .output(z.object({ until: z.string() })),
   },
   /**
    * Deployment-owner product updates. When the Compose updater sidecar is reachable, these proxy
@@ -728,7 +689,7 @@ export const appContract = {
       .input(
         threadTarget.safeExtend({
           id: Id,
-          kind: z.enum(["research", "cloud_agent", "run", "agent_run"]),
+          kind: z.enum(["cloud_agent", "run", "agent_run"]),
         }),
       )
       .output(z.object({ ok: z.literal(true) })),
@@ -907,7 +868,6 @@ export const appContract = {
         ),
       )
       .output(RecruitingRoleCampaignSchema),
-    roleSetup: oc.input(threadTarget).output(RecruitingRoleSetupSchema),
     /** The latest calibration review round of the thread's role (the ten people it showed). */
     calibrationRound: oc.input(threadTarget).output(RecruitingCalibrationRoundOutput),
     /** The recruiter accepts that round; the role moves on to finding more people. */
@@ -925,7 +885,7 @@ export const appContract = {
           kind: z.literal("text"),
           text: z.string(),
           start: z.number().int().nonnegative(),
-          end: z.number().int().positive(),
+          end: z.number().int().nonnegative(),
         }),
         z.strictObject({ kind: z.literal("report"), report: RecruitingCandidateReportSchema }),
       ]),
@@ -1006,9 +966,6 @@ export const appContract = {
     setCandidateShortlist: oc
       .input(SetRecruitingCandidateShortlistInput)
       .output(SetRecruitingCandidateShortlistOutput),
-    listQuestions: oc
-      .input(z.strictObject({ threadId: Id, roleId: RecruitingId }).safeExtend(listPageFields))
-      .output(z.strictObject({ questions: z.array(RecruitingQuestionSchema) })),
     createRole: oc.input(CreateRecruitingRoleInput).output(recruitingWorkspace),
     bindRole: oc
       .input(z.strictObject({ threadId: RecruitingId, roleId: RecruitingId.nullable() }))
@@ -1047,20 +1004,7 @@ export const appContract = {
         .input(DeleteRecruitingCandidateNoteInput)
         .output(z.strictObject({ ok: z.literal(true) })),
     },
-    confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
     editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),
-    listAssessments: oc
-      .input(z.strictObject({ roleId: RecruitingId }).safeExtend(listPageFields))
-      .output(z.array(RecruitingAssessmentSnapshotSchema)),
-    getAssessment: oc
-      .input(
-        z.strictObject({
-          roleId: RecruitingId,
-          candidateKey: RecruitingId,
-          version: z.number().int().positive().optional(),
-        }),
-      )
-      .output(RecruitingAssessmentSnapshotSchema.nullable()),
     listResearch: oc
       .input(z.strictObject({ roleId: RecruitingId }).safeExtend(listPageFields))
       .output(
@@ -1522,6 +1466,8 @@ export const appContract = {
       }),
     ),
     costs: oc.output(UsageCostsSchema),
+    /** Credits left, alone: the low-credit notice reads it on every page. */
+    remaining: oc.output(z.object({ remaining: z.number().nullable() })),
     internalCosts: oc.output(InternalUsageCostsSchema),
     workMetrics: oc.output(WorkMetricsSchema),
   },

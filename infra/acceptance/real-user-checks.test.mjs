@@ -124,6 +124,29 @@ test("an English email draft inside a Chinese reply is not a language switch", (
   );
 });
 
+test("a bare English template (no To or Subject line) in reply to Chinese is not a language switch", () => {
+  assert.deepEqual(
+    conversationChecks([
+      user("等下，base改70-90万，邮件里加每周五remote"),
+      bot(
+        "Hi {{firstName}},\n\nI'm reaching out about a Staff Frontend Engineer opportunity in Beijing, with remote work every Friday.\n\nWould you be open to a brief conversation?\n\nBest,\nAlex Morgan",
+      ),
+    ]),
+    [],
+  );
+});
+
+test("an English draft whose greeting runs on is the candidate's, not the reply's language", () => {
+  const draft = "Hi Li Wei, I'm hiring for a Staff ML role based in Beijing. Would you be open to a chat?\n\nBest,\nAlex";
+  const recruiter = user("我不能发 InMail 的话，你能做什么？");
+  assert.deepEqual(conversationChecks([recruiter, bot(`可直接粘贴：\n\n${draft}`)]), []);
+  assert(
+    conversationChecks([recruiter, bot(`Here is a draft you can paste:\n\n${draft}`)]).some((failure) =>
+      failure.startsWith("language"),
+    ),
+  );
+});
+
 test("an agent's brief shown to the recruiter fails", () => {
   assert(
     conversationChecks([
@@ -249,7 +272,7 @@ test("a blocker that says what to send next is not a dead end", () => {
 test("a second round of people may repeat the round header and next-step card, and S3 in evidence is AWS", () => {
   const round = (name) =>
     bot(
-      `10 people this round:\n1. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Data Engineer\n   > Built Glue ETL pipelines on S3 Parquet tables.`,
+      `1 person this round:\n1. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Data Engineer\n   > Built Glue ETL pipelines on S3 Parquet tables.`,
     );
   const card = bot(
     "What's next? I'd find 150 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
@@ -298,6 +321,20 @@ test("answering with the recruiter's own words is not a repeat; the same acknowl
   assert.deepEqual(failures, ['repeats itself: "我会按这个偏好处理候选人邮件。"']);
 });
 
+test("the recap a recruiter asks for may restate a sentence; an unasked repeat still fails", () => {
+  const changed = "已将年薪调整为人民币70万–90万元，并加入每周五远程办公。";
+  const before = [
+    user("base改70-90万，另外加一条每周五remote"),
+    bot(`${changed}\n\nSubject: Staff Frontend Engineer`),
+    user("一句话说下改了什么"),
+    bot(changed),
+  ];
+  const repeats = (messages) =>
+    conversationChecks(messages).filter((failure) => failure.startsWith("repeats"));
+  assert.deepEqual(repeats(before), []);
+  assert.equal(repeats([...before, user("好的"), bot(changed)]).length, 1);
+});
+
 test("a lone question mark has no language, so either reply language passes", () => {
   for (const reply of ["你想问哪个职位？", "Which role do you mean?"])
     assert(!conversationChecks([user("？"), bot(reply)]).some((f) => f.startsWith("language")));
@@ -330,6 +367,28 @@ test("a factual answer with a caveat is not a dead end", () => {
   assert(
     !deadEnd(bot("结果会保留来源和证据，资料缺失或无法核实时会标明。覆盖范围取决于公开资料。")),
   );
+  assert(deadEnd(bot("现在还不能发送邮件，因为没有可用的发件邮箱。")));
+  // "Nothing yet" describes where things stand; it blocks nothing (staging 9e15e896, 5fcecbb8).
+  assert(
+    !deadEnd(
+      bot(
+        "候选人的邮件回复会在 **Inbox** 里，点开对方姓名即可查看。目前我们只是写好了外联模板，还没有发送邮件，因此还没有候选人的回复。",
+      ),
+    ),
+  );
+  assert(!deadEnd(bot("目前还没有已建立的岗位，所以暂时没有候选人回复可查看。")));
+});
+
+test("a send on its way with the time it will be out is not a dead end", () => {
+  // The mail service's real pacing, said truthfully with the latest time (branch 80b80e6b).
+  assert(
+    !deadEnd(
+      bot(
+        "Ethan Park 和 Ada Chen 的首封邮件都已进入发送队列，正在发送途中；邮件服务会按自己的节奏启动新邮件，无法通过再次发送加快。两封预计最迟约 **61 分钟内**发出。",
+      ),
+    ),
+  );
+  assert(!deadEnd(bot("Both emails are queued and can't go faster; they'll be out by 3:40 pm.")));
   assert(deadEnd(bot("现在还不能发送邮件，因为没有可用的发件邮箱。")));
 });
 
@@ -400,7 +459,7 @@ test("the same unverified label under several people in a Chinese round is not a
   assert.deepEqual(
     conversationChecks([
       user("对了，远程也可以，不一定要在西雅图"),
-      bot(`本轮 10 人：\n\n${person(1, "Ann")}\n${person(2, "Bob")}\n${person(3, "Cy")}`),
+      bot(`本轮 3 人：\n\n${person(1, "Ann")}\n${person(2, "Bob")}\n${person(3, "Cy")}`),
     ]),
     [],
   );
@@ -461,6 +520,22 @@ test("a send card's recipients are its To list, never the sending mailbox or the
   assert.deepEqual(recipientsOf("Confirm sending email → wei@test.example", ""), [
     "wei@test.example",
   ]);
+  // A reply card names its recipient on the To line; the From mailbox is never a recipient.
+  assert.deepEqual(
+    recipientsOf(
+      "Confirm reply",
+      "To: ethan@test.example\nFrom: me@mail.example\nSubject: Re: Seattle role",
+    ),
+    ["ethan@test.example"],
+  );
+  // A calendar invitation goes to every guest on its Guests line.
+  assert.deepEqual(
+    recipientsOf(
+      "Confirm interview booking",
+      "Guests: Ethan Park <ethan@test.example>, priya@test.example\nWhen: Tue, Dec 1, 2026",
+    ),
+    ["ethan@test.example", "priya@test.example"],
+  );
 });
 
 test("cardAnswer sends a button id, a filled form, or the typed text", () => {
@@ -485,6 +560,22 @@ test("cardAnswer sends a button id, a filled form, or the typed text", () => {
   assert.deepEqual(cardAnswer(form, "会说就行 5年"), {
     action: "accept",
     content: { level: "会说", years: 5, note: "会说就行 5年" },
+  });
+  // 11-26: "搬迁最高$10k" on a 提供/不提供 card was sent as the first choice.
+  assert.equal(cardAnswer(form, "看情况，最多三年"), null);
+  // 11-27: an email + time zone card got the whole answer in both boxes and refused it.
+  const contact = {
+    actions: [],
+    schema: {
+      properties: {
+        priya_email: { type: "string", title: "Priya 的工作邮箱", format: "email" },
+        priya_time_zone: { type: "string", title: "时区" },
+      },
+    },
+  };
+  assert.deepEqual(cardAnswer(contact, "priya_email: p@example.test\n时区: America/Chicago"), {
+    action: "accept",
+    content: { priya_email: "p@example.test", priya_time_zone: "America/Chicago" },
   });
 });
 
@@ -512,5 +603,79 @@ test("an unfilled placeholder in a reply fails, a merge field does not", () => {
   assert.doesNotMatch(
     failures("草稿：\nHi {{firstName}},\nI'm reaching out"),
     /unfilled placeholder/,
+  );
+});
+
+test("a role chat's reply follows the recruiter's newest message in any chat", () => {
+  // 11-21 change-while-opening: an English JD opened the role, then a Chinese aside went to Kruit's
+  // chat; the product answers in the newest message's language, so the role's Chinese list is right.
+  const at = (message, time) => ({ ...message, at: `2026-11-21T10:${time}Z` });
+  const jd = at(user("Senior Data Engineer, Seattle, 6+ years, Spark and Kafka"), "00:00");
+  const aside = at(user("对了，远程也可以，不一定要在西雅图"), "00:05");
+  const list = at(bot("本轮 10 人：张伟、李娜等，都做过 Spark 和 Kafka。"), "01:00");
+  const language = (failures) => failures.some((f) => f.startsWith("language"));
+  assert(!language(conversationChecks([jd, list], { recruiter: [jd, aside] })));
+  assert(language(conversationChecks([jd, list], { recruiter: [jd] })));
+  // 11-25: the role chat's copy of the JD lands just after the aside; it is not newer words.
+  const copy = at(user(jd.text), "00:06");
+  assert(!language(conversationChecks([copy, list], { recruiter: [copy, jd, aside] })));
+  // A message keeps the time its row was created; its words may come later, until the chat's next
+  // message (the quick first line is replaced in place by the answer).
+  const first = at(bot("已开始搜索西雅图的数据工程师。"), "00:04");
+  const later = at(bot("第一批结果出来了。"), "00:09");
+  assert(!language(conversationChecks([jd, first, later], { recruiter: [jd, aside] })));
+  assert(language(conversationChecks([jd, first], { recruiter: [jd] })));
+});
+
+test("a card answer does not set the recruiter's language", () => {
+  // 11-25 big-ask-split: a Chinese recruiter's role chat holds "allow", which the product reads
+  // as theirs; its Chinese replies were flagged.
+  const at = (message, time) => ({ ...message, at: `2026-11-25T02:${time}Z` });
+  const chat = [
+    at(user("找60个 Senior Backend Engineer，Go或Java，人在新加坡"), "53:15"),
+    at(user("allow"), "55:07"),
+    at(bot("已保存并检查到 57 名 Strong 或 Promising 候选人，尚差 3 名。"), "59:00"),
+  ];
+  assert(!conversationChecks(chat).some((f) => f.startsWith("language")));
+  assert(!conversationChecks(chat, { recruiter: chat.filter((m) => m.role === "user") }).some((f) => f.startsWith("language")));
+});
+
+test("the number Kruit says is the number of people listed", () => {
+  const row = (n) => `${n}. **[P${n}](https://www.linkedin.com/in/p${n})** · Engineer`;
+  const round = (said, from, to) =>
+    bot(
+      `本轮 ${said} 人：\n\n${Array.from({ length: to - from + 1 }, (_, i) => row(from + i)).join("\n")}`,
+    );
+  const count = (failures) => failures.filter((f) => f.startsWith("count"));
+  assert.deepEqual(
+    count(
+      conversationChecks([
+        user("找20个后端"),
+        round(10, 1, 10),
+        bot(`${round(10, 11, 20).text}\n\n累计展示 20 人，你淘汰了 2 人，计入 18 人。`),
+      ]),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    count(
+      conversationChecks([
+        user("找20个后端"),
+        round(10, 1, 12),
+        bot(`${round(10, 13, 22).text}\n\n累计展示 20 人。`),
+      ]),
+    ),
+    ["count: round says 10 people and lists 12", "count: says 20 shown, this chat has listed 22"],
+  );
+  assert.deepEqual(
+    count(
+      conversationChecks([
+        user("找10个后端"),
+        round(10, 1, 10),
+        bot(`${round(2, 11, 12).text}\n\n累计展示 12 人，你淘汰了 2 人，计入 10 人。`),
+        bot("目前计入 8 人，还需 2 位。"),
+      ]),
+    ),
+    ["count: says 8 counted, its newest list said 10"],
   );
 });

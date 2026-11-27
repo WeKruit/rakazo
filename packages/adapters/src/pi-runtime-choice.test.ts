@@ -5,7 +5,6 @@ const fakeAgentState = vi.hoisted(() => ({
   options: ["Berlin", "Seoul", "Toronto"],
   question: "Which city should I use?",
   form: undefined as Record<string, unknown> | undefined,
-  plannedSearches: undefined as string[] | undefined,
   result: undefined as unknown,
   steered: [] as unknown[],
   tools: [] as Array<{
@@ -32,9 +31,6 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
       if (!askUser) throw new Error("ask_user tool missing");
       fakeAgentState.result = await askUser.execute("call-choice-1", {
         question: fakeAgentState.question,
-        ...(fakeAgentState.plannedSearches
-          ? { plannedSearches: fakeAgentState.plannedSearches }
-          : {}),
         ...(fakeAgentState.form
           ? { requestedSchema: fakeAgentState.form }
           : { options: fakeAgentState.options }),
@@ -114,20 +110,7 @@ describe("Pi choice asks", () => {
     fakeAgentState.tools = [];
     fakeAgentState.options = ["Berlin", "Seoul", "Toronto"];
     fakeAgentState.form = undefined;
-    fakeAgentState.plannedSearches = undefined;
     fakeAgentState.question = "Which city should I use?";
-  });
-
-  it("carries the searches planned on the last intake question to the ask", async () => {
-    fakeAgentState.plannedSearches = ["warehouse supervisor Newark NJ", "sort lead Edison NJ"];
-    const events: AgentRuntimeEvent[] = [];
-    for await (const event of new PiAgentRuntime().run(runRequest, runContext)) events.push(event);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: "ask",
-        plannedSearches: ["warehouse supervisor Newark NJ", "sort lead Edison NJ"],
-      }),
-    );
   });
 
   it("emits the standard multi-field schema on the native ask and pauses", async () => {
@@ -180,22 +163,6 @@ describe("Pi choice asks", () => {
     expect(events.some((event) => event.type === "ask")).toBe(false);
   });
 
-  it.each([
-    "Which city should I use? And what salary range?",
-    "Please answer:\n1. Which city\n2. Which salary range",
-    // A Chinese card counted no question marks, so two questions went out on one card.
-    "这个岗位在哪个城市？薪资范围是多少？",
-    "请回答：\n1、城市\n2、薪资范围",
-  ])("refuses more than one question in one ask: %s", async (question) => {
-    fakeAgentState.question = question;
-    const runtime = new PiAgentRuntime();
-    const events: AgentRuntimeEvent[] = [];
-    await expect(async () => {
-      for await (const event of runtime.run(runRequest, runContext)) events.push(event);
-    }).rejects.toThrow("Ask one question at a time");
-    expect(events.some((event) => event.type === "ask")).toBe(false);
-  });
-
   it("answers a question the conversation already answered instead of asking again", async () => {
     const runtime = new PiAgentRuntime();
     const events: AgentRuntimeEvent[] = [];
@@ -203,17 +170,6 @@ describe("Pi choice asks", () => {
     for await (const event of runtime.run(request, runContext)) events.push(event);
     expect(events.some((event) => event.type === "ask")).toBe(false);
     expect(JSON.stringify(fakeAgentState.result)).toContain("already replied after this question");
-  });
-
-  it("gives the run's question check the planned searches", async () => {
-    fakeAgentState.plannedSearches = ["warehouse supervisor Newark NJ", "sort lead Edison NJ"];
-    const beforeAsk = vi.fn(async () => undefined);
-    const runtime = new PiAgentRuntime();
-    for await (const _event of runtime.run({ ...runRequest, beforeAsk }, runContext));
-    expect(beforeAsk).toHaveBeenCalledWith("Which city should I use?", [
-      "warehouse supervisor Newark NJ",
-      "sort lead Edison NJ",
-    ]);
   });
 
   it("returns the run's own reason instead of a card the run may not ask yet", async () => {

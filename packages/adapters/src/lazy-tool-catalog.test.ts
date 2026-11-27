@@ -142,7 +142,7 @@ describe("lazy tool catalog", () => {
     const result = searchCatalog(entries, { group: "gmail", query: "send mail, read draft" });
     const names = "tools" in result ? result.tools.map((tool) => tool.name) : [];
     expect(names.slice(0, 2).sort()).toEqual(["mcp__gmail__read", "mcp__gmail__send"]);
-    expect(searchCatalog(entries, { query: "nothing here at all" })).toEqual({ tools: [] });
+    expect(searchCatalog(entries, { query: "nothing here at all" })).toMatchObject({ tools: [] });
   });
 
   it("ranks the tool that matches most of a long query above one matching a single common word", () => {
@@ -170,7 +170,17 @@ describe("lazy tool catalog", () => {
 
   it("returns an empty catalog as an empty tool list", () => {
     expect(catalogEntries([])).toEqual([]);
-    expect(searchCatalog([], { query: "anything" })).toEqual({ tools: [] });
+    expect(searchCatalog([], { query: "anything" })).toMatchObject({ tools: [] });
+  });
+
+  // team-stuck-tell-me 11-16: asked to book an interview with no calendar connected, the
+  // scheduler searched, found nothing and asked the recruiter for times instead of offering it.
+  // Like Claude Code's and Pi's tool search: no match is an empty answer, with no instruction.
+  it("answers a search that finds nothing with no tools and nothing else", () => {
+    const result = searchCatalog(catalogEntries(multiGroupTools()), {
+      query: "get_availability create_calendar_event",
+    });
+    expect(result).toEqual({ tools: [] });
   });
 
   it("lists grouped names for an empty query without dumping schemas", () => {

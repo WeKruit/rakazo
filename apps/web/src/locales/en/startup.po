@@ -21,6 +21,10 @@ msgstr " (unread)"
 msgid " and {more} more"
 msgstr " and {more} more"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid " and {moreEmailed} more"
+msgstr " and {moreEmailed} more"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -201,10 +205,6 @@ msgstr "{count} years"
 #: src/lib/relative-time.ts
 msgid "{days}d ago"
 msgstr "{days}d ago"
-
-#: src/pages/recruiting/SendQueue.tsx
-msgid "{emailed} emailed"
-msgstr "{emailed} emailed"
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
@@ -468,14 +468,6 @@ msgid "All contacts"
 msgstr "All contacts"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal assessments"
-msgstr "All internal assessments"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "All internal verdicts"
-msgstr "All internal verdicts"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All matches"
 msgstr "All matches"
 
@@ -616,12 +608,12 @@ msgstr "Ask the assistant to draft this sequence or rewrite the email you have o
 
 #. placeholder {0}: workspace.role.title
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review all {count} shortlisted candidates for {0} using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
-msgstr "Ask the Reviewer to review all {count} shortlisted candidates for {0} using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
+msgid "Re-check all {count} shortlisted candidates for {0} against this role's latest requirements. Save the results; do not send outreach or change approvals."
+msgstr "Re-check all {count} shortlisted candidates for {0} against this role's latest requirements. Save the results; do not send outreach or change approvals."
 
 #: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "Ask the Reviewer to review only these {count} selected candidates using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
-msgstr "Ask the Reviewer to review only these {count} selected candidates using this role's saved criteria and evidence. Save the review results; do not send outreach or change approvals."
+msgid "Re-check only these {count} selected candidates against this role's latest requirements. Save the results; do not send outreach or change approvals."
+msgstr "Re-check only these {count} selected candidates against this role's latest requirements. Save the results; do not send outreach or change approvals."
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
@@ -843,6 +835,7 @@ msgid "Calibration round"
 msgstr "Calibration round"
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Can't reach the server."
 msgstr "Can't reach the server."
 
@@ -1185,6 +1178,10 @@ msgstr "Computers are available. Reload or open a bot to continue."
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 
+#: src/pages/recruiting/shared.tsx
+msgid "Configured"
+msgstr "Configured"
+
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "Confirm password"
@@ -1198,6 +1195,10 @@ msgstr "Confirm the URL is reachable from this browser session, then test again.
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Connect"
 msgstr "Connect"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Connect account"
+msgstr "Connect account"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Connect an app"
@@ -1283,10 +1284,6 @@ msgstr "Copy"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
 msgstr "Copy .env example"
-
-#: src/pages/WorkMetricsSettingsPanel.tsx
-msgid "Corrected after compaction"
-msgstr "Corrected after compaction"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Cost"
@@ -1825,6 +1822,10 @@ msgstr "Dimension"
 msgid "Direct MCP"
 msgstr "Direct MCP"
 
+#: src/pages/recruiting/shared.tsx
+msgid "Disabled"
+msgstr "Disabled"
+
 #: src/components/MailReplyAskContent.tsx
 msgid "Discard"
 msgstr "Discard"
@@ -2026,6 +2027,10 @@ msgstr "Email verification required"
 msgid "Email: {0}"
 msgstr "Email: {0}"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Emailed: {emailedNames}"
+msgstr "Emailed: {emailedNames}"
+
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Emails"
@@ -2034,6 +2039,10 @@ msgstr "Emails"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Employment rule"
 msgstr "Employment rule"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Enable for this role"
+msgstr "Enable for this role"
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Engagement"
@@ -2177,6 +2186,10 @@ msgstr "Filter by saved contact"
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Filter by saved contact…"
 msgstr "Filter by saved contact…"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Find candidates with Kruit"
+msgstr "Find candidates with Kruit"
 
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
@@ -2474,34 +2487,6 @@ msgstr "Interested"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Interjection picked up p50 · p95"
 msgstr "Interjection picked up p50 · p95"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment"
-msgstr "Internal assessment"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: current"
-msgstr "Internal assessment: current"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal assessment: outdated"
-msgstr "Internal assessment: outdated"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict"
-msgstr "Internal verdict"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: met"
-msgstr "Internal verdict: met"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unknown"
-msgstr "Internal verdict: unknown"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Internal verdict: unmet"
-msgstr "Internal verdict: unmet"
 
 #: src/pages/shell/ShellConversation.tsx
 msgid "Interrupted, resuming…"
@@ -2817,7 +2802,6 @@ msgid "Meeting completed"
 msgstr "Meeting completed"
 
 #: src/pages/RecruitingPanel.tsx
-#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Memory"
 msgstr "Memory"
 
@@ -2974,11 +2958,7 @@ msgstr "Name: {0}"
 msgid "Needs a closer look"
 msgstr "Needs a closer look"
 
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Needs a new review"
-msgstr "Needs a new review"
-
+#: src/components/InactiveAsk.tsx
 #: src/lib/roster-status.ts
 #: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
@@ -3037,10 +3017,6 @@ msgstr "Next"
 msgid "Next page"
 msgstr "Next page"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Next: {next}"
-msgstr "Next: {next}"
-
 #: src/pages/recruiting/AllContacts.tsx
 msgid "No"
 msgstr "No"
@@ -3073,6 +3049,7 @@ msgstr "No bots match"
 msgid "No breakdown"
 msgstr "No breakdown"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No candidates yet"
@@ -3125,10 +3102,6 @@ msgstr "No emails sent yet."
 msgid "No evidence provided."
 msgstr "No evidence provided."
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "No internal assessment"
-msgstr "No internal assessment"
-
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No loaded candidates match these filters."
 msgstr "No loaded candidates match these filters."
@@ -3137,7 +3110,7 @@ msgstr "No loaded candidates match these filters."
 msgid "No loaded candidates match this date filter."
 msgstr "No loaded candidates match this date filter."
 
-#: src/components/MailReplyAskContent.tsx
+#: src/components/InactiveAsk.tsx
 msgid "No longer active"
 msgstr "No longer active"
 
@@ -3296,6 +3269,10 @@ msgstr "Not a fit"
 msgid "Not a fit: {name}"
 msgstr "Not a fit: {name}"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Not emailed yet: {waitingNames}"
+msgstr "Not emailed yet: {waitingNames}"
+
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Not interested"
 msgstr "Not interested"
@@ -3363,6 +3340,7 @@ msgid "On a call with {0}"
 msgstr "On a call with {0}"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "On hold"
 msgstr "On hold"
@@ -3370,6 +3348,10 @@ msgstr "On hold"
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "Only empty spaces can be deleted. Delete its bots and groups first."
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Only the start of this email is shown."
+msgstr "Only the start of this email is shown."
 
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/shell/KruitDock.tsx
@@ -3588,6 +3570,7 @@ msgid "Partial saved-history coverage. Replies follow the original observed cont
 msgstr "Partial saved-history coverage. Replies follow the original observed contact cohort."
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Passed"
 msgstr "Passed"
@@ -3698,10 +3681,6 @@ msgstr "Preview only"
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Preview only · variables remain unfilled"
 msgstr "Preview only · variables remain unfilled"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. The complete message has not loaded."
-msgstr "Preview only. The complete message has not loaded."
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Preview steps"
@@ -3824,6 +3803,7 @@ msgstr "Recipients unavailable"
 msgid "Recipients will be associated with {0}."
 msgstr "Recipients will be associated with {0}."
 
+#: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Reconnect"
 msgstr "Reconnect"
@@ -3834,6 +3814,7 @@ msgid "Reconnect your model to continue."
 msgstr "Reconnect your model to continue."
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Reconnecting"
 msgstr "Reconnecting"
 
@@ -4264,10 +4245,6 @@ msgstr "Role for new sequence"
 msgid "Role pages"
 msgstr "Role pages"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Role stage"
-msgstr "Role stage"
-
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Role unavailable"
 msgstr "Role unavailable"
@@ -4293,8 +4270,8 @@ msgstr "Roles"
 #. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
-msgid "Round {0} · {1} people"
-msgstr "Round {0} · {1} people"
+msgid "Round {0} · Review these {1} first"
+msgstr "Round {0} · Review these {1} first"
 
 #. placeholder {0}: round.round
 #: src/pages/recruiting/CalibrationRound.tsx
@@ -4704,6 +4681,7 @@ msgstr "Sending…"
 
 #: src/components/MailReplyAskContent.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -5108,10 +5086,6 @@ msgstr "Stop speaking"
 msgid "Stop teaching"
 msgstr "Stop teaching"
 
-#: src/components/BackgroundTasks.tsx
-msgid "Stop updates"
-msgstr "Stop updates"
-
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Stop-on-reply behavior is not reported."
 msgstr "Stop-on-reply behavior is not reported."
@@ -5224,6 +5198,10 @@ msgstr "Teammate replies"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Teamwork"
 msgstr "Teamwork"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Temporarily unavailable"
+msgstr "Temporarily unavailable"
 
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Terminal"

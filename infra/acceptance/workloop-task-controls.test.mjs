@@ -14,7 +14,7 @@ function fixture({ foreground = true, background = true, ignoreStop = false } = 
     if (route === "groups/get")
       return {
         name: "测试副本",
-        members: ["Main", "Sourcer", "Outreach", "Reviewer"].map((name) => ({ name })),
+        members: ["Main", "Sourcer", "Outreach"].map((name) => ({ name })),
       };
     if (route === "threads/get")
       return {

@@ -3,20 +3,22 @@ import type { RecruitingSourceRef } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
-  AGENT_RUN_GRADE_SCHEMA,
-  AGENT_RUN_MAX_COST_USD,
+  AGENT_RUN_FIND_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
-  AGENT_RUN_ULTRA_MAX_COST_USD,
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
   lookedUpContacts,
   prepareAgentRun,
+  profileLookupArgs,
   projectRecruitingCandidateReport,
   recordAgentRunCost,
-  requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
+  requireRoleForPeopleSearch,
+  SEARCH_RETURNED_NOBODY,
   savedContactLookups,
+  searchSchemaForAgent,
+  searchThatFoundNobody,
 } from "./recruiting-research.js";
 import { receiptQuery, receiptScope } from "./testing/receipt-query.js";
 
@@ -25,7 +27,6 @@ describe("agent run output schemas", () => {
     expect(AGENT_RUN_PEOPLE_SCHEMA.properties.people.items.properties.education.items).toEqual({
       type: "string",
     });
-    expect(AGENT_RUN_GRADE_SCHEMA.properties.rows.items.required).toContain("education");
   });
 });
 
@@ -69,6 +70,27 @@ describe("people-search agent runs", () => {
           { candidateKey: "linkedin:/in/saved-person" },
           { candidateKey: "email:someone" },
         ]),
+        count: vi.fn(async () => 2),
+      },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async (_query?: unknown): Promise<Array<{ candidateKey: string }>> => []),
+      },
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async (): Promise<{ approvedAt: Date | null } | null> => null),
+      },
+      // Searches still running at the provider, by their countdowns.
+      externalEffect: {
+        findMany: vi.fn(
+          async (): Promise<Array<{ idempotencyKey: string; request: unknown }>> => [],
+        ),
+      },
+      message: {
+        findFirst: vi.fn(async (): Promise<{ createdAt: Date } | null> => null),
+        // The recruiter's recent messages, newest first.
+        findMany: vi.fn(async (): Promise<Array<{ createdAt: Date; blocks: unknown }>> => []),
+      },
+      recruitingRoleRevision: {
+        findFirst: vi.fn(async (): Promise<{ createdAt: Date } | null> => null),
       },
     };
   }
@@ -119,115 +141,141 @@ describe("people-search agent runs", () => {
         where: { roleId: "role-1", role: { id: "role-1", spaceId: "space", userId: "owner" } },
       }),
     );
-    const own = { type: "object" };
-    await expect(prepare(fixture(null), { query: "Find", outputSchema: own })).resolves.toEqual({
-      query: "Find",
-      outputSchema: own,
-    });
+    // The agent's own format would drop the grade Results shows.
+    await expect(
+      prepare(fixture(null), { query: "Find", outputSchema: { type: "object" } }),
+    ).resolves.toEqual({ query: "Find", outputSchema: AGENT_RUN_PEOPLE_SCHEMA });
   });
 
-  it("caps one wave at ten dollars and runs ultra as auto", async () => {
+  it("keeps every search a small try: 20 people, two dollars, never ultra", async () => {
     const db = fixture(null);
+    expect(AGENT_RUN_PEOPLE_SCHEMA.properties.people.maxItems).toBe(20);
     await expect(prepare(db, { query: "Find", effort: "auto" })).resolves.toMatchObject({
       effort: "auto",
-      budget: { maxCostDollars: AGENT_RUN_MAX_COST_USD },
+      budget: { maxCostDollars: AGENT_RUN_FIND_MAX_COST_USD },
+      outputSchema: AGENT_RUN_PEOPLE_SCHEMA,
+    });
+    // A thousand-person sweep is no longer one run: ultra runs as auto under the same limits.
+    await expect(
+      prepare(db, { query: "Find 5,000 people", effort: "ultra", budget: { maxCostDollars: 50 } }),
+    ).resolves.toMatchObject({
+      effort: "auto",
+      budget: { maxCostDollars: 2 },
+      outputSchema: AGENT_RUN_PEOPLE_SCHEMA,
     });
     await expect(
-      prepare(db, { query: "Find", effort: "ultra", budget: { maxCostDollars: 50 } }),
-    ).resolves.toMatchObject({ effort: "auto", budget: { maxCostDollars: 10 } });
-    await expect(
-      prepare(db, { query: "Find", effort: "auto", budget: { maxCostDollars: 3 } }),
-    ).resolves.toMatchObject({ budget: { maxCostDollars: 3 } });
-    // A wave of a thousand or more may run ultra, up to thirty dollars and 2000 people.
-    const big = await prepare(db, {
-      query: "Find 5,000 current USC students",
-      effort: "ultra",
-      budget: { maxCostDollars: 50 },
-    });
-    expect(big).toMatchObject({
-      effort: "ultra",
-      budget: { maxCostDollars: AGENT_RUN_ULTRA_MAX_COST_USD },
-      outputSchema: { properties: { people: { maxItems: 2000 } } },
-    });
-    await expect(
-      prepare(db, { query: "Find 1000 people", effort: "ultra" }),
-    ).resolves.toMatchObject({ effort: "ultra", budget: { maxCostDollars: 30 } });
+      prepare(db, { query: "Find", effort: "auto", budget: { maxCostDollars: 1.5 } }),
+    ).resolves.toMatchObject({ budget: { maxCostDollars: 1.5 } });
     // Fixed-price efforts take no budget; one the agent sent anyway is dropped.
     const low = await prepare(db, { query: "Find", effort: "low", budget: { maxCostDollars: 3 } });
     expect(low).not.toHaveProperty("budget");
   });
 
-  it("grades given people with the grade format and leaves them in", async () => {
-    const db = fixture();
-    const people = [{ name: "Saved", linkedin_url: "https://www.linkedin.com/in/saved-person" }];
-    await expect(
-      prepare(db, { query: "Grade", effort: "auto", input: { data: people } }),
-    ).resolves.toEqual({
-      query: "Grade",
-      effort: "auto",
-      budget: { maxCostDollars: AGENT_RUN_MAX_COST_USD },
-      input: { data: people },
-      outputSchema: AGENT_RUN_GRADE_SCHEMA,
+  it("runs people searches only inside a saved role", async () => {
+    // Staging 14d33ed1: a role chat searched before its role was saved. (The main chat is not
+    // offered the people search at all.)
+    const inChat = (groupId: string, roleId: string | null = null) => ({
+      run: {
+        findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: roleId, groupId } })),
+      },
     });
-    expect(db.recruitingCandidate.findMany).not.toHaveBeenCalled();
-    // The agent's own schema would drop the reasons and tier Results shows.
-    const own = { type: "object", properties: { score: { type: "number" } } };
+    const check = (db: unknown, tool: string, args: Record<string, unknown>) =>
+      requireRoleForPeopleSearch(db as never, actor, server, tool, args);
+    const people = { query: "Senior SRE Austin" };
+    await expect(check(inChat("role-abc"), "agent_run", people)).rejects.toThrow(
+      /recruiting_role create/,
+    );
+    // A saved role, a company search, reading a running agent run, or another chat go ahead.
+    await expect(check(inChat("role-abc", "role-1"), "agent_run", people)).resolves.toBeUndefined();
     await expect(
-      prepare(db, { query: "Grade", input: { data: people }, outputSchema: own }),
-    ).resolves.toMatchObject({ outputSchema: AGENT_RUN_GRADE_SCHEMA });
-    expect(AGENT_RUN_GRADE_SCHEMA.properties.rows.items.properties.match_tier.enum).toEqual([
-      "Strong",
-      "Promising",
-      "Partial",
-      "Uncertain",
-    ]);
+      check(inChat("role-abc"), "web_search_exa", { query: "Austin SaaS companies" }),
+    ).resolves.toBeUndefined();
+    await expect(check(inChat("role-abc"), "agent_run", { runId: "r1" })).resolves.toBeUndefined();
+    await expect(check(inChat("team-x"), "agent_run", people)).resolves.toBeUndefined();
   });
 
-  it("reads an earlier grading run of the same people instead of paying again", async () => {
-    const people = [
-      { name: "A", linkedin_url: "https://www.linkedin.com/in/a/" },
-      { name: "B", linkedin_url: "https://linkedin.com/in/b" },
-    ];
-    const effect = (args: Record<string, unknown>, body: Record<string, unknown>) => ({
-      request: ["__rakazoCatalogTool", "direct", { route, args }],
-      result: { content: [{ type: "text", text: JSON.stringify(body) }] },
+  it("finds people only through the agent run: the web search has no people index for the agent", () => {
+    // Staging 9be9b522: ten people found through that index reached Results with no grade.
+    const schema = {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        category: { type: "string", enum: ["company", "people", "news"] },
+      },
+    };
+    expect(searchSchemaForAgent(server, "web_search_advanced_exa", schema)).toEqual({
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        category: { type: "string", enum: ["company", "news"] },
+      },
     });
-    const graded = effect(
-      { query: "Grade", input: { data: [...people].reverse() } },
-      { id: "agent_run_graded", status: "running" },
-    );
-    const db = fixture();
-    db.$queryRaw.mockImplementation(receiptQuery(() => [graded]) as never);
-    await expect(
-      prepare(db, {
-        query: "Grade again",
+    // One person's profile lookup reads that index, picked by the server.
+    const lookup = { query: "https://www.linkedin.com/in/someone", numResults: 1 };
+    expect(profileLookupArgs(server, "web_search_advanced_exa", lookup)).toEqual({
+      ...lookup,
+      category: "people",
+    });
+    const company = { query: "Austin SaaS companies", category: "company" };
+    expect(profileLookupArgs(server, "web_search_advanced_exa", company)).toBe(company);
+    expect(
+      profileLookupArgs(
+        { ...server, endpoint: "https://example.com/mcp" },
+        "web_search_advanced_exa",
+        lookup,
+      ),
+    ).toBe(lookup);
+  });
+
+  it("tells the agent what to ask next when a finished search returned nobody", () => {
+    // Plays 11-27: eight searches asked for fully verified people only and each returned no one.
+    const finished = (people: unknown[], status = "completed") => {
+      const body = { id: "agent_run_1", status, output: { structured: { people } } };
+      return { content: [{ type: "text", text: JSON.stringify(body) }], structuredContent: body };
+    };
+    expect(searchThatFoundNobody(finished([]), server.endpoint)).toMatchObject({
+      people: [],
+      note: SEARCH_RETURNED_NOBODY,
+    });
+    const one = { name: "Ada Fake", linkedin_url: "https://www.linkedin.com/in/ada-fake" };
+    expect(searchThatFoundNobody(finished([one]), server.endpoint)).toBeNull();
+    expect(searchThatFoundNobody(finished([], "running"), server.endpoint)).toBeNull();
+  });
+
+  it("offers the agent only the options a run keeps: no own format, no people to grade, no ultra", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        effort: { type: "string", enum: ["low", "auto", "ultra"] },
+        outputSchema: { type: "object" },
+        systemPrompt: { type: "string" },
         input: {
-          data: [
-            { name: "B", linkedin_url: "https://www.linkedin.com/in/b" },
-            { name: "A", linkedin_url: "https://www.linkedin.com/in/a" },
-          ],
+          type: "object",
+          properties: { data: { type: "array" }, exclusion: { type: "array" } },
+          required: ["data"],
         },
-      }),
-    ).resolves.toEqual({ runId: "agent_run_graded" });
-    expect(receiptScope(db.$queryRaw.mock.calls.at(-1)![0])).toMatchObject({
-      spaceId: "space",
-      userId: "owner",
-      threadId: "thread-1",
-      since: expect.any(Date),
+      },
+      required: ["query", "outputSchema"],
+    };
+    expect(searchSchemaForAgent(server, "agent_run", schema)).toEqual({
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        effort: { type: "string", enum: ["low", "auto"] },
+        input: { type: "object", properties: { exclusion: { type: "array" } }, required: [] },
+      },
+      required: ["query"],
     });
-    // Other people, or a run that failed, are graded anew.
-    await expect(
-      prepare(db, { query: "Grade", input: { data: people.slice(0, 1) } }),
-    ).resolves.toMatchObject({ outputSchema: AGENT_RUN_GRADE_SCHEMA });
-    db.$queryRaw.mockImplementation(
-      receiptQuery(() => [
-        graded,
-        effect({ runId: "agent_run_graded" }, { id: "agent_run_graded", status: "failed" }),
-      ]) as never,
-    );
-    await expect(prepare(db, { query: "Grade", input: { data: people } })).resolves.toMatchObject({
-      outputSchema: AGENT_RUN_GRADE_SCHEMA,
+    expect(searchSchemaForAgent(server, "web_search_exa", schema)).toBe(schema);
+    // People sent to be graded anyway are left out: a run finds and grades in one go.
+    const people = [{ name: "Saved", linkedin_url: "https://www.linkedin.com/in/saved-person" }];
+    const prepared = await prepare(fixture(null), {
+      query: "Find",
+      systemPrompt: "Use fresh searches",
+      input: { data: people },
     });
+    expect(prepared).toEqual({ query: "Find", input: {}, outputSchema: AGENT_RUN_PEOPLE_SCHEMA });
   });
 
   it("reads a finished grading run's rows as a page", () => {
@@ -238,7 +286,7 @@ describe("people-search agent runs", () => {
       ],
     });
     const read = (raw: unknown) =>
-      classifyRecruitingResearchResult(raw, { operation: "rows", providerTaskId: "agent_run_1" });
+      classifyRecruitingResearchResult(raw, { providerTaskId: "agent_run_1" });
     expect(read(result("completed"))).toMatchObject({ rows, deliveryState: "accepted" });
     expect(read(result("running")).rows).toBeUndefined();
     expect(read(result("completed", "agent_run_2")).rows).toBeUndefined();
@@ -463,130 +511,6 @@ describe("FullEnrich job ownership", () => {
   });
 });
 
-describe("Autumn task ownership", () => {
-  const actor = { userId: "owner", spaceId: "space" };
-  const server = {
-    id: "autumn-server",
-    revision: 2,
-    transport: "streamable_http",
-    endpoint: "https://api.autumn.ai/mcp",
-  };
-  const route = {
-    connectorId: "mcp",
-    resourceId: server.id,
-    resourceRevision: 2,
-    toolName: "research",
-  };
-  const direct = ["__rakazoCatalogTool", "direct", { route, args: { prompt: "Find engineers" } }];
-  function fixture(
-    request: unknown = direct,
-    result: unknown = { structuredContent: { task_id: "owned-task" } },
-  ) {
-    return {
-      recruitingResearchTask: { findFirst: vi.fn(async () => null) },
-      $queryRaw: vi.fn(
-        receiptQuery((scope) =>
-          scope.spaceId === actor.spaceId && scope.userId === actor.userId
-            ? [{ request, result }]
-            : [],
-        ),
-      ),
-    };
-  }
-  const authorize = (
-    db: ReturnType<typeof fixture>,
-    tool = "get_task",
-    args: Record<string, unknown> = { task_id: "owned-task" },
-    context = actor,
-    connection = server,
-  ) => requireAutumnTaskOwnership(db as never, context, connection, tool, args);
-
-  it.each(["get_task", "get_rows", "reply", "stop_task", "continue_with_file"])(
-    "reuses an owned native creation receipt for %s",
-    async (tool) => {
-      await expect(authorize(fixture(), tool)).resolves.toBeUndefined();
-    },
-  );
-  it.each(["connectors_execute_tool", "mcp_execute_tool"])(
-    "accepts the canonical %s creation receipt",
-    async (tool) => {
-      const request = [
-        "__rakazoCatalogTool",
-        tool,
-        { id: `${server.id}:research`, arguments: { prompt: "Find engineers" } },
-        route,
-      ];
-      await expect(authorize(fixture(request))).resolves.toBeUndefined();
-    },
-  );
-  it.each(["user", "space", "task", "connection", "revision", "read", "error", "malformed"])(
-    "does not grant ownership from %s mismatch",
-    async (change) => {
-      const request = structuredClone(direct);
-      const body = request[2] as { route: typeof route };
-      if (change === "connection") body.route.resourceId = "other-server";
-      if (change === "revision") body.route.resourceRevision = 1;
-      if (change === "read") body.route.toolName = "get_task";
-      const db = fixture(
-        request,
-        change === "error"
-          ? { isError: true, structuredContent: { task_id: "owned-task" } }
-          : change === "malformed"
-            ? { content: [{ type: "text", text: "Task owned-task" }] }
-            : undefined,
-      );
-      await expect(
-        authorize(
-          db,
-          "get_rows",
-          { task_id: change === "task" ? "foreign-task" : "owned-task" },
-          {
-            userId: change === "user" ? "other-user" : actor.userId,
-            spaceId: change === "space" ? "other-space" : actor.spaceId,
-          },
-        ),
-      ).rejects.toThrow();
-    },
-  );
-  it("accepts an existing actor-scoped native research task", async () => {
-    const db = fixture();
-    db.recruitingResearchTask.findFirst.mockResolvedValue({ id: "native-task" } as never);
-    await expect(authorize(db)).resolves.toBeUndefined();
-    expect(db.recruitingResearchTask.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          providerTaskId: "owned-task",
-          mcpServerId: server.id,
-          serverRevision: 2,
-          role: actor,
-          createdByRun: actor,
-        }),
-      }),
-    );
-    expect(db.$queryRaw).not.toHaveBeenCalled();
-  });
-  it.each(["list_tasks", "get_team", "get_usage", "invite_member", "unknown"])(
-    "denies account-wide or unsupported %s before querying receipts",
-    async (tool) => {
-      const db = fixture();
-      await expect(authorize(db, tool, {})).rejects.toThrow(/Listing all research is unavailable/i);
-      expect(db.$queryRaw).not.toHaveBeenCalled();
-    },
-  );
-  it("does not constrain other MCP providers or require a task for a new research call", async () => {
-    const db = fixture();
-    await expect(authorize(db, "research", { prompt: "Find engineers" })).resolves.toBeUndefined();
-    await expect(authorize(db, "credits", {})).resolves.toBeUndefined();
-    await expect(
-      authorize(db, "list_tasks", {}, actor, { ...server, endpoint: "https://mcp.example.test" }),
-    ).resolves.toBeUndefined();
-    expect(db.$queryRaw).not.toHaveBeenCalled();
-    await expect(
-      authorize(db, "research", { prompt: "Find engineers", task_id: "foreign-task" }),
-    ).rejects.toThrow();
-  });
-});
-
 const source: RecruitingSourceRef = {
   id: "human-message:human",
   kind: "original_material",
@@ -640,12 +564,6 @@ const context = {
         ],
         questions: [],
         rules: [],
-        confirmation: {
-          revision: 2,
-          userId: "owner",
-          messageId: "confirmation",
-          confirmedAt: "2026-10-16T18:00:00Z",
-        },
       },
     },
   },
@@ -689,134 +607,22 @@ const _request = {
 const mcp = (body: unknown) => ({ content: [{ type: "text", text: JSON.stringify(body) }] });
 const _sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-describe("recruiting MCP result observations", () => {
-  it("accepts a real task ID from structured content or a complete JSON text block", () => {
-    for (const raw of [
-      { structuredContent: { task_id: "provider-task", status: "accepted" } },
-      mcp({ task_id: "provider-task", state: "submitted", done: false }),
-    ]) {
-      expect(classifyRecruitingResearchResult(raw, { operation: "create" })).toMatchObject({
-        deliveryState: "accepted",
-        providerTaskId: "provider-task",
-        done: false,
-        providerApplicationConfirmed: false,
-        automaticRetry: false,
-      });
-    }
-  });
-
-  it.each([
-    { content: [{ type: "text", text: "Created task_id=provider-task; it is working." }] },
-    { content: [{ type: "text", text: 'prefix {"task_id":"provider-task"}' }] },
-    { task_id: "provider-task" },
-    mcp({ task_id: " " }),
-    mcp({ status: "accepted" }),
-    { isError: true, structuredContent: { task_id: "provider-task", status: "accepted" } },
-    {
-      structuredContent: { task_id: "first" },
-      content: [{ type: "text", text: '{"task_id":"second"}' }],
-    },
-  ])("keeps an unproven or conflicting creation unknown %#", (raw) => {
-    expect(classifyRecruitingResearchResult(raw, { operation: "create" })).toMatchObject({
-      deliveryState: "unknown",
-      providerApplicationConfirmed: false,
-      automaticRetry: false,
-    });
-  });
-
-  it("accepts an explicit queued continuation without claiming completion or application", () => {
-    expect(
-      classifyRecruitingResearchResult(mcp({ status: "accepted", activity: "queued" }), {
-        operation: "continue",
-        providerTaskId: "original-task",
-      }),
-    ).toMatchObject({
-      deliveryState: "accepted",
-      providerTaskId: "original-task",
-      observedProviderState: "queued",
-      done: false,
-      providerApplicationConfirmed: false,
-    });
-    expect(
-      classifyRecruitingResearchResult(mcp({ task_id: "different", status: "accepted" }), {
-        operation: "continue",
-        providerTaskId: "original-task",
-      }).deliveryState,
-    ).toBe("unknown");
-    expect(
-      classifyRecruitingResearchResult(mcp({ message: "Queued" }), {
-        operation: "continue",
-        providerTaskId: "original-task",
-      }).deliveryState,
-    ).toBe("unknown");
-  });
-
-  it("does not label a queued acknowledgement completed", () => {
-    expect(
-      classifyRecruitingResearchResult(mcp({ status: "accepted", done: true }), {
-        operation: "continue",
-        providerTaskId: "task",
-      }).deliveryState,
-    ).toBe("unknown");
-  });
-
-  it("requires creation-specific non-delivery proof for ambiguous server errors", () => {
-    const raw = mcp({ error: "internal_error", task_created: false });
-    expect(classifyRecruitingResearchResult(raw, { operation: "create" }).deliveryState).toBe(
-      "rejected",
-    );
-    expect(
-      classifyRecruitingResearchResult(raw, { operation: "continue", providerTaskId: "task" })
-        .deliveryState,
-    ).toBe("unknown");
-    expect(
-      classifyRecruitingResearchResult(
-        mcp({ error: "internal_error", task_created: false, task_id: "task" }),
-        { operation: "create" },
-      ).deliveryState,
-    ).toBe("unknown");
-  });
-
-  it.each([
-    ["submitted", false],
-    ["working", false],
-    ["input-required", true],
-    ["completed", true],
-    ["canceled", true],
-    ["failed", true],
-  ])("records explicit %s status without treating acceptance as completion", (state, done) => {
-    expect(
-      classifyRecruitingResearchResult(mcp({ task_id: "task", state, done }), {
-        operation: "status",
-        providerTaskId: "task",
-      }),
-    ).toMatchObject({
-      deliveryState: "accepted",
-      observedProviderState: state,
-      done,
-      providerApplicationConfirmed: false,
-    });
-  });
-
-  it("rejects contradictory status, foreign identity and narrative completion", () => {
+describe("stored result page observations", () => {
+  it("keeps a page that names another task, or holds no rows, unknown", () => {
     for (const body of [
-      { task_id: "task", state: "working", done: true },
-      { task_id: "other", state: "completed", done: true },
+      { task_id: "other", rows: [] },
+      { task_id: "task", state: "working", done: true, rows: [] },
       { task_id: "task", message: "Completed" },
     ])
       expect(
-        classifyRecruitingResearchResult(mcp(body), { operation: "status", providerTaskId: "task" })
-          .deliveryState,
+        classifyRecruitingResearchResult(mcp(body), { providerTaskId: "task" }).deliveryState,
       ).toBe("unknown");
   });
 
   it("retains malformed rows alongside valid candidates for explicit unresolved indexing", () => {
     const rows = [{ name: { value: "Example", source_id: "source" } }, null, "malformed"];
     expect(
-      classifyRecruitingResearchResult(mcp({ rows }), {
-        operation: "rows",
-        providerTaskId: "task",
-      }),
+      classifyRecruitingResearchResult(mcp({ rows }), { providerTaskId: "task" }),
     ).toMatchObject({ deliveryState: "accepted", rows });
   });
 
@@ -831,10 +637,7 @@ describe("recruiting MCP result observations", () => {
     const body = { rows, next_cursor: "  opaque/游标==  ", output_id: "actual-output" };
     const raw = mcp(body);
     const before = JSON.stringify(raw);
-    const first = classifyRecruitingResearchResult(raw, {
-      operation: "rows",
-      providerTaskId: "task",
-    });
+    const first = classifyRecruitingResearchResult(raw, { providerTaskId: "task" });
     expect(first).toMatchObject({
       deliveryState: "accepted",
       providerTaskId: "task",
@@ -848,110 +651,26 @@ describe("recruiting MCP result observations", () => {
         ...body,
         rows: [{ ...rows[0], geometry: { value: "New material", source_id: "s1" } }],
       }),
-      { operation: "rows", providerTaskId: "task" },
+      { providerTaskId: "task" },
     );
     expect(changed.rows).not.toEqual(first.rows);
     expect(changed.nextCursor).toBe(first.nextCursor);
   });
 
-  it.each(["12", -1, Number.POSITIVE_INFINITY, null])(
-    "does not invent numeric or per-person usage from %j",
-    (credits_used) => {
-      expect(
-        classifyRecruitingResearchResult(
-          { structuredContent: { task_id: "task", credits_used } },
-          { operation: "create" },
-        ).usage,
-      ).toBeNull();
-    },
-  );
-
-  it("records only explicitly reported task credits", () => {
+  it("reads a stored refusal as rejected only for its own task", () => {
     expect(
-      classifyRecruitingResearchResult(
-        mcp({ task_id: "task", credits_used: 12, progress: { rows: 4 } }),
-        { operation: "create" },
-      ).usage,
-    ).toEqual([{ scope: "task", unit: "credits", amount: 12 }]);
-  });
-
-  it.each([
-    "out_of_credits",
-    "invalid_request",
-    "unauthorized",
-    "task_executing",
-    "task_in_cron_mode",
-    "task_not_found",
-    "task_exists",
-    "auth_unavailable",
-  ])("recognizes a structured %s refusal without scheduling retries", (error) => {
-    expect(
-      classifyRecruitingResearchResult(
-        mcp({
-          error,
-          message: "Request refused",
-          retryable: true,
-          request_id: "synthetic-request",
-          retry_after: 5,
-        }),
-        { operation: "create" },
-      ),
-    ).toMatchObject({
-      deliveryState: "rejected",
-      refusalCode: error,
-      retryAfterSeconds: 5,
-      automaticRetry: false,
-    });
-  });
-
-  it.each([
-    { error: "out_of_credits", task_id: "not-created" },
-    { error: "invalid_request", task_id: "not-created", task_created: false },
-    { error: "internal_error", task_id: "not-created", task_created: false },
-    { task_id: "not-created", task_created: false },
-  ])("never binds a returned task ID from refused or unproven creation %#", (body) => {
-    const result = classifyRecruitingResearchResult(mcp(body), { operation: "create" });
-    expect(result.providerTaskId).toBeNull();
-    expect(result.deliveryState).not.toBe("accepted");
-    expect(result.automaticRetry).toBe(false);
-  });
-
-  it.each(["continue", "status", "rows"] as const)(
-    "retains only the known original task ID on a refused %s",
-    (operation) => {
-      expect(
-        classifyRecruitingResearchResult(mcp({ error: "out_of_credits", task_id: "known-task" }), {
-          operation,
-          providerTaskId: "known-task",
-        }),
-      ).toMatchObject({
-        deliveryState: "rejected",
+      classifyRecruitingResearchResult(mcp({ error: "out_of_credits", task_id: "known-task" }), {
         providerTaskId: "known-task",
-        automaticRetry: false,
-      });
-      expect(
-        classifyRecruitingResearchResult(
-          mcp({ error: "out_of_credits", task_id: "unrelated-task" }),
-          {
-            operation,
-            providerTaskId: "known-task",
-          },
-        ),
-      ).toMatchObject({ deliveryState: "unknown", providerTaskId: "known-task" });
-    },
-  );
-
-  it.each([
-    { error: "Connection interrupted" },
-    mcp({ error: "internal_error", task_id: "known-task", retryable: true }),
-    mcp({ error: "service_unavailable", retryable: true }),
-    mcp({ error: "out_of_credits", task_created: true }),
-    { isError: true, content: [{ type: "text", text: "out_of_credits" }] },
-  ])("retains uncertain dispatched failures as unknown %#", (raw) => {
-    expect(classifyRecruitingResearchResult(raw, { operation: "create" })).toMatchObject({
-      deliveryState: "unknown",
-      automaticRetry: false,
-    });
+      }),
+    ).toMatchObject({ deliveryState: "rejected", providerTaskId: "known-task" });
+    expect(
+      classifyRecruitingResearchResult(
+        mcp({ error: "out_of_credits", task_id: "unrelated-task" }),
+        {
+          providerTaskId: "known-task",
+        },
+      ),
+    ).toMatchObject({ deliveryState: "unknown", providerTaskId: "known-task" });
   });
 });
 

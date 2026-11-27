@@ -653,13 +653,9 @@ export class RecruitingGlobalJourneyFixture implements AgentRuntime {
         );
       }
       if (
-        [
-          "mcp.cal.com",
-          "mcp.instantly.ai",
-          "mcp.exa.ai",
-          "api.autumn.ai",
-          "mcp.fullenrich.com",
-        ].includes(url.hostname)
+        ["mcp.cal.com", "mcp.instantly.ai", "mcp.exa.ai", "mcp.fullenrich.com"].includes(
+          url.hostname,
+        )
       ) {
         const body = parseBody(init?.body);
         if (body.method === "notifications/initialized") return new Response(null, { status: 202 });

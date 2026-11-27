@@ -1,9 +1,12 @@
 import { boundDirectApprovalRequest } from "@rakazo/core";
 import { mailReplyState, type Prisma } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
+import { OWN_EMAIL_STEP, ownEmailSequences } from "./campaign-own-emails.js";
+import { InstantlyEmulator } from "./instantly-emulator.js";
 import {
   describeCampaignActivation,
   describeReplyToEmail,
+  instantlyRest,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
   nextSendWindow,
@@ -12,6 +15,7 @@ import {
   requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
+import { classifyInstantlyReplyReceipt, readInstantlyEmailPage } from "./instantly-reply.js";
 import { mailReplyFromAnchor } from "./mail-reply.js";
 
 const ORIGINAL = {
@@ -164,6 +168,13 @@ describe("native reply_to_email", () => {
       body: "收到，谢谢",
     });
     expect(JSON.stringify(display)).not.toContain("Instantly");
+    // Audit 11-26: a Cc was sent but not on the card the recruiter approved.
+    const copied = await describeReplyToEmail(async () => ORIGINAL, {
+      reply_to_uuid: ORIGINAL.id,
+      body: { text: "Thanks" },
+      cc_address_email_list: "Hiring Lead <lead@client.test>, coordinator@client.test",
+    });
+    expect(copied.cc).toEqual(["lead@client.test", "coordinator@client.test"]);
   });
 });
 
@@ -210,6 +221,35 @@ describe("activation card for one person's own first email", () => {
     expect(display.refusal).toBeUndefined();
   });
 
+  it("shows the email saved for that person even before the mail service returns it", async () => {
+    // Gate deb21fb1, stop-after-approve: the card read the mail service right after a save, so
+    // the copy check at approval saw different text and refused three approved cards.
+    const saved = { subject: "Ada, a new note", body: "Hi Ada,\n\nNewer copy." };
+    const display = await describeCampaignActivation(
+      read,
+      "c-1",
+      null,
+      { ...binding, drafts: { "ada@x.test": saved } },
+      ["Ada"],
+    );
+    expect(display.recipients[0]?.firstEmail).toEqual({
+      subject: "Ada, a new note",
+      body: "Hi Ada,<br /><br />Newer copy.",
+    });
+  });
+
+  it("shows the real email when the campaign comes from get_campaign, never its step label", async () => {
+    // get_campaign labels the variable-only step for agents (#1247); the card read the label.
+    const fromTool = async (tool: string) =>
+      tool === "native_instantly_get_campaign"
+        ? { ...campaign, sequences: ownEmailSequences(campaign.sequences) }
+        : { items: leads };
+    const display = await describeCampaignActivation(fromTool, "c-1", null, binding);
+    expect(JSON.stringify(display)).not.toContain(OWN_EMAIL_STEP);
+    expect(display.recipients[0]?.firstEmail?.subject).toBe("Ada, your compiler work");
+    expect(display.recipients[1]?.firstEmail?.subject).toBe("Founding role");
+  });
+
   it("names the sending mailbox from get_campaign when no role says it", async () => {
     const { email_list: _, ...rest } = campaign;
     const fromTool = async (tool: string) =>
@@ -220,16 +260,65 @@ describe("activation card for one person's own first email", () => {
     expect(display.mailbox).toBe("me@x.test");
   });
 
-  it("shows the role's email for the people who keep it", async () => {
+  it("shows the role's email filled in for each person who keeps it, never its variables", async () => {
+    // Audit 11-26: the card showed the raw {{firstName}} instead of what each person receives.
     const display = await describeCampaignActivation(read, "c-1", null, binding);
-    expect(display.recipients.map((r) => r.firstEmail?.subject ?? null)).toEqual([
-      "Ada, your compiler work",
-      null,
+    expect(display.recipients.map((r) => r.firstEmail)).toEqual([
+      { subject: "Ada, your compiler work", body: "Hi Ada,<br /><br />Just you." },
+      { subject: "Founding role", body: "<p>Hi Bob,</p><p>Open to a chat?</p>" },
     ]);
-    expect(display.firstEmail).toEqual({
-      subject: "Founding role",
-      body: "<p>Hi {{firstName}},</p><p>Open to a chat?</p>",
-    });
+    expect(display).not.toHaveProperty("firstEmail");
+    expect(JSON.stringify(display)).not.toContain("{{");
+  });
+
+  it("shows every follow-up the campaign will send, filled in for each person", async () => {
+    // Audit 11-26: steps 2 and 3 went out without ever being on the card the recruiter approved.
+    const plain = {
+      id: "c-2",
+      name: "Founding Engineer",
+      status: 0,
+      email_list: ["me@x.test"],
+      sequences: [
+        {
+          steps: [
+            { variants: [{ subject: "Founding role", body: "<p>Hi there</p>" }] },
+            { delay: 3, delay_unit: "days", variants: [{ subject: "", body: "<p>Bumping this</p>" }] },
+            {
+              delay: 1,
+              delay_unit: "days",
+              variants: [{ subject: "Last note", body: "<p>{{firstName}}, closing the loop</p>" }],
+            },
+          ],
+        },
+      ],
+    };
+    const display = await describeCampaignActivation(
+      async (tool) => (tool === "native_instantly_get_campaign" ? plain : { items: leads }),
+      "c-2",
+    );
+    expect(display.firstEmail).toEqual({ subject: "Founding role", body: "<p>Hi there</p>" });
+    expect(display).not.toHaveProperty("followUps");
+    expect(display.recipients.map((r) => r.followUps)).toEqual(
+      ["Ada", "Bob"].map((name) => [
+        { after: "3 days after the email before", subject: "", body: "<p>Bumping this</p>" },
+        {
+          after: "1 day after the email before",
+          subject: "Last note",
+          body: `<p>${name}, closing the loop</p>`,
+        },
+      ]),
+    );
+    const same = await describeCampaignActivation(
+      async (tool) =>
+        tool === "native_instantly_get_campaign"
+          ? { ...plain, sequences: [{ steps: plain.sequences[0]!.steps.slice(0, 2) }] }
+          : { items: leads },
+      "c-2",
+    );
+    expect(same.followUps).toEqual([
+      { after: "3 days after the email before", subject: "", body: "<p>Bumping this</p>" },
+    ]);
+    expect(same.recipients.every((r) => !r.followUps && !r.firstEmail)).toBe(true);
   });
 
   it("shows a waiting person the email the send will add for them", async () => {
@@ -300,6 +389,61 @@ describe("native campaign analytics", () => {
   });
 });
 
+it("says queued people wait for the mailbox's daily limit once it is used up today", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2030-01-01T03:40:00.000Z"));
+  const id = "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a70";
+  try {
+    const rest = vi.fn(async (_method: string, path: string) => {
+      if (path === `/campaigns/${id}`)
+        return {
+          id,
+          status: 1,
+          email_gap: 1,
+          email_list: ["sender@example.test"],
+          campaign_schedule: {
+            schedules: [
+              {
+                name: "Any time",
+                timing: { from: "00:00", to: "23:59" },
+                days: { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true },
+                timezone: "America/Chicago",
+              },
+            ],
+          },
+        };
+      if (path === "/accounts?limit=100")
+        return { items: [{ email: "sender@example.test", daily_limit: 30 }] };
+      if (path.startsWith("/accounts/analytics/daily"))
+        return { items: [{ date: "2030-01-01", email_account: "sender@example.test", sent: 30 }] };
+      return {
+        items: [
+          { email: "a@example.test", status: 1, timestamp_created: "2030-01-01T02:32:00.000Z" },
+          { email: "b@example.test", status: 1, timestamp_created: "2030-01-01T02:32:00.000Z" },
+        ],
+      };
+    });
+    const result = (await runInstantlyWrite(
+      {} as never,
+      rest,
+      context,
+      "server",
+      "native_instantly_get_campaign",
+      { campaign_id: id },
+    )) as Record<string, unknown>;
+    expect(result.sendingToday).toEqual({
+      limit: 30,
+      sent: 30,
+      left: 0,
+      resetsAt: "2030-01-02T00:00:00.000Z",
+    });
+    expect(String(result.next)).toContain("daily limit");
+    expect(String(result.next)).not.toContain("at the latest");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("timestamps a campaign GET before slower lead reads finish", async () => {
   vi.useFakeTimers();
   const started = "2030-01-01T00:00:00.000Z";
@@ -335,6 +479,22 @@ describe("shared mail account isolation", () => {
       method === "POST" && path === "/campaigns" ? { id: NEW } : { ok: true, path },
     );
 
+  it("shows only this account's own mailboxes in the daily sending counts", async () => {
+    const rest = vi.fn(async () => ({
+      items: [
+        { email_account: "mine@example.test", sent: 3 },
+        { email_account: "theirs@example.test", sent: 9 },
+      ],
+    }));
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set(),
+      mailboxes: new Set(["mine@example.test"]),
+    });
+    await expect(
+      own("GET", "/accounts/analytics/daily?start_date=2030-01-01&end_date=2030-01-01"),
+    ).resolves.toEqual({ items: [{ email_account: "mine@example.test", sent: 3 }] });
+  });
+
   it("reads and changes only this account's own campaigns", async () => {
     const rest = account();
     const own = ownedInstantlyRest(rest as never, {
@@ -359,6 +519,24 @@ describe("shared mail account isolation", () => {
     ] as const)
       await expect(own(method, path, body)).rejects.toThrow("does not belong to this account");
     expect(rest).toHaveBeenCalledTimes(3);
+  });
+
+  it("owns a campaign a parallel call bound after this call started", async () => {
+    const rest = account();
+    const bound = new Set<string>();
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set(),
+      mailboxes: new Set(),
+      campaignsNow: async () => bound,
+    });
+    await expect(own("GET", `/campaigns/${MINE}`)).rejects.toThrow(
+      "does not belong to this account",
+    );
+    bound.add(MINE);
+    await expect(own("GET", `/campaigns/${MINE}`)).resolves.toMatchObject({ ok: true });
+    await expect(own("GET", `/campaigns/${THEIRS}`)).rejects.toThrow(
+      "does not belong to this account",
+    );
   });
 
   it("adds people to its own campaign without checking the rest of the shared account", async () => {
@@ -441,7 +619,7 @@ describe("shared mail account isolation", () => {
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
       sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
-      externalEffect: { create },
+      externalEffect: { create, findFirst: vi.fn(async () => null) },
     };
     const result = await runInstantlyWrite(
       prisma as never,
@@ -469,13 +647,14 @@ describe("shared mail account isolation", () => {
     });
   });
 
-  it("refuses a new campaign whose email greets one person by name", async () => {
-    // Staging 11-13: "Hi Noah," for Noah and Ada split them into two campaigns, so the first
-    // card listed only Noah.
+  it("sends nothing from the Kruit chat in a turn that opened the role", async () => {
+    // deny-then-change-and-send 11-21: Kruit opened the role, then also emailed the same two
+    // people from the Kruit chat, so two different send cards showed at once.
     const rest = vi.fn();
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
       sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { findFirst: vi.fn(async () => ({ id: "opened" })) },
     };
     await expect(
       runInstantlyWrite(
@@ -485,43 +664,13 @@ describe("shared mail account isolation", () => {
         "server",
         "native_instantly_create_campaign",
         {
-          name: "Senior Data Engineer",
+          name: "First email",
           eaccount: "me@ours.test",
-          steps: [{ subject: "A role", body: "Hi Noah, a role in Seattle.\n\nBest,\nNoah Liu" }],
+          steps: [{ subject: "Role", body: "Hi {{firstName}}" }],
         },
         { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
       ),
-    ).rejects.toThrow("{{firstName}}");
-    expect(rest).not.toHaveBeenCalled();
-  });
-
-  it("refuses an email that still has a fill-in-the-blank", async () => {
-    // Staging 11-13: a template's "Hi [Candidate Name]," went out exactly as written.
-    const rest = vi.fn();
-    const prisma = {
-      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
-      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
-    };
-    await expect(
-      runInstantlyWrite(
-        prisma as never,
-        rest as never,
-        { ...(context as object), runId: "run-1" } as never,
-        "server",
-        "native_instantly_create_campaign",
-        {
-          name: "Senior Data Engineer",
-          eaccount: "me@ours.test",
-          steps: [
-            {
-              subject: "A role",
-              body: "Hi [Candidate Name],\n\nA role in Seattle.\n\nBest,\nNoah Liu",
-            },
-          ],
-        },
-        { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
-      ),
-    ).rejects.toThrow("fill-in-the-blank");
+    ).rejects.toThrow("the role is handling it");
     expect(rest).not.toHaveBeenCalled();
   });
 
@@ -603,13 +752,51 @@ describe("reply sender checks before card creation", () => {
           kind: "instantly_role_campaign",
           AND: [
             { request: { path: ["serverId"], equals: "source-proof" } },
-            { request: { path: ["roleId"], equals: "role-proof" } },
             { result: { path: ["campaignId"], equals: "campaign-proof" } },
+            { request: { path: ["roleId"], equals: "role-proof" } },
           ],
         }),
       }),
     );
     expect(rest.mock.calls).toEqual([["GET", "/accounts/team%40example.test"]]);
+  });
+  it("replies from a one-off campaign's mailbox outside any role", async () => {
+    // Audit 11-26: replying in the main chat to a one-off campaign's email failed
+    // sender_unavailable, since only role campaign records were taken as proof.
+    const original = { ...ORIGINAL, campaign_id: "one-off" };
+    const findUnique = vi.fn(async ({ where }: any) =>
+      where.idempotencyKey === "instantly-direct-campaign:source-proof:one-off" &&
+      where.AND?.[1]?.result?.equals === "one-off"
+        ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "one-off" } }
+        : null,
+    );
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { findUnique },
+    };
+    const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        original,
+        ORIGINAL.eaccount,
+      ),
+    ).resolves.toMatchObject({ usable: true });
+    // Another campaign's email in the same mailbox is still refused.
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        { ...original, campaign_id: "foreign" },
+        ORIGINAL.eaccount,
+      ),
+    ).rejects.toThrow("sender_unavailable");
   });
   it("returns a blocked sender check from the read-only email tool", async () => {
     const prisma = { externalEffect: { findMany: vi.fn(async () => []) } };
@@ -642,7 +829,7 @@ it.each([false, true])(
         findMany: vi.fn(async () => []),
         findUnique: vi.fn(async (input: any) =>
           input.where.kind === "instantly_role_campaign" &&
-          input.where.AND[2].result.equals === "campaign-proof"
+          input.where.AND[1].result.equals === "campaign-proof"
             ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" } }
             : null,
         ),
@@ -800,5 +987,102 @@ describe("the send card's time", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("emulated outreach mail service", () => {
+  it("queues a confirmed send, emails one person per gap, and holds the rest once paused", async () => {
+    let now = new Date("2026-11-20T15:00:00Z");
+    const mail = new InstantlyEmulator([{ email: "me@mail.test" }], () => now);
+    const rest = instantlyRest(
+      (url, init) => mail.fetch(url, init),
+      "any-key",
+      new AbortController().signal,
+    );
+    const campaign = await rest("POST", "/campaigns", {
+      name: "Role",
+      email_gap: 1,
+      email_list: ["me@mail.test"],
+      sequences: [{ steps: [{ variants: [{ subject: "Hi {{first_name}}", body: "Hello" }] }] }],
+    });
+    const added = await rest("POST", "/leads/add", {
+      campaign_id: campaign.id,
+      leads: [
+        { email: "Ada@x.test", first_name: "Ada" },
+        { email: "ben@x.test", first_name: "Ben" },
+      ],
+    });
+    expect(added.created_leads).toHaveLength(2);
+    await rest("POST", `/campaigns/${campaign.id}/activate`);
+    const contacted = async () =>
+      (
+        (await rest("POST", "/leads/list", { campaign: campaign.id })).items as Record<
+          string,
+          unknown
+        >[]
+      )
+        .filter((lead) => lead.timestamp_last_contact)
+        .map((lead) => lead.email);
+    expect(await contacted()).toEqual([]);
+    now = new Date("2026-11-20T15:02:30Z");
+    expect(await contacted()).toEqual(["ada@x.test"]);
+    await rest("POST", `/campaigns/${campaign.id}/pause`);
+    now = new Date("2026-11-20T16:30:00Z");
+    expect(await contacted()).toEqual(["ada@x.test"]);
+    const sent = await rest("GET", `/emails?campaign_id=${campaign.id}`);
+    expect(sent.items).toMatchObject([{ subject: "Hi Ada", lead: "ada@x.test" }]);
+    await expect(rest("GET", "/accounts/other@mail.test")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("files a candidate's answer in the sent email's thread, in a page the product can read", async () => {
+    let now = new Date("2026-11-20T15:00:00Z");
+    const mail = new InstantlyEmulator([{ email: "me@mail.test" }], () => now);
+    const rest = instantlyRest(
+      (url, init) => mail.fetch(url, init),
+      "any-key",
+      new AbortController().signal,
+    );
+    const campaign = await rest("POST", "/campaigns", {
+      name: "Role",
+      email_list: ["me@mail.test"],
+      sequences: [{ steps: [{ variants: [{ subject: "Data role", body: "Hi {{firstName}}" }] }] }],
+    });
+    await rest("POST", "/leads/add", {
+      campaign_id: campaign.id,
+      leads: [{ email: "ada@x.test", first_name: "Ada" }],
+    });
+    await rest("POST", `/campaigns/${campaign.id}/activate`);
+    now = new Date("2026-11-20T15:03:00Z");
+    const [sent] = mail.outbox();
+    expect(sent?.body).toEqual({ text: "Hi Ada" });
+    now = new Date("2026-11-20T15:10:00Z");
+    const reply = mail.receive({ replyTo: String(sent!.id), text: "Interested, what is the pay?" });
+    const page = readInstantlyEmailPage(
+      await rest("GET", `/emails?campaign_id=${campaign.id}&search=thread:${sent!.thread_id}`),
+    );
+    expect(page?.items.map((email) => [email.ue_type, email.subject])).toEqual([
+      [2, "Re: Data role"],
+      [1, "Data role"],
+    ]);
+    expect(page?.next_starting_after).toBeUndefined();
+    expect(reply).toMatchObject({
+      from_address_email: "ada@x.test",
+      to_address_email_list: "me@mail.test",
+    });
+    const leads = await rest("POST", "/leads/list", { campaign: campaign.id });
+    expect(leads.items).toMatchObject([{ email_reply_count: 1 }]);
+    const request = {
+      reply_to_uuid: String(reply.id),
+      eaccount: "me@mail.test",
+      to: "ada@x.test",
+      subject: "Re: Data role",
+      body_text: "About $200k.",
+      skip_validation: false as const,
+    };
+    const answered = await rest("POST", "/emails/reply", {
+      ...request,
+      body: { text: request.body_text },
+    });
+    expect(classifyInstantlyReplyReceipt(request, reply, answered).status).toBe("sent_recorded");
   });
 });

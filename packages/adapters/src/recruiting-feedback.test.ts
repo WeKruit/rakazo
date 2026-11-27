@@ -71,6 +71,7 @@ function fixture(content = "keep this preference", revision = 1, roleTitle?: str
             activeRecruitingRole: roleTitle ? { title: roleTitle } : null,
           })),
         },
+        recruitingCandidateOccurrence: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       memory: { read, commit } as unknown as MemoryStore,
     },
@@ -137,57 +138,6 @@ describe("recruiting feedback", () => {
       expect.objectContaining({ content: "keep this preference\n\nShow the complete prompt" }),
       context,
     );
-  });
-
-  it("refuses to save one role's requirement as a preference shared by every role", async () => {
-    // Staging saved "For the Senior Talent Acquisition Partner (in-house) role, require …" to the
-    // shared preferences, while the role itself kept no criteria.
-    const f = fixture("keep this preference", 1, "Senior Talent Acquisition Partner (in-house)");
-    await expect(
-      executeRecruitingFeedback(
-        f.deps,
-        trusted,
-        {
-          ...preference,
-          content:
-            "For the Senior Talent Acquisition Partner (in-house) role, require experience hiring hardware engineers.",
-        },
-        context,
-      ),
-    ).rejects.toThrow(/goes on that role[\s\S]*Senior Talent Acquisition Partner \(in-house\)/);
-    expect(f.commit).not.toHaveBeenCalled();
-    // A preference for every role saves as usual in that same chat.
-    await executeRecruitingFeedback(
-      f.deps,
-      trusted,
-      { ...preference, content: "Never show people from staffing agencies" },
-      context,
-    );
-    expect(f.commit).toHaveBeenCalledOnce();
-  });
-
-  it("refuses to save a pasted job description as a preference shared by every role", async () => {
-    // Staging: a new account pasted a Chinese JD in Kruit and the agent saved all of it as a
-    // cross-role preference instead of opening the role.
-    const f = fixture();
-    for (const content of [
-      "新岗位：华东区销售总监，常驻上海，医疗器械行业，10年以上销售经验。必须会说普通话和英语。",
-      "职位：高级前端工程师，北京，5年以上经验",
-      "New role: Senior Account Executive, Austin, 5+ years SaaS sales",
-      "Hiring for our team.\nJob Title: Staff Engineer\nLocation: remote",
-    ])
-      await expect(
-        executeRecruitingFeedback(f.deps, trusted, { ...preference, content }, context),
-      ).rejects.toThrow(/job description or a new role[\s\S]*start_role/);
-    expect(f.commit).not.toHaveBeenCalled();
-    // Preferences that only mention new roles still save.
-    await executeRecruitingFeedback(
-      f.deps,
-      trusted,
-      { ...preference, content: "以后所有新岗位都先问我预算" },
-      context,
-    );
-    expect(f.commit).toHaveBeenCalledOnce();
   });
 
   it("constructs and commits one reusable preference with runtime provenance and the loaded revision", async () => {
@@ -329,6 +279,45 @@ describe("recruiting feedback", () => {
     expect(f.commit).not.toHaveBeenCalled();
   });
 
+  it("names the shown round's people by number after round direction, since it marks no one", async () => {
+    const f = fixture();
+    const findFirst = vi.fn(async () => ({ candidateKeys: ["key-a", "key-b"] }));
+    Object.assign(f.deps.prisma, {
+      recruitingCalibrationRound: { findFirst },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: "key-b", name: "Person B" }]),
+      },
+    });
+    const roundIntent = { basis: "direct", quote: "4 and 7 are out, more streaming next" } as const;
+    db.readContext.mockResolvedValueOnce({
+      source: { ...source, quote: roundIntent.quote },
+      workspace,
+      threadId: "thread",
+      botId: "bot",
+    });
+    const result = await executeRecruitingFeedback(
+      f.deps,
+      trusted,
+      {
+        target: "round",
+        operation: "scope",
+        roleId: "role",
+        expectedRoleRevision: 1,
+        summary: roundIntent.quote,
+        intent: roundIntent,
+        sourceRefs: [],
+      },
+      context,
+    );
+    expect(result).toMatchObject({ status: "recorded" });
+    const next = (result as { next?: string }).next ?? "";
+    expect(next).toContain("1. ? = key-a; 2. Person B = key-b");
+    expect(next).toContain('fit "not_fit"');
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { roleId: "role", status: "shown" } }),
+    );
+  });
+
   it.each([["candidate"], ["candidate", "second", "third"]])(
     "records exactly the selected candidate subset %j without local assessment or memory",
     async (...candidateKeys) => {
@@ -348,6 +337,8 @@ describe("recruiting feedback", () => {
         source,
         workspace,
         status: "recorded",
+        // A decision on people leaves the role's requirements as they were, and says so.
+        requirements: { changed: false, note: expect.stringContaining("recruiting_role") },
       });
       expect(db.readContext).toHaveBeenCalledWith(
         f.deps.prisma,

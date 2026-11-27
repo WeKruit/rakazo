@@ -16,6 +16,7 @@ import {
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
+  RECRUITING_RETIRED_SKILL_NAMES,
   recruitingBotKey,
 } from "@rakazo/core";
 import type { Bot, BotMcpServer, CapabilityInstall, McpServer, PrismaClient } from "./client.js";
@@ -38,16 +39,6 @@ type RecruitingService = {
 
 const RECRUITING_SERVICES: RecruitingService[] = [
   {
-    slug: "autumn",
-    name: "Autumn",
-    description: "Platform recruiting research",
-    endpoint: "https://api.autumn.ai/mcp",
-    // Retired: people search scales and Reviewer grades. Crews keep the connection, which marks
-    // them as recruiting crews, with no tools, so nothing spends its credits.
-    bots: ["main", "sourcer", "reviewer"],
-    tools: [],
-  },
-  {
     slug: "fullenrich",
     name: "FullEnrich",
     description: "Platform contact enrichment",
@@ -60,12 +51,13 @@ const RECRUITING_SERVICES: RecruitingService[] = [
     name: "People search",
     description: "Platform people search for quick calibration rounds",
     endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
-    bots: ["main", "sourcer", "outreach", "reviewer"],
-    tools: ["web_search_exa", "web_search_advanced_exa", "agent_run"],
-    // Outreach searches the public web for a person's own posted email; only the advanced
-    // people search saves results into the role's candidates. The quality check grades saved
-    // people with one agent run per batch.
-    toolsByBot: { outreach: ["web_search_exa"], reviewer: ["agent_run"] },
+    bots: ["main", "sourcer", "outreach"],
+    // One people search for rounds: the advanced one carries the profile evidence and the "why
+    // recommended" line the check reads. Offered beside the plain one, the plain one was picked
+    // for first rounds and its thin profiles came back graded unknown.
+    tools: ["web_search_advanced_exa", "agent_run"],
+    // Outreach searches the public web for a person's own posted email.
+    toolsByBot: { outreach: ["web_search_exa"] },
   },
   {
     // Outreach mail ships with the product on the deployment's account; users never add a key.
@@ -81,27 +73,6 @@ const RECRUITING_SERVICES: RecruitingService[] = [
 
 /** The operator's staff domain: verified mailboxes here see dollar spend for every account. */
 export const RECRUITING_OPERATOR_EMAIL_DOMAIN = "wekruit.com";
-
-/**
- * List prices of the platform services by slug, for the operator's spend estimate only.
- * Research: US$850 a month for 100,000 credits. Contact enrichment: the entry monthly plan,
- * US$29 for 500 credits (charged only for found data). People search: US$7 per 1,000
- * searches with contents. Outreach mail, calendar and mailbox connectors are flat-rate or free.
- * Model tokens are priced from the model catalog instead.
- */
-export const RECRUITING_SERVICE_UNIT_PRICES_USD: Readonly<
-  Record<string, { credits?: number; calls?: number }>
-> = {
-  autumn: { credits: 850 / 100_000, calls: 0 },
-  fullenrich: { credits: 29 / 500, calls: 0 },
-  // Agent runs report their own cost, recorded as one credit per dollar.
-  "people-search": { calls: 7 / 1000, credits: 1 },
-  "recruiting-crm": { calls: 0 },
-  // Flat subscriptions or free APIs: calls add no per-use cost.
-  instantly: { calls: 0 },
-  "cal-com": { calls: 0 },
-  gmail: { calls: 0 },
-};
 
 const CRM_READ_TOOLS = [
   "whoami",
@@ -162,6 +133,8 @@ const catalogDigest = (firstPartyMcpUrl?: string) =>
     recruitingServices(firstPartyMcpUrl),
     RECRUITING_DISABLED_BUILTIN_TOOLS,
     [MEMORY_TIDY_ROUTINE_NAME, memoryTidyRoutinePrompt(true), memoryTidyRoutinePrompt(false)],
+    RECRUITING_DEFAULT_SKILLS,
+    RECRUITING_RETIRED_SKILL_NAMES,
   ]);
 export function recruitingPresetId(actor: Pick<Actor, "spaceId" | "userId">): string {
   return `recruiting-defaults-${digest([actor.spaceId, actor.userId])}`;
@@ -349,19 +322,20 @@ async function savePreset(
 
 /** Crews set up before the managed preset get the same defaults as new accounts. */
 const LEGACY_PRESET_VERSION = "legacy";
-/** Catalog roles newer than the crews set up before the managed preset. */
-const LEGACY_ADDED_ROLES: readonly string[] = ["reviewer"];
 const TURN_IN_FLIGHT_STATUSES = ["queued", "leased", "running"] as const;
 const LEGACY_BOT_FIELDS = ["title", "description", "instructions"] as const;
 const legacyDigest = (firstPartyMcpUrl?: string) =>
-  digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS, LEGACY_ADDED_ROLES]);
+  digest([
+    catalogDigest(firstPartyMcpUrl),
+    RECRUITING_DEFAULT_SKILLS,
+    RECRUITING_RETIRED_SKILL_NAMES,
+  ]);
 
 /**
- * Adopt a crew set up before the managed preset (bots named after the default roles, with Main
- * and Sourcer on the platform research service) so the account works like a new one: replace
- * the role instructions with the current defaults and remove user copies of the built-in
- * recruiting skills, again whenever the defaults change. Returns null when the Space has no such
- * crew.
+ * Adopt a crew set up before the managed preset (bots named after the default roles, recorded
+ * as a legacy install) so the account works like a new one: replace the role instructions with
+ * the current defaults and remove user copies of the built-in recruiting skills, again whenever
+ * the defaults change. Returns null when the Space has no such crew.
  */
 async function adoptLegacyCrew(
   tx: Prisma.TransactionClient,
@@ -369,8 +343,8 @@ async function adoptLegacyCrew(
   installed: CapabilityInstall | null,
   options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ): Promise<{ botId: string; groupId: string } | null> {
+  if (installed?.version !== LEGACY_PRESET_VERSION) return null;
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
   const bots = (await tx.bot.findMany({ where: { ...scope, archivedAt: null } })).filter(
     (bot) => !bot.archivedAt && !bot.spawnKey?.startsWith("recruiting:"),
   );
@@ -381,17 +355,6 @@ async function adoptLegacyCrew(
   const main = crew.find((item) => item.role.key === "main")?.bot;
   const sourcer = crew.find((item) => item.role.key === "sourcer")?.bot;
   if (!main || !sourcer) return null;
-  const servers = await tx.mcpServer.findMany({
-    where: scope,
-    include: { assignments: { where: scope } },
-  });
-  const onResearch = (botId: string) =>
-    servers.some(
-      (server) =>
-        server.endpoint === research.endpoint &&
-        server.assignments.some((assignment) => assignment.botId === botId),
-    );
-  if (!onResearch(main.id) || !onResearch(sourcer.id)) return null;
 
   const group =
     (await tx.chatGroup.findFirst({
@@ -421,68 +384,6 @@ async function adoptLegacyCrew(
     installed?.config && typeof installed.config === "object" && !Array.isArray(installed.config)
       ? installed.config
       : undefined;
-  // Roles added to the catalog after these crews were set up join once; a deleted one stays gone.
-  const added = Array.isArray(prior?.added)
-    ? prior.added.filter((key): key is string => typeof key === "string")
-    : [];
-  const members = await tx.chatGroupMember.count({ where: { groupId: group.id } });
-  const newRoles = RECRUITING_DEFAULT_BOTS.filter(
-    (role) =>
-      LEGACY_ADDED_ROLES.includes(role.key) &&
-      !added.includes(role.key) &&
-      !crew.some((item) => item.role.key === role.key),
-  ).slice(0, Math.max(0, GROUP_MEMBER_MAX - members));
-  if (newRoles.length && resolveMaxComputersPerUser() > 0) {
-    // The same quota lock the managed upgrade takes before creating bot rows.
-    const [quota] = await tx.$queryRaw<Array<{ acquired: boolean }>>`
-      SELECT pg_try_advisory_xact_lock(hashtextextended(${actor.userId}, 1)) AS acquired
-    `;
-    if (!quota?.acquired) return result;
-  }
-  for (const role of newRoles) {
-    const bot = await createBotInTransaction(
-      tx,
-      actor,
-      {
-        name: role.name,
-        title: role.title,
-        description: role.description,
-        instructions: role.instructions,
-        color: BOT_COLORS[(bots.length + crew.length) % BOT_COLORS.length] ?? BOT_COLORS[0],
-        notifyOnFinish: true,
-        disabledBuiltinTools: [...RECRUITING_DISABLED_BUILTIN_TOOLS],
-      },
-      await recruitingComputerKind(tx, options.sandboxKind),
-    );
-    await tx.chatGroupMember.createMany({
-      data: [{ groupId: group.id, botId: bot.id }],
-      skipDuplicates: true,
-    });
-    for (const service of recruitingServices(options.firstPartyMcpUrl)) {
-      if (!service.bots.includes(role.key)) continue;
-      const server = servers.find(
-        (item) =>
-          item.slug === service.slug &&
-          item.endpoint === service.endpoint &&
-          item.assignments.some((assignment) => assignment.botId === main.id),
-      );
-      if (server)
-        await tx.botMcpServer.createMany({
-          data: [
-            {
-              ...scope,
-              botId: bot.id,
-              serverId: server.id,
-              allowAllTools: false,
-              allowedTools: service.toolsByBot?.[role.key] ?? service.tools,
-            },
-          ],
-          skipDuplicates: true,
-        });
-    }
-    crew.push({ role, bot });
-    added.push(role.key);
-  }
   for (const { role, bot } of crew) {
     const data: Record<string, string | string[]> = Object.fromEntries(
       LEGACY_BOT_FIELDS.filter((field) => bot[field] !== role[field]).map((field) => [
@@ -502,11 +403,7 @@ async function adoptLegacyCrew(
     if (changed.count !== 1)
       throw new IsolationError("A recruiting assistant changed during the upgrade");
   }
-  // User copies of the built-in recruiting skills would shadow the maintained ones.
-  const names = RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name);
-  await tx.agentSkill.deleteMany({
-    where: { ...scope, source: "user", name: { in: names, mode: "insensitive" } },
-  });
+  await deleteRecruitingSkillCopies(tx, actor);
   const priorRoutines = prior?.routines;
   const routines = validRoutines(priorRoutines) && priorRoutines ? { ...priorRoutines } : {};
   await ensureMemoryTidyRoutines(
@@ -518,13 +415,9 @@ async function adoptLegacyCrew(
   const record = {
     version: LEGACY_PRESET_VERSION,
     digest: target,
-    config: { legacy: true, routines, added },
+    config: { legacy: true, routines },
   };
-  if (installed) await tx.capabilityInstall.updateMany({ where: presetWhere(actor), data: record });
-  else
-    await tx.capabilityInstall.create({
-      data: { ...presetWhere(actor), name: "Recruiting defaults", ...record },
-    });
+  await tx.capabilityInstall.updateMany({ where: presetWhere(actor), data: record });
   return result;
 }
 
@@ -539,6 +432,25 @@ async function recruitingComputerKind(
   return sandboxKind === "docker" && settings?.computerHost === "this-mac"
     ? "desktop"
     : sandboxKind;
+}
+
+/**
+ * User copies of the built-in recruiting skills would shadow the maintained ones, and copies of
+ * retired ones would stay in the catalog beside the skills that replaced them.
+ */
+async function deleteRecruitingSkillCopies(tx: Prisma.TransactionClient, actor: Actor) {
+  const names = [
+    ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name),
+    ...RECRUITING_RETIRED_SKILL_NAMES,
+  ];
+  await tx.agentSkill.deleteMany({
+    where: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      source: "user",
+      name: { in: names, mode: "insensitive" },
+    },
+  });
 }
 
 async function upgradeInTransaction(
@@ -557,6 +469,11 @@ async function upgradeInTransaction(
   const baseline = readPreset(installed.config);
   if (baseline.groupId !== recruitingHomeGroupId(actor))
     throw new IsolationError("Recruiting defaults belong to another workspace");
+  await deleteRecruitingSkillCopies(tx, actor);
+  // A service the product no longer ships leaves the baseline with it.
+  const shipped = new Set(recruitingServices(options.firstPartyMcpUrl).map((item) => item.slug));
+  for (const slug of Object.keys(baseline.services))
+    if (!shipped.has(slug)) delete baseline.services[slug];
   const originalServices = new Set(Object.keys(baseline.services));
   const newBotIds = new Set<string>();
   if (
@@ -816,17 +733,8 @@ export async function upgradeRecruitingWorkspace(
   options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ): Promise<void> {
   const installed = await prisma.capabilityInstall.findFirst({ where: presetWhere(actor) });
-  if (!installed) {
-    const crew = await prisma.bot.count({
-      where: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        archivedAt: null,
-        name: { in: ["Main", "Sourcer"] },
-      },
-    });
-    if (crew < 2) return;
-  } else if (installed.version === LEGACY_PRESET_VERSION) {
+  if (!installed) return;
+  if (installed.version === LEGACY_PRESET_VERSION) {
     if (installed.digest === legacyDigest(options.firstPartyMcpUrl)) return;
   } else if (
     installed.version === "unmanaged" ||
@@ -850,7 +758,8 @@ export async function upgradeRecruitingWorkspace(
         select: { id: true },
       });
       if (!personal) return;
-      if (!current || current.version === LEGACY_PRESET_VERSION) {
+      if (!current) return;
+      if (current.version === LEGACY_PRESET_VERSION) {
         const home = recruitingHomeGroupId(actor);
         const managed = await tx.chatGroup.count({ where: { id: home } });
         if (!managed) await adoptLegacyCrew(tx, actor, current, options);
@@ -909,7 +818,7 @@ export async function ensureRecruitingWorkspace(
         }),
       ]);
       const installed = await tx.capabilityInstall.findFirst({ where: presetWhere(actor) });
-      if (!existing && (!installed || installed.version === LEGACY_PRESET_VERSION)) {
+      if (!existing && installed?.version === LEGACY_PRESET_VERSION) {
         const legacy = await adoptLegacyCrew(tx, actor, installed, options);
         if (legacy) return legacy;
       }
@@ -1075,202 +984,190 @@ export async function ensureRecruitingWorkspace(
  * already uses it, skips a disabled one, and adds only missing links. It does not wait for runs,
  * because adding a tool changes nothing an active run already holds.
  */
-export async function ensurePlatformServices(
-  prisma: PrismaClient,
-  actor: Actor,
-  options: { sandboxKind?: string } = {},
-): Promise<void> {
-  await ensureReviewer(prisma, actor, options.sandboxKind);
-  for (const slug of ["people-search", "fullenrich", "instantly"])
-    await ensurePlatformService(prisma, actor, slug);
+const PLATFORM_SERVICE_SLUGS = ["people-search", "fullenrich", "instantly"] as const;
+
+export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor): Promise<void> {
+  await retireReviewer(prisma, actor);
+  for (const slug of PLATFORM_SERVICE_SLUGS) await ensurePlatformService(prisma, actor, slug);
   await ensureAddedTools(prisma, actor);
   await ensureSchedulingCalendar(prisma, actor);
-  await ensureOutreachGmail(prisma, actor);
-  await retireResearchTools(prisma, actor);
+  await ensureGmailSends(prisma, actor);
 }
 
 /**
- * A Google Calendar the recruiter connected reaches Scheduling, which books interviews on it,
- * even when it was first granted only to the coordinator. Adds only a missing grant.
+ * A Google Calendar the recruiter added lets Scheduling and Main book interviews on it, and a
+ * Gmail they connected lets Outreach, Scheduling (proposing times) and Main send from it; each
+ * booking and email still waits for the recruiter on its card. Main holds them too so it does the work itself instead of handing
+ * it on (simulated 11-16, calendar-not-connected: Main handed a booking to Scheduling, which told
+ * the recruiter "日历连接由 Main 管理"). Before the calendar is connected its holders' own calls
+ * ask for the connection. Adds only missing grants and missing tools; nothing else changes.
  */
-async function ensureSchedulingCalendar(prisma: PrismaClient, actor: Actor): Promise<void> {
+async function ensureGrants(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { roleKeys: readonly string[]; servers: { id: string }[]; tools: readonly string[] },
+): Promise<void> {
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "scheduling");
-  if (!role) return;
-  const servers = await prisma.mcpServer.findMany({
-    where: { ...scope, endpoint: GOOGLE_CALENDAR_ENDPOINT, enabled: true, secretId: { not: null } },
-    select: { id: true },
-  });
-  if (!servers.length) return;
+  const roles = RECRUITING_DEFAULT_BOTS.filter((item) => input.roleKeys.includes(item.key));
+  if (!roles.length || !input.servers.length) return;
   const bots = await prisma.bot.findMany({
     where: {
       ...scope,
       archivedAt: null,
-      OR: [{ spawnKey: `recruiting:${actor.userId}:${role.key}` }, { name: role.name }],
+      OR: roles.flatMap((role) => [
+        { spawnKey: `recruiting:${actor.userId}:${role.key}` },
+        { name: role.name },
+      ]),
     },
     select: { id: true },
   });
   if (!bots.length) return;
-  await prisma.botMcpServer.createMany({
-    data: servers.flatMap((server) =>
-      bots.map((bot) => ({
-        ...scope,
-        botId: bot.id,
-        serverId: server.id,
-        allowAllTools: false,
-        allowedTools: GOOGLE_CALENDAR_SCHEDULING_TOOLS,
-      })),
-    ),
-    skipDuplicates: true,
-  });
-}
-
-/**
- * A Gmail the recruiter connected lets Outreach send from it, each email on its own card. An
- * Outreach grant from before sending gains the send tools; nothing else in it changes.
- */
-async function ensureOutreachGmail(prisma: PrismaClient, actor: Actor): Promise<void> {
-  const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "outreach");
-  if (!role) return;
-  const servers = await prisma.mcpServer.findMany({
-    where: { ...scope, endpoint: GMAIL_MCP_ENDPOINT, enabled: true, secretId: { not: null } },
-    select: { id: true },
-  });
-  if (!servers.length) return;
-  const bots = await prisma.bot.findMany({
-    where: {
-      ...scope,
-      archivedAt: null,
-      OR: [{ spawnKey: `recruiting:${actor.userId}:${role.key}` }, { name: role.name }],
-    },
-    select: { id: true },
-  });
-  if (!bots.length) return;
-  const tools = [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS];
+  const serverIds = input.servers.map((server) => server.id);
   const grants = await prisma.botMcpServer.findMany({
-    where: {
-      ...scope,
-      botId: { in: bots.map((bot) => bot.id) },
-      serverId: { in: servers.map((server) => server.id) },
-    },
+    where: { ...scope, botId: { in: bots.map((bot) => bot.id) }, serverId: { in: serverIds } },
     select: { botId: true, serverId: true, allowAllTools: true, allowedTools: true },
   });
   for (const grant of grants) {
     const allowed = Array.isArray(grant.allowedTools)
       ? grant.allowedTools.filter((tool): tool is string => typeof tool === "string")
       : [];
-    if (grant.allowAllTools || GMAIL_SEND_TOOLS.every((tool) => allowed.includes(tool))) continue;
+    if (grant.allowAllTools || input.tools.every((tool) => allowed.includes(tool))) continue;
     await prisma.botMcpServer.updateMany({
       where: { ...scope, botId: grant.botId, serverId: grant.serverId },
-      data: { allowedTools: [...new Set([...allowed, ...tools])] },
+      data: { allowedTools: [...new Set([...allowed, ...input.tools])] },
     });
   }
   await prisma.botMcpServer.createMany({
-    data: servers.flatMap((server) =>
+    data: serverIds.flatMap((serverId) =>
       bots.map((bot) => ({
         ...scope,
         botId: bot.id,
-        serverId: server.id,
+        serverId,
         allowAllTools: false,
-        allowedTools: tools,
+        allowedTools: [...input.tools],
       })),
     ),
     skipDuplicates: true,
   });
 }
 
-/**
- * The research service is retired for every account: each of the account's grants to it keeps
- * its row, which marks a recruiting crew, with no tools, whoever last set it.
- */
-async function retireResearchTools(prisma: PrismaClient, actor: Actor): Promise<void> {
-  const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
-  await prisma.botMcpServer.updateMany({
+async function ensureSchedulingCalendar(prisma: PrismaClient, actor: Actor): Promise<void> {
+  const servers = await prisma.mcpServer.findMany({
     where: {
-      ...scope,
-      server: { ...scope, endpoint: research.endpoint },
-      NOT: { allowAllTools: false, allowedTools: { equals: [] } },
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      endpoint: GOOGLE_CALENDAR_ENDPOINT,
+      enabled: true,
     },
-    data: { allowAllTools: false, allowedTools: [] },
+    select: { id: true },
+  });
+  await ensureGrants(prisma, actor, {
+    roleKeys: ["scheduling", "main"],
+    servers,
+    tools: GOOGLE_CALENDAR_SCHEDULING_TOOLS,
+  });
+}
+
+async function ensureGmailSends(prisma: PrismaClient, actor: Actor): Promise<void> {
+  const servers = await prisma.mcpServer.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      endpoint: GMAIL_MCP_ENDPOINT,
+      enabled: true,
+      secretId: { not: null },
+    },
+    select: { id: true },
+  });
+  await ensureGrants(prisma, actor, {
+    roleKeys: ["outreach", "scheduling", "main"],
+    servers,
+    tools: [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS],
   });
 }
 
 /**
- * Every recruiting crew has the quality check: the account's Reviewer exists and belongs to each
- * conversation its Main is in, so grading never falls to the coordinator. Additive only.
+ * The quality check is retired for every account: the search grades people. A crew's Reviewer is
+ * archived and taken out of every conversation, so no roster offers it, nothing hands it work
+ * and a new role, which takes its team from the Kruit conversation, never gets it as a member.
+ * Its messages and the grades it saved stay. A Reviewer with a turn in flight is left for the
+ * next pass.
  */
-async function ensureReviewer(
-  prisma: PrismaClient,
-  actor: Actor,
-  sandboxKind: string | undefined,
-): Promise<void> {
+async function retireReviewer(prisma: PrismaClient, actor: Actor): Promise<void> {
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
-  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "reviewer");
-  if (!role) return;
-  const lead = {
-    ...scope,
-    archivedAt: null,
-    OR: [{ spawnKey: `recruiting:${actor.userId}:main` }, { name: "Main" }],
-    mcpServers: { some: { ...scope, server: { ...scope, endpoint: research.endpoint } } },
-  };
-  if (!(await prisma.bot.count({ where: lead }))) return;
-  const reviewerWhere = {
-    ...scope,
-    archivedAt: null,
-    OR: [{ spawnKey: `recruiting:${actor.userId}:reviewer` }, { name: role.name }],
-  };
-  await prisma.$transaction(async (tx) => {
-    await lockSpaceForContentCreation(tx, actor);
-    let reviewer = await tx.bot.findFirst({ where: reviewerWhere, select: { id: true } });
-    if (!reviewer) {
-      if (!sandboxKind) return;
-      const count = await tx.bot.count({ where: scope });
-      reviewer = await createBotInTransaction(
-        tx,
-        actor,
-        {
-          name: role.name,
-          title: role.title,
-          description: role.description,
-          instructions: role.instructions,
-          color: BOT_COLORS[count % BOT_COLORS.length] ?? BOT_COLORS[0],
-          notifyOnFinish: true,
-          spawnKey: `recruiting:${actor.userId}:reviewer`,
-          disabledBuiltinTools: [...RECRUITING_DISABLED_BUILTIN_TOOLS],
-        },
-        await recruitingComputerKind(tx, sandboxKind),
-      );
-    }
-    const groups = await tx.chatGroup.findMany({
-      where: {
-        ...scope,
-        archivedAt: null,
-        members: { some: { bot: lead }, none: { botId: reviewer.id } },
-      },
-      select: { id: true, _count: { select: { members: true } } },
-    });
-    const open = groups.filter((group) => group._count.members < GROUP_MEMBER_MAX);
-    if (open.length)
-      await tx.chatGroupMember.createMany({
-        data: open.map((group) => ({ groupId: group.id, botId: reviewer.id })),
-        skipDuplicates: true,
-      });
+  const reviewers = await prisma.bot.findMany({
+    where: {
+      ...scope,
+      OR: [
+        { spawnKey: `recruiting:${actor.userId}:reviewer` },
+        // Crews older than spawn keys got theirs by name and title.
+        { spawnKey: null, name: "Reviewer", title: "Quality check" },
+      ],
+      runs: { none: { status: { in: [...TURN_IN_FLIGHT_STATUSES] } } },
+    },
+    select: { id: true, archivedAt: true },
   });
+  if (!reviewers.length) return;
+  const ids = reviewers.map((bot) => bot.id);
+  const active = reviewers.filter((bot) => !bot.archivedAt).map((bot) => bot.id);
+  await prisma.$transaction([
+    prisma.chatGroupMember.deleteMany({ where: { botId: { in: ids } } }),
+    ...(active.length
+      ? [
+          prisma.routine.updateMany({
+            where: { botId: { in: active } },
+            data: { active: false, nextRunAt: null },
+          }),
+          prisma.bot.updateMany({
+            where: { id: { in: active }, archivedAt: null },
+            data: { archivedAt: new Date(), pinned: false },
+          }),
+        ]
+      : []),
+  ]);
 }
+
+/** Bump when a backfill step changes what it applies without changing the defaults it reads. */
+const BACKFILL_REVISION = 1;
+const BACKFILL_SAVE_EVERY = 50;
+const backfillKey = (options: { sandboxKind: string; firstPartyMcpUrl?: string }) =>
+  digest([
+    BACKFILL_REVISION,
+    catalogDigest(options.firstPartyMcpUrl),
+    legacyDigest(options.firstPartyMcpUrl),
+    ADDED_TOOLS,
+    PLATFORM_SERVICE_SLUGS,
+    options.sandboxKind,
+  ]);
 
 /**
  * Bring every private account to the current recruiting defaults now, including accounts without a crew,
  * instead of waiting for each person to open the app. Each account is independent: one that
  * fails is logged by the caller's handler and the rest continue.
+ *
+ * The walk runs once per set of defaults, like a data migration: it saves the account it reached,
+ * so a restart resumes there and a finished walk costs one read. Accounts created later are set
+ * up when they sign up. Returns the accounts brought up to date in this pass.
  */
 export async function backfillRecruitingCrews(
   prisma: PrismaClient,
-  options: { sandboxKind: string; firstPartyMcpUrl?: string },
+  options: { sandboxKind: string; firstPartyMcpUrl?: string; signal?: AbortSignal },
   onError: (error: unknown) => void,
 ): Promise<number> {
+  const key = backfillKey(options);
+  const progress = await prisma.deploymentSettings.findUnique({
+    where: { id: "default" },
+    select: { recruitingBackfillKey: true, recruitingBackfillCursor: true },
+  });
+  const resumeAfter =
+    progress?.recruitingBackfillKey === key ? progress.recruitingBackfillCursor : "";
+  if (resumeAfter === null) return 0;
+  // Never create the settings row: the first sign-up creates it with the deployment's sign-up policy.
+  const save = (cursor: string | null) =>
+    prisma.deploymentSettings.updateMany({
+      where: { id: "default" },
+      data: { recruitingBackfillKey: key, recruitingBackfillCursor: cursor },
+    });
   const memberships = await prisma.spaceMember.findMany({
     where: { role: "owner", space: { isDefault: true, deletingAt: null } },
     select: {
@@ -1299,8 +1196,20 @@ export async function backfillRecruitingCrews(
       })
     ).map((user) => [user.id, user.email]),
   );
+  const position = (lead: { spaceId: string; userId: string }) => `${lead.spaceId}:${lead.userId}`;
+  const pending = leads
+    .filter((lead) => position(lead) > resumeAfter)
+    .sort((a, b) => (position(a) < position(b) ? -1 : 1));
   let done = 0;
-  for (const lead of leads) {
+  let reached = resumeAfter;
+  for (const [index, lead] of pending.entries()) {
+    // Stop with the pool, not after it: the rest would only fail, one logged error each.
+    if (options.signal?.aborted) {
+      await save(reached);
+      return done;
+    }
+    if (index && index % BACKFILL_SAVE_EVERY === 0) await save(reached);
+    reached = position(lead);
     const email = emails.get(lead.userId);
     if (!email) continue;
     const actor: Actor = {
@@ -1327,7 +1236,7 @@ export async function backfillRecruitingCrews(
       }
       if (!installed) await ensureRecruitingWorkspace(prisma, actor, options);
       await upgradeRecruitingWorkspace(prisma, actor, options);
-      await ensurePlatformServices(prisma, actor, options);
+      await ensurePlatformServices(prisma, actor);
       await prisma.$transaction(async (tx) => {
         await lockSpaceForContentCreation(tx, actor);
         const installed = await tx.capabilityInstall.findFirst({ where: presetWhere(actor) });
@@ -1366,6 +1275,7 @@ export async function backfillRecruitingCrews(
       onError(error);
     }
   }
+  await save(null);
   return done;
 }
 
@@ -1393,12 +1303,6 @@ const ADDED_TOOLS: ReadonlyArray<{
     roles: ["main", "sourcer"],
     endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
     requires: "web_search_advanced_exa",
-    add: ["agent_run"],
-  },
-  // The quality check grades each batch with one people-search agent run.
-  {
-    roles: ["reviewer"],
-    endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
     add: ["agent_run"],
   },
 ];
@@ -1456,23 +1360,20 @@ async function ensurePlatformService(
   slug: string,
 ): Promise<void> {
   const service = RECRUITING_SERVICES.find((item) => item.slug === slug);
-  const research = RECRUITING_SERVICES.find((item) => item.slug === "autumn");
-  if (!service || !research) return;
+  if (!service) return;
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
   const roleBots = (keys: readonly string[]) =>
     keys.flatMap((key) => [
       { spawnKey: `recruiting:${actor.userId}:${key}` },
       { name: RECRUITING_DEFAULT_BOTS.find((role) => role.key === key)?.name ?? key },
     ]);
-  const plan = async (client: Pick<PrismaClient, "mcpServer" | "bot" | "botMcpServer">) => {
-    // Only a recruiting crew: its lead is on the platform research service.
+  const plan = async (
+    client: Pick<PrismaClient, "capabilityInstall" | "mcpServer" | "bot" | "botMcpServer">,
+  ) => {
+    // Only a recruiting crew: the account has the recruiting defaults and its lead.
+    if (!(await client.capabilityInstall.count({ where: presetWhere(actor) }))) return null;
     const lead = await client.bot.findFirst({
-      where: {
-        ...scope,
-        archivedAt: null,
-        OR: roleBots(["main"]),
-        mcpServers: { some: { ...scope, server: { ...scope, endpoint: research.endpoint } } },
-      },
+      where: { ...scope, archivedAt: null, OR: roleBots(["main"]) },
       select: { id: true },
     });
     if (!lead) return null;

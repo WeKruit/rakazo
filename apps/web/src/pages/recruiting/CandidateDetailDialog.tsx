@@ -9,10 +9,8 @@ import {
   CandidateResearchMatch,
   CrmDetails,
 } from "./CandidatePresentation";
-import { CriteriaExpression } from "./CriteriaEditor";
-import { CandidateSources, Sources } from "./SourceDocuments";
+import { CandidateSources } from "./SourceDocuments";
 import type { useRecruitingWorkspace } from "./useRecruitingWorkspace";
-import { VerdictLabel } from "./VerdictLabel";
 
 export function CandidateDetailDialog({
   model,
@@ -41,17 +39,12 @@ export function CandidateDetailDialog({
     candidateHandoff,
     candidatePage,
     setCandidateDetailOpen,
-    selectedEvidence,
-    evidenceFailed,
     candidateValidation,
     denyAccess,
     workspace,
-    selected,
-    assessment,
     candidateFresh,
     selectedCrm,
     selectedCrmTarget,
-    revealCandidateMessage,
   } = model;
   return (
     <Dialog
@@ -186,19 +179,6 @@ export function CandidateDetailDialog({
                 />
               </section>
             ) : null}
-            {selection.latestAssessment && evidenceFailed ? (
-              <p role="alert">
-                <Trans>Could not load assessment</Trans>
-              </p>
-            ) : selection.latestAssessment && !selectedEvidence ? (
-              <p role="status">
-                <Trans>Loading…</Trans>
-              </p>
-            ) : selection.latestAssessment && !selected ? (
-              <p role="alert">
-                <Trans>Assessment unavailable</Trans>
-              </p>
-            ) : null}
             {workspace && snapshot ? (
               <CandidateSources
                 key={`${selection.roleId}:${selection.candidateKey}`}
@@ -211,146 +191,6 @@ export function CandidateDetailDialog({
               />
             ) : null}
           </div>
-        ) : null}
-        {assessment && selected ? (
-          <section
-            key={`${assessment.roleId}:${assessment.candidateKey}:${assessment.version}`}
-            aria-label={showDiagnostics ? assessment.candidateKey : t`Candidate assessment`}
-            className="space-y-4 border-t border-border pt-4"
-          >
-            <h3 className="font-medium">
-              {showDiagnostics
-                ? assessment.candidateKey
-                : (selection?.name ?? t`Unnamed candidate`)}
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              <Trans>Internal assessment</Trans> · <Trans>Role</Trans> ·{" "}
-              <Trans>Version {selected.roleRevision.revision}</Trans>
-            </p>
-            <p className="flex items-center gap-2">
-              <span>
-                <Trans>Hard criteria</Trans>
-              </span>
-              <VerdictLabel verdict={assessment.judgments.hardGate} />
-            </p>
-            {assessment.judgments.employment.map((employment) => {
-              const count =
-                employment.upperMonths === employment.lowerMonths
-                  ? String(employment.lowerMonths)
-                  : `${employment.lowerMonths}–${employment.upperMonths ?? "?"}`;
-              const cutoff = `${employment.cutoff.year}-${String(employment.cutoff.month).padStart(2, "0")}-${String(employment.cutoff.day).padStart(2, "0")}`;
-              return (
-                <div key={employment.atomId} className="space-y-1">
-                  <p>{employment.qualificationDefinition}</p>
-                  <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>
-                      <Trans>{count} months</Trans> · ≥ {employment.minimumMonths} · {cutoff}
-                    </span>
-                    <VerdictLabel verdict={employment.verdict} />
-                  </p>
-                </div>
-              );
-            })}
-            {assessment.judgments.criteria.map((judgment) => {
-              const criterion = selected.roleRevision.criteria.find(
-                (item) => item.id === judgment.criterionId,
-              );
-              const facts = assessment.facts.filter((fact) => judgment.factIds.includes(fact.id));
-              const sourceIds = new Set([
-                ...facts.flatMap((fact) => fact.sourceRefIds),
-                ...judgment.evidence,
-              ]);
-              return (
-                <details key={judgment.criterionId} open className="space-y-2">
-                  <summary className="cursor-pointer">
-                    <span className="me-2">
-                      {criterion?.expression.kind === "atom"
-                        ? criterion.expression.statement
-                        : t`Criterion`}
-                    </span>
-                    <VerdictLabel verdict={judgment.verdict} />
-                    {criterion ? (
-                      <span className="ms-2 text-xs text-muted-foreground">
-                        {criterion.priority === "hard" ? (
-                          <Trans>Hard criteria</Trans>
-                        ) : (
-                          <Trans>Preferred criteria</Trans>
-                        )}
-                      </span>
-                    ) : null}
-                  </summary>
-                  {criterion && criterion.expression.kind !== "atom" ? (
-                    <CriteriaExpression expression={criterion.expression} />
-                  ) : null}
-                  {facts.map((fact) => (
-                    <p key={fact.id}>{fact.statement}</p>
-                  ))}
-                  <Sources
-                    sourceTarget={{
-                      kind: "assessment",
-                      roleId: assessment.roleId,
-                      candidateKey: assessment.candidateKey,
-                      version: assessment.version,
-                    }}
-                    sources={assessment.sourceRefs.filter((source) => sourceIds.has(source.id))}
-                    messageTargets={selected.sourceMessageTargets}
-                    onRevealMessage={revealCandidateMessage}
-                    showDiagnostics={showDiagnostics}
-                  />
-                  {judgment.missing.map((question) => (
-                    <p key={question} className="text-muted-foreground">
-                      {question}
-                    </p>
-                  ))}
-                </details>
-              );
-            })}
-            <details>
-              <summary className="cursor-pointer text-muted-foreground">
-                <Trans>Saved facts</Trans>
-              </summary>
-              <ul className="mt-2 space-y-3">
-                {assessment.facts.map((fact) => (
-                  <li key={fact.id} className="space-y-2">
-                    <p>{fact.statement}</p>
-                    <Sources
-                      sourceTarget={{
-                        kind: "assessment",
-                        roleId: assessment.roleId,
-                        candidateKey: assessment.candidateKey,
-                        version: assessment.version,
-                      }}
-                      sources={assessment.sourceRefs.filter((source) =>
-                        fact.sourceRefIds.includes(source.id),
-                      )}
-                      messageTargets={selected.sourceMessageTargets}
-                      onRevealMessage={revealCandidateMessage}
-                      showDiagnostics={showDiagnostics}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </details>
-            <details>
-              <summary className="cursor-pointer text-muted-foreground">
-                <Trans>Sources</Trans>
-              </summary>
-              <div className="mt-2">
-                <Sources
-                  sourceTarget={{
-                    kind: "assessment",
-                    roleId: assessment.roleId,
-                    candidateKey: assessment.candidateKey,
-                    version: assessment.version,
-                  }}
-                  showDiagnostics={showDiagnostics}
-                  sources={assessment.sourceRefs}
-                  messageTargets={selected.sourceMessageTargets}
-                  onRevealMessage={revealCandidateMessage}
-                />
-              </div>
-            </details>
-          </section>
         ) : null}
       </DialogContent>
     </Dialog>

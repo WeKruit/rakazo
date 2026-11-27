@@ -10,6 +10,7 @@ import {
   decodeLoginSecret,
   isPrivateNetworkHost,
   SecretHttpRequest,
+  unsupportedSecretHeader,
 } from "@rakazo/contracts";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { withTransactionRetry } from "@rakazo/db";
@@ -51,7 +52,7 @@ export function commandCredentialRedactions(environment: Record<string, string>)
 function credentialHeader(destination: Pick<BotSecretDestination, "auth">, plaintext: string) {
   // A login is only typed into its site, and a command variable only reaches shell commands.
   if (destination.auth.type === "login" || destination.auth.type === "command") {
-    throw new Error("Credential cannot be used with this authentication method");
+    throw new BotSecretInputError(UNUSABLE_CREDENTIAL);
   }
   const name = destination.auth.type === "header" ? destination.auth.name : "Authorization";
   const value =
@@ -64,7 +65,7 @@ function credentialHeader(destination: Pick<BotSecretDestination, "auth">, plain
     const headers = new Headers({ [name]: value });
     if (headers.get(name) !== value) throw new Error("Header value was normalized");
   } catch {
-    throw new Error("Credential cannot be used with this authentication method");
+    throw new BotSecretInputError(UNUSABLE_CREDENTIAL);
   }
   return { name, value };
 }
@@ -73,6 +74,11 @@ function credentialHeader(destination: Pick<BotSecretDestination, "auth">, plain
 export function allowPrivateHttpSecretOrigins(): boolean {
   return process.env.RAKAZO_SECRETS_ALLOW_PRIVATE_HTTP === "1";
 }
+
+/** A credential the person submitted cannot be stored or used as given; the message is safe to show. */
+export class BotSecretInputError extends Error {}
+
+class CredentialDestinationError extends BotSecretInputError {}
 
 export function normalizeSecretDestination(value: unknown): BotSecretDestination {
   const parsed = botSecretDestinationSchema({
@@ -85,7 +91,7 @@ export function normalizeSecretDestination(value: unknown): BotSecretDestination
     const detail = parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "credential"}: ${issue.message}`)
       .join("; ");
-    throw new Error(`Invalid credential destination — ${detail}`);
+    throw new CredentialDestinationError(`Invalid credential destination — ${detail}`);
   }
   if (parsed.data.auth.type === "command") return parsed.data;
   return { ...parsed.data, origin: new URL(parsed.data.origin).origin };
@@ -284,7 +290,7 @@ export function resolveRequestSecretDestination(
     } catch (error) {
       return {
         error:
-          error instanceof Error && error.message.startsWith("Invalid credential destination")
+          error instanceof CredentialDestinationError
             ? error.message
             : "Specify a credential name, HTTPS origin, and auth method.",
       };
@@ -362,11 +368,10 @@ function authMetadata(value: unknown): unknown {
   if (!isPlainObject(value)) return undefined;
   if (value.type === "header") {
     if (typeof value.name !== "string") return { type: "header" };
-    const header = BotSecretAuth.safeParse({ type: "header", name: value.name });
-    const unsupported =
-      !header.success &&
-      header.error.issues.some((issue) => issue.message === "Unsupported credential header");
-    return { type: "header", name: unsupported ? "Cookie" : "bad header" };
+    return {
+      type: "header",
+      name: unsupportedSecretHeader(value.name) ? "Cookie" : "bad header",
+    };
   }
   if (value.type === "basic") {
     if (typeof value.username !== "string") return { type: "basic" };
@@ -441,14 +446,15 @@ export async function prepareBotSecret(input: {
   plaintext: string;
 }) {
   const { prisma, secretStore, scope, plaintext } = input;
-  if (!plaintext || plaintext.length > 16_384) throw new Error("Invalid credential length");
+  if (!plaintext || plaintext.length > 16_384)
+    throw new BotSecretInputError("Invalid credential length");
   const destination = normalizeSecretDestination(input.destination);
   if (destination.auth.type === "login") decodeLoginSecret(plaintext);
   else if (destination.auth.type === "command") {
     // NUL cannot be an environment value. An unpaired surrogate cannot be percent-encoded
     // later, and that throw would abort every subsequent shell command for this bot.
     if (plaintext.includes("\0") || percentEncoded(plaintext) === undefined) {
-      throw new Error(UNUSABLE_CREDENTIAL);
+      throw new BotSecretInputError(UNUSABLE_CREDENTIAL);
     }
   } else credentialHeader(destination, plaintext);
   const existing = await prisma.botSecret.findFirst({
@@ -456,8 +462,10 @@ export async function prepareBotSecret(input: {
   });
   function validate(row: typeof existing, count: number) {
     if (row && !sameSecretDestination(normalizeSecretDestination(row), destination))
-      throw new Error("Remove the existing credential before changing its destination");
-    if (!row && count >= 100) throw new Error("Credential limit reached");
+      throw new BotSecretInputError(
+        "Remove the existing credential before changing its destination",
+      );
+    if (!row && count >= 100) throw new BotSecretInputError("Credential limit reached");
   }
   validate(existing, await prisma.botSecret.count({ where: scopeFields(scope) }));
   const id = existing?.id ?? randomBytes(12).toString("hex");
@@ -483,7 +491,7 @@ export async function prepareBotSecret(input: {
       validate(current, await tx.botSecret.count({ where: scopeFields(scope) }));
       const conflict = await findCommandVariableConflict(tx, scope, destination);
       if (conflict) {
-        throw new Error(
+        throw new CredentialDestinationError(
           `Invalid credential destination — name: ${conflict} is already exported as $${commandVariableName(destination.name)}`,
         );
       }

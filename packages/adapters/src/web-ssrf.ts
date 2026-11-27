@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { readBoundedResponseBytes } from "@rakazo/core";
+import { ResponseTooLargeError, readBoundedResponseBytes } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { Agent } from "undici";
 import {
@@ -9,7 +9,7 @@ import {
   type ResolvedAddress,
   type ResolveHostname,
 } from "./network-address.js";
-import { fetchPairedWithDispatcher } from "./undici-fetch.js";
+import { fetchPairedWithDispatcher, HttpStatusError } from "./undici-fetch.js";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
@@ -195,10 +195,8 @@ async function followRedirects(
     state.signal,
   ).catch((error: unknown) => {
     // A status no Response can hold (LinkedIn's 999) arrives as this error; the hop still happened.
-    const status = /^Request failed: HTTP (\d+)$/.exec(
-      error instanceof Error ? error.message : "",
-    )?.[1];
-    if (status) auditEgress(validated, "GET", Object.keys(headers), Number(status));
+    if (error instanceof HttpStatusError)
+      auditEgress(validated, "GET", Object.keys(headers), error.status);
     throw error;
   });
   auditEgress(validated, "GET", Object.keys(headers), response.status);
@@ -226,13 +224,13 @@ async function followRedirects(
 
   if (!response.ok) {
     await cancelResponseBody(response, state.signal);
-    throw new Error(`Request failed: HTTP ${response.status}`);
+    throw new HttpStatusError(response.status);
   }
 
   const contentLength = response.headers.get("content-length");
   if (!state.truncate && contentLength && Number(contentLength) > state.maxBytes) {
     await cancelResponseBody(response, state.signal);
-    throw new Error("Response is too large");
+    throw new ResponseTooLargeError("Response is too large");
   }
 
   const body = state.truncate

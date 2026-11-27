@@ -10,15 +10,30 @@ const dueAt = "2026-10-30T09:00:00.000Z";
 describe("recruiting reminder contracts", () => {
   it("parses create/list/update inputs", () => {
     expect(
-      CreateRecruitingReminderInput.parse({ title: "Call", dueAt, candidateKey: "autumn:k1" }),
+      CreateRecruitingReminderInput.parse({ title: "Call", dueAt, candidateKey: "sourced:k1" }),
     ).toBeTruthy();
     expect(ListRecruitingRemindersInput.parse({ status: "open", dueBefore: dueAt })).toBeTruthy();
     expect(
       UpdateRecruitingReminderInput.parse({ id: "r1", status: "done", note: null }),
     ).toBeTruthy();
   });
+  it("reads a key written before the rename as the same person", () => {
+    expect(
+      CreateRecruitingReminderInput.parse({ title: "Call", dueAt, candidateKey: "autumn:k1" })
+        .candidateKey,
+    ).toBe("sourced:k1");
+  });
+  it("reads a key given as a list shows it as that saved person", () => {
+    expect(
+      CreateRecruitingReminderInput.parse({
+        title: "Call",
+        dueAt,
+        candidateKey: "linkedin:/in/k1",
+      }).candidateKey,
+    ).toBe("sourced:linkedin:/in/k1");
+  });
   it("lists by several candidate keys, at most ten, in the tool input too", () => {
-    const keys = ["autumn:k1", "crm:2"];
+    const keys = ["sourced:k1", "crm:2"];
     expect(ListRecruitingRemindersInput.parse({ candidateKeys: keys }).candidateKeys).toEqual(keys);
     expect(
       RecruitingRemindersToolInputSchema.parse({ operation: "list", candidateKey: "crm:2" }),

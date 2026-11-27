@@ -1,7 +1,11 @@
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
-import { IsolationError, RecruitingIntentQuoteError } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { feedbackSaveRefused, filledRecruitingFeedbackArgs } from "./executor.js";
+import {
+  feedbackSaveRefused,
+  filledRecruitingFeedbackArgs,
+  recruitingFeedbackRole,
+} from "./executor.js";
 import { recruitingFeedbackInputError } from "./recruiting-feedback.js";
 
 const people = [
@@ -30,6 +34,33 @@ function prisma() {
 const intent = { basis: "direct", quote: "Jane 和 Sam 不太合适，多找带过 50 人团队的。" };
 
 describe("recruiting_feedback arguments", () => {
+  it("fills feedback from Kruit's conversation for the recruiter's own role it names", async () => {
+    // Branch fd5e4705 (st4): six main-chat calls were refused for a missing role revision.
+    const findFirst = vi.fn(async (query: { where: { id: string; userId: string } }) =>
+      query.where.id === "role-1" && query.where.userId === "user-1" ? { id: "role-1" } : null,
+    );
+    const roles = { recruitingRole: { findFirst } } as never;
+    const input = { activeRoleId: null, spaceId: "space-1", userId: "user-1" };
+    expect(await recruitingFeedbackRole(roles, { ...input, args: { roleId: "role-1" } })).toBe(
+      "role-1",
+    );
+    expect(
+      await recruitingFeedbackRole(roles, {
+        ...input,
+        userId: "other",
+        args: { roleId: "role-1" },
+      }),
+    ).toBeUndefined();
+    expect(await recruitingFeedbackRole(roles, { ...input, args: {} })).toBeUndefined();
+    expect(
+      await recruitingFeedbackRole(roles, {
+        ...input,
+        activeRoleId: "role-2",
+        args: { roleId: "x" },
+      }),
+    ).toBe("role-2");
+  });
+
   it("fills the role, revision and sources and reads a round review as its direction", async () => {
     const { args, error } = await filledRecruitingFeedbackArgs(prisma(), "role-1", {
       target: "round",
@@ -47,6 +78,29 @@ describe("recruiting_feedback arguments", () => {
       summary: intent.quote,
     });
     expect(RecruitingFeedbackInputSchema.safeParse(args).success).toBe(true);
+  });
+
+  it("reads expectedRevision on role feedback as the role's revision, and keeps it on a preference", async () => {
+    // Branch 1ae3a9c3 (fosp3): three identical candidate calls refused for expectedRevision.
+    const { args } = await filledRecruitingFeedbackArgs(prisma(), "role-1", {
+      target: "candidate",
+      operation: "review",
+      fit: "not_fit",
+      expectedRevision: 3,
+      candidateKeys: ["Jane Doe"],
+      intent,
+    });
+    expect(args).toMatchObject({
+      expectedRoleRevision: 3,
+      candidateKeys: [people[0]?.candidateKey],
+    });
+    expect(args).not.toHaveProperty("expectedRevision");
+    expect(RecruitingFeedbackInputSchema.safeParse(args).success).toBe(true);
+    const preference = await filledRecruitingFeedbackArgs(prisma(), "role-1", {
+      target: "preference",
+      expectedRevision: 2,
+    });
+    expect(preference.args).toMatchObject({ expectedRevision: 2 });
   });
 
   it("names people by their full name or profile link", async () => {
@@ -128,16 +182,6 @@ describe("recruiting_feedback arguments", () => {
 });
 
 describe("feedbackSaveRefused", () => {
-  it("passes on which words to quote, so a refused save can be fixed instead of retried blindly", () => {
-    const text = feedbackSaveRefused(
-      new RecruitingIntentQuoteError("Jane Doe 很好。Sam Lee 不合适。"),
-    );
-    expect(text).toMatch(/^Not recorded/);
-    expect(text).toContain("Jane Doe 很好。Sam Lee 不合适。");
-    expect(text).toContain("carry on with the rest of the recruiter's request");
-    expect(text).not.toContain("Never run people searches");
-  });
-
   it("names every field to check when the refusal gives no reason", () => {
     const text = feedbackSaveRefused(new IsolationError());
     expect(text).toContain("sourceRefs");

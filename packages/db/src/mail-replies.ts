@@ -14,7 +14,8 @@ import {
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { htmlToPlainText } from "@rakazo/core/node/html-text";
-import type { Prisma, PrismaClient } from "./client.js";
+import type { PrismaClient } from "./client.js";
+import { Prisma } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
 import { IsolationError } from "./scope.js";
 
@@ -304,13 +305,71 @@ export async function findSameMailReply(
  * card is recorded on the effect (instantlyActivationCampaign, instantlyActivationCard) under a
  * lock before it is posted, so two runs racing see each other.
  */
+/** The fingerprint of what a campaign send card shows: who gets which first email, and when. */
+export function campaignSendCardHash(card: unknown): string {
+  return createHash("sha256").update(stableJsonValue(card)).digest("hex");
+}
+
 export async function findWaitingCampaignSend(
   tx: Prisma.TransactionClient,
   input: { spaceId: string; effectId: string; campaignId: string; card: unknown },
-): Promise<{ effectId: string; threadId: string; place: string | null } | undefined> {
-  const card = createHash("sha256").update(stableJsonValue(input.card)).digest("hex");
+): Promise<
+  | { effectId: string; threadId: string; place: string | null }
+  | { declined: true }
+  | { unchanged: true }
+  | undefined
+> {
+  const card = campaignSendCardHash(input.card);
   const lock = `campaign-send:${input.spaceId}:${input.campaignId}`;
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))::text AS "lock"`;
+  // deny-then-change-and-send 11-16: the recruiter declined a card, then another agent's run
+  // asked again with the same email before the recruiter wrote anything; on 2a781497 Kruit
+  // guessed a new subject after each denial and showed four cards. A campaign whose send the
+  // recruiter declined gets no new card until they write, in any conversation of the space.
+  const declined = await tx.externalEffect.findFirst({
+    where: {
+      spaceId: input.spaceId,
+      id: { not: input.effectId },
+      kind: { endsWith: "activate_campaign" },
+      status: "denied",
+      result: { path: ["instantlyActivationCampaign"], equals: input.campaignId },
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, updatedAt: true, result: true },
+  });
+  if (
+    declined &&
+    !(await tx.message.findFirst({
+      where: {
+        thread: { spaceId: input.spaceId },
+        role: "user",
+        botId: null,
+        createdAt: { gt: declined.updatedAt },
+        OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
+      },
+      select: { id: true },
+    }))
+  )
+    return { declined: true };
+  // deny-then-change-and-send 11-21: after "标题不对，改成 …" the agent asked again with the very
+  // email the recruiter cancelled. The first identical ask after a decline is refused once so the
+  // change gets saved; asked again unchanged (the recruiter wants it as it was), the card shows.
+  const declinedResult = object(declined?.result) ?? {};
+  if (
+    declined &&
+    declinedResult.instantlyActivationCard === card &&
+    declinedResult.instantlyUnchangedRefused !== true
+  ) {
+    await tx.externalEffect.update({
+      where: { id: declined.id },
+      data: {
+        result: { ...declinedResult, instantlyUnchangedRefused: true } as Prisma.InputJsonValue,
+        // The decline's time stays the decline's: later writes are compared with it.
+        updatedAt: declined.updatedAt,
+      },
+    });
+    return { unchanged: true };
+  }
   const waiting = await tx.externalEffect.findFirst({
     where: {
       spaceId: input.spaceId,
@@ -357,6 +416,8 @@ export async function findWaitingCampaignSend(
         ...(object(current?.result) ?? {}),
         instantlyActivationCampaign: input.campaignId,
         instantlyActivationCard: card,
+        // What the card showed, so a send refused at approval can say what changed.
+        instantlyActivationShown: input.card,
       } as Prisma.InputJsonValue,
     },
   });
@@ -460,4 +521,173 @@ export async function publishMailReplyCard(prisma: PrismaClient, actor: Actor, e
       payload: { messageId: message.id, role: "bot", blocks },
     });
   });
+}
+
+/**
+ * The receipt a completed campaign send leaves on its effect: the campaign and the people the send
+ * tool returned, as fields. A refused or failed send has none, and neither does a result that is
+ * only text.
+ */
+export function campaignSendReceipt(
+  result: unknown,
+): { campaignId: string; recipients: string[] } | undefined {
+  const outer = object(result);
+  const receipt = object(object(outer?.structuredContent)?.result) ?? outer;
+  if (!outer || !receipt || "error" in outer || "error" in receipt) return undefined;
+  if (typeof receipt.campaignId !== "string") return undefined;
+  const recipients = Array.isArray(receipt.recipients) ? receipt.recipients : [];
+  return {
+    campaignId: receipt.campaignId,
+    recipients: recipients.filter((entry): entry is string => typeof entry === "string"),
+  };
+}
+
+const RECEIPT_SQL = Prisma.sql`COALESCE(result #> '{structuredContent,result}', result)`;
+/** The same receipt's campaign id in SQL, for an `external_effects` row; NULL when it has none. */
+export const CAMPAIGN_SEND_RECEIPT_ID_SQL = Prisma.sql`(CASE WHEN result -> 'error' IS NULL AND ${RECEIPT_SQL} -> 'error' IS NULL THEN ${RECEIPT_SQL} ->> 'campaignId' END)`;
+
+/**
+ * This user's other campaigns that emailed any of these people on a confirmed send, newest
+ * first: the mail service files a person's reply under their newest campaign, so a role's reply
+ * can sit in one of these. At most `limit + 1` ids, so a caller can tell there were more.
+ */
+export async function otherCampaignsThatEmailed(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  owner: { spaceId: string; userId: string },
+  campaignIds: readonly string[],
+  emails: readonly string[],
+  limit: number,
+): Promise<string[]> {
+  const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+  if (!wanted.length) return [];
+  const rows = await prisma.$queryRaw<{ campaign_id: string }[]>`
+    SELECT ${CAMPAIGN_SEND_RECEIPT_ID_SQL} AS campaign_id FROM external_effects e
+    WHERE e."spaceId" = ${owner.spaceId} AND e.status = 'completed'
+      AND EXISTS (SELECT 1 FROM runs r WHERE r.id = e."runId"
+        AND r."userId" = ${owner.userId} AND r."spaceId" = ${owner.spaceId})
+      AND e.kind LIKE '%activate_campaign'
+      AND ${CAMPAIGN_SEND_RECEIPT_ID_SQL} IS NOT NULL
+      AND NOT (${CAMPAIGN_SEND_RECEIPT_ID_SQL} = ANY(${[...campaignIds]}::text[]))
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(
+          CASE WHEN jsonb_typeof(${RECEIPT_SQL} -> 'recipients') = 'array'
+            THEN ${RECEIPT_SQL} -> 'recipients' ELSE '[]'::jsonb END
+        ) AS recipient(email)
+        WHERE lower(btrim(recipient.email)) = ANY(${wanted}::text[]))
+    GROUP BY 1 ORDER BY max(e."updatedAt") DESC LIMIT ${limit + 1}`;
+  return rows.map((row) => row.campaign_id);
+}
+
+/** Which of these people a confirmed send of this user from one of these campaigns emailed. */
+export async function confirmedSendRecipients(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  owner: { spaceId: string; userId: string },
+  campaignIds: readonly string[],
+  emails: readonly string[],
+): Promise<Set<string>> {
+  const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+  if (!wanted.length || !campaignIds.length) return new Set();
+  const rows = await prisma.$queryRaw<{ email: string }[]>`
+    SELECT DISTINCT lower(btrim(recipient.email)) AS email FROM external_effects e
+    CROSS JOIN LATERAL jsonb_array_elements_text(
+      CASE WHEN jsonb_typeof(${RECEIPT_SQL} -> 'recipients') = 'array'
+        THEN ${RECEIPT_SQL} -> 'recipients' ELSE '[]'::jsonb END
+    ) AS recipient(email)
+    WHERE e."spaceId" = ${owner.spaceId} AND e.status = 'completed'
+      AND EXISTS (SELECT 1 FROM runs r WHERE r.id = e."runId"
+        AND r."userId" = ${owner.userId} AND r."spaceId" = ${owner.spaceId})
+      AND e.kind LIKE '%activate_campaign'
+      AND ${CAMPAIGN_SEND_RECEIPT_ID_SQL} = ANY(${[...campaignIds]}::text[])
+      AND lower(btrim(recipient.email)) = ANY(${wanted}::text[])`;
+  return new Set(rows.map((row) => row.email));
+}
+
+/**
+ * The mailbox of another campaign of this user whose received emails are a role's: a run of this
+ * user created the campaign, and a confirmed send from one of the role's own campaigns (created
+ * in the role's conversation) emailed every sender. Null when either is not so.
+ */
+export async function roleRepliesCampaignMailbox(
+  prisma: Pick<PrismaClient, "$queryRaw" | "externalEffect">,
+  owner: { spaceId: string; userId: string },
+  input: {
+    serverId: string;
+    roleId: string;
+    threadId: string;
+    campaignId: string;
+    senders: readonly string[];
+  },
+): Promise<string | null> {
+  const created = {
+    spaceId: owner.spaceId,
+    kind: "instantly_role_campaign",
+    status: "completed",
+  } as const;
+  const campaign = await prisma.externalEffect.findFirst({
+    where: {
+      ...created,
+      run: { userId: owner.userId, spaceId: owner.spaceId },
+      AND: [
+        { request: { path: ["serverId"], equals: input.serverId } },
+        { result: { path: ["campaignId"], equals: input.campaignId } },
+      ],
+    },
+    select: { result: true },
+  });
+  const result = campaign?.result as { eaccount?: unknown } | null | undefined;
+  if (typeof result?.eaccount !== "string" || !input.senders.length) return null;
+  const roleCampaigns = await prisma.externalEffect.findMany({
+    where: {
+      ...created,
+      run: { userId: owner.userId, spaceId: owner.spaceId, threadId: input.threadId },
+      AND: [
+        { request: { path: ["serverId"], equals: input.serverId } },
+        { request: { path: ["roleId"], equals: input.roleId } },
+      ],
+    },
+    select: { result: true },
+  });
+  const ids = roleCampaigns.flatMap((effect) => {
+    const id = (effect.result as { campaignId?: unknown } | null)?.campaignId;
+    return typeof id === "string" && id !== input.campaignId ? [id] : [];
+  });
+  const sent = await confirmedSendRecipients(prisma, owner, ids, input.senders);
+  return input.senders.every((sender) => sent.has(sender.trim().toLowerCase()))
+    ? result.eaccount.trim().toLowerCase()
+    : null;
+}
+
+/**
+ * The people of a planned send whom this account already sent a confirmed first email to from
+ * another campaign (a second role for the same job, an earlier send), with when. Same person, two
+ * campaigns, two first emails is the duplicate a card must not hide.
+ */
+export async function earlierConfirmedSends(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  spaceId: string,
+  campaignId: string,
+  emails: string[],
+): Promise<Map<string, string>> {
+  const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+  const found = new Map<string, string>();
+  if (!wanted.length) return found;
+  const rows = await prisma.$queryRaw<{ result: unknown; updatedAt: Date }[]>`
+    SELECT result, "updatedAt" FROM external_effects
+    WHERE "spaceId" = ${spaceId} AND status = 'completed'
+      AND kind LIKE '%activate_campaign'
+      AND ${CAMPAIGN_SEND_RECEIPT_ID_SQL} <> ${campaignId}
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(
+          CASE WHEN jsonb_typeof(${RECEIPT_SQL} -> 'recipients') = 'array'
+            THEN ${RECEIPT_SQL} -> 'recipients' ELSE '[]'::jsonb END
+        ) AS recipient(email)
+        WHERE lower(btrim(recipient.email)) = ANY(${wanted}::text[]))
+    ORDER BY "updatedAt" DESC LIMIT 200`;
+  for (const row of rows)
+    for (const entry of campaignSendReceipt(row.result)?.recipients ?? []) {
+      const email = entry.trim().toLowerCase();
+      if (wanted.includes(email) && !found.has(email))
+        found.set(email, row.updatedAt.toISOString());
+    }
+  return found;
 }

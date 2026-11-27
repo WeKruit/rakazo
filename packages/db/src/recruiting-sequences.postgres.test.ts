@@ -26,7 +26,7 @@ const local = url && ["localhost", "127.0.0.1", "::1", "[::1]"].includes(new URL
             'CREATE TEMP TABLE spaces(id text,"organizationId" text)',
             'CREATE TEMP TABLE member("userId" text,"organizationId" text)',
             'CREATE TEMP TABLE bot_mcp_servers("botId" text,"serverId" text,"userId" text,"spaceId" text)',
-            'CREATE TEMP TABLE recruiting_roles(id text,title text,"sourceThreadId" text,"playbookStage" text,"crmBindingEffectId" text,"currentRevisionId" text,"userId" text,"spaceId" text,"archivedAt" timestamp)',
+            'CREATE TEMP TABLE recruiting_roles(id text,title text,"sourceThreadId" text,"crmBindingEffectId" text,"currentRevisionId" text,"userId" text,"spaceId" text,"archivedAt" timestamp)',
             "CREATE TEMP TABLE recruiting_role_revisions(id text,brief jsonb)",
             'CREATE TEMP TABLE threads(id text,"groupId" text,"botId" text,"activeRecruitingRoleId" text,"userId" text,"spaceId" text)',
             'CREATE TEMP TABLE chat_groups(id text,"userId" text,"spaceId" text,"archivedAt" timestamp)',

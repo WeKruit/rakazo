@@ -21,7 +21,7 @@ const crmRow = (n: number) =>
 describe("mergeRoleCandidates with a first-page CRM read", () => {
   it("counts the CRM's unread people and offers the next page", async () => {
     const sources: RoleCandidatesSources = {
-      autumn: async () =>
+      sourced: async () =>
         ({
           items: [],
           nextCursor: null,
@@ -29,7 +29,7 @@ describe("mergeRoleCandidates with a first-page CRM read", () => {
           counts: { shortlisted: 0 },
           crmTarget: { target: {} },
         }) as never,
-      autumnLinkedinUrls: async () => [],
+      sourcedLinkedinUrls: async () => [],
       crm: async () => ({
         status: "ok",
         rows: Array.from({ length: 50 }, (_, n) => crmRow(n)),
@@ -56,7 +56,7 @@ it("retains the already-owned saved profile in a role candidate summary without 
   const page = await mergeRoleCandidates(
     { threadId: "thread", limit: 50 },
     {
-      autumn: async () =>
+      sourced: async () =>
         ({
           roleId: "role",
           roleRevisionId: "revision",
@@ -80,9 +80,9 @@ it("retains the already-owned saved profile in a role candidate summary without 
           counts: { shortlisted: 0 },
           crmTarget: null,
         }) as never,
-      autumnLinkedinUrls: async () => [],
+      sourcedLinkedinUrls: async () => [],
       crm: async () => ({ status: "ok", rows: [] }),
     },
   );
-  expect(page.items[0]?.autumn?.savedProfile).toEqual(profile);
+  expect(page.items[0]?.sourced?.savedProfile).toEqual(profile);
 });

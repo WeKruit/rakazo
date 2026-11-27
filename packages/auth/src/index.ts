@@ -243,11 +243,17 @@ async function claimUnverifiedFirstAccount(prisma: PrismaClient, userId: string)
 
 const CREDENTIAL_PATHS = ["/sign-in/email", "/sign-up/email", "/request-password-reset"] as const;
 
-/** Shared across API processes. Off outside production so tests can sign in freely. */
-export function authRateLimitOptions(nodeEnv = process.env.NODE_ENV) {
+/**
+ * Shared across API processes. Off outside production so tests can sign in freely, and off when
+ * the deployment sets AUTH_RATE_LIMIT=off (the test environment, where parallel plays sign in).
+ */
+export function authRateLimitOptions(
+  nodeEnv = process.env.NODE_ENV,
+  setting = process.env.AUTH_RATE_LIMIT,
+) {
   const rule = { window: 15 * 60, max: 10 };
   return {
-    enabled: nodeEnv === "production",
+    enabled: nodeEnv === "production" && setting !== "off",
     storage: "database" as const,
     customRules: {
       ...Object.fromEntries(CREDENTIAL_PATHS.map((path) => [path, rule])),
@@ -270,7 +276,8 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     trustedOrigins: [...buildTrustedOrigins(env), "rakazo://"],
     account: {
       encryptOAuthTokens: true,
-      accountLinking: { enabled: true, disableImplicitLinking: true, trustedProviders: [] },
+      // A verified Google sign-in for a verified existing account signs in to that account.
+      accountLinking: { enabled: true, trustedProviders: [] },
     },
     rateLimit: authRateLimitOptions(),
     database: prismaAdapter(prisma, { provider: "postgresql" }),
@@ -340,6 +347,8 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
         if (isMessagingEmail(email)) return { error: "EMAIL_NOT_AVAILABLE" };
         if (source.action === "link-account") {
           if (!verified) return { error: "unable_to_link_account" };
+          // The deployment's identity provider links only when the signed-in person asks.
+          if (!(await getOAuthState())?.link) return { error: "account_not_linked" };
           return;
         }
         if (source.action === "create-user") {

@@ -4,17 +4,11 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
-import {
-  createRunExecutor,
-  STEERING_PEEK_MS,
-  STEERING_QUICK_REPLY_SENDING,
-  saysSomething,
-  waitsOnTeammate,
-  withoutPolls,
-} from "./executor.js";
+import { createRunExecutor, saysSomething, withoutPolls } from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
+import type * as RequestConnectionModule from "./request-connection.js";
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
@@ -27,6 +21,24 @@ vi.mock("./recruiting-context.js", async (importOriginal) => ({
   loadRecruitingRunContext: vi.fn(async () => undefined),
 }));
 
+// The card's own effects (lease, pause) are covered elsewhere; this file checks what the chat shows.
+vi.mock("./request-connection.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof RequestConnectionModule>()),
+  requestConnection: vi.fn(
+    async (_prisma: unknown, _scope: unknown, _args: unknown, pause: (block: never) => unknown) => {
+      await Promise.resolve(
+        pause({
+          kind: "ask",
+          status: "pending",
+          text: "Connect Calendar",
+          connection: { name: "Calendar", reason: "book the call" },
+        } as never),
+      ).catch(() => undefined);
+      return { status: "paused" };
+    },
+  ),
+}));
+
 beforeEach(() => {
   vi.mocked(loadRecruitingRunContext).mockClear();
   vi.mocked(acquireComputerExecutionLease).mockClear();
@@ -35,12 +47,12 @@ beforeEach(() => {
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 /** The events double of the most recent runWithModel call. */
-/** Run ids the runtime was called with, in the current test. */
-const claimedSteering: { items?: Array<{ text: string }> } = {};
-// The newest run's database mock, for checks while that run still works.
-let lastPrisma: { message: { create: { mock: { calls: unknown[][] } } } } | undefined;
 let lastExecutorEvents:
-  | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
+  | {
+      append: ReturnType<typeof vi.fn>;
+      publishTransient: ReturnType<typeof vi.fn>;
+      finalizeRun: ReturnType<typeof vi.fn>;
+    }
   | undefined;
 const VISION_MODEL = "openai/gpt-4o";
 
@@ -57,6 +69,9 @@ type HistoryMessage = {
   clientNonce?: string;
 };
 
+/** The recruiter's current message and an earlier one of theirs, when a test sets them. */
+const recruiterTexts: { current?: string; earlier?: string } = {};
+
 function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
   return [
     {
@@ -65,7 +80,7 @@ function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
       seq: 2,
       role: "user",
       runId: "run-1",
-      blocks: [{ kind: "text", text: "what was in the screenshot?" }],
+      blocks: [{ kind: "text", text: recruiterTexts.current ?? "what was in the screenshot?" }],
       replyToMessageId: null,
       replyQuote: null,
       replyTo: null,
@@ -81,6 +96,21 @@ function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
       replyQuote: null,
       replyTo: null,
     },
+    ...(recruiterTexts.earlier
+      ? [
+          {
+            id: "earlier-text",
+            threadId: "thread-1",
+            seq: 0,
+            role: "user",
+            runId: "run-0",
+            blocks: [{ kind: "text" as const, text: recruiterTexts.earlier }],
+            replyToMessageId: null,
+            replyQuote: null,
+            replyTo: null,
+          },
+        ]
+      : []),
     ...extra,
   ];
 }
@@ -106,29 +136,40 @@ async function runWithModel(
     loadScratchpad?: () => Promise<[]>;
     /** The thread's active recruiting role; enables the run-start recruiting context. */
     recruitingRoleId?: string;
-    savedRecruitingCandidates?: number;
     /** Starts the run from this thread message, which is added to the history. */
     sourceMessage?: HistoryMessage;
+    /** When the person's newer message was written; run-0, which a retry continues, began before it. */
+    personWroteAt?: Date;
     /** The model's final reply; defaults to "Done". */
     finalText?: string;
     replySuggestions?: boolean;
-    quickReplies?: boolean;
     /** A compacted thread whose semantic memory recalls this text for the new message. */
     recalledMemory?: string;
     /** The main model call waits for this, as a long step does. */
     holdMain?: Promise<void>;
-    /** A message the run reads mid-turn, before the watch sees it unread. */
-    claimed?: { id: string; messageId: string; text: string };
-    /** Messages sent while the run works that it has not read yet. */
-    unreadSteering?: Array<{
-      id: string;
-      messageId: string;
-      blocks: MessageBlock[];
-      role?: string;
-    }>;
+    /** The recruiter's message, and an earlier one, in place of the default history. */
+    currentText?: string;
+    earlierText?: string;
+    /** A teammate already answered the recruiter's latest message with a line. */
+    replyAfterTurn?: boolean;
+    /** The thread's newest message is this bot's one-line note, posted by its run that ended. */
+    ackFromEndedRun?: boolean;
+    /** That line's text. */
+    endedRunLine?: string;
+    /** The server's hidden continuation prompt came after that line. */
+    hiddenContinuation?: boolean;
+    /** That run's steps row, which shows the recruiter no words, came after the line. */
+    stepsAfterEndedLine?: boolean;
+    /** This bot handed the teammate a newer brief after the report this run answers. */
+    newerBrief?: boolean;
+    /** The coordinator's first line, then its brief handing this bot the request. */
+    briefAfterLine?: string;
+    /** Tools the run calls, with their arguments. */
+    toolCalls?: Array<[string, Record<string, unknown>]>;
   } = {},
 ) {
-  claimedSteering.items = undefined;
+  recruiterTexts.current = options.currentText;
+  recruiterTexts.earlier = options.earlierText;
   const run = {
     id: "run-1",
     botId: "bot-1",
@@ -148,8 +189,6 @@ async function runWithModel(
   const runtimeRun = vi.fn(async function* (next: AgentRunRequest) {
     request = next;
     if (next.runId === "run-1") await options.holdMain;
-    if (next.runId === "run-1" && options.claimed)
-      claimedSteering.items = await next.claimSteering?.([]);
     if (switchModel) {
       const onModelChange = (
         next as AgentRunRequest & {
@@ -159,8 +198,54 @@ async function runWithModel(
       await onModelChange?.(switchModel.provider, switchModel.modelId);
     }
     for (const event of options.events ?? []) yield event;
+    for (const [name, args] of options.toolCalls ?? [])
+      await next.executeTool?.(name, args, `${name}-call`);
     yield { type: "done" as const, text: options.finalText ?? "Done" };
   });
+  const endedRunAck = {
+    id: "ack-0",
+    botId: "bot-1",
+    runId: "run-0",
+    role: "bot",
+    blocks: [{ kind: "text", text: options.endedRunLine ?? "I'm checking that now." }],
+    createdAt: new Date(),
+  };
+  const coordinatorRows = options.briefAfterLine
+    ? [
+        {
+          id: "handoff-1",
+          botId: "bot-main",
+          runId: "run-0",
+          role: "bot",
+          blocks: [{ kind: "handoff", fromBotId: "bot-main", toBotId: "bot-1", text: "Answer" }],
+          createdAt: new Date(),
+        },
+        {
+          id: "line-main",
+          botId: "bot-main",
+          runId: "run-0",
+          role: "bot",
+          blocks: [{ kind: "text", text: options.briefAfterLine }],
+          createdAt: new Date(),
+        },
+      ]
+    : [];
+  const stepsRow = {
+    id: "steps-0",
+    botId: "bot-1",
+    runId: "run-0",
+    role: "bot",
+    blocks: [{ kind: "steps", steps: [] }],
+    createdAt: new Date(),
+  };
+  const silentRows = options.stepsAfterEndedLine ? [stepsRow] : [];
+  const hiddenRow = {
+    id: "continue-0",
+    runId: "run-0",
+    role: "user",
+    clientNonce: "autocontinue:run-0:decline",
+    blocks: [{ kind: "text", text: "Continue." }],
+  };
   const prisma = {
     // Early final replies on file-touching turns persist through one transaction on these rows.
     $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
@@ -173,15 +258,17 @@ async function runWithModel(
       }),
     },
     run: {
-      findUnique: vi.fn(async () => run),
-      findUniqueOrThrow: vi.fn(async () => run),
-      count: vi.fn(async () => 0),
-      // The running run, as the unread-message check reads it.
-      findFirst: vi.fn(async () =>
-        options.unreadSteering
-          ? { trigger: run.trigger, clientNonce: null, sourceMessage: null }
-          : null,
+      findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
+        options.ackFromEndedRun && args?.where?.id === "run-0"
+          ? { status: "completed" }
+          : options.personWroteAt && args?.where?.id === "run-0"
+            ? { createdAt: new Date(options.personWroteAt.getTime() - 10_000) }
+            : run,
       ),
+      // A fresh row each read, as the database returns.
+      findUniqueOrThrow: vi.fn(async () => ({ ...run })),
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
       findMany: vi.fn(async () =>
         options.priorRoutineRun
           ? [{ id: options.priorRoutineRun.id, completedAt: options.priorRoutineRun.completedAt }]
@@ -208,6 +295,7 @@ async function runWithModel(
       })),
       findMany: vi.fn(async () => []),
     },
+    chatGroup: { findMany: vi.fn(async () => []) },
     attempt: {
       create: vi.fn(async () => ({ id: "attempt-1" })),
       update: vi.fn(),
@@ -228,35 +316,95 @@ async function runWithModel(
     },
     message: {
       // The run's own replies so far: none until the model writes one.
-      findMany: vi.fn(async (args: { where?: { threadId?: string; runId?: string } }) =>
-        args.where?.threadId && !args.where.runId
-          ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-          : [],
+      findMany: vi.fn(
+        async (args: {
+          where?: { threadId?: string; runId?: string; role?: string; NOT?: object };
+          orderBy?: object;
+          select?: { runId?: boolean; clientNonce?: boolean };
+          take?: number;
+        }) =>
+          args.take === 6 && args.select?.runId && !args.where?.runId && !args.where?.role
+            ? // The thread's newest messages: what came after the first line, then the line.
+              [
+                ...(
+                  await Promise.all(
+                    prisma.message.create.mock.results.map((result) => result.value),
+                  )
+                )
+                  .map((message) => ({ runId: "run-1", role: "bot", ...message }))
+                  .reverse(),
+                ...(options.hiddenContinuation ? [hiddenRow] : []),
+                ...silentRows,
+                ...(options.ackFromEndedRun ? [endedRunAck] : []),
+                ...coordinatorRows,
+              ]
+            : options.briefAfterLine && args.take === 8
+              ? coordinatorRows
+              : options.ackFromEndedRun && args.take === 8
+                ? [...(options.hiddenContinuation ? [hiddenRow] : []), ...silentRows, endedRunAck]
+                : options.replyAfterTurn && args.take === 8 && !args.select?.runId
+                  ? [
+                      {
+                        role: "bot",
+                        blocks: [{ kind: "text", text: "I'm writing the template now." }],
+                      },
+                      { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
+                    ]
+                  : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+                    ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+                    : [],
       ),
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
+        options.newerBrief && args?.where?.id === options.sourceMessage?.id
+          ? { seq: options.sourceMessage?.seq }
+          : options.briefAfterLine && args?.where?.id === "line-main"
+            ? coordinatorRows[1]
+            : args?.where?.id === "published-final"
+              ? ((await prisma.message.create.mock.results.at(-1)?.value) ?? null)
+              : null,
+      ),
       count: vi.fn(async () => 0),
-      findFirst: vi.fn(async (args?: { where?: { role?: string; id?: string } }) =>
-        args?.where?.role === "user" || args?.where?.id
-          ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
-              (message: { role: string; id?: string }) =>
-                message.role === "user" && (!args.where?.id || message.id === args.where.id),
-            ) ?? null)
-          : options.priorRoutineRun
-            ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
-            : null,
+      findFirst: vi.fn(
+        async (args?: {
+          where?: { role?: string; id?: string; seq?: object; createdAt?: { gt?: Date } };
+          orderBy?: object;
+        }) =>
+          options.personWroteAt &&
+          args?.where?.role === "user" &&
+          (args.where.createdAt?.gt ?? new Date(0)) >= options.personWroteAt
+            ? null
+            : options.newerBrief && args?.where?.seq
+              ? { id: "brief-2" }
+              : args?.orderBy && !args.where?.role && !args.where?.id
+                ? // The thread's newest message: the last one this run posted.
+                  (prisma.message.create.mock.results.at(-1)?.value ??
+                  (options.ackFromEndedRun ? endedRunAck : null))
+                : args?.where?.role === "user" || args?.where?.id
+                  ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
+                      (message: { role: string; id?: string }) =>
+                        message.role === "user" &&
+                        (!args.where?.id || message.id === args.where.id),
+                    ) ?? null)
+                  : options.priorRoutineRun
+                    ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
+                    : null,
       ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
+      delete: vi.fn(async () => ({})),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: object }) => ({
+        id: where.id,
+        ...data,
+      })),
     },
     recruitingRole: {
       findUnique: vi.fn(async () => ({
         title: "Engineer",
-        playbookStage: "feedback",
         currentRevisionId: "revision",
         archivedAt: null,
       })),
     },
     recruitingRoleRevision: { findUnique: vi.fn(async () => ({ brief: null })) },
-    recruitingCandidate: { count: vi.fn(async () => options.savedRecruitingCandidates ?? 0) },
+    recruitingCandidate: { count: vi.fn(async () => 0) },
     recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
     task: {
       findUniqueOrThrow: vi.fn(async () => {
@@ -297,14 +445,8 @@ async function runWithModel(
     scratchpadItem: { findMany: vi.fn(async () => options.loadScratchpad?.() ?? []) },
     externalEffect: { findMany: vi.fn(async () => []) },
     steeringMessage: {
-      findMany: vi.fn(async () =>
-        (options.unreadSteering ?? []).map((row) => ({
-          id: row.id,
-          messageId: row.messageId,
-          message: { blocks: row.blocks, role: row.role ?? "user", botId: null },
-        })),
-      ),
-      count: vi.fn(async () => (options.unreadSteering?.length ? 1 : 0)),
+      findMany: vi.fn(async () => []),
+      count: vi.fn(async () => 0),
     },
     artifact: {
       findMany: vi.fn(async () => [
@@ -312,24 +454,13 @@ async function runWithModel(
       ]),
     },
   };
-  lastPrisma = prisma as never;
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
   const events = {
-    claimSteering: vi.fn(async () =>
-      options.claimed
-        ? [
-            {
-              id: options.claimed.id,
-              messageId: options.claimed.messageId,
-              text: options.claimed.text,
-              blocks: [{ kind: "text", text: options.claimed.text }],
-            },
-          ]
-        : [],
-    ),
+    claimSteering: vi.fn(async () => []),
     append: vi.fn(async () => undefined),
     publishTransient: vi.fn(async () => undefined),
     notify: vi.fn(async () => undefined),
+    pauseRunForInput: vi.fn(async () => true),
     finalizeRun,
   };
   lastExecutorEvents = events;
@@ -364,7 +495,6 @@ async function runWithModel(
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
     replySuggestions: options.replySuggestions,
-    quickReplies: options.quickReplies,
     ...(options.discoverTools ? { connector: { discoverTools: options.discoverTools } } : {}),
   } as unknown as Parameters<typeof createRunExecutor>[0]);
 
@@ -468,177 +598,16 @@ describe("withoutPolls", () => {
   });
 });
 
-describe("waitsOnTeammate", () => {
-  it("reads a line saying a teammate's email is not sent yet", () => {
-    expect(
-      waitsOnTeammate(
-        "这封邮件还没有准备好或发送。负责处理的流程目前暂停，尚未给出邮件草稿或需要你补充的信息。",
-      ),
-    ).toBe(true);
-    expect(waitsOnTeammate("初次联系邮件已发送给 Noah Test。")).toBe(false);
-  });
-});
-
-describe("quick reply", () => {
+describe("saysSomething", () => {
   it("counts only words or cards as a reply, not a row of the run's steps", () => {
     expect(saysSomething([{ kind: "steps", steps: [] } as never])).toBe(false);
     expect(saysSomething([{ kind: "text", text: "  " }])).toBe(false);
-    // A handoff to a teammate is a marker, not a reply: the quick first line still goes out.
+    // A handoff to a teammate is a marker, not a reply.
     expect(
       saysSomething([{ kind: "handoff", fromBotId: "a", toBotId: "b", text: "Find people." }]),
     ).toBe(false);
     expect(saysSomething([{ kind: "text", text: "On it." }])).toBe(true);
     expect(saysSomething([{ kind: "ask", question: "Which city?" } as never])).toBe(true);
-  });
-
-  it("posts a short first reply beside setup and tells the run what it said", async () => {
-    const { runtimeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "On it.",
-      quickReplies: true,
-    });
-    const quick = runtimeRun.mock.calls.find(([call]) => call.runId === "run-1:quick-reply")?.[0];
-    expect(quick?.tools).toEqual([]);
-    expect(quick?.prompt).toContain("what was in the screenshot?");
-    expect(prisma.message.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ blocks: [{ kind: "text", text: "On it." }] }),
-      }),
-    );
-    // It starts before the main model call.
-    const main = runtimeRun.mock.calls.findIndex(([call]) => call.runId === "run-1");
-    const quickIndex = runtimeRun.mock.calls.findIndex(
-      ([call]) => call.runId === "run-1:quick-reply",
-    );
-    expect(quickIndex).toBeLessThan(main);
-    expect(runtimeRun.mock.calls[main]![0].prompt).toContain(
-      'You already sent the person this first line while you work: "On it."',
-    );
-  });
-
-  it("answers a message sent during a long step at once, without waiting for the step", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Got it, remote works too.",
-      quickReplies: true,
-      holdMain,
-      unreadSteering: [
-        {
-          id: "steer-1",
-          messageId: "message-9",
-          blocks: [{ kind: "text", text: "对了，远程也可以" }],
-        },
-      ],
-    });
-    const fixedLine = JSON.stringify([{ kind: "text", text: "收到，马上处理。" }]);
-    const posted = (prisma: { message: { create: { mock: { calls: unknown[][] } } } }) =>
-      prisma.message.create.mock.calls.filter(
-        ([args]) =>
-          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) === fixedLine,
-      ).length;
-    await vi.waitFor(() => expect(lastPrisma && posted(lastPrisma)).toBe(1), {
-      timeout: STEERING_PEEK_MS + 3_000,
-    });
-    release();
-    const { prisma, runtimeRun } = await pending;
-    // The fixed line goes out at once, with no model call of its own.
-    expect(posted(prisma)).toBe(1);
-    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-1")).toBe(
-      false,
-    );
-  });
-
-  // Staging 11-13: two messages in a row each got a fixed line, one after the other.
-  it("sends one fixed line for messages sent back to back before the run speaks", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Updated.",
-      quickReplies: true,
-      holdMain,
-      unreadSteering: [
-        {
-          id: "steer-a",
-          messageId: "message-a",
-          blocks: [{ kind: "text", text: "Remote is fine" }],
-        },
-        {
-          id: "steer-b",
-          messageId: "message-b",
-          blocks: [{ kind: "text", text: "对了，远程也可以" }],
-        },
-      ],
-    });
-    const acks = (prisma: { message: { create: { mock: { calls: unknown[][] } } } }) =>
-      prisma.message.create.mock.calls.filter(([args]) =>
-        /Got it, on it\.|收到，马上处理。/.test(
-          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks),
-        ),
-      ).length;
-    await vi.waitFor(() => expect(lastPrisma && acks(lastPrisma)).toBe(1), {
-      timeout: STEERING_PEEK_MS + 3_000,
-    });
-    await new Promise((done) => setTimeout(done, 300));
-    release();
-    const { prisma } = await pending;
-    expect(acks(prisma)).toBe(1);
-  });
-
-  // Staging eval 11-11: the server's automatic continuation ("Continue with the next step: …")
-  // got a quick reply of its own, which echoed it to the recruiter.
-  it("never answers the server's own continuation as if the person wrote it", async () => {
-    let release!: () => void;
-    const holdMain = new Promise<void>((done) => {
-      release = done;
-    });
-    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Done.",
-      quickReplies: true,
-      holdMain,
-      unreadSteering: [
-        {
-          id: "steer-3",
-          messageId: "message-11",
-          role: "system",
-          blocks: [
-            { kind: "text", text: "Continue with the next step: Review the first 10 people." },
-          ],
-        },
-      ],
-    });
-    await new Promise((done) => setTimeout(done, STEERING_PEEK_MS + 500));
-    release();
-    const { runtimeRun } = await pending;
-    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-3")).toBe(
-      false,
-    );
-  });
-
-  it("answers a message the run reads mid-stream, and tells the run not to acknowledge it", async () => {
-    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      finalText: "Got it, remote works too.",
-      quickReplies: true,
-      claimed: { id: "steer-2", messageId: "message-10", text: "对了，远程也可以" },
-    });
-    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-2")).toBe(
-      false,
-    );
-    expect(claimedSteering.items?.[0]?.text).toContain(STEERING_QUICK_REPLY_SENDING);
-  });
-
-  it("skips runs that a person did not start", async () => {
-    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      trigger: "routine",
-      priorRoutineRun: { id: "run-0", completedAt: new Date(), replyText: "x" },
-      quickReplies: true,
-    });
-    expect(runtimeRun.mock.calls.every(([call]) => !call.runId.endsWith(":quick-reply"))).toBe(
-      true,
-    );
   });
 });
 
@@ -672,6 +641,45 @@ describe("handed-in stage", () => {
     expect(request.prompt).toContain("Begin your first step with one short sentence");
   });
 
+  // Gate 264149c9, change-mind-mid-run: the recruiter already had Main's line, and the stage
+  // opened with another sentence saying what it was doing before the template.
+  it("asks for no opening sentence when the recruiter already has a reply", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-1"),
+      replyAfterTurn: true,
+    });
+    expect(request.prompt).not.toContain("Begin your first step with one short sentence");
+  });
+
+  // Gate 95185659, change-mind: the old 60–80万 version came after the recruiter changed the base,
+  // and the corrected one followed; the run that took the newer message hands the change on.
+  // Gate c8855b72: the same, from the server's retry of the handed-in turn that asked instead.
+  it.each([
+    ["brief", () => handoff("bot-1")],
+    [
+      "retry of a brief",
+      () => ({
+        ...handoff("bot-1"),
+        role: "user",
+        botId: null,
+        clientNonce: "autocontinue:run-0:decline",
+        blocks: [{ kind: "text", text: "Not shown: write the email." }],
+      }),
+    ],
+  ] as const)("posts no result for a %s the recruiter has written past", async (_, source) => {
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: source() as never,
+      // Gate 36e6d7f0, change-mind: the retry began 0.8 s after the recruiter changed the base.
+      ...(_ === "retry of a brief" ? { personWroteAt: new Date(Date.now() - 1000) } : {}),
+      recruitingRoleId: "role-1",
+      finalText:
+        "Subject: Staff Frontend Engineer\n\nHi {{firstName}}, the base is RMB 600,000–800,000.",
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("600,000");
+  });
+
   it("posts nothing when the answer to a teammate's check-in is NO_RESPONSE", async () => {
     const checkIn = handoff("bot-1");
     checkIn.blocks[0] = { ...checkIn.blocks[0], report: "progress" } as never;
@@ -681,6 +689,82 @@ describe("handed-in stage", () => {
       finalText: "NO_RESPONSE",
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("NO_RESPONSE");
+  });
+
+  // Gate 36e6d7f0, change-mind-mid-run: the revised email went out headed 「NO_RESPONSE」.
+  it("drops the silent marker from the start of a reply that has more to say", async () => {
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      recruitingRoleId: "role-1",
+      finalText:
+        "NO_RESPONSE\n\nSubject: Staff Frontend Engineer\n\nThe base is RMB 700,000–900,000.",
+    });
+    const posted = JSON.stringify(finalizeRun.mock.calls);
+    expect(posted).not.toContain("NO_RESPONSE");
+    expect(posted).toContain("700,000");
+  });
+
+  // Gate 01e9467c, first-timer-no-gmail: the run posted its first line and ended; the
+  // continuation the server gave it answered in a message of its own.
+  it("puts a continuation's answer in place of the line its run left", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      ackFromEndedRun: true,
+      endedRunLine: "我会说明不连接邮箱时能否直接发邮件。",
+      hiddenContinuation: true,
+      finalText: "需要连接 Gmail 才能给候选人发邮件。",
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "ack-0" } }),
+    );
+  });
+
+  // Honest-limits 8a002815, cannot-do-that-honestly: the first line, the run's steps rows, then
+  // the continuation's 「我无法发送 LinkedIn InMail…」 as a second message 40 s later.
+  it("puts a continuation's answer in place of the line under rows that say nothing", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      ackFromEndedRun: true,
+      endedRunLine: "可以改为通过邮件联系 Li Wei。",
+      hiddenContinuation: true,
+      stepsAfterEndedLine: true,
+      finalText: "我无法发送 LinkedIn InMail，这次没有联系任何人。",
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "ack-0" } }),
+    );
+  });
+
+  // Gate 4774895e, first-timer-no-gmail: the coordinator's first line already answered, it handed
+  // the question on, and the teammate's answer came as a second reply.
+  it("puts a handed-in answer in place of the coordinator's line for the same message", async () => {
+    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-1"),
+      briefAfterLine: "不连邮箱也不能直接给候选人发邮件。",
+      finalText: "不能。要实际发送，需要先连接发件邮箱。",
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "line-main" },
+        data: expect.objectContaining({ botId: "bot-1", runId: "run-1" }),
+      }),
+    );
+    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
+  });
+
+  // Gate 01e9467c, change-mind-mid-run: the recruiter changed the ask, this bot handed the
+  // teammate the new brief, and its answer to the old stage's report was a third template.
+  it("posts nothing for a report this bot already handed a newer brief after", async () => {
+    const report = handoff("bot-1");
+    report.blocks[0] = { ...report.blocks[0], report: "completed" } as never;
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: report,
+      newerBrief: true,
+      finalText: "Here is the updated template, signed Alex Morgan.",
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
   });
 
   it("keeps full thinking for a handoff addressed to another bot", async () => {
@@ -773,28 +857,6 @@ describe("run budget guardrails", () => {
     );
     // The run ended on the guardrail reply; the later tool call never reached the thread.
     expect(prisma.message.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("includes saved recruiting results and the next step when the budget stops the executor", async () => {
-    const { finalizeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
-      recruitingRoleId: "role-1",
-      savedRecruitingCandidates: 10,
-      events: [usage(3), tool("t1"), usage(2.5), tool("t2")],
-    });
-    expect(finalizeRun).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        outcome: "completed",
-        blocks: [
-          {
-            kind: "text",
-            text: expect.stringContaining(
-              "10 saved candidate profiles. Next step: Show the first 10 people.",
-            ),
-          },
-        ],
-      }),
-    );
-    expect(prisma.recruitingCandidate.count).toHaveBeenCalledWith({ where: { roleId: "role-1" } });
   });
 
   it("leaves a run under the cap alone", async () => {
@@ -1182,7 +1244,7 @@ describe("streaming progress is transient", () => {
           summary: "Reviewing candidates",
           at: "2026-10-23T00:00:00.000Z",
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
     );
@@ -1211,7 +1273,7 @@ describe("streaming progress is transient", () => {
           text: "Looking",
           streaming: true,
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
       expect.objectContaining({
@@ -1221,7 +1283,7 @@ describe("streaming progress is transient", () => {
           activity: true,
           phase: "compacting",
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
     ]);

@@ -17,6 +17,8 @@ type AccountItem = RecruitingAccountViewOutput["items"][number];
 type Props = {
   accountKey?: string;
   roles: RecruitingAccountViewOutput["roles"];
+  /** Conversations whose mail sent outside a role is listed too, named like a role. */
+  conversations?: RecruitingAccountViewOutput["roles"];
   items: AccountItem[];
   spaceId?: string;
   pending: readonly string[];
@@ -67,7 +69,7 @@ export function accountInboxPerson(
     );
   }
   if (email.candidateKey)
-    return people.find((person) => person.autumn?.candidateKey === email.candidateKey);
+    return people.find((person) => person.sourced?.candidateKey === email.candidateKey);
   if (email.direction !== "received") return undefined;
   const address = (email.sender?.trim().match(/^[^<>]*<([^<>]+)>$/)?.[1] ?? email.sender)
     ?.trim()
@@ -79,10 +81,7 @@ export function accountInboxPerson(
 }
 
 /** A list entry keeps its exact role/source/mailbox; missing provider threads stay single messages. */
-export function accountInboxThreads(
-  items: readonly AccountItem[],
-  requested?: { roleId: string; emailId: string; sourceId: string },
-) {
+export function accountInboxThreads(items: readonly AccountItem[]) {
   const rows = new Map<
     string,
     {
@@ -133,15 +132,6 @@ export function accountInboxThreads(
     }
   }
   return [...rows.values()]
-    .filter((row) =>
-      row.emails.some(
-        (email) =>
-          email.direction !== "sent" ||
-          (row.roleId === requested?.roleId &&
-            email.id === requested.emailId &&
-            email.sourceId === requested.sourceId),
-      ),
-    )
     .map((row) => ({
       ...row,
       emails: row.emails.sort(
@@ -156,7 +146,8 @@ export function accountInboxThreads(
 
 export function AccountInbox({
   accountKey,
-  roles,
+  roles: ownRoles,
+  conversations,
   items,
   spaceId,
   pending,
@@ -174,8 +165,10 @@ export function AccountInbox({
   onFilterChange,
 }: Props) {
   const { t } = useLingui();
+  // A conversation's mail shows its name and opens its reply cards; only a role opens a role.
+  const roles = conversations?.length ? [...ownRoles, ...conversations] : ownRoles;
   const requestedServerThread = serverThreads?.find((item) => item.key === requestedThread);
-  const rows = accountInboxThreads(items, requestedServerThread);
+  const rows = accountInboxThreads(items);
   for (const row of rows) {
     const saved = serverThreads?.find(
       (thread) =>
@@ -391,9 +384,12 @@ export function AccountInbox({
               const latest = row.emails[0]!;
               const incoming =
                 row.emails.find((message) => message.direction === "received") ?? latest;
+              // Nobody has replied yet: the thread is the email Kruit sent, so name its recipient.
+              const sentOnly = incoming.direction === "sent";
+              const counterpart = sentOnly ? incoming.recipients[0] : incoming.sender;
               const unread = row.emails.some((message) => readState.unread(message) === true);
               const person = row.person;
-              const profile = person?.autumn?.savedProfile;
+              const profile = person?.sourced?.savedProfile;
               const work =
                 profile?.experience
                   .slice(0, 2)
@@ -414,7 +410,7 @@ export function AccountInbox({
                   ) ??
                 [];
               const school = profile?.education[0];
-              const ranking = person?.autumn?.ranking;
+              const ranking = person?.sourced?.ranking;
               const grade =
                 ranking?.source === "reviewer" && ranking.state === "current"
                   ? ranking.group === "strong_match"
@@ -432,7 +428,7 @@ export function AccountInbox({
                   <button
                     type="button"
                     aria-pressed={selected?.key === row.key}
-                    aria-label={`${incoming.sender || t`Sender unavailable`} · ${roleTitle(row.roleId)} · ${latest.subject || t`No subject`}`}
+                    aria-label={`${counterpart || t`Sender unavailable`} · ${roleTitle(row.roleId)} · ${latest.subject || t`No subject`}`}
                     className="flex w-full items-start gap-3 rounded-2xl border border-border bg-card p-4 text-start focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted/50 aria-pressed:bg-muted"
                     onClick={(event) => {
                       railTrigger.current = event.currentTarget;
@@ -446,14 +442,14 @@ export function AccountInbox({
                   >
                     <ProfileImage
                       src={profile?.profileImageUrl}
-                      fallback={initials(person?.name || incoming.sender || "")}
+                      fallback={initials(person?.name || counterpart || "")}
                       photo
                       className="grid size-10 shrink-0 place-items-center rounded-full bg-muted text-sm font-medium text-muted-foreground"
                     />
                     <span className="min-w-0 flex-1 space-y-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <strong className="truncate text-sm" title={incoming.sender ?? undefined}>
-                          {person?.name || incoming.sender || t`Sender unavailable`}
+                        <strong className="truncate text-sm" title={counterpart ?? undefined}>
+                          {person?.name || counterpart || t`Sender unavailable`}
                         </strong>
                         {grade ? <Badge variant="outline">{grade}</Badge> : null}
                       </span>
@@ -515,6 +511,10 @@ export function AccountInbox({
                           ) : incoming.direction === "received" ? (
                             <span>
                               <Trans>Received</Trans>
+                            </span>
+                          ) : sentOnly ? (
+                            <span>
+                              <Trans>Sent</Trans>
                             </span>
                           ) : null}
                           {latest.date && Number.isFinite(Date.parse(latest.date)) ? (
@@ -631,7 +631,7 @@ export function AccountInbox({
                 {roleTitle(selected.roleId)}
                 {email.eaccount ? ` · ${email.eaccount}` : ""}
               </span>
-              {roles.find((role) => role.id === selected.roleId)?.groupId ? (
+              {ownRoles.find((role) => role.id === selected.roleId)?.groupId ? (
                 <Button size="sm" variant="ghost" onClick={() => onOpenRole(selected.roleId)}>
                   <Trans>Open role</Trans>
                   <ArrowUpRight size={14} aria-hidden />
@@ -666,11 +666,11 @@ export function AccountInbox({
                       .sender
                   }
                   candidateTitle={selected.person?.title}
-                  candidatePhotoUrl={selected.person?.autumn?.savedProfile?.profileImageUrl}
+                  candidatePhotoUrl={selected.person?.sourced?.savedProfile?.profileImageUrl}
                   onOpenProfile={
                     selected.person &&
                     onOpenProfile &&
-                    roles.find((role) => role.id === selected.roleId)?.groupId
+                    ownRoles.find((role) => role.id === selected.roleId)?.groupId
                       ? () => onOpenProfile(selected.roleId, selected.person!)
                       : undefined
                   }

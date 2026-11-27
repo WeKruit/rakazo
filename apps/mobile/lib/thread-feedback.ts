@@ -3,7 +3,7 @@ import type { ComposerMention, resolveComposerSendPlan } from "@rakazo/core";
 import { isServerUnreachable, retrySend } from "@rakazo/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { rpc } from "./api";
-import { t } from "./i18n";
+import { getActiveUiLocale, t } from "./i18n";
 import type { PickedAttachment } from "./pick-attachments";
 
 export type ComposerSnapshot = {
@@ -97,7 +97,10 @@ export async function deliverSend(
       // A message sent while a reply works goes in right away instead of waiting.
       interrupt: true,
       text: plan.trimmed || undefined,
+      uiLocale: getActiveUiLocale(),
       mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
+      // A send queued on disk by an earlier app version has no such list.
+      connectorNames: plan.connectorNames?.length ? plan.connectorNames : undefined,
       artifactIds: artifactIds.length ? artifactIds : undefined,
       replyToMessageId: reroutedToGroup ? undefined : payload.replyTargetId,
       replyQuote: reroutedToGroup ? undefined : (payload.replyQuote ?? undefined),

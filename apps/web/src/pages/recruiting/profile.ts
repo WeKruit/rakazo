@@ -116,7 +116,7 @@ function recruiterField(field: Field): Field[] {
 }
 
 /**
- * Autumn's report fields sorted into the sections a recruiter reads, as returned and never
+ * The search's report fields sorted into the sections a recruiter reads, as returned and never
  * re-judged. Fields that fit no named section stay together as research findings.
  */
 export function candidateSections(
@@ -331,7 +331,7 @@ export type SkillEvidenceSource = {
   status?: RequirementStatus;
 };
 
-/** One requirement line of Autumn's own assessment, its words kept verbatim. */
+/** One requirement line of the search's own assessment, its words kept verbatim. */
 export type RequirementRow = {
   priority?: "hard" | "preferred";
   key: string;
@@ -340,7 +340,7 @@ export type RequirementRow = {
   /** Original source reference kept separately from the readable definition. */
   criterionId?: string;
   status: RequirementStatus;
-  /** Autumn's own short name and verdict for this criterion, when it returned them. */
+  /** The search's own short name and verdict for this criterion, when it returned them. */
   brief?: { name: string | null; verdict: string | null };
   text: string;
   sourceUrls: readonly string[];
@@ -358,6 +358,7 @@ const STATUS_WORDS: [RegExp, RequirementStatus][] = [
   [/^(?:fact|match|met|good match|strong|yes|pass|符合|满足|事实)$/i, "match"],
   [/^(?:gap|miss|not met|no match|not a match|no|fail|missing|不符合|缺口|差距|缺失)$/i, "gap"],
 ];
+const VERDICT_LINE = /^([^-–—:：]{1,24}?)\s*[-–—]\s*(\S.*)$/;
 const CITATION = /\[\s*sources?\b[^\]]*\]/gi;
 const LINK = /https?:\/\/[^\s,;\]]+/g;
 
@@ -414,7 +415,7 @@ function fieldText(field: Field, includeValue = true) {
 }
 
 /**
- * Splits Autumn's "R1: Fact - … R2: Gap - … [Sources read …]" assessment into one row per
+ * Splits the search's "R1: Fact - … R2: Gap - … [Sources read …]" assessment into one row per
  * requirement, keeping its status word's meaning and its evidence as written. Text it cannot
  * split stays one row with an unknown status. Cited source links are returned once.
  */
@@ -436,6 +437,20 @@ export function requirementRows(
   const parts = body
     ? body.split(/(?:^|\s|[;；])(?=R\d+\s*[:：])/).filter((part) => part.trim())
     : [];
+  // The requirement check writes one line per requirement, "Verdict - the requirement as the
+  // recruiter said it", with no reference number: the requirement itself is the row's name.
+  const lines = body.split("\n").map((line) => VERDICT_LINE.exec(line.trim()));
+  if (body && lines.every((line) => line && statusOf(line[1]!)))
+    return {
+      rows: lines.map((line, index) => ({
+        key: `row:${index}`,
+        label: line![2]!.trim(),
+        status: statusOf(line![1]!)!,
+        text: "",
+        sourceUrls: [],
+      })),
+      sourceUrls,
+    };
   const rows = parts.map((part, index): RequirementRow => {
     const match = /^(R\d+)\s*[:：]\s*(.*)$/s.exec(part.trim());
     const rest = (match?.[2] ?? part).trim();

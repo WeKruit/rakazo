@@ -1,4 +1,4 @@
-import type { ConnectorProvider } from "@rakazo/adapter-kit";
+import type { ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -56,6 +56,8 @@ function fixture() {
     },
     botMcpServer: { findFirst: assignment },
     thread: { findFirst: vi.fn(async () => ({ id: "thread" })) },
+    // The account's other campaigns that emailed the role's people; none unless a test says so.
+    $queryRaw: vi.fn(async () => [] as { campaign_id: string }[]),
   } as unknown as PrismaClient;
   return { prisma, assignment };
 }
@@ -133,6 +135,66 @@ describe("live role correspondence", () => {
     ).rejects.toBeInstanceOf(IsolationError);
     expect(execute).toHaveBeenCalledTimes(2);
   });
+  it("shows an interview booked in this role's conversation for an email nobody saved, as cancelled once cancelled", async () => {
+    const { prisma } = fixture();
+    const booked = {
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "calendar",
+            resourceRevision: 1,
+            toolName: "create_event",
+          },
+          args: { summary: "Call", attendees: [{ email: "typed@example.test" }] },
+        },
+      ],
+      result: { structuredContent: { id: "booked" } },
+    };
+    vi.mocked(prisma.externalEffect.findMany).mockImplementation((async (query: {
+      where: { OR?: unknown };
+    }) => (query.where.OR ? [booked] : [])) as never);
+    const event = (id: string, status: string, email: string) => ({
+      id,
+      status,
+      summary: id,
+      start: { dateTime: "2026-12-01T20:00:00Z" },
+      end: { dateTime: "2026-12-01T20:30:00Z" },
+      attendees: [{ email: "recruiter@example.test", self: true }, { email }],
+    });
+    let events = [
+      event("booked", "confirmed", "typed@example.test"),
+      event("unrelated", "confirmed", "someone@example.test"),
+    ];
+    const execute = vi.fn(async function* () {
+      yield { type: "result", data: { structuredContent: { events } } } as const;
+    });
+    const deps = { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> };
+    const read = async (user: string) => {
+      const output = empty();
+      await refreshRecruitingCorrespondence(
+        deps,
+        { ...actor, userId: user },
+        { roleId: "role", threadId: "thread", view: "interview" },
+        [source("calendar")],
+        output,
+      );
+      return output.events.map(({ id, status, roleAssociation }) => ({
+        id,
+        status,
+        roleAssociation,
+      }));
+    };
+    expect(await read("typed-email-user")).toEqual([
+      { id: "calendar:booked", status: "booked", roleAssociation: "booking" },
+    ]);
+    events = [event("booked", "cancelled", "typed@example.test")];
+    expect(await read("typed-email-cancelled-user")).toEqual([
+      { id: "calendar:booked", status: "cancelled", roleAssociation: "booking" },
+    ]);
+  });
   it("does not read the calendar for a role with nobody to match", async () => {
     const { prisma } = fixture();
     vi.mocked(prisma.externalEffect.findMany).mockResolvedValue([] as never);
@@ -206,7 +268,7 @@ describe("live role correspondence", () => {
     });
     expect(await open()).toEqual(["calendar:third"]);
   });
-  it("looks up the role's mail campaigns by their exact keys", async () => {
+  it("looks up only this role's mail campaigns", async () => {
     const { prisma } = fixture();
     const execute = vi.fn(async function* () {
       yield { type: "result", data: { structuredContent: { events: [] } } } as const;
@@ -221,16 +283,11 @@ describe("live role correspondence", () => {
     expect(prisma.externalEffect.findMany).toHaveBeenCalledWith({
       where: {
         spaceId: actor.spaceId,
+        kind: "instantly_role_campaign",
         status: "completed",
-        idempotencyKey: {
-          in: [
-            "instantly-role-campaign:calendar:role",
-            "instantly-role-campaign:calendar:role:history",
-            "instantly-role-campaign:instantly:role",
-            "instantly-role-campaign:instantly:role:history",
-          ],
-        },
+        request: { path: ["roleId"], equals: "role" },
       },
+      orderBy: { createdAt: "asc" },
       select: { idempotencyKey: true, result: true },
     });
   });
@@ -368,6 +425,74 @@ describe("live role correspondence", () => {
     expect(execute).toHaveBeenCalledTimes(3);
     expect(execute.mock.calls[1]?.[0].args.starting_after).toBe("100");
   });
+  it("shows a reply the mail service filed under another of the account's campaigns when the role emailed that person", async () => {
+    // The service files a person's reply under their newest campaign: Ada, emailed by the role and
+    // then by a one-off from the main conversation, answered there, and the role's Inbox was empty.
+    const { prisma } = fixture();
+    const oneOff = "00000000-0000-4000-8000-0000000000c2";
+    const email = (id: number, campaign: string, ue_type: 1 | 2, lead: string) => ({
+      id: `00000000-0000-4000-8000-${String(id).padStart(12, "0")}`,
+      timestamp_created: "2026-10-30T12:00:00Z",
+      timestamp_email: "2026-10-30T12:00:00Z",
+      message_id: `msg-${id}`,
+      subject: "Data role",
+      from_address_email: ue_type === 2 ? lead : "recruiter@example.test",
+      to_address_email_list: ue_type === 2 ? "recruiter@example.test" : lead,
+      body: { text: ue_type === 2 ? "Not looking." : "Hi" },
+      organization_id: "00000000-0000-4000-8000-000000000002",
+      campaign_id: campaign,
+      lead,
+      eaccount: "recruiter@example.test",
+      ue_type,
+    });
+    vi.mocked(prisma.$queryRaw)
+      .mockResolvedValueOnce([{ campaign_id: oneOff }] as never)
+      // The role's own confirmed send emailed Ada.
+      .mockResolvedValueOnce([{ email: "ada@example.test" }] as never);
+    const jobs = { enqueue: vi.fn(async (_job: { payload: unknown }) => undefined) };
+    const execute = vi.fn(async function* (call: { args: Record<string, unknown> }) {
+      const items =
+        call.args.campaign_id === campaignId
+          ? [email(1, campaignId, 1, "ada@example.test")]
+          : [
+              email(2, oneOff, 2, "ada@example.test"),
+              // Someone the role never emailed stays out of the role's Inbox.
+              email(3, oneOff, 2, "stranger@example.test"),
+            ];
+      yield { type: "result", data: { structuredContent: { items } } } as const;
+    });
+    const output = empty();
+    await refreshRecruitingCorrespondence(
+      {
+        prisma,
+        connectors: { execute } as Pick<ConnectorProvider, "execute">,
+        jobs: jobs as unknown as JobPublisher,
+      },
+      { ...actor, userId: "cross-campaign" },
+      { roleId: "role", threadId: "thread", view: "inbox", pageEnd: 50 },
+      [source("instantly")],
+      output,
+    );
+    const calls = execute.mock.calls as unknown as [{ args: Record<string, unknown> }][];
+    expect(calls.map((call) => call[0].args.campaign_id)).toEqual([campaignId, oneOff]);
+    expect(output.status).toBe("ready");
+    expect(
+      output.emails.map((row) => [row.sender, row.direction, row.campaignId]).toSorted(),
+    ).toEqual([
+      ["ada@example.test", "received", oneOff],
+      ["recruiter@example.test", "sent", campaignId],
+    ]);
+    // The account Inbox stores Ada's reply for the role too, as read from that campaign.
+    const stored = jobs.enqueue.mock.calls
+      .map(
+        ([job]) =>
+          (job.payload as { observation: { campaignId: string; emails: { sender: string }[] } })
+            .observation,
+      )
+      .find((observation) => observation.campaignId === oneOff);
+    expect(stored).toMatchObject({ roleId: "role", threadId: "thread", sourceId: "instantly" });
+    expect(stored?.emails.map((row) => row.sender)).toEqual(["ada@example.test"]);
+  });
   it("reads the role's imported campaign beside its own", async () => {
     const { prisma } = fixture();
     const imported = "00000000-0000-4000-8000-000000000009";
@@ -390,6 +515,39 @@ describe("live role correspondence", () => {
     );
     const calls = execute.mock.calls as unknown as [{ args: Record<string, unknown> }][];
     expect(calls.map((call) => call[0].args.campaign_id)).toEqual([campaignId, imported]);
+  });
+  it("reads a campaign cloned for the role, once, and no other source's", async () => {
+    // gate d06ea499, send-at-night: a follow-up wave went out from a cloned draft and its mail
+    // never reached the Inbox.
+    const { prisma } = fixture();
+    const clone = "00000000-0000-4000-8000-000000000010";
+    vi.mocked(prisma.externalEffect.findMany).mockResolvedValueOnce([
+      { idempotencyKey: "instantly-role-campaign:instantly:role", result: { campaignId } },
+      {
+        idempotencyKey: `instantly-role-campaign:instantly:role:campaign:${campaignId}`,
+        result: { campaignId },
+      },
+      {
+        idempotencyKey: `instantly-role-campaign:instantly:role:campaign:${clone}`,
+        result: { campaignId: clone },
+      },
+      {
+        idempotencyKey: "instantly-role-campaign:elsewhere:role:campaign:x",
+        result: { campaignId: "00000000-0000-4000-8000-000000000011" },
+      },
+    ] as never);
+    const execute = vi.fn(async function* () {
+      yield { type: "result", data: { structuredContent: { items: [] } } } as const;
+    });
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      { ...actor, userId: "cloned-campaign" },
+      { roleId: "role", threadId: "thread", view: "inbox", pageEnd: 50 },
+      [source("instantly")],
+      empty(),
+    );
+    const calls = execute.mock.calls as unknown as [{ args: Record<string, unknown> }][];
+    expect(calls.map((call) => call[0].args.campaign_id)).toEqual([campaignId, clone]);
   });
   it.each(["calendar", "cal"] as const)(
     "rejects malformed %s provider identities before generating event keys",

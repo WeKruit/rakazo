@@ -41,6 +41,7 @@ import {
   groupsOf,
   InfraError,
   PROFILE,
+  retireRoutines,
   roleChats,
   send,
   settle,
@@ -220,8 +221,13 @@ async function play(scenario, owner, sample) {
     chats = await transcripts(user.rpc, startedAt, mostlyChinese(first));
   } finally {
     await stopAll(user.rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
+    if (!scenario.account)
+      await retireRoutines(user.rpc).catch((error) =>
+        log(`${label}: routines not stopped: ${error.message}`),
+      );
   }
   const lines = [];
+  const recruiter = chats.flatMap(({ messages }) => messages.filter((m) => m.role === "user"));
   for (const { group, messages } of chats) {
     if (!messages.length) continue;
     lines.push(`## ${group.name}`);
@@ -230,7 +236,7 @@ async function play(scenario, owner, sample) {
         `[${message.at}] ${message.role}${message.card ? " (card)" : ""}: ${message.text}`,
       );
     failures.push(
-      ...conversationChecks(messages)
+      ...conversationChecks(messages, { recruiter })
         // A contact lookup's deliverable is an address the recruiter never typed.
         .filter((failure) => !(scenario.foundEmail && failure.startsWith("shows an address")))
         .map((failure) => `${group.name}: ${failure}`),

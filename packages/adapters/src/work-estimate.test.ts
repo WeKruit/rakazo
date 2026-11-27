@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   contactLookupCountdownNote,
   currentWorkEstimate,
-  wakeForResearchCountdown,
   withWorkNote,
   workEstimateAfterAgentRun,
 } from "./work-estimate.js";
@@ -38,14 +37,13 @@ describe("countdowns for big work", () => {
       test.prisma,
       run,
       mcp({ id: "agent_run_1", status: "running" }),
-      { query: "Find 500 more USC alumni" },
     );
-    expect(note).toContain("about 10 minutes");
+    expect(note).toContain("about 2 minutes");
     expect(note).toContain("email_when_done");
     expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
       kind: "work_estimate",
       idempotencyKey: "work_estimate:agent_run_1",
-      request: { kind: "search", people: 500, estimateMs: 10 * 60_000 },
+      request: { kind: "search", people: 100, estimateMs: 2 * 60_000 },
     });
   });
 
@@ -74,24 +72,9 @@ describe("countdowns for big work", () => {
       test.prisma,
       run,
       mcp({ id: "agent_run_1", status: "running" }),
-      { query: "Find 100 more" },
     );
     expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
       request: { people: 100, roleId: "role", saved: 518 },
-    });
-  });
-
-  it("counts up for a small search without a note", async () => {
-    const test = store();
-    const note = await workEstimateAfterAgentRun(
-      test.prisma,
-      run,
-      mcp({ id: "agent_run_1", status: "running" }),
-      { query: "Find 30 nurses" },
-    );
-    expect(note).toBeNull();
-    expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
-      request: { people: 30, estimateMs: null },
     });
   });
 
@@ -101,7 +84,6 @@ describe("countdowns for big work", () => {
       test.prisma,
       run,
       mcp({ id: "agent_run_1", status: "completed" }),
-      {},
     );
     expect(test.create).not.toHaveBeenCalled();
     expect(test.updateMany).toHaveBeenCalledWith({
@@ -153,66 +135,5 @@ describe("countdowns for big work", () => {
       "how many emails were found so far",
     );
     expect(withWorkNote({ summary: {} }, "note")).toEqual({ summary: {}, countdown: "note" });
-  });
-});
-
-describe("countdowns for background research", () => {
-  const thread = { spaceId: "space", threadId: "thread", botId: "sourcer", userId: "user" };
-  function research(startedMsAgo: number, options: { busy?: boolean; reported?: number } = {}) {
-    const runCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "wake" }));
-    const taskCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "t" }));
-    const updateMany = vi.fn(async (_args: unknown) => ({ count: 1 }));
-    const tx = {
-      thread: { updateMany: vi.fn(async () => ({ count: 1 })) },
-      run: {
-        findFirst: vi.fn(async (args: { where: { clientNonce?: string } }) =>
-          args.where.clientNonce ? null : options.busy ? { id: "busy" } : null,
-        ),
-        create: runCreate,
-      },
-      task: { create: taskCreate },
-    };
-    const prisma = {
-      externalEffect: {
-        findFirst: vi.fn(async () => ({
-          id: "estimate",
-          request: { threadId: "thread", kind: "search", people: 300, estimateMs: 10 * 60_000 },
-          result: options.reported ? { reported: options.reported } : null,
-          createdAt: new Date(now - startedMsAgo),
-        })),
-        updateMany,
-      },
-      $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
-    } as unknown as PrismaClient;
-    const jobs = { enqueue: vi.fn(async () => undefined) };
-    return { prisma, jobs, runCreate, taskCreate, updateMany };
-  }
-
-  it("wakes the agent once to report when the countdown runs out", async () => {
-    const test = research(11 * 60_000);
-    await wakeForResearchCountdown(test, { id: "task", roleId: "role" }, thread, now);
-    expect(test.runCreate.mock.calls[0]?.[0].data).toMatchObject({
-      trigger: "recruiting_research",
-      clientNonce: "work_estimate:research:task:1",
-    });
-    expect(String(test.taskCreate.mock.calls[0]?.[0].data.prompt)).toContain(
-      "estimated 10 minutes are up",
-    );
-    expect(test.updateMany).toHaveBeenCalledWith({
-      where: { id: "estimate", status: "running" },
-      data: { result: { reported: 1 } },
-    });
-  });
-
-  it("does nothing before the countdown ends, after it was reported, or while busy", async () => {
-    for (const test of [
-      research(4 * 60_000),
-      research(11 * 60_000, { reported: 1 }),
-      research(11 * 60_000, { busy: true }),
-    ]) {
-      await wakeForResearchCountdown(test, { id: "task", roleId: "role" }, thread, now);
-      expect(test.runCreate).not.toHaveBeenCalled();
-      expect(test.updateMany).not.toHaveBeenCalled();
-    }
   });
 });

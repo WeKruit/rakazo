@@ -30,7 +30,7 @@ export type CatalogSearchHit = {
 };
 
 export type CatalogSearchResult =
-  | { tools: CatalogSearchHit[] }
+  | { tools: CatalogSearchHit[]; hint?: string }
   | { index: Array<{ group: string; names: string[] }> }
   | { groups: Array<{ group: string; count: number }>; hint: string }
   | { group: string; names: string[]; error?: string }
@@ -196,24 +196,23 @@ export function searchCatalog(
     : TOOL_SEARCH_LIMIT;
   // The whole query first; only when nothing matches it, its words one by one.
   const score = scoped.some((entry) => termScore(entry, query) < 4) ? termScore : termsScore;
-  return {
-    tools: scoped
-      .map((entry) => ({ entry, score: score(entry, query) }))
-      .filter(({ score }) => score < 4)
-      .sort(
-        (left, right) =>
-          left.score - right.score ||
-          left.entry.tool.name.localeCompare(right.entry.tool.name) ||
-          left.entry.id.localeCompare(right.entry.id),
-      )
-      .slice(0, limit)
-      .map(({ entry }) => ({
-        id: entry.id,
-        name: entry.tool.name,
-        description: entry.tool.description.slice(0, MAX_DESCRIPTION_LENGTH),
-        readOnly: entry.tool.readOnly === true,
-      })),
-  };
+  const tools = scoped
+    .map((entry) => ({ entry, score: score(entry, query) }))
+    .filter(({ score }) => score < 4)
+    .sort(
+      (left, right) =>
+        left.score - right.score ||
+        left.entry.tool.name.localeCompare(right.entry.tool.name) ||
+        left.entry.id.localeCompare(right.entry.id),
+    )
+    .slice(0, limit)
+    .map(({ entry }) => ({
+      id: entry.id,
+      name: entry.tool.name,
+      description: entry.tool.description.slice(0, MAX_DESCRIPTION_LENGTH),
+      readOnly: entry.tool.readOnly === true,
+    }));
+  return { tools };
 }
 
 export function loadCatalogEntry(

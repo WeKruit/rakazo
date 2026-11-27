@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AskDeadline } from "./AskDeadline";
 import { LoadingState } from "./ai/primitives";
+import { InactiveAsk } from "./InactiveAsk";
 
 /** Content of the existing approval card; both Inbox and the transcript render AskCard. */
 export function MailReplyAskContent({
@@ -234,6 +235,20 @@ export function MailReplyAskContent({
             </dt>
             <dd className="break-words">{reply.subject}</dd>
           </dl>
+          {editable && reply.openQuestions?.length ? (
+            <div className="space-y-1 text-sm">
+              <p className="text-muted-foreground">
+                <Trans>The candidate asked what you haven't told me. Answer it in the reply:</Trans>
+              </p>
+              <ul className="list-disc space-y-1 pl-5">
+                {reply.openQuestions.map((question) => (
+                  <li key={question} className="break-words">
+                    {question}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {editable ? (
             <Textarea
               aria-label={t`Reply body`}
@@ -263,7 +278,7 @@ export function MailReplyAskContent({
         </>
       ) : status === "needs_approval" && !reportedError ? (
         <p className="text-sm text-muted-foreground">
-          <Trans>No longer active</Trans>
+          <InactiveAsk />
         </p>
       ) : null}
       {visibleError ? (

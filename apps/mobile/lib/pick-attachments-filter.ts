@@ -12,7 +12,9 @@ export type PickedAttachment = {
   previewUri?: string;
 };
 
-export type PickSkip = { name: string; reason: string };
+export type PickSkip =
+  | { name: string; reason: "permission denied" | "over 10 MiB" | "unsupported type" }
+  | { name: string; reason: "max attachments"; max: number };
 
 export function filterPickedAttachments(
   existingCount: number,
@@ -28,7 +30,7 @@ export function filterPickedAttachments(
   const skipped: PickSkip[] = [];
   for (const candidate of candidates) {
     if (existingCount + attachments.length >= ATTACHMENT_MAX_COUNT) {
-      skipped.push({ name: candidate.name, reason: `max ${ATTACHMENT_MAX_COUNT} attachments` });
+      skipped.push({ name: candidate.name, reason: "max attachments", max: ATTACHMENT_MAX_COUNT });
       continue;
     }
     if (candidate.size > ATTACHMENT_MAX_BYTES) {

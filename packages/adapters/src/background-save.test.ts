@@ -129,11 +129,14 @@ describe("role saves in the background", () => {
   });
 
   it("retries a revision race or an outage, and hands bad input back to the agent", () => {
-    expect(transientSaveError("Role revision conflict")).toBe(true);
-    expect(transientSaveError("connection terminated unexpectedly")).toBe(true);
-    expect(transientSaveError("brief.fields[0].key: Required")).toBe(false);
+    const failed = (error: string, code?: string) =>
+      transientSaveError({ error, ...(code ? { code } : {}) }, error);
+    expect(failed("Recruiting revision changed", "CONFLICT")).toBe(true);
+    expect(failed("connection terminated unexpectedly")).toBe(true);
+    expect(failed("brief.fields[0].key: Required")).toBe(false);
+    // A refusal that only names a revision is bad input, not a race.
     expect(
-      transientSaveError(
+      failed(
         '[{"expected":"number","code":"invalid_type","path":["expectedRoleRevision"],"message":"Invalid input: expected number, received undefined"}]',
       ),
     ).toBe(false);
@@ -151,6 +154,15 @@ describe("role saves in the background", () => {
     expect(revisions.current("role-1", 1)).toBe(1);
     expect(revisions.current("role-2", 2)).toBe(2);
     expect(revisions.current(undefined, 2)).toBe(2);
+  });
+
+  it("acts on the saved revision when the agent names one its failed save never made", () => {
+    const revisions = ownRoleRevisions();
+    // Staging 11-15: the criteria save was refused, the round named revision 4 and conflicted.
+    expect(revisions.current("role-1", 4, 3)).toBe(3);
+    expect(revisions.current("role-1", 3, 3)).toBe(3);
+    // An older revision is a real conflict with someone else's save.
+    expect(revisions.current("role-1", 2, 3)).toBe(2);
   });
 });
 

@@ -7,6 +7,10 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
+  showDelegatedTeamCard,
+  showRoundWhereAskedNow,
+  teamProgress,
+  waitForDelegatedAnswer,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
 import * as mailReplies from "./mail-reply.js";
@@ -33,6 +37,8 @@ function deps(
     transactionConflictOnce?: boolean;
     /** What a scoped lookup of another conversation returns. */
     addressedThread?: unknown;
+    /** The role team's turn still working on an earlier request from the same conversation. */
+    teamWorking?: unknown;
   } = {},
 ) {
   const enqueue = vi.fn().mockResolvedValue(undefined);
@@ -47,16 +53,27 @@ function deps(
   const tx = {
     $queryRaw: vi.fn().mockResolvedValue([{ id: "thread" }]),
     run: {
-      findFirst: vi
-        .fn()
-        .mockResolvedValue(options.senderRunning === false ? null : { id: "run-1" }),
+      findFirst: vi.fn(async (args: { where: { trigger?: string; OR?: unknown } }) =>
+        // The team's earlier turn for this conversation; otherwise the sender's own run.
+        args.where.OR
+          ? (options.teamWorking ?? null)
+          : options.senderRunning === false
+            ? null
+            : { id: "run-1" },
+      ),
       findUnique: vi.fn().mockResolvedValue({ status: "running" }),
       create: vi.fn().mockResolvedValue({ id: "run-2" }),
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    attempt: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     bot: {
       findFirst: vi.fn().mockResolvedValue(options.targetArchived ? null : { id: "bot-target" }),
     },
-    task: { create: vi.fn().mockResolvedValue({ id: "task-1" }) },
+    task: {
+      create: vi.fn().mockResolvedValue({ id: "task-1" }),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     message: {
       findUnique: messageFindUnique,
       create: vi.fn().mockResolvedValue({ id: "message-1", seq: 1 }),
@@ -64,9 +81,13 @@ function deps(
     },
     event: { create: vi.fn().mockResolvedValue({ seq: 7 }) },
     thread: { update: vi.fn().mockResolvedValue({}) },
+    steeringMessage: { create: vi.fn().mockResolvedValue({ id: "steer-1" }) },
   };
   let transactionAttempts = 0;
   const prisma = {
+    recruitingCandidateOccurrence: {
+      findMany: vi.fn().mockResolvedValue([{ candidateKey: "a" }, { candidateKey: "b" }]),
+    },
     bot: {
       findMany: vi
         .fn()
@@ -79,9 +100,14 @@ function deps(
     message: { findUnique: messageFindUnique, findMany: vi.fn().mockResolvedValue([]) },
     run: {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      findFirst: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn(async (args?: { where?: { OR?: unknown } }) =>
+        args?.where?.OR ? (options.teamWorking ?? null) : null,
+      ),
     },
-    thread: { findFirst: vi.fn().mockResolvedValue(options.addressedThread ?? null) },
+    thread: {
+      findFirst: vi.fn().mockResolvedValue(options.addressedThread ?? null),
+      findUnique: vi.fn().mockResolvedValue({ activeRecruitingRoleId: "role-1" }),
+    },
     $transaction: vi.fn(async (fn: (client: unknown) => unknown) => {
       transactionAttempts += 1;
       if (options.transactionConflictOnce && transactionAttempts === 1) {
@@ -475,6 +501,107 @@ describe("delegating to a role team in another conversation", () => {
     );
   });
 
+  it("replaces an earlier request from the same conversation that has not started", async () => {
+    // Staging 11-14: each "where's the new round?" queued as its own turn behind the round and
+    // they ran one after another, so the recruiter's new instruction waited minutes.
+    const harness = deps({ bots: mainBot, addressedThread: { id: "thread-role" } });
+    harness.tx.run.findMany.mockResolvedValue([{ id: "run-stale", taskId: "task-stale" }]);
+    harness.tx.run.findUnique.mockImplementation(async (args: { where: { id: string } }) => ({
+      status: args.where.id === "run-stale" ? "cancelled" : "running",
+    }));
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-role",
+      message: "Redo the ones without Kafka",
+    });
+    expect(sent).toMatchObject({ ok: true });
+    expect(harness.tx.run.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        threadId: "thread-role",
+        botId: "bot-main",
+        status: "queued",
+        leaseFence: 0,
+        sourceMessage: {
+          is: {
+            blocks: {
+              array_contains: [{ kind: "bot_message_received", returnThreadId: "thread-global" }],
+            },
+          },
+        },
+      }),
+      select: { id: true, taskId: true },
+    });
+    expect(harness.tx.run.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["run-stale"] } },
+        data: expect.objectContaining({ status: "cancelled" }),
+      }),
+    );
+    expect(harness.tx.run.create).toHaveBeenCalled();
+  });
+
+  it("tells Kruit the team is still on its earlier request instead of a fresh start", async () => {
+    // Staging 11-14: asked "where are they?" mid-search, Kruit read the role status, saw no new
+    // round and told the recruiter three times that the search had not started.
+    const harness = deps({
+      bots: mainBot,
+      addressedThread: { id: "thread-role" },
+      teamWorking: {
+        id: "run-team",
+        botId: "bot-sourcer",
+        createdAt: new Date(Date.now() - 5 * 60_000),
+        startedAt: new Date(Date.now() - 3 * 60_000),
+        bot: { name: "Sourcer" },
+      },
+    });
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-role",
+      message: "Where are the new people?",
+    });
+    expect(sent).toMatchObject({ ok: true });
+    if (!sent.ok) throw new Error("not sent");
+    // Staging 11-15: queued behind the round, the request ran a second paid search after it.
+    expect(harness.tx.steeringMessage.create).toHaveBeenCalledWith({
+      data: { messageId: "message-1", botId: "bot-sourcer", userId: "user-1", runId: "run-team" },
+    });
+    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.enqueue).not.toHaveBeenCalled();
+    expect(sent.note).toContain(
+      "Sourcer has been working on the recruiter's request for 3 min; the next round",
+    );
+    expect(sent.note).toContain("give no count of people found or saved");
+    expect(sent.note).toContain("never say it has not started");
+    expect(harness.tx.run.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadId: "thread-role",
+          status: { in: ["leased", "running"] },
+          // The teammate the work was handed to counts too: with one lane per agent, a request
+          // that missed it would start a second search beside it (reliability plan S3/S4).
+          OR: expect.arrayContaining([{ trigger: "follow_up" }]),
+        }),
+      }),
+    );
+  });
+
+  it("says nothing about earlier work when the team is idle", async () => {
+    const harness = deps({ bots: mainBot, addressedThread: { id: "thread-role" } });
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-role",
+      message: "Find more like the rest",
+    });
+    if (!sent.ok) throw new Error("not sent");
+    expect(sent.note).toMatch(/^Sent to /);
+  });
+
+  it("never replaces a request inside the same conversation", async () => {
+    const harness = deps();
+    await messageBot(harness.deps, run, sender, { bot_id: "bot-target", message: "hello" });
+    expect(harness.tx.run.findMany).not.toHaveBeenCalled();
+  });
+
   it("refuses a conversation outside this user's active role teams", async () => {
     const harness = deps({ bots: mainBot, addressedThread: null });
     const sent = await messageBot(harness.deps, globalRun, kruit, {
@@ -507,12 +634,20 @@ describe("delegating to a role team in another conversation", () => {
     returnThreadId: "thread-global",
   };
   /** A role team's conversation after Kruit's request, with what the team said since. */
-  function team(options: { busy?: boolean; later?: unknown[]; root?: unknown } = {}) {
+  function team(
+    options: {
+      busy?: boolean;
+      later?: unknown[];
+      shown?: unknown[];
+      root?: unknown;
+      roleId?: string;
+    } = {},
+  ) {
     const harness = deps({ bots: mainBot, hopBlocks: [delegation] });
     const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
     prisma.thread!.findFirst = vi.fn(async (args: { select?: { group?: unknown } }) =>
       args.select?.group
-        ? { activeRecruitingRoleId: null, group: { name: "SUI Engineer" } }
+        ? { activeRecruitingRoleId: options.roleId ?? null, group: { name: "SUI Engineer" } }
         : { id: "thread-global" },
     );
     prisma.message!.findFirst = vi.fn(async () => ({
@@ -521,25 +656,51 @@ describe("delegating to a role team in another conversation", () => {
       createdAt: new Date("2026-11-13T09:06:40Z"),
       blocks: [options.root ?? delegation],
     }));
-    prisma.message!.findMany = vi.fn(async () => options.later ?? []);
+    prisma.message!.findMany = vi.fn(async (args?: { where?: { threadId?: string } }) =>
+      args?.where?.threadId === "thread-global" ? (options.shown ?? []) : (options.later ?? []),
+    );
     prisma.run!.findFirst = vi.fn(async () => (options.busy ? { id: "run-sourcer" } : null));
     return harness;
   }
   const roleRun = { ...run, botId: "bot-main", threadId: "thread-role", sourceMessageId: "m" };
   const said = (text: string) => ({ role: "bot", blocks: [{ kind: "text", text }] });
+  const roundList = (text: string, roundId?: string) => ({
+    kind: "text",
+    text,
+    recruitingRoundList: roundId ? { roundId } : {},
+  });
+  const listed = (text: string, roundId?: string) => ({
+    role: "bot",
+    blocks: [roundList(text, roundId)],
+  });
   const returnedTo = (harness: ReturnType<typeof team>) =>
     harness.tx.message.create.mock.calls
       .map(([call]) => call as { data: { threadId: string; blocks: unknown[] } })
       .filter((call) => call.data.threadId === "thread-global")
       .map((call) => call.data.blocks[0]);
 
-  it("waits while a teammate the lead handed the work to is still on it", async () => {
+  // fosp 11-22 (352978a2): the result was marked returned and then dropped while the team was busy.
+  it("keeps the result unreturned while a teammate is still on it, so it is offered again", async () => {
     const harness = team({ busy: true, later: [said("Sourcer is finding 50 more.")] });
     expect(await returnBotMessageOutcome(harness.deps, roleRun, kruit, "Sourcer is on it.")).toBe(
-      true,
+      false,
     );
     expect(harness.tx.run.create).not.toHaveBeenCalled();
-    expect(harness.deps.prisma.run.updateMany).toHaveBeenCalled();
+    expect(harness.deps.prisma.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Send-at-night 11-16: each teammate's "completed without a summary" status woke Kruit, which
+  // re-read the campaign, posted again and delegated "send now" a second time.
+  it("sends no status back while the team is still on delegated work", async () => {
+    const harness = team({ busy: true, later: [said("Checking Noah and Ada now.")] });
+    await returnBotMessageOutcome(
+      harness.deps,
+      roleRun,
+      kruit,
+      "The delegated bot completed its turn without a written summary.",
+      "status",
+    );
+    expect(returnedTo(harness)).toEqual([]);
   });
 
   it("retains earlier team progress as context beneath the authoritative card outcome", async () => {
@@ -593,6 +754,39 @@ describe("delegating to a role team in another conversation", () => {
     );
   });
 
+  it("returns the result of a role opened from Kruit's chat there", async () => {
+    // Long-search-finishes 11-15: "找20个人，找完告诉我" opened the role from Kruit's chat; the
+    // team finished in the role's chat and Kruit never told the recruiter.
+    const harness = team({ later: [said("已找到 20 位，搜索完成。")] });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    prisma.message!.findFirst = vi.fn(
+      async (args: { where: { clientNonce?: unknown; id?: string } }) =>
+        args.where.id === "message-asked"
+          ? { threadId: "thread-global" }
+          : args.where.clientNonce
+            ? {
+                id: "message-started",
+                seq: 3,
+                createdAt: new Date("2026-11-15T10:06:21Z"),
+                blocks: [{ kind: "text", text: "找20个人，找完告诉我" }],
+                clientNonce: "start-role:message-asked",
+                sourceRuns: [{ botId: "bot-main" }],
+              }
+            : null,
+    );
+    prisma.thread!.findUnique = vi.fn(async () => ({ spaceId: run.spaceId, userId: run.userId }));
+    prisma.bot!.findFirst = vi.fn(async () => ({ name: "Kruit" }));
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([
+      expect.objectContaining({
+        kind: "bot_message_received",
+        fromBotName: "SUI Engineer team",
+        text: "已找到 20 位，搜索完成。",
+        intent: "result",
+      }),
+    ]);
+  });
+
   it("is not held back by a card the role was already waiting on before the request", async () => {
     // Staging 11-13: the intake turn's next-step card waited the whole time, so the Mandarin
     // check Kruit asked for finished in the role's chat and never came back to Kruit.
@@ -616,7 +810,7 @@ describe("delegating to a role team in another conversation", () => {
   it("returns a finished round while Kruit's later follow-ups to the team still queue", async () => {
     // Staging 11-13: "where's the next round?" was delegated twice while Sourcer ran the round;
     // the queued follow-ups held the finished round back and Kruit said it had not come back.
-    const harness = team({ later: [said("10 people this round: …")] });
+    const harness = team({ later: [listed("10 people this round: …")] });
     await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
     expect(harness.deps.prisma.message.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -626,17 +820,202 @@ describe("delegating to a role team in another conversation", () => {
     expect(harness.deps.prisma.run.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          NOT: {
-            status: "queued",
-            trigger: "bot_message",
-            createdAt: { gt: new Date("2026-11-13T09:06:40Z") },
-          },
+          NOT: [
+            {
+              status: "queued",
+              trigger: "bot_message",
+              createdAt: { gt: new Date("2026-11-13T09:06:40Z") },
+            },
+            // The Reviewer's background checks never hold the team's answer back.
+            { trigger: { in: ["tickets", "recruiting_grade"] } },
+          ],
         }),
       }),
     );
-    expect(returnedTo(harness)).toEqual([
-      expect.objectContaining({ text: "10 people this round: …", intent: "result" }),
+    expect(returnedTo(harness)).toEqual([roundList("10 people this round: …")]);
+  });
+
+  it("shows a returned round to the recruiter itself and gives Kruit no turn to retell it", async () => {
+    // feedback-round x5 on 44c1ad44: Kruit retold the team's round, graded the people itself and
+    // listed another eight from the pool. fosp 11-21 (f68ae6bf): told the round was shown and to
+    // say nothing, Kruit still summarised it 5 s later, so the recruiter read it twice.
+    const round = "7 people this round:\n\n1. **Sathya G** · Sr Engineer · Zillow";
+    const harness = team({ later: [listed(round), said("Round 2 is posted.")] });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).toEqual([roundList(round)]);
+  });
+
+  it("shows a round where it was asked as it is shown, though the team is still busy", async () => {
+    // fosp 11-23 (s21): round 2 showed in the role chat while a check still ran; a newer request
+    // replaced the open one and the round never reached Kruit's chat ("稍后给你" four times).
+    const round = "本轮 10 人：\n\n1. **Yijun Y.** · Big Data Engineer · TEMU";
+    const harness = team({ busy: true });
+    await showRoundWhereAskedNow(harness.deps, roleRun, round, "effect-round-2");
+    expect(returnedTo(harness)).toEqual([roundList(round, "effect-round-2")]);
+    // Shown where it was asked already: not again.
+    const again = team({ busy: true });
+    again.tx.message.findUnique.mockResolvedValue({ id: "message-round" });
+    await showRoundWhereAskedNow(again.deps, roleRun, round, "effect-round-2");
+    expect(again.tx.message.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          threadId_clientNonce: {
+            threadId: "thread-global",
+            clientNonce: "delegated-round:round:effect-round-2",
+          },
+        },
+      }),
+    );
+    expect(returnedTo(again)).toEqual([]);
+  });
+
+  it("posts a round once where it was asked, though two requests return it", async () => {
+    // fosp 11-20 (1ae3a9c3): "再来5个" and a correction a minute later both got the round, 11 s apart.
+    const round = "5 people this round:\n\n1. **Yu Zhang** · Data Engineer · EcoWater";
+    const harness = team({ later: [listed(round, "effect-round-3")] });
+    harness.tx.message.findUnique.mockImplementation(
+      async (args: { where: { threadId_clientNonce: { clientNonce: string } } }) =>
+        args.where.threadId_clientNonce.clientNonce === "delegated-round:round:effect-round-3"
+          ? { id: "message-round" }
+          : null,
+    );
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).toEqual([]);
+  });
+
+  it("brings the round's people back with the team's closing line", async () => {
+    // Staging 11-14: only "the next round has been posted" came back, so Kruit could not show
+    // the people or say who has both must-haves.
+    const round = "10 people this round:\n\n1. **Hima Y** · Sr Data Engineer · Starbucks";
+    const harness = team({
+      later: [said("Recording the feedback."), listed(round), said("Round 2 is posted.")],
+    });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    // The round itself is posted; the team's closing line stays in its own chat.
+    expect(returnedTo(harness)[0]).toEqual(roundList(round));
+  });
+
+  it("returns the team's answer as written, with where its saved people are read", async () => {
+    // fr 11-23 (s30): the record-built list was blanked by its own guards after a newer round, so
+    // "find 20 more" came back with no people; Kruit now reads them itself when asked.
+    const harness = team({ roleId: "role-1", later: [said("Saved 20 more; 8 look strong.")] });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
+    prisma.recruitingCalibrationRound = { findMany: vi.fn(async () => []) };
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    const [returned] = returnedTo(harness) as Array<{ text: string }>;
+    expect(returned?.text).toContain("Saved 20 more; 8 look strong.");
+    expect(returned?.text).toContain('operation:"activity"');
+  });
+
+  it("names nobody a search saved once a later round answered the recruiter", async () => {
+    // fr 11-21 (e72bd4f3): the first request's search finished after round 2 was shown, and its
+    // ten unchecked people went out as a second "round 2" list.
+    const harness = team({ roleId: "role-1", later: [said("Search finished.")] });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const person = (slug: string, name: string) => ({
+      candidateKey: `linkedin:/in/${slug}`,
+      name,
+      title: "SRE",
+      company: "Visa",
+      location: "Austin",
+    });
+    prisma.recruitingCandidateOccurrence!.findMany = vi.fn(async () => [
+      person("bo", "Bo B"),
+      person("cy", "Cy C"),
     ]);
+    prisma.recruitingCalibrationRound = {
+      findMany: vi.fn(async () => [
+        { round: 1, candidateKeys: ["linkedin:/in/amy"], createdAt: new Date(0) },
+        { round: 2, candidateKeys: ["linkedin:/in/dee"], createdAt: new Date(Date.now() + 60_000) },
+      ]),
+    };
+    prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
+    prisma.externalEffect = { findMany: vi.fn(async () => []) };
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    const text = (returnedTo(harness) as Array<{ text?: string }>)
+      .map((b) => b.text ?? "")
+      .join("\n");
+    expect(text).not.toContain("2 more");
+    expect(text).not.toContain("Bo B");
+  });
+
+  it("names no unchecked people beyond the round when no number was asked for (simulated 2026-11-16)", async () => {
+    // feedback-round edb7834f: "can you pull some people?" came back with the round and 17
+    // unchecked people, Kruit listed all 27, and the next round's Gaya read as a repeat.
+    const round = "10 people this round:\n\n1. **[Amy A](https://www.linkedin.com/in/amy)** · SRE";
+    const harness = team({
+      roleId: "role-1",
+      root: { ...delegation, text: "Senior SRE in Austin, can you pull some people?" },
+      later: [listed(round)],
+    });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const person = (slug: string, name: string) => ({
+      candidateKey: `linkedin:/in/${slug}`,
+      name,
+      title: "SRE",
+      company: "Visa",
+      location: "Austin",
+    });
+    prisma.recruitingCandidateOccurrence!.findMany = vi.fn(async () => [
+      person("amy", "Amy A"),
+      person("bo", "Bo B"),
+      person("cy", "Cy C"),
+    ]);
+    prisma.recruitingCalibrationRound = {
+      findMany: vi.fn(async () => [{ round: 1, candidateKeys: ["linkedin:/in/amy"] }]),
+    };
+    prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
+    prisma.externalEffect = { findMany: vi.fn(async () => []) };
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    // The round is the whole answer: no count of the unchecked rest goes along (fosp 11-23, s29).
+    const [posted, returned] = returnedTo(harness) as Array<{ text: string }>;
+    expect(posted?.text).toBe(round);
+    expect(returned).toBeUndefined();
+  });
+
+  it("returns no round the recruiter already answered in the role's chat (staging 2026-11-15)", async () => {
+    // The role opened from Kruit's chat showed its ten, the recruiter gave feedback right there,
+    // and nine minutes later the ten came back to Kruit's chat, which called them the new search.
+    const round =
+      "10 people this round:\n\n1. **[Nirneth M](https://www.linkedin.com/in/nirnethm)**";
+    const harness = team({
+      later: [
+        listed(round),
+        { role: "user", blocks: [{ kind: "text", text: "arpit doesn't fit, more like the rest" }] },
+        listed("10 people this round:\n\n1. **[Akhil K](https://www.linkedin.com/in/akhil)**"),
+      ],
+    });
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([]);
+  });
+
+  it("returns the round after the recruiter taps an answer on a card in the role's chat", async () => {
+    // fr 11-21 (41c12cca): answering the role's intake question there ended the scan, so the
+    // round that followed never came back and Kruit said it wasn't recorded.
+    const label = "Building and operating large-scale batch and streaming pipelines";
+    const card = {
+      role: "bot",
+      blocks: [
+        {
+          kind: "ask",
+          text: "Which core work should I prioritize?",
+          answer: "choice-1",
+          status: "answered",
+          actions: [{ id: "choice-1", label }],
+        },
+      ],
+    };
+    const round = "9 people this round:\n\n1. **[Kiran K](https://www.linkedin.com/in/kk)** · SDE";
+    const harness = team({
+      later: [
+        card,
+        { role: "user", blocks: [{ kind: "text", text: label, cardAnswer: true }] },
+        listed(round),
+      ],
+    });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).toEqual([roundList(round)]);
   });
 
   it("stops at the recruiter's own next message in the role conversation", async () => {
@@ -651,30 +1030,81 @@ describe("delegating to a role team in another conversation", () => {
     expect(returnedTo(harness)).toEqual([expect.objectContaining({ text: "Added 50 people." })]);
   });
 
-  it("tells the delegating conversation right away when the team waits on a card", async () => {
+  it("shows the team's waiting card in the delegating conversation, pointing back at it", async () => {
     const harness = team({ busy: true });
-    await reportDelegatedTeamBlocked(harness.deps, roleRun, {
-      kind: "waiting",
+    const card = {
+      kind: "ask",
       text: "Send these 3 emails?",
-    });
+      status: "pending",
+      actions: [{ id: "allow", label: "Send" }],
+    };
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const delegated = prisma.message!.findFirst as (args: { where: { runId?: string } }) => unknown;
+    const cardRow = { id: "card-1", blocks: [card] };
+    prisma.message!.findFirst = vi.fn(async (args: { where: { runId?: string } }) =>
+      args.where.runId ? cardRow : delegated(args),
+    );
+    (harness.tx.message as Record<string, unknown>).findFirst = vi.fn(async () => cardRow);
+    (harness.tx.thread as Record<string, unknown>).findUnique = vi.fn(async () => ({
+      groupId: "role-group",
+      group: { name: "Senior DE" },
+    }));
+    await showDelegatedTeamCard(harness.deps, roleRun);
     expect(returnedTo(harness)).toEqual([
-      expect.objectContaining({
-        kind: "bot_message_received",
-        fromBotName: "SUI Engineer team",
-        intent: "status",
-        text: expect.stringContaining('on its card: "Send these 3 emails?"'),
-      }),
+      { ...card, answerTarget: { threadId: "thread-role", runId: "run-1", messageId: "card-1" } },
     ]);
-    expect(harness.tx.message.findUnique).toHaveBeenCalledWith(
+    // 11-21 user: the copy leads back to the role's own conversation, opened at the card.
+    expect(harness.tx.message.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
-          threadId_clientNonce: {
-            threadId: "thread-global",
-            clientNonce: "bot-message:delegation-waiting:run-1",
-          },
-        },
+        data: expect.objectContaining({
+          blocks: expect.arrayContaining([
+            { kind: "role_link", groupId: "role-group", title: "Senior DE" },
+          ]),
+        }),
       }),
     );
+  });
+
+  it("copies neither the card nor the result when the recruiter is in the role's chat (branch sends 2026-11-20)", async () => {
+    const harness = team({ busy: true });
+    const card = { kind: "ask", text: "Send?", status: "pending", actions: [] };
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const delegated = prisma.message!.findFirst as (args: { where: { runId?: string } }) => unknown;
+    prisma.message!.findFirst = vi.fn(async (args: { where: { runId?: string } }) =>
+      args.where.runId ? { id: "card-1", blocks: [card] } : delegated(args),
+    );
+    (harness.tx.message as Record<string, unknown>).findFirst = vi.fn(async () => ({
+      id: "card-1",
+      blocks: [card],
+    }));
+    const human = (threadId: string, text: string) => ({
+      threadId,
+      role: "user",
+      clientNonce: null,
+      botId: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text }],
+    });
+    const recent = vi.fn(async (args: { where: { threadId?: unknown } }) =>
+      typeof args.where.threadId === "object"
+        ? [human("thread-role", "use my subject line"), human("thread-global", "email Ethan")]
+        : [said("Queued; sends within 58 minutes.")],
+    );
+    prisma.message!.findMany = recent;
+    await showDelegatedTeamCard(harness.deps, roleRun);
+    prisma.run!.findFirst = vi.fn(async () => null);
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([]);
+    // Back in Kruit's chat, both come there again.
+    prisma.message!.findMany = vi.fn(async (args: { where: { threadId?: unknown } }) =>
+      typeof args.where.threadId === "object"
+        ? [human("thread-global", "is it sent?"), human("thread-role", "use my subject line")]
+        : [said("Queued; sends within 58 minutes.")],
+    );
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([
+      expect.objectContaining({ text: expect.stringContaining("Queued") }),
+    ]);
   });
 
   it("reports nothing when no other conversation delegated the work", async () => {
@@ -1033,5 +1463,147 @@ describe("automatic outcome return", () => {
     expect(returned).toBe(true);
     expect(harness.enqueue).not.toHaveBeenCalled();
     expect(harness.deps.prisma.run.updateMany).toHaveBeenCalled();
+  });
+});
+
+describe("teamProgress", () => {
+  it("says a round recorded while the team works is already shown (staging 2026-11-15)", async () => {
+    // Global Kruit said "the new ten aren't finalized yet" a minute after round 2 was recorded.
+    const startedAt = new Date(Date.now() - 3 * 60_000);
+    const prisma = {
+      run: {
+        findFirst: vi.fn(async () => ({ createdAt: startedAt, startedAt, bot: { name: "Lead" } })),
+      },
+      thread: { findUnique: vi.fn() },
+      recruitingCandidateOccurrence: { findMany: vi.fn(async () => [{ candidateKey: "a" }]) },
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async () => ({ round: 2, createdAt: new Date(Date.now() - 60_000) })),
+      },
+    } as unknown as PrismaClient;
+    const progress = await teamProgress(prisma, {
+      threadId: "role-thread",
+      returnThreadId: "global",
+      roleId: "role",
+    });
+    expect(progress?.note).toContain("Round 2 is already recorded");
+    expect(progress?.note).not.toContain("comes back here when it is picked");
+  });
+
+  it("counts the turn of a role opened from Kruit's chat as the team working (staging 2026-11-15)", async () => {
+    // Asked "where are the people?" while a role opened from Kruit's chat ran its first round,
+    // Kruit listed seven unchecked people from Results: only delegated turns counted as working.
+    const startedAt = new Date(Date.now() - 60_000);
+    const prisma = {
+      run: {
+        findFirst: vi.fn(async ({ where }: { where: { OR?: Array<Record<string, unknown>> } }) =>
+          JSON.stringify(where.OR ?? []).includes("start-role:")
+            ? { id: "start", botId: "lead", createdAt: startedAt, startedAt, bot: { name: "Lead" } }
+            : null,
+        ),
+      },
+      thread: { findUnique: vi.fn(async () => null) },
+    } as unknown as PrismaClient;
+    const progress = await teamProgress(prisma, {
+      threadId: "role-thread",
+      returnThreadId: "global",
+    });
+    expect(progress?.name).toBe("Lead");
+  });
+
+  it("counts a team turn requeued after a follow-up as still working (staging 2026-11-15)", async () => {
+    // A follow-up steered into the team's turn requeued it for 50 s; in between Kruit listed
+    // three pages of unchecked people from Results with repeats.
+    const findFirst = vi.fn(async () => null);
+    const prisma = { run: { findFirst } } as unknown as PrismaClient;
+    await teamProgress(prisma, { threadId: "role-thread", returnThreadId: "global", roleId: "r" });
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: { in: ["queued", "leased", "running"] } }),
+      }),
+    );
+  });
+});
+
+describe("waitForDelegatedAnswer", () => {
+  const since = new Date("2026-11-23T10:00:00Z");
+  const wait = (
+    prisma: PrismaClient,
+    extra: { userMessageWaiting?: () => Promise<boolean> } = {},
+  ) =>
+    waitForDelegatedAnswer(prisma, {
+      spaceId: "space",
+      threadId: "global",
+      botId: "kruit",
+      since,
+      signal: new AbortController().signal,
+      timeoutMs: 50,
+      pollMs: 1,
+      ...extra,
+    });
+
+  it("takes the team's returned answer into the turn and cancels its queued turn", async () => {
+    // fosp/fr 11-23: Kruit said "已交给岗位" and later retold the relayed answer; a hand-off now
+    // returns the team's answer to the same turn, the way a subagent call does.
+    const returned = {
+      blocks: [{ kind: "bot_message_received", text: "本轮 5 人：…", hop: 2 }],
+      sourceRuns: [{ id: "queued-run", taskId: "task" }],
+    };
+    const tx = {
+      run: {
+        findMany: vi.fn(async () => [{ id: "queued-run", taskId: "task" }]),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn(async () => ({ status: "cancelled" })),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 0 })) },
+      task: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      event: { create: vi.fn(async () => ({ seq: 1 })) },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 2, userId: "user" })) },
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      message: {
+        findFirst: vi.fn(async ({ where }: { where: { role: string } }) =>
+          where.role === "user" ? returned : null,
+        ),
+      },
+      $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
+    } as unknown as PrismaClient;
+    expect(await wait(prisma)).toEqual({ answer: "本轮 5 人：…" });
+    expect(tx.run.updateMany).toHaveBeenCalled();
+    expect(tx.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: { in: ["queued-run"] } }) }),
+    );
+  });
+
+  it("ends when the recruiter writes, or when the team's round is posted here", async () => {
+    const none = { message: { findFirst: vi.fn(async () => null) } } as unknown as PrismaClient;
+    expect(await wait(none, { userMessageWaiting: async () => true })).toBeUndefined();
+    const round = {
+      message: {
+        findFirst: vi.fn(async ({ where }: { where: { role: string } }) =>
+          where.role === "bot" ? { blocks: [{ kind: "text", text: "本轮 1 人：…" }] } : null,
+        ),
+      },
+    } as unknown as PrismaClient;
+    expect(await wait(round)).toEqual({ roundShown: "本轮 1 人：…" });
+  });
+
+  // Branch play 11-27: the team's Connect card was shown here at 49 s and Kruit waited 3 more minutes.
+  it("ends when the team's card is shown here for the recruiter to answer", async () => {
+    const card = (answerTarget?: object) =>
+      ({
+        message: {
+          findFirst: vi.fn(async ({ where }: { where: { role: string; blocks?: unknown } }) =>
+            where.role === "bot" && where.blocks
+              ? { blocks: [{ kind: "ask", text: "Connect", status: "pending", answerTarget }] }
+              : null,
+          ),
+        },
+      }) as unknown as PrismaClient;
+    expect(await wait(card({ runId: "r", threadId: "t", messageId: "m" }))).toEqual({
+      cardShown: true,
+    });
+    // Kruit's own card is not the team's.
+    expect(await wait(card())).toBeUndefined();
   });
 });

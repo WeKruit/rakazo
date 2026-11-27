@@ -93,9 +93,9 @@ it("restores a reloaded Notes tab when Contacts loads its person without adding 
   await act(async () => render());
   expect(current!.current).toBeUndefined();
   expect(current!.pending).toBe(`notes.${key}`);
-  // The exact loaded Autumn identity supplies the snapshot. No synthetic profile or
+  // The exact loaded search-result identity supplies the snapshot. No synthetic profile or
   // URL-only target is inserted while the list is still absent.
-  rows.value = [{ key, name: "Synthetic person", autumn: { candidateKey: key }, crm: null }];
+  rows.value = [{ key, name: "Synthetic person", sourced: { candidateKey: key }, crm: null }];
   await act(async () => render());
   expect(current!.current).toMatchObject({ view: "notes", person: { candidateId: key } });
   expect(current!.pending).toBeNull();

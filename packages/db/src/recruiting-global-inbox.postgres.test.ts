@@ -266,7 +266,7 @@ suite("stored global Inbox projection", () => {
         .attachments,
     ).toBeUndefined();
   });
-  it("searches outbound text within an incoming thread while keeping its incoming card and excluding sent-only threads", async () => {
+  it("searches outbound text within an incoming thread while keeping its incoming card, and lists sent-only threads", async () => {
     await projectRecruitingInboxMessages(prisma, actor, {
       roleId,
       observedAt: new Date(),
@@ -285,9 +285,19 @@ suite("stored global Inbox projection", () => {
       ],
     });
     const page = await read({ query: "outboundUniqueNeedle" });
-    expect(page.items).toHaveLength(1);
-    expect(page.items[0]?.email.id).toBe("search-incoming");
-    expect(page.items[0]?.email.body).toBe("Incoming reply");
+    expect(page.items.map((row) => row.email.id).sort()).toEqual([
+      "search-incoming",
+      "search-sent-only",
+    ]);
+    expect(page.items.find((row) => row.email.id === "search-incoming")?.email.body).toBe(
+      "Incoming reply",
+    );
+    // A sent email nobody has answered is in the list, but never counts as unread.
+    expect(
+      (await read({ query: "outboundUniqueNeedle", unreadOnly: true })).items.map(
+        (row) => row.email.id,
+      ),
+    ).not.toContain("search-sent-only");
   });
   it("never returns another owner or space, and rolls back a projection whose authorization was revoked", async () => {
     expect((await read({}, actors[1]!)).items).toEqual([]);
@@ -519,12 +529,12 @@ suite("stored global Inbox projection", () => {
     );
     expect(page.items).toHaveLength(1);
     expect(page.items[0]?.person).toMatchObject({
-      key: `autumn:${candidateKey}`,
+      key: `sourced:${candidateKey}`,
       name: "Exact Saved Person",
       title: "Platform Engineer",
       location: "Remote",
       shortlisted: true,
-      autumn: {
+      sourced: {
         candidateKey,
         savedProfile: {
           personKey: candidateKey,
@@ -548,7 +558,7 @@ suite("stored global Inbox projection", () => {
   it("refreshes cached persona grades against current role revision and later Reviewer evidence", async () => {
     const candidateKey = "linkedin:/in/synthetic-inbox-profile";
     const original = (await read({ query: "Subject exact-profile" })).items[0]!.person!;
-    expect(original.autumn?.ranking).toMatchObject({ grade: "Strong", state: "current" });
+    expect(original.sourced?.ranking).toMatchObject({ grade: "Strong", state: "current" });
     await projectRecruitingInboxMessages(prisma, actor, {
       roleId,
       emails: [message("cached-profile", { candidateKey })],
@@ -589,7 +599,7 @@ suite("stored global Inbox projection", () => {
       },
     });
     expect(
-      (await read({ query: "Subject cached-profile" })).items[0]?.person?.autumn?.ranking,
+      (await read({ query: "Subject cached-profile" })).items[0]?.person?.sourced?.ranking,
     ).toMatchObject({
       grade: "Partial",
       score: 55,
@@ -614,8 +624,8 @@ suite("stored global Inbox projection", () => {
       data: { currentRevisionId: revision, revision: 2 },
     });
     expect(
-      (await read({ query: "Subject cached-profile" })).items[0]?.person?.autumn?.ranking,
-    ).toMatchObject({ grade: "Partial", state: "outdated", roleRevisionId: roleId });
+      (await read({ query: "Subject cached-profile" })).items[0]?.person?.sourced?.ranking,
+    ).toMatchObject({ grade: "Partial", state: "current", roleRevisionId: roleId });
   });
   it("indexes 24,000 saved messages off-request while reads remain read-only and page immediately", async () => {
     const before = await prisma.recruitingInboxMessage.count({
@@ -915,5 +925,65 @@ suite("stored global Inbox projection", () => {
       ).items,
     ).toEqual([]);
     expect((await read({ thread: { roleId, key, emailId: original.id } })).items).toEqual([]);
+  });
+  it("lists mail a conversation sent outside a role under that conversation, for its owner only", async () => {
+    // A one-off email from the main chat and its answer appeared on no page.
+    const chat = `chat-${suffix}`;
+    await prisma.chatGroup.create({
+      data: { id: chat, userId: actor.userId, spaceId: actor.spaceId, name: "Kruit" },
+    });
+    await prisma.thread.create({
+      data: { id: chat, userId: actor.userId, spaceId: actor.spaceId, groupId: chat },
+    });
+    const sent = message("chat-sent", {
+      direction: "sent",
+      sender: "host@example.test",
+      recipients: ["ada@example.test"],
+      providerThreadId: "chat-thread",
+      date: "2026-11-20T10:00:00Z",
+    });
+    const reply = message("chat-reply", {
+      sender: "ada@example.test",
+      providerThreadId: "chat-thread",
+      date: "2026-11-20T11:00:00Z",
+    });
+    await projectRecruitingInboxMessages(prisma, actor, {
+      conversationId: chat,
+      emails: [sent, reply],
+      observedAt: new Date("2026-11-20T12:00:00Z"),
+    });
+    // Another user cannot store mail under this conversation.
+    await expect(
+      projectRecruitingInboxMessages(prisma, actors[1]!, {
+        conversationId: chat,
+        emails: [message("intruder")],
+        observedAt: new Date(),
+      }),
+    ).rejects.toThrow();
+    const page = GlobalRecruitingInboxOutputSchema.parse(await read({ roleId: chat }));
+    expect(page.conversations).toEqual([
+      { id: chat, title: "Kruit", threadId: chat, groupId: chat },
+    ]);
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ roleId: chat, person: null });
+    expect(page.items[0]!.email.id).toBe("chat-reply");
+    const thread = await read({ thread: { roleId: chat, key: page.items[0]!.key } });
+    expect(thread.items.map((item) => item.email.id).toSorted()).toEqual([
+      "chat-reply",
+      "chat-sent",
+    ]);
+    expect((await read({ roleId: chat }, actors[1]!)).items).toEqual([]);
+    expect((await read({}, actors[1]!)).conversations).toEqual([]);
+  });
+  it("reads a role's rows stored before conversations could own mail", async () => {
+    // Rows written by earlier code carry a role and no conversation column value.
+    const email = message("legacy-row", { subject: "Legacy subject" });
+    await prisma.$executeRaw`INSERT INTO recruiting_inbox_messages
+      (id,user_id,space_id,role_id,origin_key,dedupe_key,source_id,source_kind,observed_at,message_at,direction,search_text,email)
+      VALUES (${`legacy-${suffix}`},${actor.userId},${actor.spaceId},${roleId},'["source",null,"legacy-row"]',${`legacy-dedupe-${suffix}`},'source','observed',now(),now(),'received','Legacy subject',${JSON.stringify(email)}::jsonb)`;
+    const page = await read({ roleId, query: "Legacy subject" });
+    expect(page.items.map((item) => [item.roleId, item.email.id])).toEqual([
+      [roleId, "legacy-row"],
+    ]);
   });
 });

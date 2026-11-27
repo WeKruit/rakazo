@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
-import { summarizeInternalUsageCosts, summarizeUsageCosts } from "./usage.js";
+import { summarizeInternalUsageCosts, summarizeUsageCosts, usageRemaining } from "./usage.js";
 
 const actor = { spaceId: "space-a", userId: "user-a" };
 function fixture(staff = false) {
@@ -72,6 +72,13 @@ describe("product credits and internal cost privacy", () => {
       .mockResolvedValueOnce([group])
       .mockResolvedValueOnce([{ limit: 10_000, spent: 10_001 }]);
     expect((await summarizeUsageCosts(prisma, actor)).remaining).toBe(0);
+  });
+  it("reads the credits left alone, without the per-day and per-role breakdown", async () => {
+    const { prisma, raw } = fixture();
+    raw.$queryRaw.mockReset().mockResolvedValueOnce([{ limit: 10_000, spent: 1.4 }]);
+    expect(await usageRemaining(prisma, actor)).toEqual({ remaining: 9998.6 });
+    // One ledger read: the breakdown query that summarizes every usage row never runs.
+    expect(raw.$queryRaw).toHaveBeenCalledOnce();
   });
   it("never limits verified staff accounts", async () => {
     const { prisma, raw, group } = fixture(true);

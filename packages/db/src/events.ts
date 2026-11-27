@@ -28,6 +28,7 @@ import {
   isWorkActivity,
   messagingChannelId,
   resolveAskChoice,
+  RETIRED_APPROVAL_KINDS,
   runsBesidePerson,
   sanitizeJsonValue,
   takesPersonMessages,
@@ -47,14 +48,9 @@ import {
   createThreadMessageInTransaction,
   RunHistoryWriteError,
 } from "./messages.js";
-import type { RecruitingQuestionPauseContext } from "./recruiting.js";
-import {
-  authorizeRecruitingApprovalAnswerInTransaction,
-  authorizeRecruitingFeedbackMessage,
-  authorizeRecruitingQuestionAnswerInTransaction,
-  commitRecruitingQuestionInTransaction,
-  prepareRecruitingQuestionInTransaction,
-} from "./recruiting.js";
+import { syncMirroredAsksInTransaction } from "./mirrored-asks.js";
+import { authorizeRecruitingFeedbackMessage } from "./recruiting.js";
+import { retriedReplyInTransaction } from "./retried-reply.js";
 import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -198,6 +194,8 @@ interface FinalizeRunBase {
   leaseFence: number;
 }
 
+export type RunStopKind = "loop_guard" | "cost" | "time";
+
 export type FinalizeRunInput = FinalizeRunBase &
   (
     | {
@@ -208,6 +206,8 @@ export type FinalizeRunInput = FinalizeRunBase &
         timing?: RunTiming;
         /** Model calls this attempt retried after a stalled stream, kept on run.completed. */
         modelRetries?: number;
+        /** Set when a guard ended the run before its work was done. */
+        stopKind?: RunStopKind;
       }
     | { outcome: "failed"; error: string }
   );
@@ -228,8 +228,6 @@ export interface PauseRunForInput {
    * (not in message blocks) so clients still see redacted labels.
    */
   offeredActions?: Array<{ id: string; label: string }>;
-  /** Server-owned native question binding; model tool arguments never supply this context. */
-  recruitingQuestion?: RecruitingQuestionPauseContext;
   /** Model calls this attempt retried after a stalled stream, kept on run.waiting_input. */
   modelRetries?: number;
 }
@@ -288,22 +286,17 @@ export async function questionClosedByChat(
       blocks: { array_contains: [{ kind: "ask" }] },
     },
     orderBy: { seq: "desc" },
-    select: { blocks: true, runId: true, seq: true },
+    select: { blocks: true, seq: true },
   });
   const parsed = MessageBlockSchema.array().safeParse(latest?.blocks);
   const ask = parsed.success ? parsed.data.findLast((block) => block.kind === "ask") : undefined;
-  if (ask?.kind !== "ask" || ask.status !== "answered" || typeof ask.answer !== "string") return;
-  if (!latest?.runId) return;
+  if (!latest || ask?.kind !== "ask" || ask.status !== "answered" || !ask.answeredInChat) return;
+  if (typeof ask.answer !== "string") return;
   const spokeSince = await tx.message.findFirst({
     where: { threadId: input.threadId, botId: input.botId, role: "bot", seq: { gt: latest.seq } },
     select: { id: true },
   });
   if (spokeSince) return;
-  const run = await tx.run.findFirst({
-    where: { id: latest.runId, threadId: input.threadId },
-    select: { task: { select: { prompt: true } } },
-  });
-  if (!run?.task.prompt.endsWith(`${ask.text}\nAnswer: ${chatReplyToAsk(ask.answer)}`)) return;
   return { question: ask.text, reply: ask.answer };
 }
 
@@ -870,40 +863,9 @@ export async function hasUnclaimedSteering(
   return Boolean(row);
 }
 
-/**
- * Messages this run would take that it has not read yet, oldest first. Read without claiming them,
- * so the person can be answered at once while a long step is still running.
- */
 /** A row the person did not write: a server continuation (system) or a teammate's message. */
 const isInternalMessage = (message: { role?: string | null; botId?: string | null }) =>
   (message.role !== undefined && message.role !== "user") || Boolean(message.botId);
-
-export async function unreadSteering(
-  prisma: Pick<PrismaClient, "run" | "steeringMessage">,
-  input: { threadId: string; botId: string; runId: string },
-): Promise<Array<{ id: string; messageId: string; blocks: MessageBlock[]; internal?: true }>> {
-  const run = await prisma.run.findFirst({
-    where: { id: input.runId, threadId: input.threadId, status: "running" },
-    select: { trigger: true, clientNonce: true, sourceMessage: { select: { blocks: true } } },
-  });
-  if (!run || run.trigger === "created") return [];
-  const rows = await prisma.steeringMessage.findMany({
-    where: { ...steeringForRunWhere(run, input), claimedAt: null },
-    select: {
-      id: true,
-      messageId: true,
-      message: { select: { blocks: true, role: true, botId: true } },
-    },
-    orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
-    take: 5,
-  });
-  return rows.map((row) => ({
-    id: row.id,
-    messageId: row.messageId,
-    blocks: row.message.blocks as MessageBlock[],
-    ...(isInternalMessage(row.message) ? { internal: true as const } : {}),
-  }));
-}
 
 export async function claimSteering(
   prisma: PrismaClient,
@@ -1002,7 +964,7 @@ async function commitAnswerRunInput(
   tx: Prisma.TransactionClient,
   input: AnswerRunInput,
   runSecretWriter?: RunSecretWriter,
-): Promise<{ threadId: string; seq: number } | null> {
+): Promise<AnsweredCard | null> {
   // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
   // concurrent clear cannot deadlock against this transaction.
   await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
@@ -1241,17 +1203,7 @@ async function commitAnswerRunInput(
       }
     }
 
-    if (
-      approvalEffect.kind === "recruiting_request_approval" &&
-      (answerText === "always" ||
-        (answerText === "allow" &&
-          !(await authorizeRecruitingApprovalAnswerInTransaction(
-            tx,
-            input,
-            approvalEffect.request,
-          ))))
-    )
-      return null;
+    if (RETIRED_APPROVAL_KINDS.has(approvalEffect.kind) && answerText !== "deny") return null;
     if (answerText === "always") {
       if (run.userId !== input.answeredByUserId) return null;
       approvalUserId = input.answeredByUserId;
@@ -1284,16 +1236,6 @@ async function commitAnswerRunInput(
       return null;
   }
 
-  if (
-    !(await authorizeRecruitingQuestionAnswerInTransaction(
-      tx,
-      input,
-      message,
-      parsed.data.indexOf(pendingAsk),
-    ))
-  )
-    return null;
-
   const queued = await tx.run.updateMany({
     where: {
       id: input.runId,
@@ -1319,6 +1261,7 @@ async function commitAnswerRunInput(
       {
         kind: "text" as const,
         text: ordinaryAsk ? (selectedChoice?.label ?? answerText) : answerText,
+        ...(ordinaryAsk ? { cardAnswer: true as const } : {}),
       },
     ];
     const utterance = await createThreadMessageInTransaction(tx, {
@@ -1446,6 +1389,7 @@ async function commitAnswerRunInput(
           ...block,
           status: "answered" as const,
           answer: recordedAnswer,
+          ...(input.answerMessageId ? { answeredInChat: true as const } : {}),
           ...(block.mailReply
             ? {
                 mailReply: {
@@ -1470,6 +1414,14 @@ async function commitAnswerRunInput(
     runId: input.runId,
     payload: { messageId: message.id, role: "bot", blocks },
   });
+  // Copies of this card in the conversation that delegated the work close with it.
+  const mirrors = await syncMirroredAsksInTransaction(tx, {
+    spaceId: input.spaceId,
+    sourceThreadId: input.threadId,
+    sourceMessageId: message.id,
+    runId: input.runId,
+    blocks,
+  });
   if (ordinaryAsk) {
     const proof = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
@@ -1484,7 +1436,7 @@ async function commitAnswerRunInput(
         answeredByUserId: input.answeredByUserId,
       },
     });
-    return { threadId: proof.threadId, seq: proof.seq };
+    return { threadId: proof.threadId, seq: proof.seq, mirrors };
   }
   if (approvalAsk) {
     const proof = await appendEventInTransaction(tx, {
@@ -1507,9 +1459,26 @@ async function commitAnswerRunInput(
           .digest("hex"),
       },
     });
-    return { threadId: proof.threadId, seq: proof.seq };
+    return { threadId: proof.threadId, seq: proof.seq, mirrors };
   }
-  return { threadId: updated.threadId, seq: updated.seq };
+  return { threadId: updated.threadId, seq: updated.seq, mirrors };
+}
+
+/** The answered card's event, plus the events of its copies in other conversations. */
+export type AnsweredCard = {
+  threadId: string;
+  seq: number;
+  mirrors?: { threadId: string; seq: number }[];
+};
+
+/** Tell open clients about an answered card and every copy of it. */
+export async function notifyAnsweredCard(
+  realtime: RealtimeFanout | undefined,
+  answered: AnsweredCard,
+): Promise<void> {
+  await notifyRealtime(realtime, answered.threadId, answered.seq);
+  for (const mirror of answered.mirrors ?? [])
+    await notifyRealtime(realtime, mirror.threadId, mirror.seq);
 }
 
 export async function answerRunInput(
@@ -1527,7 +1496,7 @@ export async function answerRunInput(
     : await commit();
 
   if (!committed) return false;
-  await notifyRealtime(realtime, committed.threadId, committed.seq);
+  await notifyAnsweredCard(realtime, committed);
   return true;
 }
 
@@ -1543,7 +1512,7 @@ export async function answerWaitingRunWithTextInTransaction(
     /** Server-only native composer message, reused across the waiting runs it answers. */
     answerMessageId?: string;
   },
-): Promise<{ threadId: string; seq: number } | null> {
+): Promise<AnsweredCard | null> {
   if (!input.answer.trim()) return null;
   const found = await findPendingAsk(tx, input);
   if (!found) return null;
@@ -1567,29 +1536,13 @@ export async function waitingAskTakesText(
 ): Promise<boolean> {
   const found = await findPendingAsk(tx, input);
   if (!found) return true;
+  // A connect card stays open under the message: typing past it closed it, and each reply then
+  // brought a new card (gate eec6adf0).
   return !(
     isApprovalAskBlock(found.pendingAsk) ||
     isSecretAskBlock(found.pendingAsk) ||
+    found.pendingAsk.connection ||
     found.pendingAsk.requestedSchema
-  );
-}
-
-/**
- * A connect card cannot be answered by typing. A recruiter who writes past it has moved on, so the
- * card closes as not connected and the run resumes; the caller delivers the message as steering.
- */
-export async function declineConnectionAskInTransaction(
-  tx: Prisma.TransactionClient,
-  input: { spaceId: string; threadId: string; runId: string; answeredByUserId: string },
-): Promise<boolean> {
-  const found = await findPendingAsk(tx, input);
-  if (!found?.pendingAsk.connection) return false;
-  return Boolean(
-    await commitAnswerRunInput(tx, {
-      ...input,
-      messageId: found.messageId,
-      answer: "not_connected" satisfies ConnectionAskAnswer,
-    }),
   );
 }
 
@@ -1628,7 +1581,7 @@ export async function cancelFormAskInTransaction(
 export async function answerPausedAskWithSteering(
   prisma: PrismaClient,
   input: { spaceId: string; threadId: string; botId: string; runId: string },
-): Promise<{ threadId: string; seq: number } | null> {
+): Promise<AnsweredCard | null> {
   return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
     const rows = await tx.steeringMessage.findMany({
@@ -1678,10 +1631,7 @@ export async function pauseRunForInput(
   MessageBlockSchema.array().parse(input.blocks);
   if (
     input.existingApprovalEffectId !== undefined &&
-    (!input.existingApprovalEffectId.trim() ||
-      input.blocks.length ||
-      input.offeredActions?.length ||
-      input.recruitingQuestion)
+    (!input.existingApprovalEffectId.trim() || input.blocks.length || input.offeredActions?.length)
   )
     return false;
   const committed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -1752,10 +1702,6 @@ export async function pauseRunForInput(
       });
       if (answered) return null;
     }
-    const question = input.recruitingQuestion
-      ? await prepareRecruitingQuestionInTransaction(tx, input)
-      : undefined;
-    if (question?.kind === "completed") return { threadId: input.threadId, seq: question.eventSeq };
     const waitAt = new Date();
     const paused = await tx.run.updateMany({
       where: {
@@ -1766,9 +1712,7 @@ export async function pauseRunForInput(
         status: "running",
         leaseOwner: input.leaseOwner,
         leaseFence: input.leaseFence,
-        ...(input.recruitingQuestion || input.existingApprovalEffectId
-          ? { leaseExpiresAt: { gt: new Date() } }
-          : {}),
+        ...(input.existingApprovalEffectId ? { leaseExpiresAt: { gt: new Date() } } : {}),
       },
       data: {
         status: "waiting_input",
@@ -1801,9 +1745,6 @@ export async function pauseRunForInput(
           blocks: input.blocks,
           botId: input.botId,
           runId: input.runId,
-          ...(question?.kind === "new"
-            ? { clientNonce: `recruiting-question:${question.effectId}` }
-            : {}),
         });
     if (message)
       await appendEventInTransaction(tx, {
@@ -1814,7 +1755,7 @@ export async function pauseRunForInput(
         runId: input.runId,
         payload: { messageId: message.id, role: "bot", blocks: input.blocks },
       });
-    let waitingEvent = await appendEventInTransaction(tx, {
+    const waitingEvent = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,
       botId: input.botId,
@@ -1825,8 +1766,6 @@ export async function pauseRunForInput(
         ...(input.modelRetries ? { modelRetries: input.modelRetries } : {}),
       },
     });
-    if (question?.kind === "new" && message)
-      waitingEvent = await commitRecruitingQuestionInTransaction(tx, input, question, message);
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
     return { threadId: waitingEvent.threadId, seq: waitingEvent.seq };
   });
@@ -2146,6 +2085,7 @@ async function finalizeRunOnce(
       data: {
         status: input.outcome,
         error: input.outcome === "failed" ? input.error : null,
+        ...(input.outcome === "completed" && input.stopKind ? { stopKind: input.stopKind } : {}),
         completedAt: now,
         leaseOwner: null,
         leaseExpiresAt: null,
@@ -2182,7 +2122,29 @@ async function finalizeRunOnce(
     const events: AppendEventInput[] = [];
     if (input.outcome === "completed") {
       const completedBlocks = completedRunBlocks(input.blocks, writableRun?.startedAt ?? null, now);
-      if (completedBlocks.length > 0) {
+      const retried =
+        completedBlocks.length > 0
+          ? await retriedReplyInTransaction(tx, {
+              threadId: input.threadId,
+              runId: input.runId,
+              blocks: completedBlocks,
+            })
+          : null;
+      if (retried) {
+        // The reply is now this turn's, so a further push of this turn finds it too.
+        await tx.message.update({
+          where: { id: retried },
+          data: { blocks: completedBlocks, runId: input.runId },
+        });
+        events.push({
+          spaceId: input.spaceId,
+          threadId: input.threadId,
+          botId: input.botId,
+          type: "thread.message.updated",
+          runId: input.runId,
+          payload: { messageId: retried, role: "bot", blocks: completedBlocks },
+        });
+      } else if (completedBlocks.length > 0) {
         const message = await createThreadMessageInTransaction(tx, {
           threadId: input.threadId,
           role: "bot",
@@ -2310,9 +2272,10 @@ export async function createPendingSteeringRun(
       trigger: { not: "tool_background" },
       status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
     },
-    select: { id: true },
+    select: { id: true, status: true },
   });
-  if (active) return null;
+  const waiting = active?.status === "waiting_input" || active?.status === "waiting_takeover";
+  if (active && !waiting) return null;
   const pending = await tx.steeringMessage.findMany({
     where: {
       botId: input.botId,
@@ -2323,6 +2286,25 @@ export async function createPendingSteeringRun(
     orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
   });
   if (pending.length === 0) return null;
+  // A teammate's report doesn't wait on a card nobody answers, as a teammate's message doesn't
+  // (fr 11-21: a checked round sat 60–90 s, or until the recruiter gave up, behind a role chat's
+  // open "what next?" card while the recruiter talked in Kruit's chat).
+  if (
+    waiting &&
+    (!pending.every((item) =>
+      (item.message.blocks as MessageBlock[] | null)?.some((block) => block.kind === "handoff"),
+    ) ||
+      (await tx.run.findFirst({
+        where: {
+          threadId: input.threadId,
+          botId: input.botId,
+          trigger: { not: "tool_background" },
+          status: { in: ["queued", "leased", "running"] },
+        },
+        select: { id: true },
+      })))
+  )
+    return null;
   // One origin per continuation so a group channel and a direct chat are not answered together.
   const origin = steeringOrigin(pending[0]!);
   const batch = pending.filter((item) => steeringOrigin(item) === origin);

@@ -123,6 +123,17 @@ describe("logger", () => {
 });
 
 describe("error serialization", () => {
+  it("keeps the reason a warning passes as an error binding", () => {
+    const sink = createTestSink();
+    const logger = createLogger({ service: "test", sinks: [sink] });
+    logger.warn("save failed", { error: "Error: deadlock detected" });
+    logger.warn("save failed", { error: new Error("write conflict") });
+    expect(sink.events.map((event) => event.error?.message)).toEqual([
+      "Error: deadlock detected",
+      "write conflict",
+    ]);
+  });
+
   it("records cause chains", () => {
     const error = new Error("outer", { cause: new Error("inner", { cause: new Error("root") }) });
     expect(serializeError(error)).toMatchObject({

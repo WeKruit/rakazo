@@ -51,24 +51,14 @@ export function isSenderRead(name: string, args: Record<string, unknown>): boole
   return /ensure_sender$/.test(target) && toolOperation(args) === "read";
 }
 
-/** A question asking which company name candidates should see, which only sender setup asks. */
-export function asksSenderCompanyName(question: string): boolean {
-  return /公司名|company name/i.test(question);
-}
-
-/** Model-facing: the sending email is read before any setup question. */
-export const SENDER_READ_FIRST =
-  "Not asked: call ensure_sender operation read first and do what it returns. Ask a company name only when it returns selfSetup true with no sender.";
-
 function noSelfSetup(ownEmail: boolean) {
   if (ownEmail)
-    return "No product sending mailbox: this account sends from the recruiter's own connected email, one send_message per person, each on its own card. When send_message is not among your tools, Gmail is not connected yet: write the full email (Subject: and body, signed with the recruiter's name, else the sign-off alone, never Recruiting Team) once, in the reply that first drafts it, then call request_connection once with provider gmail and a one-sentence reason in the recruiter's language saying the email above is kept and goes out on its own card once Gmail is connected. Never say you started, sent or made a connection request: the card is there for them to press. If they say they cannot sign in to Gmail, say in one line that this account sends from their own email (another Google account they can sign in to works too), then give the subject and body once, ready to copy and send themselves; never say that no sender or mailbox exists. Later, whenever the recruiter asks to send (直接发, send it now), which mailbox sends, what to do or whether the draft is kept, answer at once in one short reply with no part of the email, not even reworded, and no other checks first: it has not gone out yet; the one step is the Connect Gmail card, so it goes out from their own address (call request_connection again so it sits with this reply); the draft is kept, it is the email above, and it goes out on its own card once Gmail is connected. Never say the draft cannot be confirmed and never look for it in a mailbox; paste the email again only when the recruiter asks for it or says they cannot connect. If they say they have no Gmail or cannot connect one, say plainly in one line that this account sends only from a connected Google email (Gmail or a company email hosted on Google), so nothing can go out until one is connected, and give the subject and body once, ready to copy, so they can send it themselves. Never say there is nothing to do and never claim another mailbox. Never ask for a company name or propose an address; drafts and contact lookups still work.";
+    return 'No product sending mailbox: this account sends from the recruiter\'s own connected email, one send_message per person, each on its own card. Once send_message is among your tools (for example they just connected Gmail), put each email they already asked to send on its card at once, with no question or new draft first. When send_message is not among your tools, Gmail is not connected yet: write the full email (Subject: and body, signed with the recruiter\'s name, else the sign-off alone, never Recruiting Team) once, in the reply that first drafts it, opened by one line that it is written and goes out from their own address once they press Connect on the card below (never "no sending mailbox" or "send confirmation card"), then call request_connection once with provider gmail and a one-sentence reason in the recruiter\'s language saying the email above has not gone out, is kept and goes out on its own card once Gmail is connected. Never say you started, sent or made a connection request: the card is there for them to press. If they say they cannot sign in to Gmail, say in one line that this account sends from their own email (another Google account they can sign in to works too), then give the subject and body once, ready to copy and send themselves; never say that no sender or mailbox exists. Once an email is written and the recruiter asks to send it, which mailbox sends or whether the draft is kept, answer in one short reply without pasting it again (unless they ask for it): it has not gone out; the one step is pressing Connect on the card (call request_connection again so it sits with this reply, with a reason saying it has not gone out); the draft is kept and goes out on its own card once Gmail is connected. With nothing written yet, write it first. If they say they have no Gmail or cannot connect one, say plainly in one line that this account sends only from a connected Google email (Gmail or a company email hosted on Google), so nothing can go out until one is connected, and give the subject and body once, ready to copy, so they can send it themselves. Never say there is nothing to do and never claim another mailbox. Never ask for a company name or propose an address; drafts and contact lookups still work.';
   return "No sending email yet: we set this account's mailbox up ourselves and have just been notified that it is needed. Tell the recruiter once, in one line, in their language, that this account cannot email candidates yet and that we have been notified to turn it on; then keep drafting and finding contacts. Never give an email address, never tell them to contact anyone, and do not repeat this in later replies unless they ask. Never ask for a company name or propose an address.";
 }
 
-/** A recruiter asking to send from their own email account. */
-export const OWN_EMAIL_REQUEST =
-  /gmail|outlook|(?:my|own) (?:e-?mail|mailbox|inbox)|自己的?(?:邮箱|邮件)|我的邮箱/i;
+export const SEND_NOW_WITHOUT_GMAIL_NOTE =
+  "For an email (never a send on another channel): when send_message is not among your tools, Gmail is not connected, so nothing can go out yet. When they ask whether email can go out without Gmail, the answer is no: say so in one line of your reply, that each email goes out from their own Gmail after they press Send on its card, so Gmail is the one step; there is no other sending account. A question is answered in words, with no card: the connect card comes when they ask to send. Once an email is written and the recruiter asks to send it, what to press or whether the draft is kept, say in one short reply in their language, before any tool call: it has not been sent; the one step is pressing Connect on the card below, so it goes out from their own address; the draft is kept (in those words) and comes back on one Send card here once Gmail is connected. Call request_connection with provider gmail beside that line, with a reason that also says it has not been sent. Never say you are sending or connecting it yourself, or that the draft is not saved. With nothing written yet, write it first.";
 export const OUTREACH_MAILBOX_ONLY_NOTE =
   "This account sends email only through its outreach mailbox, never the recruiter's own email account. If asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.";
 
@@ -83,9 +73,10 @@ export async function ownMailboxSendingAllowed(
 ): Promise<boolean> {
   const user = await prisma.user.findUnique({
     where: { id: context.userId },
-    select: { usageCreditLimit: true },
+    select: { usageCreditLimit: true, _count: { select: { sendingMailboxAssignments: true } } },
   });
-  if (user?.usageCreditLimit == null) return false;
+  // A mailbox we assigned by hand is this account's sender even before a run adopts it.
+  if (user?.usageCreditLimit == null || user._count?.sendingMailboxAssignments) return false;
   return (await confirmedSendingMailboxes(prisma, context)).length === 0;
 }
 const key = (email: string) => `instantly-sender-mailbox:${email.trim().toLowerCase()}`;
@@ -206,14 +197,26 @@ export async function requireSendingMailboxReady(
   if (!mine) throw new IsolationError("Confirm this account's sending address before sending.");
   const state = await sendingMailboxState(rest, email);
   if (!state.usable)
-    throw new Error(
+    throw new SendingMailboxError(
+      "sender_not_ready",
       "This sending address is not active yet. The draft is saved; sending must wait.",
     );
   if (!("displayName" in state) || state.displayName !== mine.displayName)
-    throw new Error(
+    throw new SendingMailboxError(
+      "sender_changed",
       "The sending display name changed. Review this account's sender before sending.",
     );
   return state;
+}
+
+/** A confirmed sending mailbox that cannot send as it stands. */
+export class SendingMailboxError extends Error {
+  constructor(
+    readonly code: "sender_not_ready" | "sender_changed",
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 type OrderedAccount = { email: string; domain: string; emailProvider: number; displayName: string };
@@ -407,7 +410,9 @@ async function ownedLegacySender(
 /**
  * The mailboxes the deployment owner assigned to this account become its senders on the account's
  * next mail call, each recorded as the same native receipt, unless another account already holds
- * it. Returns the newly adopted addresses.
+ * it. Returns the assigned addresses this account now holds, including one a parallel call of
+ * this account recorded first (stop-after-approve 11-21: the call that lost that race got none,
+ * so its save was refused as another account's mailbox).
  */
 export async function adoptAssignedSenders(
   prisma: PrismaClient,
@@ -424,7 +429,11 @@ export async function adoptAssignedSenders(
   const adopted: string[] = [];
   for (const assignment of assignments) {
     const email = assignment.email.trim().toLowerCase();
-    if (await prisma.externalEffect.findUnique({ where: { idempotencyKey: key(email) } })) continue;
+    const held = await heldBy(prisma, email);
+    if (held) {
+      if (held === "this") adopted.push(email);
+      continue;
+    }
     let account: Record<string, unknown>;
     try {
       account = await rest("GET", `/accounts/${encodeURIComponent(email)}`);
@@ -446,8 +455,8 @@ export async function adoptAssignedSenders(
     const runId = context.runId;
     const recorded = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["sending-identity", context.userId, context.spaceId])}, 0))`;
-      if (await tx.externalEffect.findUnique({ where: { idempotencyKey: key(email) } }))
-        return false;
+      const now = await heldBy(tx, email);
+      if (now) return now;
       await tx.externalEffect.create({
         data: {
           spaceId: context.spaceId,
@@ -459,13 +468,29 @@ export async function adoptAssignedSenders(
           result: value as unknown as Prisma.InputJsonValue,
         },
       });
-      return true;
+      return "new" as const;
     });
-    if (!recorded) continue;
+    if (recorded !== "other") adopted.push(email);
+    if (recorded !== "new") continue;
     if (value.displayName !== current) await refreshMailbox(rest, email, value.displayName);
-    adopted.push(email);
   }
   return adopted;
+
+  /** Whether a receipt already holds this mailbox, and for which account. */
+  async function heldBy(db: Pick<PrismaClient, "externalEffect">, email: string) {
+    const receipt = await db.externalEffect.findUnique({
+      where: { idempotencyKey: key(email) },
+      include: { run: { select: { userId: true, spaceId: true } } },
+    });
+    if (!receipt) return undefined;
+    return receipt.spaceId === context.spaceId &&
+      receipt.status === "completed" &&
+      (receipt.request as { serverId?: unknown } | null)?.serverId === serverId &&
+      receipt.run.userId === context.userId &&
+      receipt.run.spaceId === context.spaceId
+      ? ("this" as const)
+      : ("other" as const);
+  }
 }
 
 /**
@@ -845,4 +870,57 @@ async function refreshMailbox(rest: InstantlyRest, email: string, displayName: s
     return { ...state, displayName, warmup: "starting" };
   }
   return { ...state, displayName };
+}
+
+/** What a campaign's mailboxes have left of their daily sending limits on the provider's day. */
+export type SendingToday = { limit: number; sent: number; left: number; resetsAt: string };
+
+/**
+ * The provider stops a mailbox at its daily limit and counts the day in UTC, so people queued
+ * after it is used up wait for the next day however the campaign is set. Null when it cannot tell.
+ */
+export async function sendingToday(
+  rest: InstantlyRest,
+  mailboxes: unknown,
+  now = new Date(),
+): Promise<SendingToday | null> {
+  const wanted = new Set(
+    (Array.isArray(mailboxes) ? mailboxes : []).flatMap((email) =>
+      typeof email === "string" ? [email.toLowerCase()] : [],
+    ),
+  );
+  if (!wanted.size) return null;
+  const day = now.toISOString().slice(0, 10);
+  const listed = (value: Record<string, unknown>) =>
+    Array.isArray(value.items) ? (value.items as Record<string, unknown>[]) : [];
+  try {
+    const [accounts, daily] = await Promise.all([
+      rest("GET", "/accounts?limit=100"),
+      rest("GET", `/accounts/analytics/daily?start_date=${day}&end_date=${day}`),
+    ]);
+    let limit = 0;
+    const found = new Set<string>();
+    for (const account of listed(accounts)) {
+      const email = typeof account.email === "string" ? account.email.toLowerCase() : "";
+      if (!wanted.has(email)) continue;
+      if (typeof account.daily_limit !== "number" || account.daily_limit <= 0) return null;
+      limit += account.daily_limit;
+      found.add(email);
+    }
+    if (found.size !== wanted.size) return null;
+    let sent = 0;
+    for (const row of listed(daily))
+      if (
+        row.date === day &&
+        typeof row.email_account === "string" &&
+        wanted.has(row.email_account.toLowerCase())
+      )
+        sent += Number(row.sent) || 0;
+    const next = new Date(`${day}T00:00:00.000Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    return { limit, sent, left: Math.max(0, limit - sent), resetsAt: next.toISOString() };
+  } catch {
+    // Knowing the limit improves the estimate; it never holds a send back.
+    return null;
+  }
 }

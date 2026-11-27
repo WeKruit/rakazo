@@ -9,6 +9,7 @@ import { InfisicalSecretStore } from "./infisical-secret-store.js";
 import { sequenceConfigurationRevision } from "./instantly-native-writes.js";
 import {
   allowlistDrift,
+  CONNECTION_REFUSED_TTL_MS,
   DISCOVERY_CACHE_TTL_MS,
   DISCOVERY_FAILURE_TTL_MS,
   DISCOVERY_REFRESH_OPERATION,
@@ -17,10 +18,10 @@ import {
   loadMcpCredentialRecord,
   McpConnector,
   NO_EMAIL_HISTORY_YET,
+  NoOutreachCampaignError,
   PATH_REFUSAL_NOTE,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
-  SHARED_MAIL_DISCOVERY_BUDGET_MS,
   scopeRefusal,
   sharedInstantlyAccount,
 } from "./mcp-connector.js";
@@ -376,31 +377,6 @@ describe("local native Instantly thread history", () => {
       await f.connector.close();
     }
   });
-  it("answers with the shared account's local mail tools while its remote list is still connecting", async () => {
-    vi.stubEnv("INSTANTLY_API_KEY", "platform-mail-key");
-    const f = fixture();
-    const inner = globalThis.fetch;
-    const pending: ((error: Error) => void)[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: string | URL | Request, init?: RequestInit) =>
-        new URL(logicalHref(input, init)).origin === "https://mcp.instantly.ai"
-          ? new Promise<Response>((_resolve, reject) => pending.push(reject))
-          : inner(input, init),
-      ),
-    );
-    try {
-      const startedAt = performance.now();
-      const names = (await f.connector.discoverTools(f.context as never)).map((tool) => tool.name);
-      expect(performance.now() - startedAt).toBeLessThan(SHARED_MAIL_DISCOVERY_BUDGET_MS + 1_000);
-      expect(names).toContain("instantly__demo__activate_campaign");
-      expect(names.some((name) => name.startsWith("mcp__"))).toBe(false);
-    } finally {
-      for (const reject of pending) reject(new Error("connection closed"));
-      await f.connector.close();
-      vi.unstubAllEnvs();
-    }
-  });
   it("discovers a separate read-only local tool and retains exact native anchor, REST page and controls", async () => {
     const f = fixture();
     try {
@@ -577,7 +553,7 @@ describe("local native Instantly thread history", () => {
     vi.spyOn(
       f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
       "instantlyCampaignScope",
-    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    ).mockRejectedValue(new NoOutreachCampaignError());
     const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     try {
       await f.connector.discoverTools(f.context as never);
@@ -590,6 +566,71 @@ describe("local native Instantly thread history", () => {
           (call) => new URL(logicalHref(...call)).pathname === "/api/v2/emails",
         ),
       ).toBe(false);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  // Simulated 11-16, did-you-really-send: "was the email sent?" on an account that never sent
+  // read list_emails, got "no outreach campaign yet" as an error, and Kruit said it could not
+  // tell whether anything was sent. An account with no campaign has sent nothing.
+  it("answers list_emails on an account that never sent with no emails, not a failure", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
+      "instantlyCampaignScope",
+    ).mockRejectedValue(new NoOutreachCampaignError());
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const result = await f.collect({}, { ...route, toolName: "list_emails" });
+      expect(result).toMatchObject([
+        { type: "result", data: { structuredContent: { note: NO_EMAIL_HISTORY_YET } } },
+      ]);
+      expect(f.state.calls).toEqual([]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  // Simulated 11-16 on deb21fb1, did-you-really-send: list_mailbox_emails without a mailbox was
+  // refused as invalid arguments on an account that had none, and Kruit said the inbox was down.
+  it("lists mailbox mail without a mailbox named: none yet is no history, not a failure", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
+      "instantlyCampaignScope",
+    ).mockRejectedValue(new NoOutreachCampaignError());
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const result = await f.collect(
+        {},
+        { ...route, toolName: "native_instantly_list_mailbox_emails" },
+      );
+      expect(result).toMatchObject([
+        { type: "result", data: { structuredContent: { note: NO_EMAIL_HISTORY_YET } } },
+      ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  // Gate 9e15e896, stop-after-approve: on an account with several campaigns every contact read
+  // said "failed during native anchor, check the connection", so nobody's status could be read.
+  it("names the campaign choice when a contact lookup spans several of the account's campaigns", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as {
+        instantlyCampaignScope: () => Promise<{ campaignIds: string[]; workspaceKey: string }>;
+      },
+      "instantlyCampaignScope",
+    ).mockResolvedValue({ campaignIds: ["campaign-a", "campaign-b"], workspaceKey: "account" });
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const result = await f.collect({ email: "alex@example.test" }, contactRoute);
+      expect(result).toMatchObject([
+        {
+          type: "error",
+          message: expect.stringContaining("pass campaign_id, one of campaign-a, campaign-b"),
+        },
+      ]);
     } finally {
       await f.connector.close();
     }
@@ -714,13 +755,17 @@ describe("local native Instantly thread history", () => {
                 {
                   campaignId: anchor.campaign_id,
                   stopOnReply: false,
-                  warning: expect.stringMatching(/stop_on_reply is off/),
+                  warning: expect.stringContaining(
+                    `call pause_campaign with their email and campaign_id ${anchor.campaign_id}`,
+                  ),
                 },
               ],
             },
           },
         },
       ]);
+      // Audit 11-26: the advice named the mail service and asked for a change nobody could make.
+      expect(JSON.stringify(events)).not.toMatch(/in Instantly|stop_on_reply is off/);
       const campaignCalls = f.rest.mock.calls.filter((call) =>
         new URL(logicalHref(...call)).pathname.startsWith("/api/v2/campaigns/"),
       );
@@ -824,7 +869,8 @@ describe("local native Instantly thread history", () => {
     }
   });
   it.each([
-    [{}, false],
+    // No mailbox named and none to default to: one accounts read, then a named fix.
+    [{}, true],
     [{ eaccount: "not-an-address" }, false],
     [{ eaccount: anchor.eaccount, lead: anchor.from_address_email }, false],
     [{ eaccount: anchor.eaccount, min_timestamp_created: "yesterday" }, false],
@@ -1284,6 +1330,54 @@ describe("local native Instantly thread history", () => {
     },
   );
   it.each([
+    ["the role emailed that person", true],
+    ["the role never emailed that person", false],
+  ])(
+    "reads a reply filed under another of the account's campaigns when %s",
+    async (_case, emailed) => {
+      const f = fixture();
+      const roleCampaign = "123e4567-e89b-42d3-a456-426614174009";
+      const reply = { ...structuredClone(anchor), lead: "person@example.test" };
+      f.state.callResult = { content: [], structuredContent: reply };
+      // The reply's campaign is the account's own, not the role's.
+      (f.prisma as unknown as { $queryRaw: unknown }).$queryRaw = vi.fn(async () => [
+        { kind: "instantly_role_campaign", result: { campaignId: anchor.campaign_id } },
+      ]);
+      f.state.page = {
+        items: emailed
+          ? [
+              {
+                ...structuredClone(anchor),
+                campaign_id: roleCampaign,
+                ue_type: 1,
+                lead: reply.lead,
+              },
+            ]
+          : [],
+      };
+      vi.spyOn(
+        f.connector as unknown as {
+          instantlyCampaignScope: () => Promise<{ campaignIds: string[] }>;
+        },
+        "instantlyCampaignScope",
+      ).mockResolvedValue({ campaignIds: [roleCampaign] });
+      try {
+        const events = await f.collect(
+          { id: anchor.id },
+          { ...route, toolName: "native_instantly_get_email" },
+        );
+        expect(events.at(-1)).toMatchObject({ type: emailed ? "result" : "error" });
+        const asked = f.rest.mock.calls
+          .map((call) => new URL(new Request(...call).url))
+          .find((url) => url.pathname === "/api/v2/emails");
+        expect(asked?.searchParams.get("campaign_id")).toBe(roleCampaign);
+        expect(asked?.searchParams.get("lead")).toBe(reply.lead);
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each([
     "native_instantly_get_email",
     "native_instantly_list_mailbox_emails",
     "native_instantly_reply_to_email",
@@ -1608,61 +1702,6 @@ function mcpFetch(
     return new Response(null, { status: 202 });
   });
 }
-
-describe("official Autumn task dispatch", () => {
-  it.each(["get_task", "get_rows", "reply", "stop_task", "list_tasks"])(
-    "denies an unowned %s call before connecting to the provider",
-    async (toolName) => {
-      const fetch = vi.fn();
-      vi.stubGlobal("fetch", fetch);
-      const load = vi.fn();
-      const connector = new McpConnector(
-        {
-          botMcpServer: {
-            findFirst: vi.fn().mockResolvedValue({
-              ...ASSIGNMENT,
-              server: { ...SERVER, endpoint: "https://api.autumn.ai/mcp" },
-            }),
-          },
-          recruitingResearchTask: { findFirst: vi.fn().mockResolvedValue(null) },
-          $queryRaw: vi.fn().mockResolvedValue([]),
-        } as never,
-        { load } as never,
-        { network: TEST_NETWORK },
-      );
-      const events = [];
-      try {
-        for await (const event of connector.execute(
-          {
-            tool: `mcp__autumn__${toolName}`,
-            executionId: "isolated-call",
-            route: { connectorId: "mcp", resourceId: SERVER.id, resourceRevision: 1, toolName },
-            args: { task_id: "foreign-task" },
-          },
-          {
-            spaceId: "w1",
-            userId: "u1",
-            botId: "bot-1",
-            signal: new AbortController().signal,
-          } as never,
-        ))
-          events.push(event);
-        expect(events).toEqual([
-          expect.objectContaining({
-            type: "error",
-            message: expect.stringMatching(
-              /scoped research history|Listing all research is unavailable/i,
-            ),
-          }),
-        ]);
-        expect(fetch).not.toHaveBeenCalled();
-        expect(load).not.toHaveBeenCalled();
-      } finally {
-        await connector.close();
-      }
-    },
-  );
-});
 
 it("denies an unowned FullEnrich job before connecting or loading credentials", async () => {
   const fetch = vi.fn();
@@ -2534,7 +2573,7 @@ describe("MCP connector session cache", () => {
   });
 
   it("keeps each agent's core work tools direct when the rest moves to the catalog", async () => {
-    const core = ["create_booking", "get_availability", "get_event_types", "cancel_booking"];
+    const core = ["get_availability", "get_event_types", "cancel_booking"];
     const state = {
       failNext: false,
       initializations: 0,
@@ -2543,7 +2582,7 @@ describe("MCP connector session cache", () => {
           name: `tool_${index}`,
           inputSchema: { type: "object" },
         })),
-        ...core.map((name) => ({ name, inputSchema: { type: "object" } })),
+        ...[...core, "create_booking"].map((name) => ({ name, inputSchema: { type: "object" } })),
       ],
     };
     vi.stubGlobal("fetch", mcpFetch(state));
@@ -2576,16 +2615,114 @@ describe("MCP connector session cache", () => {
       "connectors_load_tool",
       "connectors_execute_tool",
     ]);
-    // The catalog index no longer lists them, so a search never finds them twice.
-    expect(tools.find((tool) => tool.name === "connectors_search_tools")?.description).not.toMatch(
-      /create_booking/,
-    );
+    // A booking goes through recruiting_scheduling, so the calendar's own create is not direct.
+    expect(tools.map((tool) => tool.name)).not.toContain("mcp__demo__create_booking");
+    // Kruit itself answers candidates and books from the conversation, so it lists those too.
+    expect(
+      (await discover({ name: "Main", spawnKey: "recruiting:u1:main" })).map((t) => t.name),
+    ).toEqual([
+      "mcp__demo__get_availability",
+      "mcp__demo__cancel_booking",
+      "connectors_search_tools",
+      "connectors_load_tool",
+      "connectors_execute_tool",
+    ]);
     // Another agent with the same connection keeps its tools in the catalog.
     expect((await discover({ name: "Researcher", spawnKey: null })).map((t) => t.name)).toEqual([
       "connectors_search_tools",
       "connectors_load_tool",
       "connectors_execute_tool",
     ]);
+  });
+
+  // 11-27 branch plays: an agent that saw the calendar's own create booked with it and left the
+  // recruiter's guests off; Main in the account-wide chat answered a candidate the role's
+  // conversation answered too, so the candidate got two replies.
+  it("lists one route: no calendar create, and only reads in the account-wide chat", async () => {
+    const names = [
+      "create_booking",
+      "get_availability",
+      "reply_to_email",
+      "get_email",
+      "cancel_booking",
+      "agent_run",
+    ];
+    vi.stubGlobal(
+      "fetch",
+      mcpFetch(
+        {
+          failNext: false,
+          initializations: 0,
+          tools: names.map((name) => ({ name, inputSchema: { type: "object" } })),
+        },
+        "https://mcp.cal.com/mcp?toolsets=bookings",
+      ),
+    );
+    const connector = new McpConnector(
+      {
+        botMcpServer: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              ...ASSIGNMENT,
+              server: { ...SERVER, endpoint: "https://mcp.cal.com/mcp?toolsets=bookings" },
+              bot: { name: "Outreach", spawnKey: "recruiting:u1:outreach" },
+            },
+          ]),
+          findFirst: vi.fn().mockResolvedValue(ASSIGNMENT),
+        },
+      } as never,
+      {} as never,
+      { network: TEST_NETWORK },
+    );
+    const context = (accountWideConversation: boolean) =>
+      ({
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        accountWideConversation,
+        signal: new AbortController().signal,
+      }) as never;
+    try {
+      const listed = async (accountWide: boolean) =>
+        (await connector.discoverTools(context(accountWide))).map((tool) => tool.name);
+      expect(await listed(false)).toEqual([
+        "mcp__demo__get_availability",
+        "mcp__demo__reply_to_email",
+        "mcp__demo__get_email",
+        "mcp__demo__cancel_booking",
+        "mcp__demo__agent_run",
+      ]);
+      // The main chat does no operations (user's rule 11-27): no mail, booking change or search.
+      expect(await listed(true)).toEqual(["mcp__demo__get_availability", "mcp__demo__get_email"]);
+      // A search there says where operations are done instead of leaving a dead end.
+      const searched = async (accountWide: boolean) => {
+        const search = connector.execute(
+          {
+            tool: "connectors_search_tools",
+            route: { connectorId: "mcp", toolName: "__catalog_search" },
+            args: { query: "send email" },
+            executionId: "search",
+          } as never,
+          context(accountWide),
+        );
+        for await (const event of search) if (event.type === "result") return event.data as never;
+      };
+      expect(await searched(true)).toMatchObject({ note: expect.stringContaining("start_role") });
+      expect(await searched(false)).not.toHaveProperty("note");
+      // The booking plan still resolves the create it reviewed.
+      const resolved = await connector.resolveCall(
+        {
+          tool: "connectors_execute_tool",
+          route: { connectorId: "mcp", toolName: "__catalog_execute" },
+          args: { id: "server-1:create_booking", arguments: {} },
+          executionId: "plan",
+        } as never,
+        context(false),
+      );
+      expect(resolved?.tool.route?.toolName).toBe("create_booking");
+    } finally {
+      await connector.close();
+    }
   });
 
   describe("a connection whose provider refuses access", () => {
@@ -2702,7 +2839,7 @@ describe("MCP connector session cache", () => {
           expect(names).toEqual(["mcp__demo__ensure_role_campaign", "mcp__demo__get_weather"]);
         }
         // It is never permanent: after the window the connection is offered and called again.
-        vi.useFakeTimers({ now: Date.now() + DISCOVERY_FAILURE_TTL_MS + 1, toFake: ["Date"] });
+        vi.useFakeTimers({ now: Date.now() + CONNECTION_REFUSED_TTL_MS + 1, toFake: ["Date"] });
         expect((await connector.discoverTools(context as never)).map((t) => t.name)).toContain(
           "mcp__mail__create_draft",
         );
@@ -3731,7 +3868,6 @@ describe("deployment contact enrichment", () => {
 });
 
 describe.each([
-  ["Autumn", "https://api.autumn.ai/mcp", "AUTUMN_API_KEY", "Recruiting research"],
   ["FullEnrich", "https://mcp.fullenrich.com/mcp", "FULLENRICH_API_KEY", "Contact enrichment"],
 ])("deployment %s credentials", (name, endpoint, env, label) => {
   afterEach(() => vi.unstubAllEnvs());
@@ -3763,10 +3899,7 @@ describe.each([
   });
 
   it.each([
-    "https://api.autumn.ai/mcp?redirect=other",
-    "https://api.autumn.ai.example.test/mcp",
     "https://other.example.test/mcp",
-    "http://api.autumn.ai/mcp",
     "https://mcp.fullenrich.com/mcp?redirect=other",
     "https://mcp.fullenrich.com.example.test/mcp",
     "http://mcp.fullenrich.com/mcp",
@@ -3783,7 +3916,7 @@ describe.each([
 
   it("preserves actor-scoped personal credentials and refuses a missing owned secret", async () => {
     // FullEnrich ships with the product: a configured platform key replaces a saved one (below).
-    vi.stubEnv(env, name === "FullEnrich" ? " " : "platform-service-key");
+    vi.stubEnv(env, " ");
     const row = { id: "personal-secret", ciphertext: "encrypted-reference" };
     const findFirst = vi.fn().mockResolvedValueOnce(row).mockResolvedValueOnce(null);
     const load = vi.fn().mockResolvedValue('{"secret":"personal-service-key"}');
@@ -3837,13 +3970,9 @@ describe.each([
       await expect(connector.discoverTools(scoped as never)).resolves.toEqual([
         expect.objectContaining({ name: `mcp__${name.toLowerCase()}__echo` }),
         // The contact lookup rides on the enrichment connection.
-        ...(official.endpoint === "https://mcp.fullenrich.com/mcp"
-          ? [
-              expect.objectContaining({
-                route: expect.objectContaining({ toolName: "native_find_emails" }),
-              }),
-            ]
-          : []),
+        expect.objectContaining({
+          route: expect.objectContaining({ toolName: "native_find_emails" }),
+        }),
       ]);
       expect(
         state.headers.every((headers) => headers.authorization === "Bearer platform-service-key"),
@@ -3918,6 +4047,52 @@ describe("first-party product OIDC MCP connection", () => {
       }
     },
   );
+  it("lists the product's own server once for every account", async () => {
+    const state = { failNext: false, initializations: 0, lists: 0 };
+    const native = mcpFetch(state, endpoint);
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "POST" && (await request.clone().text()).includes('"tools/list"'))
+        state.lists += 1;
+      return native(input, init);
+    });
+    const row = { ...ASSIGNMENT, server: { ...SERVER, endpoint } };
+    const connector = new McpConnector(
+      { botMcpServer: { findMany: vi.fn().mockResolvedValue([row]) } } as never,
+      {} as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken: async () => "access" } },
+    );
+    try {
+      expect(await connector.discoverTools(context as never)).toHaveLength(1);
+      const other = { ...context, spaceId: "w2", userId: "u2" };
+      expect(await connector.discoverTools(other as never)).toHaveLength(1);
+      expect(state.lists).toBe(1);
+    } finally {
+      await connector.close();
+    }
+  });
+  it("signs in once when many accounts list the product's own server at the same moment", async () => {
+    const state = { failNext: false, initializations: 0 };
+    vi.stubGlobal("fetch", mcpFetch(state, endpoint));
+    const accessToken = vi.fn(async () => "access");
+    const row = { ...ASSIGNMENT, server: { ...SERVER, endpoint } };
+    const connector = new McpConnector(
+      { botMcpServer: { findMany: vi.fn().mockResolvedValue([row]) } } as never,
+      {} as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+    );
+    try {
+      const lists = await Promise.all(
+        ["u1", "u2", "u3"].map((userId) =>
+          connector.discoverTools({ ...context, spaceId: `s-${userId}`, userId } as never),
+        ),
+      );
+      expect(lists.map((list) => list.length)).toEqual([1, 1, 1]);
+      expect(state.initializations).toBe(1);
+    } finally {
+      await connector.close();
+    }
+  });
   it("does not retain a completed run's cancellation signal and denies revoked identity before another dispatch", async () => {
     const state = { failNext: false, initializations: 0, calls: [] as string[] };
     vi.stubGlobal("fetch", mcpFetch(state, endpoint));
@@ -4093,6 +4268,7 @@ describe("local native Instantly campaign and lead tools", () => {
         id: CAMPAIGN,
         status: 0,
         stop_on_reply: true,
+        email_list: ["sender@x.test"],
         sequences: [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }],
       } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
@@ -4104,11 +4280,22 @@ describe("local native Instantly campaign and lead tools", () => {
       activeRoleId: null as string | null,
       deleted: false,
       rejectPatch: "",
+      /** The campaign read after an edit fails, as a timed-out request does. */
+      failReadAfterPatch: false,
+      /** What the mail service's sending-status read says about the role campaign. */
+      sendingStatus: null as
+        | Record<string, unknown>
+        | ((requests: { method: string; path: string }[]) => Record<string, unknown>)
+        | null,
       lookups: [] as Record<string, unknown>[],
       /** The role's saved candidates, as a role-wide candidate read returns them. */
       candidates: [] as Record<string, unknown>[],
       /** Whether an added lead shows up in the role campaign's own lead list. */
       addToCampaign: false,
+      /** What the recruiter wrote in the run's conversation. */
+      typed: [] as string[],
+      /** What the recruiter wrote in their other conversations in this account. */
+      typedElsewhere: [] as string[],
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
@@ -4118,6 +4305,15 @@ describe("local native Instantly campaign and lead tools", () => {
       mcpServer: {
         findFirst: vi.fn(async () => server),
         findMany: vi.fn(async () => [{ id: "enrich", revision: 1 }]),
+      },
+      message: {
+        findMany: vi.fn(async ({ where }) =>
+          (where.botId === null ? state.typedElsewhere : state.typed).map((text) => ({
+            threadId: "thread-1",
+            thread: { spaceId: "w1", userId: "u1" },
+            blocks: [{ kind: "text", text }],
+          })),
+        ),
       },
       run: {
         findFirst: vi.fn(async ({ where }) =>
@@ -4147,6 +4343,8 @@ describe("local native Instantly campaign and lead tools", () => {
       },
       // Saved contact lookup receipts.
       $queryRaw: vi.fn(async () => state.lookups),
+      $executeRaw: vi.fn(async () => 1),
+      $transaction: vi.fn(async (work: (tx: unknown) => unknown) => work(prisma)),
       externalEffect: {
         findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
         findMany: vi.fn(async ({ where }) =>
@@ -4207,9 +4405,21 @@ describe("local native Instantly campaign and lead tools", () => {
           if (state.deleted) return new Response("{}", { status: 404 });
           if (request.method === "PATCH" && state.rejectPatch)
             return Response.json({ message: state.rejectPatch }, { status: 400 });
+          if (
+            request.method === "GET" &&
+            state.failReadAfterPatch &&
+            state.requests.some((r) => r.method === "PATCH")
+          )
+            return Response.json({ message: "timed out" }, { status: 400 });
           if (request.method === "PATCH") Object.assign(state.campaign, body);
           return Response.json(state.campaign);
         }
+        if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}/sending-status`)
+          return Response.json(
+            (typeof state.sendingStatus === "function"
+              ? state.sendingStatus(state.requests)
+              : state.sendingStatus) ?? { diagnostics: null, summary: null },
+          );
         if (url.pathname.startsWith(`/api/v2/campaigns/${CAMPAIGN}/`))
           return Response.json(state.campaign);
         const listed = state.campaigns.find((c) => url.pathname === `/api/v2/campaigns/${c.id}`);
@@ -4498,6 +4708,33 @@ describe("local native Instantly campaign and lead tools", () => {
     ]);
   });
 
+  it("get_campaign shows each person's own first email, never the bare variables", async () => {
+    // An agent read "{{rk_body}}" as a blank email and paused a send the recruiter had confirmed.
+    const f = fixture();
+    f.state.campaign = {
+      ...f.state.campaign,
+      status: 1,
+      sequences: [
+        { steps: [{ variants: [{ subject: "{{rk_subject}}", body: "<p>{{rk_body}}</p>" }] }] },
+      ],
+    };
+    f.state.campaignLeads = [
+      {
+        id: "lead-ada",
+        email: "ada@x.test",
+        payload: { rk_subject: "Data role", rk_body: "Hi Ada,<br /><br />A role in Seattle." },
+      },
+    ];
+    const events = await f.run("get_campaign", { campaign_id: CAMPAIGN });
+    const result = (
+      events[0] as { data: { structuredContent: { result: Record<string, unknown> } } }
+    ).data.structuredContent.result;
+    expect(result.firstEmails).toEqual({
+      "ada@x.test": { subject: "Data role", opening: "Hi Ada,\n\nA role in Seattle." },
+    });
+    expect(JSON.stringify(result.sequences)).not.toContain("{{rk_body}}");
+  });
+
   it("refuses a foreign sending mailbox without creating anything", async () => {
     const f = fixture();
     const events = await f.run("create_campaign", {
@@ -4547,8 +4784,30 @@ describe("local native Instantly campaign and lead tools", () => {
         path: "/api/v2/leads/list",
         body: { campaign: CAMPAIGN, limit: 100 },
       },
+      // How much of today's sending the campaign's mailbox has left.
+      { method: "GET", path: "/api/v2/accounts?limit=100" },
+      { method: "GET", path: expect.stringMatching(/^\/api\/v2\/accounts\/analytics\/daily\?/) },
+      // A send to a few people goes out a minute apart, not ten.
+      {
+        method: "PATCH",
+        path: `/api/v2/campaigns/${CAMPAIGN}`,
+        body: { email_gap: 1, random_wait_max: 1 },
+      },
+      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
+      // What the mail service says once the send started, before promising a time.
+      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}/sending-status` },
     ]);
+  });
+
+  it("never activates a campaign with no sending mailbox", async () => {
+    // Staging 11-20: three confirmed sends were held for hours as "no sending accounts
+    // available" (0 of 0 mailboxes) while the reply said they were on their way.
+    const f = fixture();
+    f.state.campaign.email_list = [];
+    const events = await f.run("activate_campaign", { campaign_id: CAMPAIGN });
+    expect((events[0] as { message: string }).message).toMatch(/no sending mailbox/);
+    expect(f.state.requests.some((r) => r.path.endsWith("/activate"))).toBe(false);
   });
 
   it("refuses to enroll leads into an active campaign", async () => {
@@ -5013,7 +5272,7 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(events[0]).toMatchObject({ type: "result" });
     const paths = f.state.requests.map((r) => `${r.method} ${r.path}`);
     expect(paths).toContain("POST /api/v2/campaigns");
-    expect(paths.at(-1)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
+    expect(paths.at(-2)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
     expect(f.result(events)).toMatchObject({ activated: true, campaignId: CAMPAIGN });
   });
 
@@ -5051,6 +5310,9 @@ describe("local native Instantly campaign and lead tools", () => {
     // Read back without a mailbox: the saved email, not an error.
     const shown = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(shown).toMatchObject({ campaign: null, savedEmail: steps });
+    // The role's draft read shows it too: staging 11-14 said "nothing saved" after three saves.
+    const draft = f.result(await f.run("get_role_draft", { role_id: "role-1" }));
+    expect(draft).toMatchObject({ campaign: null, savedEmail: steps });
     // Once a mailbox exists, the role's campaign is created with that email.
     f.state.accounts = ["first@example.test"];
     const made = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
@@ -5193,6 +5455,94 @@ describe("local native Instantly campaign and lead tools", () => {
         (r) => r.path.endsWith("/activate") || r.path === "/api/v2/leads/add",
       );
 
+    it("refuses to email people another of this account's campaigns is already sending to", async () => {
+      // Sim 11-14: one request opened two roles, both cards were confirmed, and both campaigns
+      // emailed the same two people.
+      const { f } = await roleWithSixteen();
+      const OTHER = "223e4567-e89b-42d3-a456-4266141740c2";
+      f.state.campaigns = [{ id: OTHER, name: "Senior Data Engineer Seattle", status: 1 }];
+      f.state.effects.set("instantly-role-campaign:other-role", {
+        id: "binding-other",
+        kind: "instantly_role_campaign",
+        status: "completed",
+        spaceId: "w1",
+        request: { roleId: "role-2", serverId: SERVER.id },
+        result: { campaignId: OTHER, leads: { abe: { leadId: "x-abe", email: "abe@x.test" } } },
+      });
+      const events = await f.run("activate_campaign", { recipients: ["Abe Stone"] });
+      expect((events[0] as { message: string }).message).toMatch(
+        /abe@x\.test already gets a first email from Senior Data Engineer Seattle/,
+      );
+      expect(sends(f)).toEqual([]);
+      // Asked to email them again, the recruiter's resend goes through.
+      const again = f.result(
+        await f.run("activate_campaign", { recipients: ["Abe Stone"], resend: true }),
+      );
+      expect(again).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
+    });
+
+    it("says a draft's person is emailed from another campaign instead of calling it unsent", async () => {
+      // Staging 11-21: a denied one-off draft was read after the role's campaign sent, and the
+      // recruiter was told their email was still a draft.
+      const { f } = await roleWithSixteen();
+      const OTHER = "223e4567-e89b-42d3-a456-4266141740c2";
+      f.state.campaigns = [{ id: OTHER, name: "Senior Data Engineer Seattle", status: 1 }];
+      f.state.effects.set("instantly-role-campaign:other-role", {
+        id: "binding-other",
+        kind: "instantly_role_campaign",
+        status: "completed",
+        spaceId: "w1",
+        request: { roleId: "role-2", serverId: SERVER.id },
+        result: { campaignId: OTHER, leads: { abe: { leadId: "x-abe", email: "abe@x.test" } } },
+      });
+      const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+      expect(read).toMatchObject({
+        status: 0,
+        sentFrom: { "abe@x.test": "Senior Data Engineer Seattle" },
+        next: expect.stringContaining("unsent draft, not the send"),
+      });
+    });
+
+    it("stops one person for good without sending anything, and refuses a later send to them", async () => {
+      // Audit 11-26: "don't contact Ada again" could only pause the whole campaign, and nothing
+      // kept a later send from reaching her.
+      const { f, binding } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      f.state.existingLeads = [{ id: ABE.id, email: ABE.email }];
+      const out = f.result(
+        await f.run("pause_campaign", { email: "Abe@x.test", campaign_id: CAMPAIGN }),
+      );
+      expect(out).toMatchObject({ stopped: true, stoppedInCampaigns: [CAMPAIGN] });
+      expect(
+        f.state.requests
+          .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+          .map((r) => `${r.method} ${r.path}`),
+      ).toEqual([`DELETE /api/v2/leads/${ABE.id}`]);
+      expect(Object.keys((binding.result as { leads: object }).leads)).not.toContain(
+        "key-abe@x.test",
+      );
+      expect(f.state.effects.get("outreach-contact-stop:w1:abe@x.test")).toMatchObject({
+        kind: "outreach_contact_stop",
+        status: "completed",
+      });
+      // A later send naming them is refused before anything is added or started.
+      f.state.campaign.status = 0;
+      f.state.campaignLeads.push({ ...ABE });
+      f.state.requests.length = 0;
+      const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
+      expect((events[0] as { message: string }).message).toMatch(
+        /abe@x\.test \(the recruiter asked that they never be contacted again\)/,
+      );
+      expect(sends(f)).toEqual([]);
+      // Taken back only when the recruiter says so.
+      expect(
+        f.result(await f.run("pause_campaign", { email: "abe@x.test", allow_again: true })),
+      ).toMatchObject({ allowedAgain: true });
+      expect(
+        f.result(await f.run("activate_campaign", { recipients: ["abe@x.test"] })),
+      ).toMatchObject({ activated: true });
+    });
+
     it("takes the unnamed never-sent people out of a draft before activating it", async () => {
       const { f, binding } = await roleWithSixteen();
       const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
@@ -5201,8 +5551,8 @@ describe("local native Instantly campaign and lead tools", () => {
       const deletes = paths.filter((path) => path.startsWith("DELETE"));
       expect(deletes).toEqual(OTHERS.map((lead) => `DELETE /api/v2/leads/${lead.id}`));
       // Every removal and a re-read showing only Abe come before the one activation.
-      expect(paths.indexOf(`POST /api/v2/campaigns/${CAMPAIGN}/activate`)).toBe(paths.length - 1);
-      expect(paths.at(-2)).toBe("POST /api/v2/leads/list");
+      expect(paths.indexOf(`POST /api/v2/campaigns/${CAMPAIGN}/activate`)).toBe(paths.length - 2);
+      expect(paths.at(-3)).toBe("POST /api/v2/leads/list");
       expect(f.state.campaignLeads.map((lead) => lead.email)).toEqual(["abe@x.test"]);
       // The role's lead map drops them too, so a later send adds them again from saved emails.
       expect(Object.keys((binding.result as { leads: object }).leads)).toEqual(["key-abe@x.test"]);
@@ -5234,13 +5584,68 @@ describe("local native Instantly campaign and lead tools", () => {
       ).toEqual([]);
     });
 
-    it("keeps everyone in a campaign that has already run and sends nothing", async () => {
+    it("keeps everyone a paused campaign already emailed and sends nothing", async () => {
       const { f } = await roleWithSixteen();
       f.state.campaign.status = 2;
+      // A follow-up is left for those it emailed, so resuming would email them again.
+      f.state.campaign.sequences = [
+        {
+          steps: [
+            { delay: 0, variants: [{ subject: "Hi", body: "<p>Hello</p>" }] },
+            { delay: 4, variants: [{ subject: "", body: "<p>Following up</p>" }] },
+          ],
+        },
+      ];
+      for (const lead of f.state.campaignLeads.slice(1))
+        Object.assign(lead, { timestamp_last_contact: "2026-11-14T05:55:34.180Z" });
       const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
       expect((events[0] as { message: string }).message).toMatch(/would also email/);
       expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
       expect(sends(f)).toEqual([]);
+    });
+
+    it("takes never-emailed people nobody named out of a paused campaign, then resumes it", async () => {
+      // Sim 11-14: a mistyped address in a paused campaign blocked every send to the two people
+      // the recruiter named, and nothing could take it out.
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 2;
+      const out = f.result(await f.run("activate_campaign", { recipients: ["abe@x.test"] }));
+      expect(out).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
+      expect(f.state.campaignLeads.map((lead) => lead.email)).toEqual(["abe@x.test"]);
+      expect(sends(f).map((r) => r.path)).toEqual([`/api/v2/campaigns/${CAMPAIGN}/activate`]);
+    });
+
+    it("resumes a one-email campaign for the named people when everyone else was already emailed", async () => {
+      // Sim 11-14: a finished role campaign got two new people, and the send was refused as
+      // "would also email" the two it had already emailed, who have no step left.
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 2;
+      f.state.campaign.sequences = [
+        {
+          steps: [{ type: "email", delay: 0, variants: [{ subject: "Hi", body: "<p>Hello</p>" }] }],
+        },
+      ];
+      for (const lead of f.state.campaignLeads.slice(1))
+        Object.assign(lead, { timestamp_last_contact: "2026-11-14T05:55:34.180Z" });
+      const out = f.result(await f.run("activate_campaign", { recipients: ["abe@x.test"] }));
+      expect(out).toMatchObject({ recipients: ["abe@x.test"] });
+      expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
+      expect(sends(f).map((r) => r.path)).toEqual([`/api/v2/campaigns/${CAMPAIGN}/activate`]);
+    });
+
+    it("pauses a finished campaign before adding new people to it, emailing nobody", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 3;
+      await f.run("add_shortlist_leads", {
+        candidates: [{ candidate_key: "zoe", email: "zoe@x.test", first_name: "Zoe" }],
+      });
+      const writes = f.state.requests
+        .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+        .map((r) => `${r.method} ${r.path}`);
+      expect(writes).toEqual([
+        `POST /api/v2/campaigns/${CAMPAIGN}/pause`,
+        "POST /api/v2/leads/add",
+      ]);
     });
 
     it("adds only the named people to a campaign that is already sending", async () => {
@@ -5286,7 +5691,7 @@ describe("local native Instantly campaign and lead tools", () => {
       expect(out).toMatchObject({
         queued: true,
         recipients: ["abe.new@x.test"],
-        next: expect.stringContaining("never that they were sent"),
+        next: expect.stringContaining("never that it was sent"),
       });
       expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
       const saved = binding.result as { leads: object; staged: object };
@@ -5303,7 +5708,7 @@ describe("local native Instantly campaign and lead tools", () => {
       f.state.campaign.status = 1;
       const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
       expect((events[0] as { message: string }).message).toMatch(
-        /Already queued in this sending campaign, not emailed yet: .*Nothing failed\. .*send_now/,
+        /Already in this sending campaign and waiting to be emailed: .*Nothing failed\. .*send_now/,
       );
       expect(sends(f)).toEqual([]);
     });
@@ -5330,7 +5735,7 @@ describe("local native Instantly campaign and lead tools", () => {
       });
       const message = (events[0] as { message: string }).message;
       expect(message).toMatch(/Already emailed by this campaign: /);
-      expect(message).toMatch(/Already queued in this sending campaign, not emailed yet: Abe/);
+      expect(message).toMatch(/Already in this sending campaign and waiting to be emailed: Abe/);
       expect(sends(f)).toEqual([]);
     });
 
@@ -5362,7 +5767,8 @@ describe("local native Instantly campaign and lead tools", () => {
           queued: true,
           recipients: ["nick@x.test"],
           next: expect.stringContaining(
-            "it should be out by about 01:30 Central time (Chicago) at the latest",
+            // Minutes, never a local clock: gate b2005684 converted one to the wrong day.
+            "it should be out within about 15 minutes from now at the latest",
           ),
         });
         expect(out).not.toHaveProperty("firstEmailAt");
@@ -5405,11 +5811,12 @@ describe("local native Instantly campaign and lead tools", () => {
           lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
         const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(read).toMatchObject({
-          queued: ["abe@x.test"],
-          queuedFirstEmail: "Fri 09:00 America/Chicago",
+          notEmailedYet: ["abe@x.test"],
+          firstEmailGoesOut: "Fri 09:00 America/Chicago",
           next: expect.stringContaining("send_now"),
         });
         expect(read.emailed).toHaveLength(f.state.campaignLeads.length - 1);
+        expect(Object.values(read.emailedAt as object)).toContain("2026-11-12T15:00:00Z");
         f.state.requests.length = 0;
         const out = f.result(await f.run("activate_campaign", { send_now: true }));
         expect(
@@ -5424,7 +5831,7 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(out).toMatchObject({
           sendingNow: true,
           recipients: ["abe@x.test"],
-          next: expect.stringContaining("queued with the mail service"),
+          next: expect.stringContaining("not sent yet"),
         });
         // 11-13 staging: a check of the role's other campaign found nobody emailed and took the
         // queued answer back; the result names this campaign and says 0 means still queued.
@@ -5434,6 +5841,116 @@ describe("local native Instantly campaign and lead tools", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("says a send cannot leave when the mail service counts no sending mailbox", async () => {
+      // Staging 11-20: new sends from a mailbox the service did not count ("0 of 0") were still
+      // told "out within about 61 minutes".
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      await f.run("add_shortlist_leads", {
+        candidates: [{ candidate_key: "nick", email: "nick@x.test", first_name: "Nick" }],
+      });
+      f.state.sendingStatus = {
+        summary: {
+          status: "no_accounts_available",
+          status_message: "No sending accounts available",
+        },
+      };
+      const out = f.result(await f.run("activate_campaign", { recipients: ["nick@x.test"] }));
+      expect(out).toMatchObject({
+        mailServiceSays: { status: "no_accounts_available" },
+        next: expect.stringContaining("cannot send right now"),
+      });
+      expect(out.next).not.toMatch(/minutes/);
+    });
+
+    it("reads the mailbox after a draft starts, so a first send from a broken mailbox is not on its way", async () => {
+      // Audit 11-26: the sending status was read before the draft started, when the mail service
+      // reports only "draft", so the first send from a mailbox it could not use was "on its way".
+      const { f } = await roleWithSixteen();
+      f.state.sendingStatus = (requests) =>
+        requests.some((r) => r.method === "POST" && r.path.endsWith("/activate"))
+          ? {
+              summary: {
+                status: "no_accounts_available",
+                status_message: "No sending accounts available",
+              },
+            }
+          : { summary: { status: "campaign_draft", status_message: "Draft" } };
+      const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
+      expect(out).toMatchObject({
+        activated: true,
+        delivery: "held",
+        mailServiceSays: { status: "no_accounts_available" },
+        next: expect.stringContaining("cannot send right now"),
+      });
+      expect(out.next).not.toContain("their email is on its way");
+    });
+
+    it("never calls a started send on its way while the mail service still reports it not running", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.sendingStatus = {
+        summary: { status: "campaign_paused", status_message: "Campaign is paused" },
+      };
+      const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
+      expect(out).toMatchObject({
+        delivery: "held",
+        mailServiceSays: { status: "campaign_paused" },
+      });
+      expect(out.next).not.toContain("their email is on its way");
+    });
+
+    it("says why the mail service is holding a confirmed send instead of promising an hour", async () => {
+      // Staging 11-20: three confirmed one-person sends sat unsent over two hours after "within
+      // about 60 minutes at the latest".
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      f.state.campaign.campaign_schedule = {
+        schedules: [
+          {
+            ...WEEKDAYS_9_TO_5.schedules[0],
+            name: "Any time",
+            timing: { from: "00:00", to: "23:59" },
+            days: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((day) => [String(day), true])),
+          },
+        ],
+      };
+      for (const lead of f.state.campaignLeads.slice(1))
+        lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+      f.state.campaign.email_list = ["sender@x.test"];
+      f.state.sendingStatus = {
+        diagnostics: {
+          status: "account_daily_limit_met",
+          next_open_at: null,
+          accounts_summary: {
+            total_connected: 1,
+            available: 0,
+            unavailable: { daily_limit_hit: 1, disconnected: 0 },
+          },
+        },
+        summary: {
+          status: "account_daily_limit_met",
+          status_message: "All sending accounts reached their daily limit",
+          issue_started_at: "2026-11-20T19:30:00Z",
+        },
+      };
+      const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+      expect(read).toMatchObject({
+        notEmailedYet: ["abe@x.test"],
+        mailServiceSays: { status: "account_daily_limit_met" },
+        next: expect.stringContaining(
+          "All sending accounts reached their daily limit (0 of 1 sending mailboxes available; 1 daily limit hit)",
+        ),
+      });
+      expect(read.next).not.toMatch(/within|since/);
+      expect(read.next).toContain("it sends from sender@x.test");
+      f.state.sendingStatus = {
+        summary: { status: "waiting_for_leads", status_message: "No leads are ready" },
+      };
+      const sending = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+      expect(sending).not.toHaveProperty("mailServiceSays");
+      expect(sending.next).toMatch(/going out now/);
     });
 
     it("says people queued inside the sending hours are going out, and a send-now sends them one a minute", async () => {
@@ -5457,8 +5974,10 @@ describe("local native Instantly campaign and lead tools", () => {
           lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
         const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(read).toMatchObject({
-          queuedFirstEmail: "now",
-          next: expect.stringMatching(/all 2 should be out by about 01:40.*send_now/),
+          firstEmailGoesOut: "now",
+          next: expect.stringMatching(
+            /all 2 should be out within about \d+ minutes from now at the latest.*send_now/,
+          ),
         });
         f.state.requests.length = 0;
         const out = f.result(await f.run("activate_campaign", { send_now: true }));
@@ -5475,7 +5994,9 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(out).toMatchObject({
           sendingNow: true,
           recipients: ["abe@x.test", "p0@x.test"],
-          next: expect.stringContaining("all 2 should be out by about 01:31"),
+          next: expect.stringMatching(
+            /all 2 should be out within about \d+ minutes from now at the latest/,
+          ),
         });
         f.state.requests.length = 0;
         const again = await f.run("activate_campaign", { send_now: true });
@@ -5485,6 +6006,29 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(
           f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list")),
         ).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sends a campaign it paused for a send-now again when a later step fails", async () => {
+      // 11-14 staging: after a confirmed send a campaign stayed paused and nothing went out.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        f.state.campaign.status = 1;
+        f.state.campaign.email_gap = 10;
+        for (const lead of f.state.campaignLeads.slice(2))
+          lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+        f.state.requests.length = 0;
+        f.state.failReadAfterPatch = true;
+        await f.run("activate_campaign", { send_now: true });
+        const writes = f.state.requests
+          .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+          .map((r) => `${r.method} ${r.path}`);
+        expect(writes[0]).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/pause`);
+        expect(writes.at(-1)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
       } finally {
         vi.useRealTimers();
       }
@@ -5513,14 +6057,16 @@ describe("local native Instantly campaign and lead tools", () => {
           lead.timestamp_created = "2026-11-13T06:10:00Z";
         // 11-13 staging: each check counted the hour from the check, so the time kept slipping.
         const first = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
-        expect(first).toMatchObject({ next: expect.stringContaining("out by about 01:20") });
-        vi.setSystemTime(new Date(NIGHT.getTime() + 15 * 60_000));
+        expect(first).toMatchObject({ next: expect.stringContaining("about 5 minutes from now") });
+        vi.setSystemTime(new Date(NIGHT.getTime() + 3 * 60_000));
         const later = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
-        expect(later).toMatchObject({ next: expect.stringContaining("out by about 01:20") });
+        expect(later).toMatchObject({ next: expect.stringContaining("about 2 minutes from now") });
         vi.setSystemTime(new Date(NIGHT.getTime() + 90 * 60_000));
         const late = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(late).toMatchObject({
-          next: expect.stringMatching(/since 00:10 .*longer than its usual hour; nothing failed/),
+          next: expect.stringMatching(
+            /since 00:10 .*longer than its usual 15 minutes; nothing failed/,
+          ),
         });
       } finally {
         vi.useRealTimers();
@@ -5613,6 +6159,67 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(f.state.campaignLeads).toEqual([
           expect.objectContaining({ email: "abe@x.test", payload: OWN_VARIABLES }),
         ]);
+      });
+
+      it("sends the saved email the card showed when the mail service still holds an older one", async () => {
+        // Gate deb21fb1, stop-after-approve: the card was read from the mail service seconds
+        // after a save and the check at approval read it again; three approved cards sent nothing.
+        const { f } = await roleWithSixteen();
+        await saveForAbe(f);
+        const abe = f.state.campaignLeads.find((lead) => lead.email === "abe@x.test")!;
+        abe.payload = { rk_subject: "Hi", rk_body: "Hi Abe" };
+        f.state.requests.length = 0;
+        const sent = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
+        expect(sent).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
+        const write = f.state.requests.findIndex(
+          (r) => r.method === "PATCH" && r.path === "/api/v2/leads/lead-abe",
+        );
+        expect(f.state.requests[write]?.body).toEqual({ custom_variables: OWN_VARIABLES });
+        const activate = f.state.requests.findIndex((r) => r.path.endsWith("/activate"));
+        expect(write).toBeGreaterThan(-1);
+        expect(write).toBeLessThan(activate);
+      });
+
+      it("saves one email for each named person when written as one step each", async () => {
+        // Gate 426d09b9, stop-after-approve: two people's emails in one save were refused, Kruit
+        // saved only Noah's, and the card left Ada out though the recruiter named both.
+        const { f, binding } = await roleWithSixteen();
+        const P0 = { subject: "P0, a data role", body: "Hi P0,\n\nA role in Seattle." };
+        const out = f.result(
+          await f.run("ensure_role_campaign", {
+            steps: [OWN, P0],
+            recipients: ["Abe Stone", "p0@x.test"],
+          }),
+        );
+        expect(out).toMatchObject({ ownEmailSavedFor: ["abe@x.test", "p0@x.test"] });
+        expect(binding.result).toMatchObject({ drafts: { "abe@x.test": OWN, "p0@x.test": P0 } });
+      });
+
+      it("fills {{firstName}} for each person when one email is saved for several", async () => {
+        const { f, binding } = await roleWithSixteen();
+        const out = f.result(
+          await f.run("ensure_role_campaign", {
+            steps: [{ subject: "A data role", body: "Hi {{firstName}},\n\nA role in Seattle." }],
+            recipients: ["abe@x.test", "p0@x.test"],
+          }),
+        );
+        expect(out).toMatchObject({ ownEmailSavedFor: ["abe@x.test", "p0@x.test"] });
+        expect(binding.result).toMatchObject({
+          drafts: {
+            "abe@x.test": { subject: "A data role", body: "Hi Abe,\n\nA role in Seattle." },
+            "p0@x.test": { subject: "A data role", body: "Hi P0,\n\nA role in Seattle." },
+          },
+        });
+      });
+
+      it("saving the same email again once it is sending changes nothing", async () => {
+        const { f } = await roleWithSixteen();
+        await saveForAbe(f);
+        f.state.campaign.status = 1;
+        f.state.requests.length = 0;
+        const out = f.result(await saveForAbe(f));
+        expect(out).toMatchObject({ ownEmailSavedFor: ["abe@x.test"], unchanged: true });
+        expect(patches(f)).toEqual([]);
       });
 
       it("keeps their own email when the role's email is saved again", async () => {
@@ -5709,18 +6316,21 @@ describe("local native Instantly campaign and lead tools", () => {
         }
       });
 
-      it("refuses an email with variables, more than one step, or a person not yet added", async () => {
+      it("refuses an unfillable variable, more than one step, or a person not yet added", async () => {
         const { f } = await roleWithSixteen();
         const message = async (args: Record<string, unknown>) =>
           ((await f.run("ensure_role_campaign", args))[0] as { message: string }).message;
         expect(
+          await message({ steps: [{ subject: "Hi", body: "Hi {{title}}" }], recipients: ["Abe"] }),
+        ).toMatch(/a \{\{\.\.\.\}\} field other than \{\{firstName\}\}/);
+        expect(
           await message({
-            steps: [{ subject: "Hi", body: "Hi {{firstName}}" }],
-            recipients: ["Abe"],
+            steps: [{ subject: "Hi", body: "Hi {{firstName}} {{lastName}}" }],
+            recipients: ["abe@x.test", "p0@x.test"],
           }),
-        ).toMatch(/without \{\{variables\}\}/);
+        ).toMatch(/No lastName is known for P0/);
         expect(await message({ steps: [OWN, OWN], recipients: ["Abe Stone"] })).toMatch(
-          /exactly one step/,
+          /pass one step: .*or one step per recipient/,
         );
         expect(await message({ steps: [OWN], recipients: ["nobody@x.test"] })).toMatch(
           /Ask the recruiter one question: which person they mean/,
@@ -5805,6 +6415,7 @@ describe("local native Instantly campaign and lead tools", () => {
         f.state.addToCampaign = true;
         f.state.candidates = [];
         f.state.lookups = [];
+        f.state.typed = ["Please email Noah at Noah@X.test about the data role"];
         const note = { subject: "A data role", body: "Hi Noah,\n\nA note just for you." };
         const out = f.result(
           await f.run("ensure_role_campaign", { steps: [note], recipients: ["Noah@X.test"] }),
@@ -5826,6 +6437,68 @@ describe("local native Instantly campaign and lead tools", () => {
         });
         // Nothing goes out until the send card is confirmed.
         expect(f.state.requests.filter((r) => r.path.endsWith("/activate"))).toEqual([]);
+      });
+
+      it("takes a person's name written beside their address for {{firstName}}", async () => {
+        const { f, binding } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [];
+        f.state.lookups = [];
+        f.state.typed = ["Noah Liu noah@x.test 和 Ada Chen ada@x.test，帮我发"];
+        const note = { subject: "A data role", body: "Hi {{firstName}},\n\nA note just for you." };
+        const out = f.result(
+          await f.run("ensure_role_campaign", {
+            steps: [note],
+            recipients: ["Noah Liu <noah@x.test>", '"Ada Chen" <ada@x.test>'],
+          }),
+        );
+        expect(out).toMatchObject({ ownEmailSavedFor: ["noah@x.test", "ada@x.test"] });
+        expect(binding.result).toMatchObject({
+          drafts: {
+            "noah@x.test": { body: "Hi Noah,\n\nA note just for you." },
+            "ada@x.test": { body: "Hi Ada,\n\nA note just for you." },
+          },
+        });
+      });
+
+      it("refuses an address nobody wrote, naming the saved one a letter off", async () => {
+        const { f } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [];
+        f.state.lookups = [];
+        f.state.typed = ["Send Ada the note"];
+        const note = { subject: "A data role", body: "Hi Ada,\n\nA note just for you." };
+        const message = async (recipients: string[]) =>
+          (
+            (await f.run("ensure_role_campaign", { steps: [note], recipients }))[0] as {
+              message: string;
+            }
+          ).message;
+        // The campaign holds abe@x.test; the agent retyped it with two letters swapped.
+        expect(await message(["abe@x.tset"])).toContain(
+          "Nothing was saved: abe@x.tset is not an address anyone wrote in this conversation or a saved email of this role's candidates. If they mean abe@x.test, the closest saved address, use it exactly; otherwise ask the recruiter one question: which person they mean, by full name or email.",
+        );
+        // Two saved addresses as close says nothing about which one they meant.
+        expect(await message(["p@x.test"])).not.toMatch(/closest/);
+        expect(f.state.requests.filter((r) => r.path === "/api/v2/leads/add")).toEqual([]);
+      });
+
+      it("takes an address the recruiter wrote in the conversation that opened the role", async () => {
+        const { f } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [];
+        f.state.lookups = [];
+        // The role holds only a later message of theirs; the address is in their first request.
+        f.state.typed = ["Ada呢？卡片上只有Noah"];
+        f.state.typedElsewhere = ["Noah Liu noah@x.test 和 Ada Chen ada@x.test，首封写好发"];
+        const note = { subject: "A data role", body: "Hi {{firstName}},\n\nA note just for you." };
+        const out = f.result(
+          await f.run("ensure_role_campaign", {
+            steps: [note],
+            recipients: ["Noah Liu <noah@x.test>", "Ada Chen <ada@x.test>"],
+          }),
+        );
+        expect(out).toMatchObject({ ownEmailSavedFor: ["noah@x.test", "ada@x.test"] });
       });
 
       it("still refuses an unknown or ambiguous person with one question, adding nobody", async () => {
@@ -5862,9 +6535,24 @@ describe("local native Instantly campaign and lead tools", () => {
 
 describe("MCP discovery tool-list cache", () => {
   function fixture() {
-    const state = { failNext: false, initializations: 0, lists: 0 };
-    const fetch = mcpFetch(state);
+    const state = { failNext: false, unreachable: 0, initializations: 0, lists: 0 };
+    const example = mcpFetch(state);
+    const exa = mcpFetch(state, `${PLATFORM_PEOPLE_SEARCH_ENDPOINT},agent_run`);
+    const fetch = (input: string | URL | Request, init?: RequestInit) =>
+      new URL(logicalHref(input, init)).origin === "https://mcp.exa.ai"
+        ? exa(input, init)
+        : example(input, init);
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      if (state.unreachable > 0) {
+        state.unreachable -= 1;
+        // What the container's network gives during a burst: the connection never opens.
+        throw new TypeError("fetch failed", {
+          cause: Object.assign(new Error("connect ETIMEDOUT 192.0.2.1:443"), {
+            code: "ETIMEDOUT",
+            syscall: "connect",
+          }),
+        });
+      }
       const request = input instanceof Request ? input : new Request(input, init);
       if (request.method === "POST" && (await request.clone().text()).includes('"tools/list"'))
         state.lists += 1;
@@ -5917,6 +6605,24 @@ describe("MCP discovery tool-list cache", () => {
     }
   });
 
+  it("lists a server reached with the deployment's key once for every account", async () => {
+    const f = fixture();
+    try {
+      f.setAssignment({ server: { ...SERVER, endpoint: PLATFORM_PEOPLE_SEARCH_ENDPOINT } });
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      const other = { ...(f.context as object), spaceId: "w2", userId: "u2" } as never;
+      expect(await f.connector.discoverTools(other)).toHaveLength(1);
+      expect(f.state.lists).toBe(1);
+      // A server without the deployment's key keeps its list per account.
+      f.setAssignment({ server: { ...SERVER, revision: 2 } });
+      await f.connector.discoverTools(f.context);
+      await f.connector.discoverTools(other);
+      expect(f.state.lists).toBe(3);
+    } finally {
+      await f.connector.close();
+    }
+  });
+
   it("lists again for a refresh discovery even while the cached list is fresh", async () => {
     const f = fixture();
     try {
@@ -5950,12 +6656,55 @@ describe("MCP discovery tool-list cache", () => {
       expect(tools[0]!.route?.resourceRevision).toBe(2);
       await f.connector.discoverTools(f.context);
       expect(f.state.lists).toBe(2);
+      // An old list still answers at once and is listed again in the background.
       await vi.advanceTimersByTimeAsync(DISCOVERY_CACHE_TTL_MS);
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      await vi.waitFor(() => expect(f.state.lists).toBe(3));
       await f.connector.discoverTools(f.context);
       expect(f.state.lists).toBe(3);
     } finally {
       await f.connector.close();
       vi.useRealTimers();
+    }
+  });
+
+  it("never hides a server from runs because the background refresh failed", async () => {
+    const f = fixture();
+    try {
+      f.state.failNext = true;
+      const refresh = {
+        ...(f.context as object),
+        operationId: DISCOVERY_REFRESH_OPERATION,
+      } as never;
+      expect(await f.connector.discoverTools(refresh)).toEqual([]);
+      f.state.failNext = false;
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+    } finally {
+      await f.connector.close();
+    }
+  });
+
+  it("connects again when a connection did not open, and forgets that failure within seconds", async () => {
+    const f = fixture();
+    try {
+      // One dropped connection is retried at once and the run still gets its tools.
+      f.state.unreachable = 1;
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      await f.connector.close();
+      const g = fixture();
+      try {
+        // A burst longer than the retries is remembered only briefly, not for the failure TTL.
+        g.state.unreachable = 3;
+        expect(await g.connector.discoverTools(g.context)).toEqual([]);
+        expect(await g.connector.discoverTools(g.context)).toEqual([]);
+        vi.useFakeTimers({ now: Date.now() + DISCOVERY_FAILURE_TTL_MS + 1, toFake: ["Date"] });
+        expect(await g.connector.discoverTools(g.context)).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+        await g.connector.close();
+      }
+    } finally {
+      await f.connector.close();
     }
   });
 
@@ -5980,12 +6729,13 @@ describe("MCP discovery tool-list cache", () => {
       f.setAssignment({ server: { ...SERVER, revision: 2 } });
       expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
       expect(f.state.lists).toBe(1);
-      // TTL expiry retries.
+      // A failed background re-list of an old list never hides the server from a run.
       f.state.failNext = true;
       await vi.advanceTimersByTimeAsync(DISCOVERY_CACHE_TTL_MS);
-      expect(await f.connector.discoverTools(f.context)).toEqual([]);
-      f.state.failNext = false;
-      await vi.advanceTimersByTimeAsync(DISCOVERY_FAILURE_TTL_MS);
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      await vi.waitFor(() =>
+        expect(sink.events.some((event) => event.message === "discovery.relist_failed")).toBe(true),
+      );
       expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
     } finally {
       await f.connector.close();

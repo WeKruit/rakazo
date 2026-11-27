@@ -22,10 +22,9 @@ import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
   GMAIL_SEND_TOOLS,
+  GOOGLE_CALENDAR_ENDPOINT,
   PLACEHOLDER_NOTE,
   recruitingBotKey,
-  signedAsTeam,
-  TEAM_SIGNATURE_NOTE,
   unfilledPlaceholder,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
@@ -63,6 +62,7 @@ import {
   roleCampaignIds,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
+import type { InstantlyEmail } from "./instantly-reply.js";
 import {
   readInstantlyEmail,
   readInstantlyEmailPage,
@@ -71,6 +71,7 @@ import {
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import {
   CATALOG_EXECUTE,
+  CATALOG_SEARCH,
   catalogEntries,
   DIRECT_TOOL_LIMIT,
   executeLazyCatalogControl,
@@ -81,25 +82,29 @@ import {
 } from "./lazy-tool-catalog.js";
 import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
-import { type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
+import { McpNotConnectedError, type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
+import { addressTypedInConversation } from "./named-address.js";
+import { ownMailboxSendRefusal, recordOwnMailboxSend } from "./own-mailbox-sends.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   lookedUpContacts,
   prepareAgentRun,
+  profileLookupArgs,
   recordAgentRunCost,
-  requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
-  requireQuickSearchBeforeResearch,
+  requireRoleForPeopleSearch,
   savedContactLookups,
+  searchSchemaForAgent,
 } from "./recruiting-research.js";
 import {
   assertSchedulingCall,
   SchedulingApprovalEvidenceSchema,
   schedulingPlanHash,
 } from "./recruiting-scheduling.js";
-import { addressTypedInConversation, unresolvedContactEmailError } from "./recruiting-tools.js";
+import { unresolvedContactEmailError } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
+import { withOpenQuestions } from "./reply-open-questions.js";
 
 const INSTANTLY_MCP = "https://mcp.instantly.ai/mcp";
 const GMAIL_MCP = "https://gmailmcp.googleapis.com/mcp/v1";
@@ -151,7 +156,10 @@ const MailboxEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
   eaccount: z
     .email()
     .max(254)
-    .describe("Your connected Instantly mailbox to list. Never a contact address."),
+    .optional()
+    .describe(
+      "Your connected Instantly mailbox to list. Never a contact address. Optional when you have one mailbox.",
+    ),
   search: z
     .string()
     .max(500)
@@ -266,17 +274,20 @@ export async function agentCrmScopedArgs(
   return next;
 }
 
+/** No campaign was named among several: the one refusal the agent can fix itself. */
+class CampaignChoiceError extends IsolationError {}
+
 export function scopedInstantlyCampaign(
   args: Record<string, unknown>,
   campaigns: readonly string[],
 ): string {
   const selected = args.campaign_id ?? (campaigns.length === 1 ? campaigns[0] : undefined);
   if (selected === undefined && campaigns.length > 1)
-    throw new IsolationError(
+    throw new CampaignChoiceError(
       `Select an exact campaign of the current recruiting role before reading its email: pass campaign_id, one of ${campaigns.join(", ")}`,
     );
   if (typeof selected !== "string" || !campaigns.includes(selected))
-    throw new IsolationError(
+    throw new CampaignChoiceError(
       "Select an exact campaign of the current recruiting role before reading its email",
     );
   return selected;
@@ -310,7 +321,11 @@ export function scopeRefusal(error: Error): string {
   return `${reason ? `${reason.replace(/[.\s]+$/, "")}. ` : ""}${PATH_REFUSAL_NOTE}`;
 }
 
-const NO_OUTREACH_CAMPAIGN_YET = "This account has no outreach campaign yet";
+export class NoOutreachCampaignError extends IsolationError {
+  constructor() {
+    super("This account has no outreach campaign yet");
+  }
+}
 export const NO_EMAIL_HISTORY_YET =
   "No emails yet: this account has not emailed anyone, so there is no history with this person. Treat it as a first email.";
 const nativeInstantlyReads = [
@@ -406,7 +421,10 @@ function localInstantlyTools(
     tools.push({
       name: `instantly__${assignment.server.slug}__${local.name}`,
       description: local.description,
-      inputSchema: local.inputSchema,
+      inputSchema:
+        local.toolName === "native_instantly_reply_to_email"
+          ? withOpenQuestions(local.inputSchema)
+          : local.inputSchema,
       readOnly: local.readOnly,
       route: route(local.toolName),
     });
@@ -487,13 +505,18 @@ const GmailSendInput = z.strictObject({
     .min(1)
     .max(50_000)
     .describe("Plain-text body.")
-    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE)
     .refine((body) => !unfilledPlaceholder(body), PLACEHOLDER_NOTE),
   replyThreadId: z
     .string()
     .regex(/^[0-9a-f]{6,64}$/i)
     .optional()
     .describe("To follow up, the Gmail thread id of the earlier email to this person."),
+  resend: z
+    .boolean()
+    .optional()
+    .describe(
+      "Only when the recruiter asks for a new separate email to someone this account already emailed.",
+    ),
 });
 
 /**
@@ -687,8 +710,6 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
     return server.secretId ? undefined : { key, label: "Contact enrichment" };
   }
   if (server.secretId) return undefined;
-  if (server.endpoint === "https://api.autumn.ai/mcp")
-    return { key: process.env.AUTUMN_API_KEY?.trim(), label: "Recruiting research" };
   // People search also works keyless at a lower rate limit, so a missing key is not a setup gap.
   if (server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
     return { key: process.env.EXA_API_KEY?.trim(), label: "People search", keyless: true };
@@ -697,35 +718,77 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
 
 /** Tools listed outside the lazy catalog even when an agent has many connected tools. */
 const directTools = new WeakSet<ConnectorTool>();
+/**
+ * A calendar's own create, which only a reviewed booking plan calls (recruiting_scheduling book
+ * resolves it): never listed to an agent, so the one booking route is the only one it sees.
+ */
+const planOnlyTools = new WeakSet<ConnectorTool>();
+const PLAN_ONLY = {
+  "https://mcp.cal.com/mcp": "create_booking",
+  [GOOGLE_CALENDAR_ENDPOINT]: "create_event",
+} as Record<string, string>;
+const endpointBase = (endpoint: string | null | undefined) => {
+  const url = endpoint ? URL.parse(endpoint) : null;
+  return url ? `${url.origin}${url.pathname.replace(/\/$/, "")}` : "";
+};
+/** The people-search tools. */
+const PEOPLE_SEARCH_TOOLS = ["web_search_exa", "web_search_advanced_exa", "agent_run"];
+/**
+ * The account-wide conversation only reads: every operation on a role (its people searches and
+ * contact lookups, its mail, bookings and record changes) runs in that role's conversation, so
+ * here an agent is listed a connection's reads and nothing else. A reply sent from both places
+ * reached one candidate twice (branch play 11-27); the user's rule 11-27: the main chat does no
+ * operations, it hands them to the role.
+ */
+const ROLE_LOOKUPS = new Set([...PEOPLE_SEARCH_TOOLS, "find_emails"]);
+const accountWideRead = (tool: ConnectorTool) =>
+  !ROLE_LOOKUPS.has(coreName(tool)) &&
+  (tool.readOnly ?? REMOTE_READ.test(tool.route?.toolName ?? ""));
+/** Runs whose catalog left out operations, so a search there names where they are done. */
+const operationsHidden = new WeakSet<AdapterContext>();
+const OPERATIONS_ELSEWHERE =
+  "This conversation only reads. Searching for people, contact lookups, mail to candidates, bookings and changes to a role's records are done in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, in the recruiter's own words; either shows the recruiter the card that opens that conversation. Never tell the recruiter it cannot be done.";
 
+const OUTREACH_CORE = [
+  "ensure_role_campaign",
+  "add_shortlist_leads",
+  "activate_campaign",
+  "get_campaign",
+  "list_leads",
+  "get_email",
+  "reply_to_email",
+  "find_emails",
+];
 /**
  * Each recruiting agent's own work tools, listed outside the lazy catalog on whichever connection
  * the bot is assigned, so a turn never searches for them. Matched by the tool's own name; the
  * people search is already direct for every bot.
  */
 export const CORE_TOOLS: Readonly<Record<string, readonly string[]>> = {
-  outreach: [
-    "ensure_role_campaign",
-    "add_shortlist_leads",
-    "activate_campaign",
-    "get_campaign",
-    "list_leads",
-    "get_email",
-    "reply_to_email",
-    "find_emails",
+  // Kruit answers candidates and books calls from the conversation itself (a reply wake runs it,
+  // not a specialist), so those tools need no catalog search and load first either. A booking is
+  // made with recruiting_scheduling on either calendar, so the calendars' own creates are not here.
+  main: [
+    ...OUTREACH_CORE,
+    "get_availability",
+    "reschedule_booking",
+    "cancel_booking",
+    "list_events",
+    "update_event",
+    "delete_event",
+    "suggest_time",
   ],
+  outreach: OUTREACH_CORE,
   scheduling: [
     "get_event_types",
     "get_event_type",
     "get_availability",
-    "create_booking",
     "reschedule_booking",
     "cancel_booking",
     "get_booking",
     "get_bookings",
     "suggest_time",
     "list_events",
-    "create_event",
     "update_event",
     "delete_event",
   ],
@@ -760,6 +823,18 @@ function directSet(tools: readonly ConnectorTool[]): Set<ConnectorTool> {
 
 export const PLATFORM_PEOPLE_SEARCH_ENDPOINT =
   "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
+/** The platform people searches that only read; a retry costs a search, never a duplicate effect. */
+function peopleSearchRead(
+  server: Pick<McpServer, "transport" | "endpoint"> | undefined,
+  tool: string,
+) {
+  return (
+    server?.transport === "streamable_http" &&
+    server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
+    (tool === "web_search_exa" || tool === "web_search_advanced_exa")
+  );
+}
+const isNeverSent = (error: unknown) => error instanceof McpNotConnectedError;
 
 let warnedKeylessPeopleSearch = false;
 /**
@@ -890,31 +965,16 @@ export async function loadMcpCredentialRecord(
 /** How long a worker reuses a server's discovered tool list before listing it again. */
 export const DISCOVERY_CACHE_TTL_MS = 10 * 60_000;
 /**
- * How long a worker skips a server whose discovery just failed, instead of reconnecting every run.
- * Longer than the prewarm cadence, which retries it in the background.
+ * How long a worker skips a server whose listing just failed (a short breaker, then one trial):
+ * a passing network or server error must not hide a service from runs for minutes.
  */
-export const DISCOVERY_FAILURE_TTL_MS = DISCOVERY_CACHE_TTL_MS;
+export const DISCOVERY_FAILURE_TTL_MS = 30_000;
+/** A server that refused the credential stays skipped until the window ends or a reconnect. */
+export const CONNECTION_REFUSED_TTL_MS = DISCOVERY_CACHE_TTL_MS;
 /** Discovery with this operation id lists every server again, refreshing the cache for runs. */
 export const DISCOVERY_REFRESH_OPERATION = "discovery.prewarm";
-/**
- * How long a run waits for the shared mail account's remote tool list. Its own mail tools call
- * the REST API directly, so a cold connection (about 12 s for a new account) must not hold the
- * first answer; the listing finishes in the background and serves the next run.
- */
-export const SHARED_MAIL_DISCOVERY_BUDGET_MS = 1_000;
-
-/** The promise's value when it settles within ms, else undefined (it keeps running). */
-async function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<undefined>((resolve) => {
-    timer = setTimeout(resolve, ms, undefined);
-  });
-  try {
-    return await Promise.race([promise, late]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
+/** How long a background re-list of an old tool list may take. */
+const RELIST_TIMEOUT_MS = 60_000;
 
 export class McpConnector implements ConnectorProvider {
   private readonly sessions = new Map<string, SessionEntry>();
@@ -939,6 +999,13 @@ export class McpConnector implements ConnectorProvider {
   private readonly toolCatalog = new Map<
     string,
     { version: string; at: number; listed: Awaited<ReturnType<McpSession["listTools"]>> }
+  >();
+  /** Background re-lists in flight, one per list key. */
+  private readonly relisting = new Map<string, Promise<unknown>>();
+  /** A shared list being fetched for the first time, which every account waiting on it shares. */
+  private readonly listing = new Map<
+    string,
+    Promise<Awaited<ReturnType<McpConnector["listFresh"]>>>
   >();
   private catalogGeneration = 0;
   private readonly unsubscribe: () => void;
@@ -995,7 +1062,7 @@ export class McpConnector implements ConnectorProvider {
   }
 
   async discoverTools(context: AdapterContext): Promise<ConnectorTool[]> {
-    const tools = await this.authorizedTools(context);
+    const tools = (await this.authorizedTools(context)).filter((tool) => !planOnlyTools.has(tool));
     if (tools.length <= DIRECT_TOOL_LIMIT) return tools;
     // The built-in people search and each agent's core work tools stay directly callable, so a
     // calibration round or an outreach step needs no catalog search and load turns first.
@@ -1042,11 +1109,18 @@ export class McpConnector implements ConnectorProvider {
     const groups = await Promise.all(
       assignments.map(async (assignment): Promise<ConnectorTool[]> => {
         const core = coreTools(assignment.bot);
+        const planOnly = PLAN_ONLY[endpointBase(assignment.server.endpoint)];
         const withCore = (tools: ConnectorTool[]) => {
-          for (const tool of tools) if (core.has(coreName(tool))) directTools.add(tool);
-          return tools;
+          for (const tool of tools) {
+            if (core.has(coreName(tool))) directTools.add(tool);
+            if (tool.route?.toolName === planOnly) planOnlyTools.add(tool);
+          }
+          if (!context.accountWideConversation) return tools;
+          const kept = tools.filter(accountWideRead);
+          if (kept.length < tools.length) operationsHidden.add(context);
+          return kept;
         };
-        // A grant of no tools (a retired platform service) needs no listing call.
+        // A grant of no tools needs no listing call.
         if (
           !assignment.allowAllTools &&
           Array.isArray(assignment.allowedTools) &&
@@ -1081,17 +1155,7 @@ export class McpConnector implements ConnectorProvider {
           this.discoveryFailures.delete(failureKey);
         }
         try {
-          const listing = this.listServerTools(assignment.server, context);
-          const listed =
-            sharedInstantlyAccount(assignment.server) &&
-            context.operationId !== DISCOVERY_REFRESH_OPERATION
-              ? await withinBudget(listing, SHARED_MAIL_DISCOVERY_BUDGET_MS)
-              : await listing;
-          if (!listed) {
-            listing.catch(() => undefined);
-            getLogger().info("discovery.deferred", { server: assignment.server.slug });
-            return withCore(localInstantlyTools(assignment, []));
-          }
+          const listed = await this.listServerTools(assignment.server, context);
           reportAllowlistDrift(
             assignment,
             // Gmail's send names stay allowed for when Google offers them; send_message is served
@@ -1107,12 +1171,27 @@ export class McpConnector implements ConnectorProvider {
                 (assignment.allowAllTools ||
                   (assignment.allowedTools as unknown[]).includes(tool.name)) &&
                 (!sharedInstantlyAccount(assignment.server) ||
-                  SHARED_INSTANTLY_REMOTE.includes(tool.name)),
+                  SHARED_INSTANTLY_REMOTE.includes(tool.name)) &&
+                // An agent that runs rounds gets one people search: beside the advanced one the
+                // plain one was picked for first rounds, and its thin profiles graded unknown.
+                !(
+                  tool.name === "web_search_exa" &&
+                  assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
+                  !assignment.allowAllTools &&
+                  (assignment.allowedTools as unknown[]).includes("web_search_advanced_exa")
+                ),
             )
             .map((tool) => ({
               name: `mcp__${assignment.server.slug}__${tool.name}`,
               description: tool.description ?? tool.name,
-              inputSchema: tool.inputSchema as Record<string, unknown>,
+              inputSchema:
+                tool.name === "reply_to_email" && assignment.server.endpoint === INSTANTLY_MCP
+                  ? withOpenQuestions(tool.inputSchema as Record<string, unknown>)
+                  : searchSchemaForAgent(
+                      assignment.server,
+                      tool.name,
+                      tool.inputSchema as Record<string, unknown>,
+                    ),
               route: {
                 connectorId: "mcp",
                 resourceId: assignment.serverId,
@@ -1143,11 +1222,13 @@ export class McpConnector implements ConnectorProvider {
           // Capture material before eviction so the audited reason stays redacted, the
           // same reason execute() captures it before callTool.
           const key = failureKey;
-          this.discoveryFailures.set(key, {
-            version: this.discoveryVersion(assignment.server),
-            until: Date.now() + DISCOVERY_FAILURE_TTL_MS,
-            logged: false,
-          });
+          // The background refresh must never hide a server from runs: a run lists it itself.
+          if (context.operationId !== DISCOVERY_REFRESH_OPERATION)
+            this.discoveryFailures.set(key, {
+              version: this.discoveryVersion(assignment.server),
+              until: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+              logged: false,
+            });
           const material = this.sessions.get(key)?.material;
           await this.evict(key);
           await this.recordDiscoveryFailure(
@@ -1162,7 +1243,19 @@ export class McpConnector implements ConnectorProvider {
         }
       }),
     );
-    return groups.flat();
+    const tools = groups.flat();
+    const crm = (tool: ConnectorTool) => /(?:^crm_|_crm_)/.test(tool.route?.toolName ?? "");
+    if (!context.runId || !tools.some(crm)) return tools;
+    // Every CRM call is refused outside a conversation linked to a CRM role, so the tools are
+    // not offered there: an agent that finds one spends its turn on calls that cannot succeed.
+    const unlinked = new Set<string>();
+    for (const { server } of assignments)
+      if (tools.some((tool) => crm(tool) && tool.route?.resourceId === server.id))
+        await this.crmBinding(context, server).catch((error: unknown) => {
+          if (!(error instanceof IsolationError)) throw error;
+          unlinked.add(server.id);
+        });
+    return tools.filter((tool) => !crm(tool) || !unlinked.has(tool.route?.resourceId ?? ""));
   }
 
   /**
@@ -1210,11 +1303,23 @@ export class McpConnector implements ConnectorProvider {
     }
     if (isLazyCatalogControlRoute(call.route)) {
       try {
-        yield* executeLazyCatalogControl(
+        const tools = await this.authorizedTools(context);
+        // Search and load list what an agent may pick; a plan's approved booking still runs.
+        for await (const event of executeLazyCatalogControl(
           call,
-          catalogEntries(await this.authorizedTools(context)),
+          catalogEntries(
+            call.route.toolName === CATALOG_EXECUTE
+              ? tools
+              : tools.filter((tool) => !planOnlyTools.has(tool)),
+          ),
           (resolved) => this.execute(resolved, context),
-        );
+        )) {
+          yield call.route.toolName === CATALOG_SEARCH &&
+          event.type === "result" &&
+          operationsHidden.has(context)
+            ? { ...event, data: { ...(event.data as object), note: OPERATIONS_ELSEWHERE } }
+            : event;
+        }
       } catch (error) {
         // A tool of a refused connection is no longer in the catalog; say why, not "unknown".
         const refused = this.refusedCatalogTool(String(call.args.id ?? ""), context);
@@ -1243,6 +1348,8 @@ export class McpConnector implements ConnectorProvider {
     const startedAt = Date.now();
     let calledAt = startedAt;
     let sessionKey: string | undefined;
+    /** The session this call used, so a failure closes only that one and not a fresh replacement. */
+    let usedSession: McpSession | undefined;
     let calledServer: McpServer | undefined;
     try {
       if (call.route.toolName === FIND_EMAILS) {
@@ -1321,17 +1428,11 @@ export class McpConnector implements ConnectorProvider {
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
         ["web_search_exa", "web_search_advanced_exa", "agent_run"].includes(call.route.toolName);
+      const searchRead = peopleSearchRead(assignment.server, call.route.toolName);
       const enrichmentResults =
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === "https://mcp.fullenrich.com/mcp" &&
         call.route.toolName === "get_enrichment_results";
-      await requireAutumnTaskOwnership(
-        this.prisma,
-        context,
-        assignment.server,
-        call.route.toolName,
-        call.args,
-      );
       const ownedArgs = await requireFullEnrichJobOwnership(
         this.prisma,
         context,
@@ -1339,7 +1440,7 @@ export class McpConnector implements ConnectorProvider {
         call.route.toolName,
         call.args,
       );
-      await requireQuickSearchBeforeResearch(
+      await requireRoleForPeopleSearch(
         this.prisma,
         context,
         assignment.server,
@@ -1352,19 +1453,40 @@ export class McpConnector implements ConnectorProvider {
           : null;
       sessionKey = this.sessionKey(assignment.server, context);
       let session = await this.sessionFor(assignment.server, context);
+      usedSession = session;
       material = this.sessions.get(sessionKey)?.material;
       context.signal.throwIfAborted();
-      const emailScope =
-        assignment.server.endpoint === INSTANTLY_MCP &&
-        ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
-          ? await this.instantlyCampaignScope(context, assignment.server.id)
-          : null;
-      let args = await prepareAgentRun(
-        this.prisma,
-        context,
+      let emailScope: Awaited<ReturnType<typeof this.instantlyCampaignScope>> = null;
+      try {
+        emailScope =
+          assignment.server.endpoint === INSTANTLY_MCP &&
+          ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
+            ? await this.instantlyCampaignScope(context, assignment.server.id)
+            : null;
+      } catch (error) {
+        // Simulated 11-16: "was it sent?" read this as a failure and Kruit could not say. An
+        // account with no campaign has sent nothing, so its mail list is an empty answer.
+        if (
+          call.route.toolName !== "list_emails" ||
+          !(error instanceof NoOutreachCampaignError)
+        )
+          throw error;
+        yield {
+          type: "result",
+          data: { structuredContent: { items: [], note: NO_EMAIL_HISTORY_YET } },
+        };
+        return;
+      }
+      let args = profileLookupArgs(
         assignment.server,
         call.route.toolName,
-        ownedArgs,
+        await prepareAgentRun(
+          this.prisma,
+          context,
+          assignment.server,
+          call.route.toolName,
+          ownedArgs,
+        ),
       );
       if (emailScope && call.route.toolName === "list_emails") {
         const campaignId = scopedInstantlyCampaign(args, emailScope.campaignIds);
@@ -1485,6 +1607,7 @@ export class McpConnector implements ConnectorProvider {
       let result: Awaited<ReturnType<McpSession["callTool"]>>;
       const enrichmentDeadline = Date.now() + ENRICHMENT_WAIT_MS;
       const retryDeadline = Date.now() + PEOPLE_SEARCH_RETRY_BUDGET_MS;
+      let reconnected = false;
       for (let attempt = 0; ; attempt += 1) {
         context.signal.throwIfAborted();
         if (peopleSearch) await peopleSearchTurn(context.signal);
@@ -1511,6 +1634,24 @@ export class McpConnector implements ConnectorProvider {
             throw new Error(
               `${call.route.toolName} did not answer within ${REMOTE_READ_MS / 1000} seconds. Continue with the other tools, or tell the user this service is not answering.`,
             );
+          // Staging 11-16: a dropped connection failed a people search as "uncertain", so it was
+          // never run again, and the calls sharing that session then failed as not connected.
+          // A closed session never sent the call, and a search is a read: reconnect once.
+          const neverSent = isNeverSent(error);
+          const readDropped =
+            searchRead && !(error instanceof SdkHttpError) && !context.signal.aborted;
+          if (!reconnected && (neverSent || readDropped)) {
+            reconnected = true;
+            getLogger().warn("mcp.call.reconnect", {
+              tool: call.route.toolName,
+              reason: neverSent ? "not_connected" : "dropped",
+            });
+            await this.evictSession(sessionKey, session);
+            session = await this.sessionFor(assignment.server, context);
+            usedSession = session;
+            material = this.sessions.get(sessionKey)?.material;
+            continue;
+          }
           if (!peopleSearch || !(error instanceof SdkHttpError) || error.status !== 429)
             throw error;
         }
@@ -1533,6 +1674,7 @@ export class McpConnector implements ConnectorProvider {
           call.route.toolName,
         );
         session = await this.sessionFor(current.server, context);
+        usedSession = session;
         material = this.sessions.get(sessionKey)?.material;
       }
       await recordAgentRunCost(
@@ -1640,7 +1782,7 @@ export class McpConnector implements ConnectorProvider {
       // A caller that stopped waiting (a page closed or ran out of time) leaves the session
       // healthy; closing it would also fail every other call still running on it.
       if (sessionKey && !(error instanceof PeopleSearchRateLimitError) && !context.signal.aborted)
-        await this.evict(sessionKey);
+        await this.evictSession(sessionKey, usedSession);
       let message =
         error instanceof IsolationError
           ? scopeRefusal(error)
@@ -1660,7 +1802,10 @@ export class McpConnector implements ConnectorProvider {
       yield {
         type: "error",
         message,
-        ...(callStarted && !signedOut && !(error instanceof PeopleSearchRateLimitError)
+        ...(callStarted &&
+        !signedOut &&
+        !(error instanceof PeopleSearchRateLimitError) &&
+        !(peopleSearchRead(calledServer, call.route.toolName) || isNeverSent(error))
           ? { outcome: "uncertain" as const }
           : {}),
       };
@@ -1757,7 +1902,16 @@ export class McpConnector implements ConnectorProvider {
         const email = readInstantlyEmail(original);
         if (
           !email?.campaign_id ||
-          !emailScope.campaignIds.includes(email.campaign_id) ||
+          !(
+            emailScope.campaignIds.includes(email.campaign_id) ||
+            (await this.roleCandidateReply(
+              instantlyRest(safeFetch, credential.key, context.signal),
+              context,
+              credential.server.id,
+              emailScope.campaignIds,
+              email,
+            ))
+          ) ||
           email.id !== call.args.reply_to_uuid ||
           (call.args.eaccount !== undefined &&
             !sameInstantlyAddresses(email.eaccount, String(call.args.eaccount)))
@@ -1805,6 +1959,15 @@ export class McpConnector implements ConnectorProvider {
               ).then((owned) => ({
                 campaigns: new Set(owned.campaigns),
                 mailboxes: new Set(owned.mailboxes),
+                campaignsNow: async () =>
+                  (
+                    await ownedInstantly(
+                      this.prisma,
+                      context.spaceId,
+                      credential.server.id,
+                      context.userId,
+                    )
+                  ).campaigns,
               }))
           : undefined,
       );
@@ -1813,7 +1976,16 @@ export class McpConnector implements ConnectorProvider {
         const email = readInstantlyEmail(result);
         if (
           !email?.campaign_id ||
-          !emailScope.campaignIds.includes(email.campaign_id) ||
+          !(
+            emailScope.campaignIds.includes(email.campaign_id) ||
+            (await this.roleCandidateReply(
+              rest,
+              context,
+              credential.server.id,
+              emailScope.campaignIds,
+              email,
+            ))
+          ) ||
           email.id !== call.args.id
         )
           throw new IsolationError("Email does not belong to the current role campaign");
@@ -1927,6 +2099,16 @@ export class McpConnector implements ConnectorProvider {
           `${server.name} is not connected; call request_connection with serverId "${server.id}".`,
         );
       redactions.push(token);
+      // The same checks a campaign send makes, from records, right before it goes out.
+      const refusal = await ownMailboxSendRefusal(this.prisma, context, {
+        to: input.to[0]!,
+        replyThreadId: input.replyThreadId,
+        resend: input.resend,
+      });
+      if (refusal) {
+        yield { type: "error", message: refusal };
+        return;
+      }
       const gmail = async (path: string, init?: RequestInit) => {
         const response = await safeFetch(
           new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`),
@@ -1961,12 +2143,32 @@ export class McpConnector implements ConnectorProvider {
           ...(input.replyThreadId ? { threadId: input.replyThreadId } : {}),
         }),
       });
+      const sentAt = new Date().toISOString();
+      const mailbox = await gmail("profile")
+        .then((profile) => (typeof profile.emailAddress === "string" ? profile.emailAddress : null))
+        .catch(() => null);
+      // The send's record, keyed by the mailbox's own message and thread ids.
+      if (typeof sent.id === "string")
+        await recordOwnMailboxSend(this.prisma, context, {
+          sourceId: server.id,
+          sourceName: server.name,
+          mailbox,
+          to: input.to[0]!,
+          subject: input.subject,
+          body: input.body,
+          messageId: sent.id,
+          threadId: typeof sent.threadId === "string" ? sent.threadId : null,
+          sentAt,
+        });
       yield {
         type: "result",
         data: {
           structuredContent: {
             sent: true,
             to: input.to[0],
+            ...(mailbox ? { from: mailbox } : {}),
+            subject: input.subject,
+            sentAt,
             messageId: sent.id,
             threadId: sent.threadId,
           },
@@ -2153,8 +2355,37 @@ export class McpConnector implements ConnectorProvider {
       serverId,
       context.userId,
     );
-    if (!campaignIds.length) throw new IsolationError(NO_OUTREACH_CAMPAIGN_YET);
+    if (!campaignIds.length) throw new NoOutreachCampaignError();
     return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
+  }
+
+  /**
+   * A reply the mail service filed under another of this account's own campaigns (it files a
+   * person's reply under their newest campaign) still belongs to the role when the person who
+   * wrote it is someone one of the role's campaigns emailed. Never another account's mail.
+   */
+  private async roleCandidateReply(
+    rest: ReturnType<typeof instantlyRest>,
+    context: AdapterContext,
+    serverId: string,
+    roleCampaignIds: readonly string[],
+    email: InstantlyEmail,
+  ): Promise<boolean> {
+    const lead = email.lead?.trim().toLowerCase();
+    if (email.ue_type !== 2 || !lead || !email.campaign_id) return false;
+    const owned = await ownedInstantly(this.prisma, context.spaceId, serverId, context.userId);
+    if (!owned.campaigns.includes(email.campaign_id)) return false;
+    for (const campaignId of roleCampaignIds.slice(0, 10)) {
+      const query = new URLSearchParams({ campaign_id: campaignId, lead, limit: "1" });
+      const page = readInstantlyEmailPage(await rest("GET", `/emails?${query}`));
+      if (
+        page?.items.some(
+          (item) => item.campaign_id === campaignId && item.lead?.trim().toLowerCase() === lead,
+        )
+      )
+        return true;
+    }
+    return false;
   }
 
   /** Existing campaign identity only; reading mail must never create or infer a campaign by name. */
@@ -2340,8 +2571,7 @@ export class McpConnector implements ConnectorProvider {
         emailScope = await this.instantlyCampaignScope(context, credential.server.id);
       } catch (error) {
         // An account that has never sent has no mail to read; that is an answer, not a failure.
-        if (!(error instanceof IsolationError) || error.message !== NO_OUTREACH_CAMPAIGN_YET)
-          throw error;
+        if (!(error instanceof NoOutreachCampaignError)) throw error;
         yield {
           type: "result",
           data: {
@@ -2405,7 +2635,8 @@ export class McpConnector implements ConnectorProvider {
         : input.campaign_id;
       if (anchor && campaignId && anchor.campaign_id !== campaignId)
         throw new IsolationError("Email anchor does not belong to the requested role campaign");
-      if (contactInput && !contactInput.eaccount) {
+      const defaulted = contactInput ?? mailboxInput;
+      if (defaulted && !defaulted.eaccount) {
         // Same rule as ensure_role_campaign: one connected mailbox is the default sending side.
         phase = "default mailbox";
         const accounts = await safeFetch(
@@ -2421,7 +2652,12 @@ export class McpConnector implements ConnectorProvider {
           ? (JSON.parse(text) as { items?: { email?: unknown }[] }).items
           : [];
         if (items?.length === 1 && typeof items[0]?.email === "string")
-          contactInput.eaccount = items[0].email;
+          defaulted.eaccount = items[0].email;
+        if (mailboxInput && !mailboxInput.eaccount) {
+          reason =
+            " Several Instantly mailboxes are connected: pass eaccount, the mailbox that sent the role's mail (get_campaign lists it).";
+          throw new Error(reason);
+        }
       }
       const url = new URL("https://api.instantly.ai/api/v2/emails");
       url.search = new URLSearchParams({
@@ -2429,7 +2665,7 @@ export class McpConnector implements ConnectorProvider {
           ? { search: `thread:${anchor.thread_id}`, eaccount: anchor.eaccount }
           : mailboxInput
             ? {
-                eaccount: mailboxInput.eaccount,
+                eaccount: mailboxInput.eaccount!,
                 ...(mailboxInput.search ? { search: mailboxInput.search } : {}),
                 ...(mailboxInput.min_timestamp_created
                   ? { min_timestamp_created: mailboxInput.min_timestamp_created }
@@ -2532,8 +2768,9 @@ export class McpConnector implements ConnectorProvider {
       // sequence field and Lead.status (2 Paused, 3 Completed) is readOnly. POST
       // /api/v2/leads/update-interest-status is documented to complete leads and trigger
       // automations/subsequences, not to stop a sequence, so it is not used as a stop.
-      // The native stop is the campaign setting GET /api/v2/campaigns/{id} stop_on_reply
-      // ("Whether to stop the campaign on reply"); report it, never fabricate a stop.
+      // The campaign setting GET /api/v2/campaigns/{id} stop_on_reply ("Whether to stop the
+      // campaign on reply") is reported; when it does not stop them, the agent stops that one
+      // person with pause_campaign and their email, which takes them out of the campaign.
       // https://developer.instantly.ai/api-reference/campaign/get-campaign
       const repliedCampaigns = [
         ...new Set(
@@ -2585,10 +2822,7 @@ export class McpConnector implements ConnectorProvider {
           ...(stopOnReply
             ? {}
             : {
-                warning:
-                  stopOnReply === false
-                    ? "The lead replied but this campaign's stop_on_reply is off, so Instantly keeps sending follow-ups. Turn on stop on reply for the campaign in Instantly."
-                    : "The lead replied but whether this campaign stops on reply could not be confirmed; check stop on reply for the campaign in Instantly.",
+                warning: `This person replied, but ${stopOnReply === false ? "this campaign keeps sending them its follow-ups" : "whether this campaign stops their follow-ups could not be confirmed"}. Unless the recruiter wants the follow-ups to continue, call pause_campaign with their email and campaign_id ${campaignId}: it stops only them and sends nothing. Tell the recruiter in plain words that their follow-ups were stopped, never naming the mail service.`,
               }),
         });
       }
@@ -2646,7 +2880,10 @@ export class McpConnector implements ConnectorProvider {
           redactions,
         ),
       };
-    } catch {
+    } catch (error) {
+      // Which campaign to name is the one fix the agent can make; "check the connection" is not
+      // (gate 9e15e896, stop-after-approve: every mailbox and contact read failed this way).
+      if (!reason && error instanceof CampaignChoiceError) reason = ` ${error.message}.`;
       yield {
         type: "error",
         message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}${rejectedCode ? ` (${rejectedCode})` : ""}.` : reason || " Check the current assigned connection and requested scope."}${hint}`,
@@ -2665,20 +2902,41 @@ export class McpConnector implements ConnectorProvider {
   }
 
   /**
-   * The server's raw tool list, cached per worker for DISCOVERY_CACHE_TTL_MS. Only the list
-   * shape is cached: the assignment, allowlist and enabled state are read on every discovery,
-   * and sessionFor still revalidates the credential first (a rotated or deleted credential
-   * evicts the session and this entry). The version holds every field a server or credential
-   * write changes (revision, secretId), so such a write misses the cache in every worker.
+   * The server's raw tool list, kept per worker the way MCP clients keep a session's tools/list:
+   * a run always gets the last list at once, and a list older than DISCOVERY_CACHE_TTL_MS is
+   * listed again in the background for the next run. Only the list shape is kept: the
+   * assignment, allowlist and enabled state are read on every discovery. A server reached with
+   * the deployment's own key lists the same tools for every account, so its list is shared and
+   * needs no connection of the account's own; any other list is kept per account, after
+   * sessionFor revalidates its credential (a rotated or deleted credential evicts the session
+   * and this entry). The version holds every field a server or credential write changes
+   * (revision, secretId), so such a write misses the cache in every worker.
    */
   private async listServerTools(server: McpServer, context: AdapterContext) {
-    const key = this.sessionKey(server, context);
-    const version = this.discoveryVersion(server);
+    const shared = this.sharedListingKey(server);
+    const key = shared ?? this.sessionKey(server, context);
+    const version = shared ?? this.discoveryVersion(server);
     const startedAt = performance.now();
-    const session = await this.sessionFor(server, context);
-    const cached =
-      context.operationId === DISCOVERY_REFRESH_OPERATION ? undefined : this.toolCatalog.get(key);
-    if (cached?.version === version && Date.now() - cached.at < DISCOVERY_CACHE_TTL_MS) {
+    const refresh = context.operationId === DISCOVERY_REFRESH_OPERATION;
+    if (!shared || refresh) await this.sessionFor(server, context);
+    const cached = refresh ? undefined : this.toolCatalog.get(key);
+    if (cached?.version === version) {
+      if (Date.now() - cached.at >= DISCOVERY_CACHE_TTL_MS && !this.relisting.has(key)) {
+        const relist = this.listFresh(
+          server,
+          { ...context, signal: AbortSignal.timeout(RELIST_TIMEOUT_MS) },
+          key,
+          version,
+        )
+          .catch((error: unknown) =>
+            getLogger().warn("discovery.relist_failed", {
+              server: server.slug,
+              error: sanitizeConnectorError(error),
+            }),
+          )
+          .finally(() => this.relisting.delete(key));
+        this.relisting.set(key, relist);
+      }
       getLogger().info("discovery.cache", {
         hit: true,
         server: server.slug,
@@ -2686,18 +2944,65 @@ export class McpConnector implements ConnectorProvider {
       });
       return cached.listed;
     }
-    const generation = this.catalogGeneration;
-    const listed = await session.listTools({ signal: context.signal });
-    // A credential change during the list call leaves it uncached.
-    if (generation === this.catalogGeneration)
-      this.toolCatalog.set(key, { version, at: Date.now(), listed });
-    this.discoveryFailures.delete(key);
+    // One fetch per shared list: after a deploy every account's first turn missed at once and
+    // each signed in to the CRM to list it, until the sign-ins were refused (gate 35dd105c: 18
+    // failures within a second of each other).
+    let pending = shared ? this.listing.get(key) : undefined;
+    if (!pending) {
+      pending = this.listFresh(server, context, key, version);
+      if (shared) {
+        this.listing.set(key, pending);
+        void pending.catch(() => undefined).finally(() => this.listing.delete(key));
+      }
+    }
+    const listed = await pending;
     getLogger().info("discovery.cache", {
       hit: false,
       server: server.slug,
       ms: Math.round(performance.now() - startedAt),
     });
     return listed;
+  }
+
+  private async listFresh(
+    server: McpServer,
+    context: AdapterContext,
+    key: string,
+    version: string,
+  ) {
+    const generation = this.catalogGeneration;
+    const session = await this.sessionFor(server, context);
+    const listed = await session.listTools({ signal: context.signal });
+    // A credential change during the list call leaves it uncached.
+    if (generation === this.catalogGeneration)
+      this.toolCatalog.set(key, { version, at: Date.now(), listed });
+    this.discoveryFailures.delete(this.sessionKey(server, context));
+    return listed;
+  }
+
+  /** The one list key every account shares for a server reached with the deployment's key. */
+  private sharedListingKey(server: McpServer): string | undefined {
+    // The product's own CRM server registers the same tools for every signed-in caller; each
+    // call still carries that caller's own token. Kept per account, every new account and every
+    // worker start listed it again before the first reply (gate 6eb3e360: 52 of 133, up to 3.5 s).
+    if (this.isFirstParty(server) && !Object.keys((server.headers as object | null) ?? {}).length)
+      return `first-party ${server.endpoint}`;
+    const platform = platformMcpCredential(server);
+    if (!platform?.key && !platform?.keyless) return undefined;
+    if (server.secretId && !platform.replacesSecret) return undefined;
+    if (Object.keys((server.headers as Record<string, unknown> | null) ?? {}).length)
+      return undefined;
+    return `platform ${server.transport} ${server.endpoint}`;
+  }
+
+  /** The product's own server, reached with the caller's product sign-in. */
+  private isFirstParty(server: McpServer): boolean {
+    return (
+      Boolean(this.options.firstParty) &&
+      !server.secretId &&
+      server.transport === "streamable_http" &&
+      server.endpoint === this.firstPartyEndpoint
+    );
   }
 
   private refusedConnection(server: McpServer, context: AdapterContext): boolean {
@@ -2726,11 +3031,11 @@ export class McpConnector implements ConnectorProvider {
     getLogger().warn("mcp.connection_refused", {
       server: server.slug,
       tool: toolName,
-      untilMs: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+      untilMs: Date.now() + CONNECTION_REFUSED_TTL_MS,
     });
     this.discoveryFailures.set(this.sessionKey(server, context), {
       version: this.discoveryVersion(server),
-      until: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+      until: Date.now() + CONNECTION_REFUSED_TTL_MS,
       logged: false,
       refused: { serverId: server.id, slug: server.slug },
     });
@@ -2764,6 +3069,12 @@ export class McpConnector implements ConnectorProvider {
     // Identity headers are applied once, at connect time, so a session is only
     // valid for the identity it connected as. The key has to carry that identity.
     return `${server.id} ${context.spaceId} ${context.userId}`;
+  }
+
+  /** Closes a failed session only while it is still the cached one; a replaced one was closed. */
+  private async evictSession(sessionKey: string, session: McpSession | undefined): Promise<void> {
+    if (session && this.sessions.get(sessionKey)?.session !== session) return;
+    await this.evict(sessionKey);
   }
 
   private async evict(sessionKey: string): Promise<void> {
@@ -2962,12 +3273,7 @@ export class McpConnector implements ConnectorProvider {
           context.userId,
           this.options.allowPrivateEndpoint === true,
         );
-        const firstParty =
-          !server.secretId &&
-          server.transport === "streamable_http" &&
-          server.endpoint === this.firstPartyEndpoint
-            ? this.options.firstParty
-            : undefined;
+        const firstParty = this.isFirstParty(server) ? this.options.firstParty : undefined;
         let runtimeAuth: McpRuntimeAuth | undefined;
         if (firstParty) {
           const rejected = new WeakMap<Response, { token: string; signal?: AbortSignal }>();

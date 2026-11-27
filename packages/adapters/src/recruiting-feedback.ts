@@ -1,5 +1,5 @@
 import type { AdapterContext, MemoryStore } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type {
   Actor,
   RecruitingCandidateFeedbackSelection,
@@ -9,34 +9,52 @@ import type {
   RecruitingSourceRef,
 } from "@rakazo/contracts";
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
-import {
-  applyRecruitingPreferenceEdit,
-  RECRUITING_SCALE_START,
-  tidyPreferenceDocument,
-} from "@rakazo/core";
+import { applyRecruitingPreferenceEdit, tidyPreferenceDocument } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
   approveRecruitingCalibrationRoundFromMessage,
   executeNativeRecruitingCandidateDecision,
+  Prisma,
   readRecruitingFeedbackContext,
 } from "@rakazo/db";
 import type { ZodError } from "zod";
-import { peopleTargetFrom } from "./people-target.js";
+import { criteriaAssessment } from "./recruiting-criteria-check.js";
 
-/** Why a preference naming the chat's role is not saved to memory shared by every role. */
-export const ROLE_PREFERENCE_ERROR =
-  'Not saved: shared preferences apply to every role, so a requirement for one role goes on that role. Save it with recruiting_role update (or recruiting_feedback target:"role"), and keep only what the recruiter said for all roles as a preference.';
+/**
+ * Round direction marks no one. fosp x5 11-20 (753783e2): "4、5、7不行…" and a turn-down naming three
+ * people were saved as round scope with no people, so Results showed none of them as not a fit
+ * until the recruiter complained. The result names the round's people by number so the agent can
+ * mark the ones the recruiter's words were about.
+ */
+function roundDirectionNext(people: string[]) {
+  return `Saved as direction for the next round; it marks no one on Results. The latest round as numbered for the recruiter: ${people.join("; ")}. If their words turned down or praised any of these people, by name or by number, record those people now with target "candidate", operation "review" and fit "not_fit" or "good_example" (one call per fit), using these keys.`;
+}
 
-/** Why a pasted job description or new-role request is not saved as a shared preference. */
-export const NEW_ROLE_PREFERENCE_ERROR =
-  "Not saved: this is a role's job description or a new role, not a preference for every role. Open the role first (start_role in the recruiter's own chat, otherwise recruiting_role) and keep its requirements on that role; save a preference only for what the recruiter said applies to all roles.";
-
-/** A job description or new-role request: a title or new-role label at the start, or a "Job Title:" line. */
-const NEW_ROLE_TEXT =
-  /^\s*(?:新(?:的)?(?:岗位|职位)|(?:岗位|职位)(?:名称)?|new (?:role|position|job|opening)|job title)\s*[:：]|(?:^|\n)\s*job title\s*[:：]/i;
-
-/** People to reach when the recruiter accepts a round without naming a number. */
-const DEFAULT_SCALE_TARGET = 150;
+/** The latest round the recruiter saw, as "1. Name = key" in the order its list numbers them. */
+async function latestRoundPeople(prisma: PrismaClient, roleId: string): Promise<string[]> {
+  return Promise.resolve()
+    .then(async () => {
+      const round = await prisma.recruitingCalibrationRound.findFirst({
+        where: { roleId, status: "shown" },
+        orderBy: { round: "desc" },
+        select: { candidateKeys: true },
+      });
+      if (!round?.candidateKeys.length) return [];
+      const names = new Map(
+        (
+          await prisma.recruitingCandidateOccurrence.findMany({
+            where: { roleId, candidateKey: { in: round.candidateKeys }, name: { not: null } },
+            select: { name: true, candidateKey: true },
+            distinct: ["candidateKey"],
+          })
+        ).map((row) => [row.candidateKey, row.name]),
+      );
+      return round.candidateKeys.map(
+        (key, index) => `${index + 1}. ${names.get(key) ?? "?"} = ${key}`,
+      );
+    })
+    .catch(() => []);
+}
 
 export class RecruitingFeedbackValidationError extends Error {
   constructor(message: string) {
@@ -69,6 +87,11 @@ export type RecruitingFeedbackResult = {
   feedback: RecruitingFeedbackInput;
   source: RecruitingSourceRef;
   workspace: { role: RecruitingRole; revision: RecruitingRoleRevision } | null;
+  /** Per named person, how their profile was judged on each requirement of the role. */
+  profilesShow?: Record<string, string>;
+  profilesShowNote?: string;
+  /** On a decision about people: the role's requirements are as they were before this call. */
+  requirements?: { changed: false; note: string };
 } & (
   | { status: "needs_clarification" }
   | {
@@ -82,7 +105,6 @@ export type RecruitingFeedbackResult = {
       round?: number;
       /** What to do in the same turn once a round is accepted. */
       next?: string;
-      target?: { people: number; inResultsNow: number };
     }
   | {
       status: "saved";
@@ -96,7 +118,53 @@ export type RecruitingFeedbackResult = {
     }
 );
 
+/**
+ * A recruiter's reason for a decision on a person can differ from what the person's profile was
+ * judged to show (a recruiter said "under five years" of someone judged to meet five years, and
+ * the next search carried that reason, 11-26). The decision is theirs and is recorded as given;
+ * its result carries the saved verdicts so the reply rests on them, not on the reason alone.
+ */
 export async function executeRecruitingFeedback(
+  ...args: Parameters<typeof recordRecruitingFeedback>
+): Promise<RecruitingFeedbackResult> {
+  const recorded = await recordRecruitingFeedback(...args);
+  const { feedback } = recorded;
+  if (feedback.target !== "candidate") return recorded;
+  // A turn-down's reason was kept only as the note on those people, and the next rounds were not
+  // judged on it (staging and branch plays 11-27: saved as a requirement in one play of seven).
+  const result =
+    recorded.status === "recorded" || recorded.status === "already_recorded"
+      ? { ...recorded, requirements: { changed: false as const, note: REQUIREMENTS_NOTE } }
+      : recorded;
+  const judged = await args[0].prisma.recruitingCandidateOccurrence.findMany({
+    where: {
+      roleId: feedback.roleId,
+      candidateKey: { in: [...feedback.candidateKeys] },
+      matchFields: { path: ["criteria"], not: Prisma.AnyNull },
+    },
+    orderBy: { page: { observedAt: "desc" } },
+    select: { candidateKey: true, name: true, matchFields: true },
+  });
+  const profilesShow: Record<string, string> = {};
+  for (const row of judged) {
+    const criteria = (row.matchFields as { criteria?: Parameters<typeof criteriaAssessment>[0] })
+      .criteria;
+    const name = row.name ?? row.candidateKey;
+    if (Array.isArray(criteria) && criteria.length && !(name in profilesShow))
+      profilesShow[name] = criteriaAssessment(criteria);
+  }
+  return Object.keys(profilesShow).length
+    ? { ...result, profilesShow, profilesShowNote: PROFILES_SHOW_NOTE }
+    : result;
+}
+
+const REQUIREMENTS_NOTE =
+  "This saved the decision on the named people only; the role's requirements are unchanged. When the recruiter's words give a reason later people must also meet, add it to the role's requirements in this step (recruiting_role update, criteria.upsert), so everyone found from now on is judged on it.";
+
+const PROFILES_SHOW_NOTE =
+  "profilesShow is how each named person's profile was judged on the role's requirements. The recruiter's decision stands as recorded. Where their reason differs from it, say in one line what the profile shows, and leave that reason out of the next search.";
+
+async function recordRecruitingFeedback(
   deps: { prisma: PrismaClient; memory: MemoryStore },
   trusted: { actor: Actor; runId: string; sourceMessageId: string | null },
   untrusted: unknown,
@@ -162,9 +230,6 @@ export async function executeRecruitingFeedback(
       ? {}
       : { roleId: feedback.roleId, expectedRoleRevision: feedback.expectedRoleRevision }),
     ...(feedback.target === "candidate" ? { candidateKeys: feedback.candidateKeys } : {}),
-    ...(feedback.target === "round" && feedback.operation === "approve"
-      ? { acceptEarlierQuote: true }
-      : {}),
     ...((feedback.target === "round" && feedback.operation === "scope") ||
     (feedback.target === "candidate" && feedback.operation === "review")
       ? { recordKeeping: true }
@@ -182,22 +247,22 @@ export async function executeRecruitingFeedback(
       roleId: feedback.roleId,
       expectedRoleRevision: feedback.expectedRoleRevision,
     });
-    // The server, not the model, works out the target: "find 50" with 65 already saved is 115.
-    const inResults = await deps.prisma.recruitingCandidate.count({
-      where: { roleId: feedback.roleId },
-    });
-    const target =
-      peopleTargetFrom(feedback.intent.quote, inResults) ??
-      Math.max(DEFAULT_SCALE_TARGET, inResults);
     return {
       ...result,
       status: approved.already ? "already_recorded" : "recorded",
       round: approved.round,
-      target: { people: target, inResultsNow: inResults },
-      next: `Target for this request: ${target} people in Results (${inResults} now). Use this number; do not work it out again. ${RECRUITING_SCALE_START}`,
     };
   }
-  if (feedback.target === "round" || feedback.target === "candidate")
+  if (feedback.target === "round") {
+    const people = await latestRoundPeople(deps.prisma, feedback.roleId);
+    return {
+      ...result,
+      status: choice ? "already_recorded" : "recorded",
+      ...(choice ? { choice } : {}),
+      ...(people.length ? { next: roundDirectionNext(people) } : {}),
+    };
+  }
+  if (feedback.target === "candidate")
     return {
       ...result,
       status: choice ? "already_recorded" : "recorded",
@@ -219,21 +284,6 @@ export async function executeRecruitingFeedback(
     throw new RecruitingFeedbackValidationError(
       "Memory target does not match the recruiting preference proposal",
     );
-  // Shared preferences apply to every role; a line naming this chat's role belongs on the role.
-  if (feedback.operation !== "revoke") {
-    if (NEW_ROLE_TEXT.test(feedback.content))
-      throw new RecruitingFeedbackValidationError(NEW_ROLE_PREFERENCE_ERROR);
-    const role = await deps.prisma.thread
-      .findUnique({
-        where: { id: threadId },
-        select: { activeRecruitingRole: { select: { title: true } } },
-      })
-      .then((found) => found?.activeRecruitingRole?.title.trim());
-    if (role && role.length >= 6 && feedback.content.toLowerCase().includes(role.toLowerCase()))
-      throw new RecruitingFeedbackValidationError(
-        `${ROLE_PREFERENCE_ERROR} This one names the role "${role}".`,
-      );
-  }
   const target = {
     scope: feedback.scope,
     path: feedback.path,
@@ -242,7 +292,7 @@ export async function executeRecruitingFeedback(
   const snapshot = await deps.memory.read(target, context);
   const document = snapshot.documents[0];
   if ((document?.revision ?? 0) !== feedback.expectedRevision)
-    throw new Error(MEMORY_REVISION_CONFLICT_ERROR);
+    throw new MemoryRevisionConflictError();
   let edited: ReturnType<typeof applyRecruitingPreferenceEdit>;
   try {
     edited = applyRecruitingPreferenceEdit(document?.content ?? "", feedback);

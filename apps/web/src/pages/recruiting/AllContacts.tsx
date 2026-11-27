@@ -765,10 +765,24 @@ export function AllContacts({
               <Trans>
                 {offset + 1}–{offset + rows.length} of {data.total}
               </Trans>
+            ) : filterKey === "{}" ? (
+              <Trans>No candidates yet</Trans>
             ) : (
               <Trans>No contacts match.</Trans>
             )}
           </p>
+          {/* A new account's first step is a search; the empty list leads there. */}
+          {!data.total && filterKey === "{}" && globalGroup ? (
+            <Button
+              variant="outline"
+              className="self-start"
+              onClick={() =>
+                navigate(`/app/g/${encodeURIComponent(globalGroup.id)}?view=conversation`)
+              }
+            >
+              <Trans>Find candidates with Kruit</Trans>
+            </Button>
+          ) : null}
           {rows.length ? (
             <div className="hire-contact-table-scroll max-h-[65vh] max-w-full overflow-auto rounded-xl border border-border">
               <table

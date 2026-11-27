@@ -144,13 +144,17 @@ describe("thread lanes for automation runs", () => {
     expect(await db.start("webhook-late")).toBe(true);
   });
 
-  it("serializes different bots' automations in a group thread", async () => {
+  // Reliability plan S3 (11-16): one lane per agent, as Workloop runs child agents in parallel.
+  // Staging feedback-round: round 2 spent 76 s queued behind teammates' turns in the role chat.
+  it("lets different agents in a group thread work at once, each one turn at a time", async () => {
     const db = lane([
       { id: "main-webhook", botId: "main", trigger: "webhook", status: "running" },
+      { id: "main-next", botId: "main", trigger: "webhook", status: "queued" },
       { id: "sourcer-wake", botId: "sourcer", trigger: "recruiting_research", status: "queued" },
     ]);
-    expect(await db.start("sourcer-wake")).toBe(false);
-    expect(db.status("sourcer-wake")).toBe("queued");
+    expect(await db.start("sourcer-wake")).toBe(true);
+    expect(await db.start("main-next")).toBe(false);
+    expect(db.status("main-next")).toBe("queued");
   });
 
   it("does not wait for a run that is waiting for a person", async () => {
@@ -186,9 +190,20 @@ describe("thread lanes for automation runs", () => {
     const db = lane([
       { id: "grade", botId: "reviewer", trigger: "recruiting_grade", status: "running" },
       { id: "feedback", botId: "lead", trigger: "bot_message", status: "queued" },
-      { id: "routine", trigger: "routine", status: "queued" },
+      { id: "routine", botId: "lead", trigger: "routine", status: "queued" },
     ]);
     expect(await db.start("feedback")).toBe(true);
+    expect(await db.start("routine")).toBe(false);
+  });
+
+  it("resumes a turn on the recruiter's card answer without waiting behind background grading", async () => {
+    // Staging 11-14: feedback typed on the next-step card waited 103 s while the Reviewer graded.
+    const db = lane([
+      { id: "grade", botId: "reviewer", trigger: "recruiting_grade", status: "running" },
+      { id: "intake", botId: "lead", trigger: "tool_background", status: "queued", leaseFence: 1 },
+      { id: "routine", botId: "lead", trigger: "routine", status: "queued" },
+    ]);
+    expect(await db.start("intake")).toBe(true);
     expect(await db.start("routine")).toBe(false);
   });
 
@@ -320,7 +335,7 @@ describe("automation rate cap", () => {
   });
 });
 
-it("keeps a cyclic delegation chain behind its live parent", async () => {
+it("starts a delegated agent while its delegator's turn is live, even in a cyclic chain", async () => {
   const db = lane([
     {
       id: "parent",
@@ -367,6 +382,5 @@ it("keeps a cyclic delegation chain behind its live parent", async () => {
   Object.assign(db.prisma.run, {
     findFirst: vi.fn(async ({ where }: { where: { id: string } }) => db.row(where.id) ?? null),
   });
-  expect(await db.start("child")).toBe(false);
-  expect(db.status("child")).toBe("queued");
+  expect(await db.start("child")).toBe(true);
 });

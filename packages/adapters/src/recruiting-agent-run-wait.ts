@@ -57,12 +57,14 @@ export function recruitingAgentRunWaitPrompt(
   countdown?: { estimateMs: number },
 ): string {
   const quiet = countdown
-    ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over. Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, tell the recruiter in one line how many people the role has in Results now and that the search keeps going, about ${minutes(countdown.estimateMs)} more minutes; ask nothing.`
+    ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over. Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, tell the recruiter in one line that the search keeps going, about ${minutes(countdown.estimateMs)} more minutes; ask nothing.`
     : `Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, end the turn with an empty reply: you are woken again later, and the recruiter hears nothing until it finishes.`;
   return [
     `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message; you are continuing your own work.`,
     quiet,
-    "When it has finished, say in one line how many new people were added and whether the role's target is met; if it is short, say why in plain words, as the provider's own summary explains it. Then carry on with the stage as your instructions say: if the role is still short of its target, the next wave continues this run with previousRunId. Start no unrelated search.",
+    // Staging 180051e6 and play s165: the request was already met when a search left running
+    // finished, and its people were shown as a round nobody asked for.
+    "When it has finished: while the recruiter's request is still short of the number they asked for, show its new people who fit with calibration_round (the same asked), and if it stays short say why in plain words, as the provider's own summary explains it, and carry on as the Find more people skill says. When that number is already reached (counted in the result says so), show nobody and write nothing: its people stay in Results until the recruiter asks for more. Start no unrelated search.",
   ].join("\n");
 }
 

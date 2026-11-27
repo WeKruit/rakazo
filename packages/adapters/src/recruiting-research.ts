@@ -17,8 +17,7 @@ import { IsolationError, listRecruitingResearch, listRunToolResults, Prisma } fr
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
-import { NOT_GRADING_TASK } from "./recruiting-grading.js";
-import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
+import { isPeopleSearchEndpoint, linkedinPersonKey, peopleFromSearch } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
@@ -98,91 +97,6 @@ async function* nativeMcpCreationReceipts(
   }
 }
 
-/** A shared provider account never grants access to another product user's research. */
-export async function requireAutumnTaskOwnership(
-  prisma: PrismaClient,
-  actor: Pick<AdapterContext, "userId" | "spaceId">,
-  server: Pick<McpServer, "id" | "revision" | "transport" | "endpoint">,
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<void> {
-  if (server.transport !== "streamable_http" || server.endpoint !== "https://api.autumn.ai/mcp")
-    return;
-  if (["research", "credits"].includes(toolName) && args.task_id === undefined) return;
-  if (
-    !["get_task", "get_rows", "reply", "stop_task", "continue_with_file"].includes(toolName) ||
-    typeof args.task_id !== "string" ||
-    !args.task_id.trim()
-  )
-    throw new IsolationError(
-      "Listing all research is unavailable. Continue this role's research with get_task or reply on the task id from this conversation's earlier research calls, or start new research in this conversation.",
-    );
-  const task = await prisma.recruitingResearchTask.findFirst({
-    where: {
-      providerTaskId: args.task_id,
-      mcpServerId: server.id,
-      serverRevision: server.revision,
-      role: { spaceId: actor.spaceId, userId: actor.userId },
-      createdByRun: { spaceId: actor.spaceId, userId: actor.userId },
-    },
-    select: { id: true },
-  });
-  if (task) return;
-  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, "research")) {
-    if (!nonblank(receipt.args.prompt) || receipt.args.task_id !== undefined) continue;
-    const observation = classifyRecruitingResearchResult(receipt.result, { operation: "create" });
-    if (observation.deliveryState === "accepted" && observation.providerTaskId === args.task_id)
-      return;
-  }
-  throw new IsolationError(
-    "This research is not available in your workspace. Use scoped research history or start new research in this conversation.",
-  );
-}
-
-/**
- * A role's first calibration rounds come from the built-in people search, which answers in
- * seconds. Before any round is accepted, a new research task on a role that has none yet starts
- * only after a people search ran in this run (to top up a short one). Roles that already have
- * research keep their existing flow.
- */
-export async function requireQuickSearchBeforeResearch(
-  prisma: PrismaClient,
-  context: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
-  server: Pick<McpServer, "transport" | "endpoint">,
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<void> {
-  if (
-    server.transport !== "streamable_http" ||
-    server.endpoint !== "https://api.autumn.ai/mcp" ||
-    toolName !== "research" ||
-    args.task_id !== undefined ||
-    !context.runId
-  )
-    return;
-  const scope = { spaceId: context.spaceId, userId: context.userId };
-  const run = await prisma.run.findFirst({
-    where: { id: context.runId, ...scope },
-    select: { trigger: true, thread: { select: { activeRecruitingRoleId: true } } },
-  });
-  const roleId = run?.thread.activeRecruitingRoleId;
-  // Grading people a search already found is not a search.
-  if (!roleId || run.trigger === "recruiting_grade") return;
-  const [searchAssigned, earlierResearch, acceptedRound] = await Promise.all([
-    prisma.botMcpServer.count({
-      where: { ...scope, server: { ...scope, slug: "people-search", enabled: true } },
-    }),
-    prisma.recruitingResearchTask.count({ where: { roleId, ...NOT_GRADING_TASK } }),
-    prisma.recruitingCalibrationRound.count({ where: { roleId, approvedAt: { not: null } } }),
-  ]);
-  if (!searchAssigned || earlierResearch || acceptedRound) return;
-  const calls = await listRunToolResults(prisma, { ...scope } as Actor, context.runId);
-  if (calls.some((call) => isPeopleSearchEndpoint(call.endpoint))) return;
-  throw new IsolationError(
-    "Calibration rounds use the built-in people search, not a research task: call web_search_advanced_exa yourself (four searches in one step; each saves itself to Results), then calibration_round, in this turn. If you do not have the people search, hand the round back to Main. Research starts after a round is accepted, or to top up a short people search in the same run.",
-  );
-}
-
 /** Schools on the public profile, so Results can show education without another lookup. */
 const EDUCATION_SCHEMA = {
   type: ["array", "null"],
@@ -191,16 +105,29 @@ const EDUCATION_SCHEMA = {
 } as const;
 
 /** Output shape a people-search agent run returns when the request names none. */
+/**
+ * People one search run may return. The recruiter's rule: each try finds about 10 to 20 more,
+ * never a wide sweep; a bigger request is several small tries, each limited below.
+ */
+export const AGENT_RUN_MAX_PEOPLE = 20;
+
+/** The grades a search gives a person it found, in the words Results already reads. */
+export const PEOPLE_MATCH_TIERS = ["Strong", "Promising", "Uncertain", "Partial"] as const;
+
+/**
+ * The search agent finds and grades in the same run (the recruiter's rule: it is our search agent,
+ * we only pass the request on), so every person comes back with a score, a tier and one reason.
+ */
 export const AGENT_RUN_PEOPLE_SCHEMA = {
   type: "object",
   required: ["people"],
   properties: {
     people: {
       type: "array",
-      maxItems: 500,
+      maxItems: AGENT_RUN_MAX_PEOPLE,
       items: {
         type: "object",
-        required: ["name", "linkedin_url", "evidence"],
+        required: ["name", "linkedin_url", "evidence", "match_score", "match_tier", "fit_reasons"],
         properties: {
           name: { type: "string" },
           linkedin_url: { type: ["string", "null"], format: "uri" },
@@ -208,141 +135,231 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
           current_company: { type: ["string", "null"] },
           location: { type: ["string", "null"] },
           education: EDUCATION_SCHEMA,
-          evidence: { type: "string" },
-        },
-      },
-    },
-  },
-} as const;
-/**
- * A grading run's rows: one per person given in input.data, in the research service's own row
- * format (canonical person columns, education, match_score 0–100, match_tier Strong / Promising / Partial /
- * Uncertain, fit_reasons, concerns, requirements_assessment), so Results reads them unchanged.
- */
-export const AGENT_RUN_GRADE_SCHEMA = {
-  type: "object",
-  required: ["rows"],
-  properties: {
-    rows: {
-      type: "array",
-      maxItems: 100,
-      items: {
-        type: "object",
-        required: [
-          "name",
-          "linkedin_url",
-          "current_title",
-          "current_company",
-          "location",
-          "education",
-          "evidence_urls",
-          "match_score",
-          "match_tier",
-          "fit_reasons",
-          "concerns",
-          "requirements_assessment",
-        ],
-        properties: {
-          name: { type: "string" },
-          linkedin_url: { type: "string" },
-          current_title: { type: ["string", "null"] },
-          current_company: { type: ["string", "null"] },
-          location: { type: ["string", "null"] },
-          education: EDUCATION_SCHEMA,
-          evidence_urls: { type: ["array", "null"], items: { type: "string" } },
-          match_score: { type: "integer", minimum: 0, maximum: 100 },
-          match_tier: { type: "string", enum: ["Strong", "Promising", "Partial", "Uncertain"] },
-          fit_reasons: { type: "string" },
-          concerns: { type: "array", items: { type: "string" } },
-          requirements_assessment: {
-            type: "array",
-            items: {
-              type: "object",
-              required: ["requirement", "status", "evidence"],
-              properties: {
-                requirement: { type: "string" },
-                status: { type: "string", enum: ["met", "not_met", "unknown"] },
-                evidence: { type: ["string", "null"] },
-              },
-            },
+          evidence: {
+            type: "string",
+            description:
+              "What the public profile says, facts only: titles, companies, dates, years, skills, languages, current location.",
+          },
+          match_score: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100,
+            description: "How well the profile fits the request's requirements on the person.",
+          },
+          match_tier: {
+            type: "string",
+            enum: PEOPLE_MATCH_TIERS,
+            description:
+              "Strong: every requirement is shown on the profile. Promising: most are shown and none is contradicted. Uncertain: the profile does not show enough to tell. Partial: a requirement is clearly not met, or the person is someone the request says to leave out.",
+          },
+          fit_reasons: {
+            type: "string",
+            description: "One short sentence: why, and what is missing.",
           },
         },
       },
     },
   },
 } as const;
-/** Most one people-search agent run (one wave) may spend, in US dollars. */
-export const AGENT_RUN_MAX_COST_USD = 10;
-/** Most one ultra run may spend; ultra is only for waves that ask for a thousand people or more. */
-export const AGENT_RUN_ULTRA_MAX_COST_USD = 30;
-/** People an ultra wave may return; a smaller wave stays within the default schema's 500. */
-const AGENT_RUN_ULTRA_MAX_PEOPLE = 2000;
-
-/** The largest people count a query names ("1,000", "5000"), or 0. */
-function askedPeople(query: unknown): number {
-  if (typeof query !== "string") return 0;
-  let most = 0;
-  for (const match of query.matchAll(/\b\d{1,3}(?:,\d{3})+\b|\b\d{1,6}\b/g))
-    most = Math.max(most, Number(match[0].replaceAll(",", "")));
-  return most;
+/** Most one deeper search for people may spend; observed deeper runs cost $0.3 to $1.4. */
+export const AGENT_RUN_FIND_MAX_COST_USD = 2;
+/** The conversation and role a run works in. */
+async function runRole(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+) {
+  return actor.runId
+    ? prisma.run.findFirst({
+        where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
+        select: { threadId: true, thread: { select: { activeRecruitingRoleId: true } } },
+      })
+    : null;
 }
-/** A grading run of the same people in the same conversation is read again for this long. */
-const GRADING_REUSE_MS = 6 * 60 * 60_000;
-const FAILED_RUN_STATUSES = new Set(["failed", "cancelled", "canceled", "stopped", "expired"]);
 
-/** The people a grading request names, as one comparable key; undefined when one has no profile. */
-function gradedPeopleKey(data: unknown[]): string | undefined {
-  const keys = data.map((person) => {
-    const url = record(person)?.linkedin_url;
-    return typeof url === "string" ? linkedinPersonKey(url) : undefined;
+/** Model-facing: a people search in a role chat whose role is not saved yet. */
+export const PEOPLE_SEARCH_NEEDS_SAVED_ROLE =
+  "Not searched: this role is not saved yet, so the people found would have nowhere to go. Save it first with recruiting_role create (title and the JD's requirements), then search again.";
+
+/**
+ * People searches run only inside a saved role: its cap, autosave, per-requirement check and feedback
+ * all read the conversation's role. Staging a986fe51, feedback-round: the main chat searched
+ * itself, nothing was saved or checked, and a snippet's employer was stated as fact; 14d33ed1: a
+ * role chat searched before its role was saved and save_search was refused.
+ */
+export async function requireRoleForPeopleSearch(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  server: Pick<McpServer, "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  if (
+    toolName !== "agent_run" ||
+    args.runId !== undefined ||
+    !actor.runId ||
+    server.transport !== "streamable_http" ||
+    !server.endpoint ||
+    new URL(server.endpoint).host !== "mcp.exa.ai"
+  )
+    return;
+  const run = await prisma.run.findFirst({
+    where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
+    select: { thread: { select: { activeRecruitingRoleId: true, groupId: true } } },
   });
-  if (keys.some((key) => !key)) return undefined;
-  return [...new Set(keys)].sort().join("\n");
+  if (!run || run.thread.activeRecruitingRoleId) return;
+  if (run.thread.groupId?.startsWith("role-"))
+    throw new IsolationError(PEOPLE_SEARCH_NEEDS_SAVED_ROLE);
 }
 
 /**
- * A grading run this conversation already started for exactly these people, unless it failed.
- * Its grades are read again instead of paying for the same batch twice: a grading turn that
- * restarts, or repeats its call after the run finished, used to send the identical batch again.
+ * One person's profile lookup: the search asked for a LinkedIn profile link reads the people
+ * index. Finding people is the agent run's job alone, so the agent is not offered that index
+ * (searchSchemaForAgent) and the server picks it for a lookup.
  */
-async function earlierGradingRun(
+export function profileLookupArgs(
+  server: Pick<McpServer, "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  return toolName === "web_search_advanced_exa" &&
+    isPeopleSearchServer(server) &&
+    linkedinPersonKey(args.query)
+    ? { ...args, category: "people" }
+    : args;
+}
+
+/**
+ * Model-facing: a finished search that returned no one. Plays 11-27: after "must be Senior" and
+ * "the evidence must be clear" the agent asked eight searches in a row to return only fully
+ * verified people, each returned nobody, and the recruiter waited up to twelve minutes for an
+ * empty answer. The recruiter chose (2026-11-27) to see the closest people with their gaps.
+ */
+export const SEARCH_RETURNED_NOBODY =
+  "This search returned no one, so nothing was saved. A search grades every person it returns and each person's requirement check shows what their profile does not state: ask the next search for the people closest to the role's requirements, a full run's worth, never only for people who meet or prove every requirement. Then show the closest of them, each with the requirement their profile leaves open.";
+
+/** A completed people search with nobody in it, as the agent reads it; null for any other. */
+export function searchThatFoundNobody(
+  returned: unknown,
+  endpoint: string,
+): Record<string, unknown> | null {
+  if (mcpObject(returned)?.status !== "completed" || peopleFromSearch(returned, endpoint).length)
+    return null;
+  return { ...record(returned), people: [], note: SEARCH_RETURNED_NOBODY };
+}
+
+/** Most earlier turns of the conversation read for the profile text their searches returned. */
+const PROFILE_TEXT_RUNS = 12;
+
+/**
+ * The full profile text the conversation's people searches returned, by person: this run's first,
+ * then its earlier turns'.
+ */
+async function profileTexts(
   prisma: PrismaClient,
-  actor: Pick<AdapterContext, "userId" | "spaceId">,
-  server: Pick<McpServer, "id" | "revision">,
-  threadId: string,
-  people: unknown[],
-): Promise<string | undefined> {
-  const wanted = gradedPeopleKey(people);
-  if (!wanted) return undefined;
-  const receipts: Array<{ args: Record<string, unknown>; result: unknown }> = [];
-  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, "agent_run", {
-    threadId,
-    since: new Date(Date.now() - GRADING_REUSE_MS),
-  }))
-    receipts.push(receipt);
-  const failed = new Set<string>();
-  for (const receipt of receipts) {
-    const body = mcpObject(receipt.result);
-    if (typeof body?.id === "string" && FAILED_RUN_STATUSES.has(String(body.status)))
-      failed.add(body.id);
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+): Promise<Map<string, string>> {
+  const texts = new Map<string, string>();
+  try {
+    const run = await runRole(prisma, actor);
+    const earlier = run
+      ? await prisma.run.findMany({
+          where: {
+            threadId: run.threadId,
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            id: { not: actor.runId! },
+          },
+          orderBy: { createdAt: "desc" },
+          take: PROFILE_TEXT_RUNS,
+          select: { id: true },
+        })
+      : [];
+    for (const runId of [actor.runId!, ...earlier.map(({ id }) => id)])
+      for (const call of await listRunToolResults(prisma, { ...actor } as Actor, runId))
+        if (isPeopleSearchEndpoint(call.endpoint))
+          for (const person of peopleFromSearch(call.result, call.endpoint)) {
+            const key = linkedinPersonKey(person.linkedin_url);
+            if (key && person._profile_text && !texts.has(key))
+              texts.set(key, person._profile_text);
+          }
+  } catch {
+    // Without the text the people are graded and checked on what their row holds.
   }
-  for (const receipt of receipts) {
-    const data = record(receipt.args.input)?.data;
-    const id = mcpObject(receipt.result)?.id;
-    if (
-      receipt.args.runId === undefined &&
-      Array.isArray(data) &&
-      typeof id === "string" &&
-      !failed.has(id) &&
-      gradedPeopleKey(data) === wanted
-    )
-      return id;
+  return texts;
+}
+
+/**
+ * Rows a grading run returns hold only the grade, so each keeps the profile text the search
+ * returned for that person: the requirement check then reads the same text the grade came from.
+ */
+export async function keepProfileText(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  entries: Array<{ row: Record<string, unknown> }>,
+): Promise<void> {
+  if (entries.every(({ row }) => row._profile_text)) return;
+  const texts = await profileTexts(prisma, actor);
+  for (const { row } of entries) {
+    const key = linkedinPersonKey(row.linkedin_url);
+    const text = key ? texts.get(key) : undefined;
+    if (text && !row._profile_text) row._profile_text = text;
   }
-  return undefined;
 }
 
 /** Most saved people sent as one agent run's exclusion list. */
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
+
+/**
+ * The people search's tools as the agent sees them. agent_run comes without the options
+ * prepareAgentRun sets or leaves out itself (its own return format, its own system prompt for the
+ * search, people to grade in input.data, the ultra effort). The web search comes without its
+ * people index: staging 9be9b522 found the first ten with agent_run, then ten more through that
+ * index, and those ten reached Results with no grade.
+ * What the server would override is not offered, as Anthropic's tool guide advises ("poka-yoke
+ * your tools"); plays 11-27 saw four of seven runs carry the agent's own format.
+ */
+export function searchSchemaForAgent(
+  server: Pick<McpServer, "transport" | "endpoint">,
+  toolName: string,
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  const properties = record(schema.properties);
+  if (!properties || !isPeopleSearchServer(server)) return schema;
+  if (toolName === "web_search_advanced_exa") {
+    const category = record(properties.category);
+    if (!category || !Array.isArray(category.enum)) return schema;
+    const kinds = category.enum.filter((value) => value !== "people");
+    return { ...schema, properties: { ...properties, category: { ...category, enum: kinds } } };
+  }
+  if (toolName !== "agent_run") return schema;
+  const { outputSchema: _format, systemPrompt: _steer, ...offered } = properties;
+  const input = record(offered.input);
+  const inputProperties = record(input?.properties);
+  if (input && inputProperties) {
+    const { data: _data, ...rest } = inputProperties;
+    offered.input = { ...input, properties: rest, ...withoutRequired(input.required, "data") };
+  }
+  const effort = record(offered.effort);
+  if (effort && Array.isArray(effort.enum))
+    offered.effort = { ...effort, enum: effort.enum.filter((value) => value !== "ultra") };
+  return { ...schema, properties: offered, ...withoutRequired(schema.required, "outputSchema") };
+}
+
+function isPeopleSearchServer(server: Pick<McpServer, "transport" | "endpoint">) {
+  return (
+    server.transport === "streamable_http" &&
+    !!server.endpoint &&
+    new URL(server.endpoint).host === "mcp.exa.ai"
+  );
+}
+
+function isAgentRunTool(server: Pick<McpServer, "transport" | "endpoint">, toolName: string) {
+  return toolName === "agent_run" && isPeopleSearchServer(server);
+}
+
+function withoutRequired(required: unknown, name: string): { required?: unknown } {
+  return Array.isArray(required) ? { required: required.filter((key) => key !== name) } : {};
+}
 
 /**
  * The people-search key is shared funding, not a shared run history: an agent run is resumed or
@@ -356,13 +373,7 @@ export async function prepareAgentRun(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  if (
-    toolName !== "agent_run" ||
-    server.transport !== "streamable_http" ||
-    !server.endpoint ||
-    new URL(server.endpoint).host !== "mcp.exa.ai"
-  )
-    return args;
+  if (!isAgentRunTool(server, toolName)) return args;
   const named = (["runId", "previousRunId"] as const).filter((field) => args[field] !== undefined);
   if (named.length) {
     const owned = new Set<string>();
@@ -380,28 +391,22 @@ export async function prepareAgentRun(
         );
   }
   if (args.runId !== undefined) return args;
-  const toGrade = record(args.input)?.data;
-  const grading = Array.isArray(toGrade) && toGrade.length > 0;
-  const run = actor.runId
-    ? await prisma.run.findFirst({
-        where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
-        select: { threadId: true, thread: { select: { activeRecruitingRoleId: true } } },
-      })
-    : null;
-  if (grading && run?.threadId) {
-    const earlier = await earlierGradingRun(prisma, actor, server, run.threadId, toGrade);
-    if (earlier) return { runId: earlier };
-  }
-  // Ultra is for a wave of a thousand people or more (the recruiter's rule); smaller waves and
-  // grading use auto, which finds the same people for less.
-  const ultra = args.effort === "ultra" && !grading && askedPeople(args.query) >= 1000;
-  const effort = args.effort === "ultra" && !ultra ? "auto" : args.effort;
-  const metered = effort === "auto" || ultra;
-  const cap = ultra ? AGENT_RUN_ULTRA_MAX_COST_USD : AGENT_RUN_MAX_COST_USD;
+  const run = await runRole(prisma, actor);
+  // Every search is a small try of 10 to 20 people (the recruiter's rule), so ultra, which is for
+  // thousand-person sweeps, runs as auto.
+  const effort = args.effort === "ultra" ? "auto" : args.effort;
+  const metered = effort === "auto";
+  const cap = AGENT_RUN_FIND_MAX_COST_USD;
   const asked = Number(record(args.budget)?.maxCostDollars);
-  const { budget: _budget, ...rest } = args;
+  // The agent's own system prompt for the search is left out: the one staging run that carried one
+  // (2026-11-27) returned all ten people without a score, and what the recruiter wants is the query.
+  const { budget: _budget, systemPrompt: _steer, ...rest } = args;
+  // One people search (decided 2026-11-27): a run finds and grades people in one go, so people
+  // already saved are never sent back to be graded a second way (searchSchemaForAgent).
+  const { data: _toGrade, ...input } = record(args.input) ?? {};
   const prepared: Record<string, unknown> = {
     ...rest,
+    ...(args.input !== undefined ? { input } : {}),
     ...(effort !== undefined ? { effort } : {}),
     // The recruiter's spending limit for one wave; a lower limit the agent set still applies.
     ...(metered
@@ -411,24 +416,10 @@ export async function prepareAgentRun(
           },
         }
       : {}),
-    // A grading run always returns the research row format; an agent's own schema would drop it.
-    outputSchema: grading
-      ? AGENT_RUN_GRADE_SCHEMA
-      : (args.outputSchema ??
-        (ultra
-          ? {
-              ...AGENT_RUN_PEOPLE_SCHEMA,
-              properties: {
-                people: {
-                  ...AGENT_RUN_PEOPLE_SCHEMA.properties.people,
-                  maxItems: AGENT_RUN_ULTRA_MAX_PEOPLE,
-                },
-              },
-            }
-          : AGENT_RUN_PEOPLE_SCHEMA)),
+    // Always the people format. Plays 11-27: four of seven runs carried the agent's own format,
+    // their people came back without the search's grade, and Results listed them as not rated.
+    outputSchema: AGENT_RUN_PEOPLE_SCHEMA,
   };
-  // People given to grade are already saved; leaving them out would leave nothing to grade.
-  if (grading) return prepared;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
   const saved = await prisma.recruitingCandidate.findMany({
@@ -441,10 +432,11 @@ export async function prepareAgentRun(
       ? [{ linkedin_url: `https://www.linkedin.com${candidateKey.slice("linkedin:".length)}` }]
       : [],
   );
-  if (!exclusion.length) return prepared;
-  const input = record(args.input) ?? {};
   const given = Array.isArray(input.exclusion) ? input.exclusion : [];
-  return { ...prepared, input: { ...input, exclusion: [...given, ...exclusion] } };
+  const ready = exclusion.length
+    ? { ...prepared, input: { ...input, exclusion: [...given, ...exclusion] } }
+    : prepared;
+  return ready;
 }
 
 /**
@@ -690,8 +682,7 @@ const lifecycle = new Map([
   ["canceled", true],
   ["failed", true],
 ]);
-// These codes explicitly refuse admission in the public Task API ErrorResponse contract.
-// Server/transport failures need task_created:false before they prove non-delivery.
+// These codes explicitly refuse a request in the provider's public ErrorResponse contract.
 const refusalCodes = new Set([
   "invalid_request",
   "unauthorized",
@@ -702,23 +693,18 @@ const refusalCodes = new Set([
   "task_in_cron_mode",
   "task_exists",
 ]);
-const serverErrorCodes = new Set([
-  "service_unavailable",
-  "at_capacity",
-  "internal_error",
-  "bad_gateway",
-]);
 
+/**
+ * Re-reads a stored page of result rows the way it was classified when it was saved, so an older
+ * role's saved people can be checked against their retained receipt.
+ */
 export function classifyRecruitingResearchResult(
   raw: unknown,
-  options: { operation: "create" | "continue" | "status" | "rows"; providerTaskId?: string },
+  options: { providerTaskId?: string },
 ): RecruitingResearchObservation {
   const observation: RecruitingResearchObservation = {
     deliveryState: "unknown",
-    providerTaskId:
-      options.operation !== "create" && nonblank(options.providerTaskId)
-        ? options.providerTaskId
-        : null,
+    providerTaskId: nonblank(options.providerTaskId) ? options.providerTaskId : null,
     observedProviderState: null,
     done: null,
     providerApplicationConfirmed: false,
@@ -728,7 +714,7 @@ export function classifyRecruitingResearchResult(
   const body = mcpObject(raw);
   if (!body) return observation;
   // A finished people-search agent run that graded people: its structured rows are the page.
-  if (options.operation === "rows" && options.providerTaskId?.startsWith("agent_run_")) {
+  if (options.providerTaskId?.startsWith("agent_run_")) {
     const rows = record(record(body.output)?.structured)?.rows;
     if (body.id !== options.providerTaskId || body.status !== "completed" || !Array.isArray(rows))
       return observation;
@@ -750,21 +736,13 @@ export function classifyRecruitingResearchResult(
       body.retry_after >= 0
     )
       observation.retryAfterSeconds = body.retry_after;
-    if (
-      body.task_created !== true &&
-      (refusalCodes.has(body.error) ||
-        (options.operation === "create" &&
-          !taskId &&
-          body.task_created === false &&
-          serverErrorCodes.has(body.error)))
-    )
+    if (body.task_created !== true && refusalCodes.has(body.error))
       observation.deliveryState = "rejected";
     return observation;
   }
   if (record(raw)?.isError === true || (body.error != null && body.state !== "failed"))
     return observation;
-  if (options.operation === "create" && body.task_created === false) return observation;
-  if (options.operation !== "create" && !nonblank(options.providerTaskId)) return observation;
+  if (!nonblank(options.providerTaskId)) return observation;
   const state = nonblank(body.state) ? body.state : null;
   const queued = body.status === "accepted" || body.activity === "queued";
   if (queued && body.done === true) return observation;
@@ -777,34 +755,25 @@ export function classifyRecruitingResearchResult(
     return observation;
   observation.observedProviderState = state ?? (queued ? "queued" : null);
   observation.done = typeof body.done === "boolean" ? body.done : queued ? false : null;
-  if (options.operation === "create") {
-    if (!taskId) return observation;
-  } else if (options.operation === "continue") {
-    if (!taskId && !queued) return observation;
-  } else if (options.operation === "status") {
-    if (!state || !lifecycle.has(state) || typeof body.done !== "boolean") return observation;
-  } else {
-    if (!Array.isArray(body.rows)) return observation;
-    if (
-      body.next_cursor !== undefined &&
-      body.next_cursor !== null &&
-      typeof body.next_cursor !== "string"
-    )
-      return observation;
-    const outputId = body.output_id ?? record(body.output)?.id;
-    if (outputId != null && !nonblank(outputId)) return observation;
-    if (
-      body.output_id != null &&
-      record(body.output)?.id != null &&
-      body.output_id !== record(body.output)?.id
-    )
-      return observation;
-    observation.rows = body.rows;
-    if (body.next_cursor !== undefined) observation.nextCursor = body.next_cursor as string | null;
-    if (outputId !== undefined) observation.outputId = outputId as string | null;
-  }
+  if (!Array.isArray(body.rows)) return observation;
+  if (
+    body.next_cursor !== undefined &&
+    body.next_cursor !== null &&
+    typeof body.next_cursor !== "string"
+  )
+    return observation;
+  const outputId = body.output_id ?? record(body.output)?.id;
+  if (outputId != null && !nonblank(outputId)) return observation;
+  if (
+    body.output_id != null &&
+    record(body.output)?.id != null &&
+    body.output_id !== record(body.output)?.id
+  )
+    return observation;
+  observation.rows = body.rows;
+  if (body.next_cursor !== undefined) observation.nextCursor = body.next_cursor as string | null;
+  if (outputId !== undefined) observation.outputId = outputId as string | null;
   observation.deliveryState = "accepted";
-  if (options.operation === "create") observation.providerTaskId = taskId;
   if (
     typeof body.credits_used === "number" &&
     Number.isFinite(body.credits_used) &&
@@ -879,7 +848,7 @@ export function createRecruitingCandidateReportReader(
             snapshot.kind === "reviewer_grades") &&
           Array.isArray(snapshot.rows)
         ) {
-          // A people search, CSV import or quality-check grading page keeps its rows in its own
+          // A people search, CSV import or stored grade page keeps its rows in its own
           // receipt; there is no research task behind it.
           observation = {
             deliveryState: "accepted",
@@ -911,7 +880,6 @@ export function createRecruitingCandidateReportReader(
           )
             throw new IsolationError();
           observation = classifyRecruitingResearchResult(snapshot.providerResult, {
-            operation: "rows",
             providerTaskId: args.task_id,
           });
           requestCursor = "cursor" in args ? args.cursor : null;
@@ -935,7 +903,6 @@ export function createRecruitingCandidateReportReader(
           if (snapshot.operation !== "rows" || snapshot.effectId !== source.effectId)
             throw new IsolationError();
           observation = classifyRecruitingResearchResult(snapshot.providerResult, {
-            operation: "rows",
             providerTaskId: task.providerTaskId ?? undefined,
           });
           if (!isDeepStrictEqual(snapshot.observation, observation)) throw new IsolationError();

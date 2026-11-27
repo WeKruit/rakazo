@@ -30,7 +30,7 @@ type ProfileFacts = {
 
 /**
  * Each port maps to an existing product path: CRM list read, saved FullEnrich lookups
- * (Contacts tab), saved Autumn pool profile, FullEnrich get_credits / enrich_bulk,
+ * (Contacts tab), saved pool profile, FullEnrich get_credits / enrich_bulk,
  * and crm_append_candidate_note. The caller keeps those paths' approval rules.
  */
 export type ContactBackfillPorts = {

@@ -23,6 +23,7 @@ vi.mock("@lingui/react/macro", () => ({
 
 import type { AskBlock } from "./AskCard";
 import { AskCard } from "./AskCard";
+import { JumpToActiveAskContext } from "./InactiveAsk";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -467,6 +468,30 @@ it.each([
     }
   },
 );
+
+it("points a replaced card to the card that waits now", () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const jump = vi.fn();
+  const block: AskBlock = { kind: "ask", text: "Confirm sending", status: "pending" };
+  try {
+    act(() =>
+      root.render(
+        <JumpToActiveAskContext.Provider value={jump}>
+          <AskCard block={block} canAnswer={false} onAnswer={vi.fn()} />
+        </JumpToActiveAskContext.Provider>,
+      ),
+    );
+    expect(container.textContent).toContain("No longer active");
+    const button = [...container.querySelectorAll("button")].find(
+      (item) => item.textContent === "Needs an answer",
+    )!;
+    act(() => button.click());
+    expect(jump).toHaveBeenCalledOnce();
+  } finally {
+    act(() => root.unmount());
+  }
+});
 
 it("closes an expired card even before its run ends, then shows the answer a message gave it", () => {
   const container = document.createElement("div");

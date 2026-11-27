@@ -20,7 +20,7 @@ test("native recruiting copy sends immediately and recovers through the actual c
   const home = await client<{ groupId: string }>("onboarding/ensureRecruiting", {});
   const assertCrew = (group: Group) => {
     expect(group.members.map((member) => member.name)).toEqual(
-      expect.arrayContaining(["Main", "Sourcer", "Outreach", "Reviewer"]),
+      expect.arrayContaining(["Main", "Sourcer", "Outreach"]),
     );
   };
   assertCrew(await client<Group>("groups/get", { groupId: home.groupId }));

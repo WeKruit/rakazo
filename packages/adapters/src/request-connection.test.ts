@@ -9,14 +9,18 @@ function fixture({
   secretId = null as string | null,
   endpoint = null as string | null,
   assigned = true,
+  name = "Instantly",
   pendingRun = undefined as string | undefined,
+  /** A waiting run in another of the user's conversations, holding a card for this server. */
+  elsewhere = false,
   rows = [] as Array<{ id: string; slug: string; name: string; endpoint: string | null }>,
 } = {}) {
   const prisma: Record<string, any> = {
     mcpServer: {
       findFirst: vi.fn(async () => ({
         id: "server-1",
-        name: "Instantly",
+        name,
+        slug: name.toLowerCase(),
         secretId,
         transport: "streamable_http",
         endpoint,
@@ -29,26 +33,53 @@ function fixture({
       create: vi.fn(async () => ({ id: "assignment" })),
     },
     message: {
-      findMany: vi.fn(async () =>
-        pendingRun
-          ? [
-              {
-                id: "ask-1",
-                runId: pendingRun,
-                blocks: [
-                  {
-                    kind: "ask",
-                    text: "Connect Instantly",
-                    status: "pending",
-                    connection: { serverId: "server-1", name: "Instantly", reason: "x" },
-                  },
-                ],
-              },
-            ]
-          : [],
+      findMany: vi.fn(async ({ where }: { where: { threadId: unknown } }) =>
+        typeof where.threadId === "object"
+          ? elsewhere
+            ? [
+                {
+                  id: "ask-main",
+                  threadId: "thread-main",
+                  blocks: [
+                    {
+                      kind: "ask",
+                      text: "Connect Instantly",
+                      status: "pending",
+                      connection: { serverId: "server-1", name: "Instantly", reason: "x" },
+                    },
+                  ],
+                },
+              ]
+            : []
+          : pendingRun
+            ? [
+                {
+                  id: "ask-1",
+                  runId: pendingRun,
+                  blocks: [
+                    {
+                      kind: "ask",
+                      text: "Connect Instantly",
+                      status: "pending",
+                      connection: { serverId: "server-1", name: "Instantly", reason: "x" },
+                    },
+                  ],
+                },
+              ]
+            : [],
       ),
     },
-    run: { findMany: vi.fn(async () => (pendingRun ? [{ id: pendingRun }] : [])) },
+    run: {
+      findMany: vi.fn(async ({ where }: { where: { status: string; threadId?: string } }) =>
+        where.threadId
+          ? pendingRun
+            ? [{ id: pendingRun }]
+            : []
+          : elsewhere
+            ? [{ id: "run-main", threadId: "thread-main" }]
+            : [],
+      ),
+    },
   };
   prisma.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
   return { prisma, db: prisma as unknown as PrismaClient, pause: vi.fn(async () => {}) };
@@ -82,6 +113,17 @@ describe("request_connection", () => {
     }
   });
 
+  it("never shows a recruiter a card for a service the product runs", async () => {
+    const f = fixture({ endpoint: "https://mcp.instantly.ai/mcp" });
+    expect(await requestConnection(f.db, scope, args, f.pause, "", true)).toMatchObject({
+      error: expect.stringContaining("provider gmail"),
+    });
+    expect(f.pause).not.toHaveBeenCalled();
+    const gmail = fixture({ name: "Gmail" });
+    expect(await requestConnection(gmail.db, scope, args, gmail.pause, "", true)).toBeUndefined();
+    expect(gmail.pause).toHaveBeenCalled();
+  });
+
   it("pauses on one native connect card when not connected", async () => {
     const f = fixture();
     expect(await requestConnection(f.db, scope, args, f.pause)).toBeUndefined();
@@ -93,11 +135,42 @@ describe("request_connection", () => {
     });
   });
 
+  it("keeps a mail card's own reason and adds the address the recruiter typed", async () => {
+    const f = fixture({ name: "Gmail" });
+    const shown = async (reason: string, typed: string) => {
+      await requestConnection(f.db, scope, { serverId: "server-1", reason }, f.pause, typed);
+      return (f.pause.mock.calls.at(-1) as unknown as [{ connection: { reason: string } }])[0]
+        .connection.reason;
+    };
+    const send = "邮箱在上面 Wei.Zhang.Test@example.com，直接发吧";
+    expect(await shown("邮件还没发出，连上 Gmail 后按发送才会发。", send)).toBe(
+      "邮件还没发出，连上 Gmail 后按发送才会发。 (wei.zhang.test@example.com)",
+    );
+    expect(await shown("Not sent yet: to wei.zhang.test@example.com once connected.", send)).toBe(
+      "Not sent yet: to wei.zhang.test@example.com once connected.",
+    );
+    expect(await shown("用来读取候选人的回复。", "帮我看看有没有人回复")).toBe(
+      "用来读取候选人的回复。",
+    );
+  });
+
   it("returns the pending ask instead of opening a second card for the same server", async () => {
     const f = fixture({ pendingRun: "run-0" });
-    expect(await requestConnection(f.db, scope, args, f.pause)).toEqual({
+    expect(await requestConnection(f.db, scope, args, f.pause)).toMatchObject({
       status: "pending",
       askId: "ask-1",
+      message: expect.stringContaining("Do not show another"),
+    });
+    expect(f.pause).not.toHaveBeenCalled();
+  });
+
+  // Team-stuck 11-16: Kruit's calendar card, then the role team's own card for the same calendar.
+  it("shows no second card when another conversation already holds one for the server", async () => {
+    const f = fixture({ elsewhere: true });
+    expect(await requestConnection(f.db, scope, args, f.pause)).toMatchObject({
+      status: "pending",
+      askId: "ask-main",
+      message: expect.stringContaining("open in another conversation"),
     });
     expect(f.pause).not.toHaveBeenCalled();
   });

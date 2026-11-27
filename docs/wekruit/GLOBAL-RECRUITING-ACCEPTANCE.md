@@ -14,7 +14,7 @@ PR #597 replaces CRM-only correspondence gates with shared role/account reads. T
 ## Runnable checks
 
 ```sh
-pnpm exec vitest run packages/adapters/src/recruiting-account.test.ts packages/adapters/src/recruiting-live-correspondence.test.ts packages/adapters/src/recruiting-assessment.test.ts packages/db/src/recruiting-bootstrap.test.ts packages/db/src/recruiting-global-conversation.test.ts packages/auth/src/identity-trust.test.ts apps/api/src/recruiting-routine-target.test.ts
+pnpm exec vitest run packages/adapters/src/recruiting-account.test.ts packages/adapters/src/recruiting-live-correspondence.test.ts packages/adapters/src/recruiting-candidates-tool.test.ts packages/db/src/recruiting-bootstrap.test.ts packages/db/src/recruiting-global-conversation.test.ts packages/auth/src/identity-trust.test.ts apps/api/src/recruiting-routine-target.test.ts
 pnpm --filter @rakazo/web exec playwright test --config playwright.recruiting.config.ts
 pnpm exec tsx packages/testkit/src/cli/harness.ts --e2e --spec=recruiting-global-journey.spec.ts
 node --test infra/acceptance/global-recruiting.test.mjs infra/acceptance/global-recruiting-chat.test.mjs

@@ -1,9 +1,9 @@
 /**
- * One candidate list per role: Autumn search results and the role's CRM contacts, merged so a
+ * One candidate list per role: search results and the role's CRM contacts, merged so a
  * person who is both appears once. Pure and display-only; never re-ranks or qualifies anyone.
  */
 
-/** Autumn's own fit fields as it returned them; null when it returned none. */
+/** The search's own fit fields as it returned them; null when it returned none. */
 export type RoleCandidateFit = {
   score: { label: string; value: string } | null;
   rank: { label: string; value: string } | null;
@@ -21,7 +21,7 @@ export type RoleCandidateEntry<T> = {
 };
 
 export type RoleCandidateRow<A, C> = Omit<RoleCandidateEntry<null>, "value"> & {
-  autumn: A | null;
+  sourced: A | null;
   crm: C | null;
 };
 
@@ -46,7 +46,7 @@ const SCORE_LABELS = ["Match score", "Score"];
 const RANK_LABELS = ["Updated rank", "Overall rank", "Rank"];
 const TIER_LABELS = ["Match tier", "Grade"];
 
-/** Picks Autumn's score, rank and tier from its report fields, preferring the newest labels. */
+/** Picks the search's score, rank and tier from its report fields, preferring the newest labels. */
 export function roleCandidateFit(
   fields: readonly { label: string; value: string | null }[] | undefined,
 ): RoleCandidateFit | null {
@@ -67,22 +67,22 @@ function scoreOf(fit: RoleCandidateFit | null | undefined) {
 }
 
 /**
- * Autumn rows first (by score, highest first, when `sortByScore`; otherwise in the given order),
- * then CRM contacts that matched no Autumn row. A CRM contact joins an Autumn row by normalized
+ * Search rows first (by score, highest first, when `sortByScore`; otherwise in the given order),
+ * then CRM contacts that matched no search row. A CRM contact joins a search row by normalized
  * LinkedIn profile, then by lowercase email; the joined row keeps both records.
  */
 export function mergeRoleCandidates<A, C>({
-  autumn,
+  sourced,
   crm,
   fit,
   sortByScore = true,
 }: {
-  autumn: readonly RoleCandidateEntry<A>[];
+  sourced: readonly RoleCandidateEntry<A>[];
   crm: readonly RoleCandidateEntry<C>[];
   fit?: (value: A) => RoleCandidateFit | null;
   sortByScore?: boolean;
 }): RoleCandidateRow<A, C>[] {
-  const ordered = autumn.map((entry, index) => ({
+  const ordered = sourced.map((entry, index) => ({
     entry,
     index,
     score: scoreOf(fit?.(entry.value)),
@@ -95,7 +95,7 @@ export function mergeRoleCandidates<A, C>({
     );
   const rows: RoleCandidateRow<A, C>[] = ordered.map(({ entry: { value, ...fields } }) => ({
     ...fields,
-    autumn: value,
+    sourced: value,
     crm: null,
   }));
   const byLinkedin = new Map<string, RoleCandidateRow<A, C>>();
@@ -122,7 +122,7 @@ export function mergeRoleCandidates<A, C>({
       continue;
     }
     // A second CRM record for the same person stays visible rather than being dropped.
-    crmOnly.push({ ...fields, autumn: null, crm: value });
+    crmOnly.push({ ...fields, sourced: null, crm: value });
   }
   return [...rows, ...crmOnly];
 }

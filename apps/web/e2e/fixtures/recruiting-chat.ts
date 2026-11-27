@@ -373,29 +373,14 @@ export async function recruitingChatFixture(
           counts: { total: 0, shortlisted: 0, unscored: 0 },
           source: null,
         });
-      case "recruiting/listAssessments":
-        return reply([]);
       case "recruiting/listResearch":
         return reply({ tasks: [], actions: [], observations: [] });
-      case "recruiting/listQuestions":
-        return reply({ questions: [] });
       case "recruiting/crmData":
         return reply({ operation: "memberships", sources: [] });
       case "voice/status":
         return reply(null);
       case "memory/providerConfig":
         return reply(null);
-      case "recruiting/roleSetup":
-        return reply({
-          ready: false,
-          attention: {
-            kind: "question",
-            threadId: bot.threadId,
-            cardId: "calibration-question",
-            createdAt,
-          },
-          items: [],
-        });
       case "messaging/status":
         return reply({ enabled: false, providers: [] });
       case "bots/listArchived":

@@ -1,6 +1,6 @@
 import { createRouterClient } from "@orpc/server";
 import type { AdapterContext } from "@rakazo/adapter-kit";
-import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
+import { MemoryRevisionConflictError } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { createDb } from "@rakazo/db";
@@ -84,7 +84,7 @@ describe("native memory revisions", () => {
 
   it("returns a conflict with the current revision instead of retrying stale text", async () => {
     const { deps, commit } = fixture();
-    commit.mockRejectedValue(new Error(MEMORY_REVISION_CONFLICT_ERROR));
+    commit.mockRejectedValue(new MemoryRevisionConflictError());
     await expect(
       updateMemoryDocument(deps, actor, {
         documentId: "memory-document",

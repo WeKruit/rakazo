@@ -180,6 +180,7 @@ msgstr "Un peu de tout"
 msgid "A draft creation request could not be confirmed. Review the saved sequences before starting another copy."
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "A saved check failed."
 msgstr ""
@@ -661,10 +662,6 @@ msgstr ""
 msgid "Assessment"
 msgstr ""
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Assessment unavailable"
-msgstr ""
-
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Associated roles"
 msgstr ""
@@ -844,14 +841,6 @@ msgstr ""
 msgid "Bounced"
 msgstr ""
 
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Brief changed or could not be confirmed. Refresh and review it."
-msgstr ""
-
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Brief confirmed"
-msgstr ""
-
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Browse all candidates"
 msgstr ""
@@ -956,10 +945,6 @@ msgstr "Annulé"
 msgid "Candidate"
 msgstr "Candidat"
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Candidate assessment"
-msgstr ""
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Candidate conversations"
 msgstr ""
@@ -970,10 +955,6 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Candidate details unavailable"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Candidate facts"
 msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
@@ -990,10 +971,6 @@ msgstr ""
 
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 msgid "Candidate pipeline"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Candidate question"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
@@ -1129,10 +1106,6 @@ msgstr ""
 
 #: src/components/LiveWork.tsx
 msgid "Checking candidate replies"
-msgstr ""
-
-#: src/components/LiveWork.tsx
-msgid "Checking candidates"
 msgstr ""
 
 #: src/components/LiveWork.tsx
@@ -1407,7 +1380,6 @@ msgid "Configure a plugin catalog on the server to connect apps."
 msgstr "Configurez un catalogue de plugins sur le serveur pour connecter des applications."
 
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/RecruitingCorrespondence.tsx
 msgid "Configured"
 msgstr ""
 
@@ -1425,10 +1397,6 @@ msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Confirm and send"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingRoleTab.tsx
-msgid "Confirm brief"
 msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
@@ -1504,10 +1472,6 @@ msgstr "Connecter un modèle"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Connect a provider to add backups."
 msgstr "Connectez un fournisseur pour ajouter des modèles de secours."
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Connect account"
-msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Connect an app"
@@ -1841,10 +1805,6 @@ msgstr "Impossible de charger les règles d'approbation"
 #: src/pages/Artifacts.tsx
 msgid "Could not load artifacts."
 msgstr "Impossible de charger les artefacts."
-
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Could not load assessment"
-msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Could not load backup models"
@@ -2242,10 +2202,6 @@ msgstr ""
 msgid "Criteria"
 msgstr ""
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Criterion"
-msgstr ""
-
 #. placeholder {0}: index + 1
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Criterion {0}"
@@ -2477,10 +2433,6 @@ msgstr ""
 msgid "Developer diagnostics"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Disabled"
-msgstr ""
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Disabled tools"
 msgstr ""
@@ -2644,6 +2596,16 @@ msgstr ""
 msgid "Email"
 msgstr "E-mail"
 
+#. placeholder {0}: index + 1
+#. placeholder {1}: step.delay_days
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Email {0}, day {1}"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Email 1"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email content"
 msgstr ""
@@ -2704,10 +2666,6 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Employment"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Enable for this role"
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
@@ -2898,6 +2856,10 @@ msgstr "Filtres"
 #. placeholder {0}: person.name
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find {0}'s full work history and education and save it to their profile."
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Find candidates with Kruit"
 msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
@@ -3299,12 +3261,6 @@ msgstr ""
 msgid "Interested"
 msgstr ""
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-#: src/pages/recruiting/CandidatePresentation.tsx
-#: src/pages/recruiting/RecruitingLegacyResults.tsx
-msgid "Internal assessment"
-msgstr ""
-
 #: src/pages/SettingsOverlay.tsx
 msgid "Internal Costs"
 msgstr ""
@@ -3506,11 +3462,6 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Loaded files"
-msgstr ""
-
-#. placeholder {0}: loadedEmails.length
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Loaded observations: {0} emails · {unreadCount} unread · {unknownReadCount} read status unknown"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
@@ -3866,10 +3817,6 @@ msgstr "Plus"
 msgid "More options"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "More results may be available. This is not the complete mailbox or calendar."
-msgstr ""
-
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "More sources"
 msgstr ""
@@ -4145,10 +4092,6 @@ msgstr ""
 msgid "No loaded sequences match your search."
 msgstr ""
 
-#: src/components/AskCard.tsx
-msgid "No longer active"
-msgstr "Plus actif"
-
 #: src/pages/PluginsOverlay.tsx
 msgid "No managed app catalog is configured on this deployment."
 msgstr "Aucun catalogue d'applications géré n'est configuré sur ce déploiement."
@@ -4243,10 +4186,6 @@ msgstr ""
 #: src/pages/RoutineRunHistory.tsx
 msgid "No runs yet"
 msgstr "Aucune exécution pour le moment"
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "No saved assessments"
-msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No saved calendar records matched this candidate."
@@ -4483,14 +4422,6 @@ msgstr ""
 msgid "Observed email metadata"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Observed read"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Observed unread"
-msgstr ""
-
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "Older mail is still loading."
 msgstr ""
@@ -4540,6 +4471,10 @@ msgstr ""
 msgid "Only run when"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Only the start of this email is shown."
+msgstr ""
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Open"
 msgstr "Ouvrir"
@@ -4568,10 +4503,6 @@ msgstr "Ouvrir la navigation"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open original email"
 msgstr ""
-
-#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
-msgid "Open original question"
-msgstr "Ouvrir la question d’origine"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Open the conversation to review its history, or ask WeKruit to prepare drafts from saved candidate evidence."
@@ -4626,10 +4557,6 @@ msgstr "Organique"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Organization-wide candidate-role records."
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Original email results saved in this role conversation."
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -4872,10 +4799,6 @@ msgstr ""
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr "L'aperçu n'est pas disponible pour ce type de fichier — téléchargez-le pour le consulter."
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Preview only. Ask for the complete message to read the full body."
-msgstr ""
-
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Previous"
@@ -4996,10 +4919,6 @@ msgid "Read replies aloud"
 msgstr "Lire les réponses à voix haute"
 
 #: src/pages/RecruitingCorrespondence.tsx
-msgid "Read status unknown"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
 msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."
 msgstr ""
 
@@ -5063,6 +4982,14 @@ msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Reconnect"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Reconnect {expiredCalendars}"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Reconnect Gmail"
 msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
@@ -5711,10 +5638,6 @@ msgstr "Enregistré"
 msgid "Saved before latest role update"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Saved calendar checks in this conversation."
-msgstr ""
-
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Saved calendar events"
 msgstr ""
@@ -5735,12 +5658,12 @@ msgstr ""
 msgid "Saved correspondence"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Saved emails"
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Saved email"
 msgstr ""
 
-#: src/pages/recruiting/CandidateDetailDialog.tsx
-msgid "Saved facts"
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Saved emails"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingSummary.tsx
@@ -6066,10 +5989,6 @@ msgstr ""
 msgid "Send totals are not available from these records."
 msgstr ""
 
-#: src/components/AskCard.tsx
-msgid "Send when I say send"
-msgstr ""
-
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "Envoyer avec Entrée"
@@ -6085,6 +6004,10 @@ msgstr "Envoi en cours…"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Seniority"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sent (all time): {sentTotal}"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -6570,10 +6493,6 @@ msgstr "Message Teams"
 msgid "Teams not enabled"
 msgstr "Teams non activé"
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Temporarily unavailable"
-msgstr ""
-
 #: src/pages/RoutineEditor.tsx
 msgid "Test run"
 msgstr "Exécution de test"
@@ -6597,6 +6516,14 @@ msgstr ""
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
 msgstr "Le fournisseur de mémoire sélectionné n'est pas disponible dans cette version."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "There may be more replies. Check inbox to load them."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "There may be more times. Check availability to load them."
+msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "There was a problem sending this message."

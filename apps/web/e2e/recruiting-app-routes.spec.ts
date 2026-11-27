@@ -388,7 +388,7 @@ for (const width of [1440, 390]) {
   test(`actual replies, campaign and booked Overview at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await page.clock.setFixedTime(new Date("2026-10-23T12:00:00Z"));
-    const fixture = await mockRecruitingApp(page, { calendarStatus: "accepted" });
+    const fixture = await mockRecruitingApp(page, { calendarStatus: "booked" });
     await openRoute(page, "inbox");
     const inbox = page.getByTestId("account-recruiting-view");
     if (width === 390)

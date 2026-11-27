@@ -214,4 +214,186 @@ describePostgres("steering after a run ends without completing (PostgreSQL)", ()
 
     expect(expired).toMatchObject({ continuationRunId: null });
   });
+  // Staging 11-16: the decline guard pushed a second turn after Kruit's answer was shown, so the
+  // recruiter read two answers to one question. The retry's answer takes the first one's place.
+  async function retryOfAnsweredTurn(
+    personWroteSince: boolean,
+    suffix = "decline",
+    handedOff?: "global" | "role",
+    cardBeforeAnswer = false,
+  ) {
+    const fixture = await runSteeredByMessage("running");
+    // A finished turn's reply carries its tool steps beside the text.
+    await createThreadMessage(prisma, {
+      threadId,
+      role: "bot",
+      botId,
+      runId: fixture.run.id,
+      blocks: [
+        { kind: "steps", steps: [{ label: "Recruiting candidates", count: 1 }] },
+        { kind: "text", text: "Queued; both send within 58 minutes." },
+      ],
+    });
+    const first = await prisma.message.findFirstOrThrow({
+      where: { threadId, runId: fixture.run.id, role: "bot" },
+      select: { id: true },
+    });
+    await failRun(fixture);
+    if (personWroteSince)
+      await createThreadMessage(prisma, {
+        threadId,
+        role: "user",
+        blocks: [{ kind: "text", text: `and another thing ${randomUUID()}` }],
+      });
+    const nudge = await createThreadMessage(prisma, {
+      threadId,
+      role: "user",
+      blocks: [{ kind: "text", text: "Your reply declined the request." }],
+      clientNonce: `autocontinue:${fixture.run.id}:${suffix}`,
+    });
+    const task = await prisma.task.create({
+      data: { spaceId, botId, threadId, userId, prompt: "retry", status: "running" },
+    });
+    const retry = await prisma.run.create({
+      data: {
+        spaceId,
+        botId,
+        threadId,
+        taskId: task.id,
+        userId,
+        status: "running",
+        trigger: "follow_up",
+        sourceMessageId: nudge.id,
+        startedAt: new Date(),
+        leaseOwner: "worker-1",
+        leaseFence: 1,
+      },
+    });
+    // Honest-limits (c9a6991e): the pushed-on turn handed the question to a teammate, whose
+    // answer came half a minute after Kruit's and said the same thing.
+    let answering = retry;
+    if (handedOff) {
+      const group = await prisma.chatGroup.create({
+        data: {
+          id: `${handedOff === "global" ? "recruiting-global-" : ""}${randomUUID()}`,
+          spaceId,
+          userId,
+          name: handedOff === "global" ? "Kruit" : "Data Engineer",
+        },
+      });
+      await prisma.thread.update({
+        where: { id: threadId },
+        data: { groupId: group.id, botId: null },
+      });
+      const handoff = await createThreadMessage(prisma, {
+        threadId,
+        role: "bot",
+        botId,
+        runId: retry.id,
+        blocks: [{ kind: "handoff", fromBotId: botId, toBotId: botId, text: "Answer it." }],
+        clientNonce: `group-handoff:${retry.id}`,
+      });
+      const teammateTask = await prisma.task.create({
+        data: { spaceId, botId, threadId, userId, prompt: "answer", status: "running" },
+      });
+      answering = await prisma.run.create({
+        data: {
+          spaceId,
+          botId,
+          threadId,
+          taskId: teammateTask.id,
+          userId,
+          status: "running",
+          trigger: "follow_up",
+          sourceMessageId: handoff.id,
+          startedAt: new Date(),
+          leaseOwner: "worker-1",
+          leaseFence: 1,
+        },
+      });
+    }
+    // Branch sends 11-20: the teammate's send card, answered before its turn ended.
+    if (cardBeforeAnswer)
+      await createThreadMessage(prisma, {
+        threadId,
+        role: "bot",
+        botId,
+        runId: answering.id,
+        blocks: [
+          {
+            kind: "ask",
+            text: "Confirm sending the first email",
+            actions: [{ id: "allow", label: "Send" }],
+          },
+        ] as never,
+      });
+    const attempt = await prisma.attempt.create({
+      data: { runId: answering.id, fence: 1, status: "running" },
+    });
+    await finalizeRun(prisma, {
+      spaceId,
+      threadId,
+      botId,
+      runId: answering.id,
+      taskId: answering.taskId ?? task.id,
+      attemptId: attempt.id,
+      leaseOwner: "worker-1",
+      leaseFence: 1,
+      outcome: "completed",
+      blocks: [
+        { kind: "steps", steps: [{ label: "Recruiting candidates", count: 2 }] },
+        { kind: "text", text: "Here are the documents." },
+      ],
+    });
+    if (handedOff)
+      await prisma.thread.update({ where: { id: threadId }, data: { groupId: null, botId } });
+    const replies = await prisma.message.findMany({
+      where: {
+        threadId,
+        role: "bot",
+        runId: { in: [fixture.run.id, retry.id, answering.id] },
+        NOT: [
+          { blocks: { array_contains: [{ kind: "handoff" }] } },
+          { blocks: { array_contains: [{ kind: "ask" }] } },
+        ],
+      },
+      select: { id: true, blocks: true },
+    });
+    return { first, replies };
+  }
+
+  it("puts a declined turn's retry answer in place of the answer it retried", async () => {
+    const { first, replies } = await retryOfAnsweredTurn(false);
+    expect(replies).toEqual([
+      {
+        id: first.id,
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ kind: "text", text: "Here are the documents." }),
+        ]),
+      },
+    ]);
+  });
+
+  it("puts a teammate's answer to a handed-off retry in Kruit's chat in place of the first", async () => {
+    const { first, replies } = await retryOfAnsweredTurn(false, "decline", "global");
+    expect(replies.map((reply) => reply.id)).toEqual([first.id]);
+    // In a role chat a teammate's work (drafts after a round) stays beside the lead's reply.
+    const role = await retryOfAnsweredTurn(false, "decline", "role");
+    expect(role.replies).toHaveLength(2);
+  });
+
+  it("posts a teammate's answer after its own card below that card, not in the reply above it", async () => {
+    const { replies } = await retryOfAnsweredTurn(false, "decline", "global", true);
+    expect(replies).toHaveLength(2);
+  });
+
+  it("puts a promised turn's push in place of the reply it pushed on from", async () => {
+    const { first, replies } = await retryOfAnsweredTurn(false, "1");
+    expect(replies.map((reply) => reply.id)).toEqual([first.id]);
+  });
+
+  it("posts the retry answer on its own once the person has written again", async () => {
+    const { replies } = await retryOfAnsweredTurn(true);
+    expect(replies).toHaveLength(2);
+  });
 });
