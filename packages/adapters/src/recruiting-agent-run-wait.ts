@@ -62,7 +62,9 @@ export function recruitingAgentRunWaitPrompt(
   return [
     `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message; you are continuing your own work.`,
     quiet,
-    "When it has finished, show its new people who fit with calibration_round; if the request is still short, say why in plain words, as the provider's own summary explains it, and carry on as the Find more people skill says. Start no unrelated search.",
+    // Staging 180051e6 and play s165: the request was already met when a search left running
+    // finished, and its people were shown as a round nobody asked for.
+    "When it has finished: while the recruiter's request is still short of the number they asked for, show its new people who fit with calibration_round (the same asked), and if it stays short say why in plain words, as the provider's own summary explains it, and carry on as the Find more people skill says. When that number is already reached (counted in the result says so), show nobody and write nothing: its people stay in Results until the recruiter asks for more. Start no unrelated search.",
   ].join("\n");
 }
 
