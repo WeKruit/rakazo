@@ -36,7 +36,7 @@ import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.j
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as BotMessagesModule from "./bot-messages.js";
-import { messageBot } from "./bot-messages.js";
+import { messageBot, waitForDelegatedAnswer } from "./bot-messages.js";
 import type * as BotSecretsModule from "./bot-secrets.js";
 import { shellCommandEnvironment } from "./bot-secrets.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
@@ -1248,8 +1248,8 @@ describe("stage report while the person's newest message is being answered", () 
 describe("one request handed to a role", () => {
   // Staging 426d09b9, stop-after-approve: "add Ada to the card" went to the role twice a second
   // apart, and two role runs raced on the same send card.
-  it("goes to that role's conversation once per turn", async () => {
-    const f = fixture("delegate-once");
+  const roleFixture = async (name: string) => {
+    const f = fixture(name);
     const bot = await f.prisma.bot.findUniqueOrThrow();
     f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
       ...bot,
@@ -1269,6 +1269,11 @@ describe("one request handed to a role", () => {
         findMany: vi.fn(async () => []),
       },
     });
+    return f;
+  };
+
+  it("goes to that role's conversation once per turn", async () => {
+    const f = await roleFixture("delegate-once");
     vi.mocked(messageBot).mockClear();
     const ask = { name: "delegate_to_role", args: { role_id: "role-1", message: "Add Ada" } };
     f.setCalls([
@@ -1278,6 +1283,22 @@ describe("one request handed to a role", () => {
     await f.run();
     expect(messageBot).toHaveBeenCalledTimes(1);
     expect(f.results[1]).toMatchObject({ ok: true, note: expect.stringContaining("Already") });
+  });
+
+  // Branch play 11-27 (handoff5): the role's card was shown and Kruit still wrote the email draft
+  // in its own conversation after the hand-off returned.
+  it("ends Kruit's turn once the role's card is shown", async () => {
+    const f = await roleFixture("delegate-card-shown");
+    vi.mocked(waitForDelegatedAnswer).mockResolvedValueOnce({ cardShown: true });
+    f.setCalls([
+      {
+        name: "delegate_to_role",
+        args: { role_id: "role-1", message: "Book Ada" },
+        executionId: "d",
+      },
+    ]);
+    await f.run();
+    expect(f.results[0]).toMatchObject({ kind: "agent_tool_result", terminate: true });
   });
 });
 

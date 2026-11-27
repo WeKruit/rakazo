@@ -10738,12 +10738,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return undefined;
             });
             const answered = delegatedAnswerResult(waited);
-            return finish({
+            const handed = {
               ok: true,
               team: sent.name,
               ...answered,
               note: `${answered.note} A card that opens the role's conversation is already shown; do not paste a link.`,
-            });
+            };
+            // The role's card is up: the work is the role's now, so Kruit's turn ends here, the
+            // way a hand-off passes control (OpenAI Agents SDK handoffs; Pi's terminate). Branch
+            // play 11-27: told to say nothing more, Kruit still wrote the email draft itself.
+            return finish(
+              waited?.cardShown
+                ? {
+                    kind: "agent_tool_result",
+                    content: [{ type: "text", text: JSON.stringify(handed) }],
+                    details: handed,
+                    terminate: true,
+                  }
+                : handed,
+            );
           }
           if (name === "start_role") {
             const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
