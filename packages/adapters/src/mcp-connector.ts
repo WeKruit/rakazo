@@ -735,7 +735,7 @@ const endpointBase = (endpoint: string | null | undefined) => {
 /**
  * Mail for a role (its first emails and the answers to its candidates) runs in that role's
  * conversation, where its campaign, its replies and their cards are; in the account-wide
- * conversation Main hands it there (delegate_to_role) and is not offered these. A reply sent
+ * conversation it is handed there (delegate_to_role) and no agent is offered these. A reply sent
  * from both places reached one candidate twice (branch play 11-27).
  */
 const ROLE_MAIL = new Set([
@@ -752,7 +752,7 @@ const ROLE_MAIL = new Set([
 /** Runs whose catalog left out role mail, so a search there names where that mail is sent. */
 const roleMailHidden = new WeakSet<AdapterContext>();
 const ROLE_MAIL_ELSEWHERE =
-  "Mail to candidates is not sent from this conversation. A role's first emails and its answers to candidates are written and sent in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, with any addresses the recruiter gave. Only a one-off email that belongs to no role goes to Outreach here.";
+  "Mail to candidates is not sent from this conversation. A role's first emails and its answers to candidates are written and sent in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, with any addresses the recruiter gave; either shows the recruiter the card that opens that conversation.";
 
 const OUTREACH_CORE = [
   "ensure_role_campaign",
@@ -1115,14 +1115,12 @@ export class McpConnector implements ConnectorProvider {
       assignments.map(async (assignment): Promise<ConnectorTool[]> => {
         const core = coreTools(assignment.bot);
         const planOnly = PLAN_ONLY[endpointBase(assignment.server.endpoint)];
-        const accountWideMain =
-          context.accountWideConversation && recruitingBotKey(assignment.bot) === "main";
         const withCore = (tools: ConnectorTool[]) => {
           for (const tool of tools) {
             if (core.has(coreName(tool))) directTools.add(tool);
             if (tool.route?.toolName === planOnly) planOnlyTools.add(tool);
           }
-          if (!accountWideMain) return tools;
+          if (!context.accountWideConversation) return tools;
           const kept = tools.filter((tool) => !ROLE_MAIL.has(coreName(tool)));
           if (kept.length < tools.length) roleMailHidden.add(context);
           return kept;

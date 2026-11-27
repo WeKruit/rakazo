@@ -58,7 +58,10 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
         // there (delegate_to_role); offered here, it always failed (branch play 11-27).
         !(global && tool.name === "recruiting_scheduling") &&
         // A candidate's reply belongs there too: it answers in the role's own mail thread.
-        !(global && tool.name === "recruiting_reply"),
+        !(global && tool.name === "recruiting_reply") &&
+        // Every email to a candidate runs in a role's conversation (decided 11-27), so no work is
+        // left here for a teammate: this conversation opens the role or hands work to it.
+        !(global && tool.name === "handoff_to_bot"),
     );
 }
 
