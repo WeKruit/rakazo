@@ -87,15 +87,14 @@ import { addressTypedInConversation } from "./named-address.js";
 import { ownMailboxSendRefusal, recordOwnMailboxSend } from "./own-mailbox-sends.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
-  agentRunSchemaForAgent,
-  excludeFoundPeople,
-  limitPeopleSearch,
   lookedUpContacts,
   prepareAgentRun,
+  profileLookupArgs,
   recordAgentRunCost,
   requireFullEnrichJobOwnership,
   requireRoleForPeopleSearch,
   savedContactLookups,
+  searchSchemaForAgent,
 } from "./recruiting-research.js";
 import {
   assertSchedulingCall,
@@ -1188,7 +1187,7 @@ export class McpConnector implements ConnectorProvider {
               inputSchema:
                 tool.name === "reply_to_email" && assignment.server.endpoint === INSTANTLY_MCP
                   ? withOpenQuestions(tool.inputSchema as Record<string, unknown>)
-                  : agentRunSchemaForAgent(
+                  : searchSchemaForAgent(
                       assignment.server,
                       tool.name,
                       tool.inputSchema as Record<string, unknown>,
@@ -1478,21 +1477,15 @@ export class McpConnector implements ConnectorProvider {
         };
         return;
       }
-      let args = await excludeFoundPeople(
-        this.prisma,
-        context,
+      let args = profileLookupArgs(
         assignment.server,
         call.route.toolName,
-        limitPeopleSearch(
+        await prepareAgentRun(
+          this.prisma,
+          context,
           assignment.server,
           call.route.toolName,
-          await prepareAgentRun(
-            this.prisma,
-            context,
-            assignment.server,
-            call.route.toolName,
-            ownedArgs,
-          ),
+          ownedArgs,
         ),
       );
       if (emailScope && call.route.toolName === "list_emails") {
