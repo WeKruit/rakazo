@@ -429,7 +429,9 @@ export async function prepareAgentRun(
           },
         }
       : {}),
-    outputSchema: args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA,
+    // Always the people format. Plays 11-27: four of seven runs carried the agent's own format,
+    // their people came back without the search's grade, and Results listed them as not rated.
+    outputSchema: AGENT_RUN_PEOPLE_SCHEMA,
   };
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;

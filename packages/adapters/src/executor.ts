@@ -8107,7 +8107,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ) ||
               // A search by one person's profile link is a profile lookup, not new people.
               linkedinPersonKey(connectorCall.args?.query) ||
-              (returned !== null && typeof returned === "object" && "error" in returned)
+              (returned !== null && typeof returned === "object" && "error" in returned) ||
+              // A run still working has returned no people yet; it is saved when it finishes.
+              (route.toolName === "agent_run" && runningAgentRunId(returned))
             )
               return null;
             try {
