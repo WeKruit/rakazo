@@ -1053,6 +1053,15 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       .describe(
         "Optional. candidateKey → the heading of the group you put this person in, in the recruiter's language and your own words, from how their profile was judged against what the recruiter asked (for example 'Meet everything asked', 'Years on streaming not stated'). People are listed in candidateKeys order and a heading is printed where it changes, so give each group's people together.",
       ),
+    target: z
+      .number()
+      .int()
+      .positive()
+      .max(10_000)
+      .optional()
+      .describe(
+        "The value of `counted` at which the recruiter's current request is done: `counted` when they asked plus the number they asked for (a role's first request for N: N). Give it with every round of a request for a number of people; the server then says under the list how many are still to come and returns stillMissing.",
+      ),
   }),
   // People returned by a people-search connector call in this same run, saved as one unassessed page.
   z.strictObject({
@@ -1443,7 +1452,11 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     roleId: RecruitingId.optional(),
   }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("replies") }),
-  RecruitingAccountToolReadSchema.extend({ operation: z.literal("roles") }),
+  RecruitingAccountToolReadSchema.extend({
+    operation: z.literal("roles"),
+    /** In Kruit's conversation: the roles your answer is about, each shown as its card that opens it. */
+    show: z.array(RecruitingId).min(1).max(10).optional(),
+  }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("shortlist") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("sequences") }),
@@ -1516,7 +1529,12 @@ const CorrespondenceOriginFields = {
   sourceId: Id.max(200),
   providerMessageId: Id.max(1600),
   savedRead: z
-    .strictObject({ messageId: Id.max(200), linkedRunId: Id.max(200), effectId: Id.max(200) })
+    // No message for a read a candidate's reply woke: nobody wrote one.
+    .strictObject({
+      messageId: Id.max(200).nullable(),
+      linkedRunId: Id.max(200),
+      effectId: Id.max(200),
+    })
     .nullable(),
 };
 const CorrespondenceCrmContext = z
@@ -1702,6 +1720,41 @@ export const RecruitingCandidateHistorySchema = z.strictObject({
   after: z.string().nullable(),
 });
 
+/**
+ * An interview's state as the recruiter sees it, whichever calendar holds it: a saved plan not yet
+ * booked, a booking waiting on the host, booked, moved to another time, cancelled, or a booking
+ * whose outcome failed or is unknown.
+ */
+export const RecruitingInterviewStatusSchema = z.enum([
+  "planned",
+  "pending",
+  "booked",
+  "rescheduled",
+  "cancelled",
+  "failed",
+  "uncertain",
+]);
+export type RecruitingInterviewStatus = z.infer<typeof RecruitingInterviewStatusSchema>;
+const PROVIDER_INTERVIEW_STATUS: Record<string, RecruitingInterviewStatus> = {
+  // Google Calendar event status
+  confirmed: "booked",
+  tentative: "booked",
+  cancelled: "cancelled",
+  // Cal.com booking status
+  accepted: "booked",
+  pending: "pending",
+  awaiting_host: "pending",
+  rejected: "cancelled",
+  canceled: "cancelled",
+};
+/** A calendar's own status code for an event or booking, in the product's interview states. */
+export function recruitingInterviewStatus(value: unknown): RecruitingInterviewStatus | null {
+  if (typeof value !== "string") return null;
+  const status = value.toLowerCase();
+  const known = RecruitingInterviewStatusSchema.safeParse(status);
+  return known.success ? known.data : (PROVIDER_INTERVIEW_STATUS[status] ?? null);
+}
+
 export const RecruitingCorrespondenceSchema = z.strictObject({
   history: z.array(RecruitingCandidateHistorySchema).optional(),
   /** Actual reply failures/uncertainty, not a confirmation-to-booking association. */
@@ -1789,7 +1842,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       end: IsoDate.nullable(),
       timeZone: z.string().nullable(),
       attendees: z.array(z.string()),
-      status: z.string().nullable(),
+      status: RecruitingInterviewStatusSchema.nullable(),
       location: z.string().nullable(),
       url: z.httpUrl().nullable(),
     }),

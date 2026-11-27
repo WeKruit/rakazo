@@ -10,6 +10,7 @@ export const GlobalRecruitingInboxInputSchema = z.strictObject({
   unreadOnly: z.boolean().optional(),
   thread: z
     .strictObject({
+      /** The thread's owner: a role, or a conversation from `conversations`. */
       roleId: z.string().min(1).max(512),
       key: z.string().min(1).max(8192),
       emailId: Id.optional(),
@@ -41,9 +42,12 @@ export const GlobalRecruitingInboxInputSchema = z.strictObject({
 export type GlobalRecruitingInboxInput = z.infer<typeof GlobalRecruitingInboxInputSchema>;
 export const GlobalRecruitingInboxOutputSchema = z.strictObject({
   roles: z.array(RecruitingAccountRoleSchema),
+  /** Conversations that emailed people outside a role; their mail is listed under them. */
+  conversations: z.array(RecruitingAccountRoleSchema).default([]),
   items: z.array(
     z.strictObject({
       key: z.string(),
+      /** The mail's owner: a role from `roles`, or a conversation from `conversations`. */
       roleId: z.string(),
       latestIncomingAt: z.iso.datetime().nullable(),
       email: RecruitingCorrespondenceSchema.shape.emails.element,

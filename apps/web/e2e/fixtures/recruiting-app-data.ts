@@ -374,7 +374,7 @@ export async function mockRecruitingApp(
     emptyMail?: boolean;
     multipleCampaigns?: boolean;
     sequenceDraft?: boolean;
-    calendarStatus?: "accepted" | "confirmed";
+    calendarStatus?: "booked" | "pending";
     candidateReport?: RecruitingCandidateReport;
     workingRole?: boolean;
     kruitHandoff?: boolean;
@@ -615,7 +615,7 @@ export async function mockRecruitingApp(
                 : accountItem(role, 0).correspondence!.events.map((event) => ({
                     ...event,
                     title: "Avery · Platform interview",
-                    status: options.calendarStatus ?? "confirmed",
+                    status: options.calendarStatus ?? "booked",
                   })),
               bookingUnknown: false,
             },
@@ -1102,7 +1102,7 @@ export async function mockRecruitingApp(
                 start: "2026-10-23T14:00:00Z",
                 end: "2026-10-23T14:45:00Z",
                 timeZone: "America/New_York",
-                status: options.calendarStatus ?? "confirmed",
+                status: options.calendarStatus ?? "booked",
                 attendees: [people[0]!.email, "recruiter@example.test"],
                 location: "Video call",
                 url: "https://calendar.example.test/event/fixture",

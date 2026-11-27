@@ -2629,7 +2629,7 @@ describe("saved recruiting correspondence", () => {
       [rescheduleProof("booking-two", "booking-three"), rescheduleProof(), calBookingProof()],
     );
     expect(result.events).toEqual([
-      expect.objectContaining({ id: "calendar:booking:booking-three", status: "accepted" }),
+      expect.objectContaining({ id: "calendar:booking:booking-three", status: "booked" }),
     ]);
   });
   it("marks only verified replaced bookings as superseded across a multi-hop chain", async () => {
@@ -2647,9 +2647,9 @@ describe("saved recruiting correspondence", () => {
       [rescheduleProof("booking-two", "booking-three"), rescheduleProof(), calBookingProof()],
     );
     expect(result.events.map(({ id, status }) => ({ id, status }))).toEqual([
-      { id: "calendar:booking:booking-one", status: "superseded" },
-      { id: "calendar:booking:booking-two", status: "superseded" },
-      { id: "calendar:booking:booking-three", status: "accepted" },
+      { id: "calendar:booking:booking-one", status: "rescheduled" },
+      { id: "calendar:booking:booking-two", status: "rescheduled" },
+      { id: "calendar:booking:booking-three", status: "booked" },
     ]);
   });
   it("does not retire an owned original from an uncertain replacement receipt", async () => {
@@ -2663,7 +2663,7 @@ describe("saved recruiting correspondence", () => {
       [proof, calBookingProof()],
     );
     expect(result.events).toEqual([
-      expect.objectContaining({ id: "calendar:booking:booking-one", status: "accepted" }),
+      expect.objectContaining({ id: "calendar:booking:booking-one", status: "booked" }),
     ]);
   });
   it.each([
@@ -2997,7 +2997,7 @@ describe("saved recruiting correspondence", () => {
           start: "2026-10-23T13:00:00Z",
           end: "2026-10-23T13:30:00Z",
           attendees: ["person@example.test"],
-          status: "accepted",
+          status: "booked",
           location: "https://meet.example.test/interview",
           url: "https://meet.example.test/interview",
         },

@@ -687,6 +687,45 @@ it("projects mail from a campaign cloned for the role", async () => {
   await f.projectLive();
   expect(db.projectRecruitingInboxMessages).toHaveBeenCalled();
 });
+it.each(["stored", "not created by this user", "sender not emailed by the role", "sent row"])(
+  "a role's reply filed under another campaign of this user: %s",
+  async (kind) => {
+    // The mail service files a reply under the person's newest campaign; the account Inbox lost
+    // Ada's reply to the role because it sat in a one-off campaign from the main conversation.
+    const f = liveFixture();
+    const roleCampaign = { ...f.binding, result: { ...f.binding.result, campaignId: uuid(1001) } };
+    f.prisma.externalEffect.findUnique.mockImplementation(async () => roleCampaign as never);
+    Object.assign(f.prisma.externalEffect, {
+      findFirst: vi.fn(async () =>
+        kind === "not created by this user"
+          ? null
+          : { result: { campaignId: uuid(1000), eaccount: "owner@example.test" } },
+      ),
+    });
+    f.prisma.externalEffect.findMany.mockImplementation(async () => [
+      { result: { campaignId: uuid(1001) } },
+    ]);
+    // The role's own confirmed sends emailed this person.
+    f.prisma.$queryRaw.mockImplementation(
+      async () =>
+        (kind === "sender not emailed by the role"
+          ? []
+          : [{ email: "person@example.test" }]) as never,
+    );
+    Object.assign(f.observation.emails[0]!, {
+      direction: kind === "sent row" ? "sent" : "received",
+    });
+    await f.projectLive();
+    if (kind === "stored")
+      expect(db.projectRecruitingInboxMessages).toHaveBeenCalledWith(
+        f.prisma,
+        actor,
+        expect.objectContaining({ roleId: "role" }),
+        expect.any(Function),
+      );
+    else expect(db.projectRecruitingInboxMessages).not.toHaveBeenCalled();
+  },
+);
 it("keeps source observation order when newer and then older live reads finish out of order", async () => {
   const f = liveFixture();
   f.observation.observedAt = "2026-10-24T00:00:00.000Z";

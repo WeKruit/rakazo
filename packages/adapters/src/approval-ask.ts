@@ -206,6 +206,45 @@ export function buildApprovalAskBlock(
 }
 
 const MAX_RECIPIENT_LINES = 20;
+/** Plain words for the sending address, the campaign and its warmup, never the stored states. */
+const SENDER_WORDS: Record<string, string> = {
+  active: "ready to send",
+  provisioning: "still being set up, cannot send yet",
+  setup_pending: "still being set up, cannot send yet",
+  unavailable: "cannot send right now",
+};
+const WARMUP_WORDS: Record<string, string> = {
+  active: "warming up",
+  starting: "starting to warm up",
+  paused: "not warming up",
+};
+const CAMPAIGN_WORDS: Record<string, string> = {
+  Active: "already sending to others",
+  Paused: "paused; this send resumes it",
+  Completed: "finished earlier; this send starts it again",
+};
+/** One email as the card shows it: subject (or the thread it replies in) and full body. */
+function emailLines(
+  email: { subject: string; body: string },
+  indent: string,
+  heading?: string,
+): string[] {
+  return [
+    ...(heading ? [`${indent}${heading}`] : []),
+    `${indent}Subject: ${email.subject || "(a reply in the same thread)"}`,
+    `${indent}Body:`,
+    ...htmlToPlainText(email.body)
+      .split("\n")
+      .map((line) => (line && indent ? `${indent}${line}` : line)),
+  ];
+}
+const followUpLines = (
+  followUps: readonly { after: string; subject: string; body: string }[],
+  indent: string,
+) =>
+  followUps.flatMap((step, index) =>
+    emailLines(step, indent, `Follow-up ${index + 1}, ${step.after}:`),
+  );
 /** The send-confirmation card body: no ids, only what the human is approving. */
 function formatInstantlyActivation(display: InstantlyActivationDisplay) {
   const unknown = (value: string | number | null) => (value === null ? "unknown" : String(value));
@@ -220,7 +259,10 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     `Role: ${display.campaignName ?? "this role"}`,
     `From: ${unknown(display.mailbox)}`,
     ...(display.senderState
-      ? [`Sending address: ${display.senderState.state}`, `Warmup: ${display.senderState.warmup}`]
+      ? [
+          `Sending address: ${SENDER_WORDS[display.senderState.state] ?? "not known"}`,
+          `Warmup: ${WARMUP_WORDS[display.senderState.warmup] ?? "not known"}`,
+        ]
       : []),
     `To (${count}):`,
     ...shown.flatMap((r) => [
@@ -231,15 +273,8 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
             `  First email already confirmed: ${r.alreadyEmailedAt.slice(0, 16).replace("T", " ")} UTC`,
           ]
         : []),
-      ...(r.firstEmail
-        ? [
-            `  Subject: ${r.firstEmail.subject}`,
-            "  Body:",
-            ...htmlToPlainText(r.firstEmail.body)
-              .split("\n")
-              .map((line) => (line ? `  ${line}` : "")),
-          ]
-        : []),
+      ...(r.firstEmail ? emailLines(r.firstEmail, "  ") : []),
+      ...(r.followUps ? followUpLines(r.followUps, "  ") : []),
     ]),
     ...(display.recipients.length > shown.length
       ? [`- and ${display.recipients.length - shown.length} more`]
@@ -251,15 +286,16 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     ...(display.firstEmail === undefined
       ? []
       : display.firstEmail
-        ? [
-            `Subject: ${display.firstEmail.subject}`,
-            "Body:",
-            htmlToPlainText(display.firstEmail.body),
-          ]
+        ? emailLines(display.firstEmail, "")
         : ["Body: no email content yet"]),
-    ...(display.status && display.status !== "Draft" ? [`Status: ${display.status}`] : []),
+    ...(display.followUps ? followUpLines(display.followUps, "") : []),
+    ...(display.status && CAMPAIGN_WORDS[display.status]
+      ? [`Campaign: ${CAMPAIGN_WORDS[display.status]}`]
+      : []),
     "",
-    "Confirm sending the first email to these recipients",
+    display.followUps?.length || display.recipients.some((r) => r.followUps?.length)
+      ? "Confirm sending these emails to these recipients"
+      : "Confirm sending the first email to these recipients",
   ].join("\n");
 }
 
@@ -302,6 +338,7 @@ function outboundTitle(toolName: string): string | undefined {
 function formatInstantlyReply(display: InstantlyReplyDisplay) {
   return [
     `To: ${display.to ?? "unknown"}`,
+    ...(display.cc?.length ? [`Cc: ${display.cc.join(", ")}`] : []),
     `From: ${display.from ?? "unknown"}`,
     `Subject: ${display.subject}`,
     `In reply to: ${display.inReplyTo ?? "unknown"}`,
@@ -496,20 +533,20 @@ function formatGmailSend(toolName: string, args: Record<string, unknown>) {
 type BookingAttendee = { name?: string; email?: string; timeZone?: string };
 
 /** The invitee of a calendar booking request, or of the booking a change or cancellation targets. */
-function bookingAttendee(toolName: string, args: Record<string, unknown>) {
+function bookingAttendee(
+  toolName: string,
+  args: Record<string, unknown>,
+): BookingAttendee | undefined {
   const original = args.originalBooking as { attendees?: unknown } | undefined;
-  if (calendarEvent(toolName) && Array.isArray(args.attendees)) {
-    const guest = args.attendees.find(
-      (item): item is Record<string, unknown> =>
-        Boolean(item) && typeof item === "object" && !(item as { organizer?: unknown }).organizer,
+  // A move or cancellation names the event's own guests before any it adds.
+  if (calendarEvent(toolName)) {
+    const guests = calendarGuests(
+      args.attendees,
+      args.attendeeEmails,
+      (args.originalEvent as { attendees?: unknown } | null | undefined)?.attendees,
+      args.addedAttendees,
     );
-    if (!guest && typeof args.attendees[0] === "string") return { email: args.attendees[0] };
-    if (!guest) return undefined;
-    const name = guest.displayName ?? guest.name;
-    return {
-      ...(typeof name === "string" ? { name } : {}),
-      ...(typeof guest.email === "string" ? { email: guest.email } : {}),
-    } satisfies BookingAttendee;
+    return guests.find((guest) => guest.name) ?? guests[0];
   }
   const attendee = /create_booking$/i.test(toolName)
     ? args.attendee
@@ -587,9 +624,9 @@ function formatBookingChange(toolName: string, args: Record<string, unknown>) {
  * A booking card in the recruiter's terms: who is invited, when in their time zone, and what the
  * invite says. Every other field is still listed, so the card shows all that will be sent.
  */
-/** A calendar app's own event create or update tool, as opposed to a booking page's. */
+/** A calendar app's own event create, update or delete tool, as opposed to a booking page's. */
 function calendarEvent(toolName: string) {
-  return /calendar.*__(create|update|patch)_event$|^googlecalendar_(create|update|patch)_event$/i.test(
+  return /calendar.*__(create|update|patch|delete)_event$|^googlecalendar_(create|update|patch|delete)_event$/i.test(
     toolName,
   );
 }
@@ -645,34 +682,127 @@ function wallTimeIn(wall: string, zone: string): string | undefined {
   }
 }
 
-/** A calendar event the recruiter confirms: who, when and what, without the calendar's name or ids. */
+type CalendarGuest = { email: string; name?: string };
+
+/** The guests of a calendar request or event: plain addresses or attendee rows, organizer left out. */
+function calendarGuests(...values: unknown[]): CalendarGuest[] {
+  return values.flatMap((value) =>
+    Array.isArray(value)
+      ? value.flatMap((item): CalendarGuest[] => {
+          if (typeof item === "string") return [{ email: item }];
+          const guest = item as Record<string, unknown> | null;
+          if (!guest || typeof guest.email !== "string" || guest.organizer === true) return [];
+          const name = guest.displayName ?? guest.name;
+          return [{ email: guest.email, ...(typeof name === "string" && name ? { name } : {}) }];
+        })
+      : [],
+  );
+}
+
+const guestLabel = (guest: CalendarGuest) =>
+  guest.name ? `${guest.name} <${guest.email}>` : guest.email;
+
+/**
+ * A calendar event the recruiter confirms, without the calendar's name or ids: every guest who
+ * gets the invitation, the time (a move shows the current time and the new one, a cancellation
+ * what is cancelled), what the invite says and what the calendar already holds then.
+ */
 function formatCalendarEvent(toolName: string, args: Record<string, unknown>) {
   if (!calendarEvent(toolName)) return undefined;
-  const argZone = typeof args.timeZone === "string" ? args.timeZone : undefined;
+  const operation = /delete_event$/i.test(toolName)
+    ? "delete"
+    : /(update|patch)_event$/i.test(toolName)
+      ? "update"
+      : "create";
+  // The current event, read before the card; null when it could not be read.
+  const original =
+    args.originalEvent && typeof args.originalEvent === "object"
+      ? (args.originalEvent as {
+          summary?: unknown;
+          start?: unknown;
+          end?: unknown;
+          timeZone?: unknown;
+          attendees?: unknown;
+        })
+      : undefined;
+  const originalZone = typeof original?.timeZone === "string" ? original.timeZone : undefined;
+  const argZone = typeof args.timeZone === "string" ? args.timeZone : originalZone;
   const start = eventTime(args.start ?? args.startTime, argZone);
-  if (!start) return undefined;
-  const end = eventTime(args.end ?? args.endTime, start.zone);
-  const zone = start.zone ?? "UTC";
-  const attendee = bookingAttendee(toolName, args);
-  const title = args.summary ?? args.title;
-  const length = end ? Math.round((Date.parse(end.at) - Date.parse(start.at)) / 60_000) : undefined;
-  const update = /(update|patch)_event$/i.test(toolName);
+  if (operation === "create" && !start) return undefined;
+  const end = eventTime(args.end ?? args.endTime, start?.zone ?? argZone);
+  const zone = start?.zone ?? argZone ?? "UTC";
+  const was = eventTime(original?.start, originalZone);
+  const removed = new Set(
+    (Array.isArray(args.removedAttendeeEmails) ? args.removedAttendeeEmails : []).map((email) =>
+      String(email).toLowerCase(),
+    ),
+  );
+  const added =
+    operation === "create"
+      ? calendarGuests(args.attendees, args.attendeeEmails)
+      : calendarGuests(args.addedAttendees, args.addedAttendeeEmails);
+  const kept = calendarGuests(original?.attendees).filter(
+    (guest) => !removed.has(guest.email.toLowerCase()),
+  );
+  const guests = [
+    ...kept,
+    ...added.filter(
+      (guest) => !kept.some((known) => known.email.toLowerCase() === guest.email.toLowerCase()),
+    ),
+  ];
+  const title = args.summary ?? args.title ?? original?.summary;
+  const length =
+    start && end ? Math.round((Date.parse(end.at) - Date.parse(start.at)) / 60_000) : undefined;
+  const conflicts = args.calendarConflicts as Array<{ start: string; end: string }> | null;
+  const unread = operation !== "create" && !original;
+  const busy = (span: { start: string; end: string }) =>
+    `${bookingTime(span.start, zone)} – ${bookingTime(span.end, zone)}`;
   return [
-    ...(attendee
+    ...(operation === "delete"
       ? [
-          `Candidate: ${attendee.name ?? attendee.email ?? "unknown"}${attendee.name && attendee.email ? ` <${attendee.email}>` : ""}`,
+          unread
+            ? "Cancel: this event could not be read; check it in your calendar before you confirm"
+            : `Cancel: ${typeof title === "string" && title ? `${title}, ` : ""}${was ? bookingTime(was.at, originalZone ?? "UTC") : "time unknown"}`,
         ]
       : []),
-    `${update ? "New time" : "When"}: ${bookingTime(start.at, zone)}`,
+    unread && operation === "update"
+      ? "Guests: the current guests could not be read"
+      : `Guests: ${guests.map(guestLabel).join(", ") || "none"}`,
+    ...(operation === "update" && added.length
+      ? [`Adding: ${added.map(guestLabel).join(", ")}`]
+      : []),
+    ...(operation === "update" && removed.size ? [`Removing: ${[...removed].join(", ")}`] : []),
+    ...(operation === "create" && start ? [`When: ${bookingTime(start.at, zone)}`] : []),
+    ...(operation === "update"
+      ? start
+        ? [
+            `From: ${was ? bookingTime(was.at, originalZone ?? zone) : "could not be read"}`,
+            `To: ${bookingTime(start.at, zone)}`,
+          ]
+        : [`When: unchanged${was ? `, ${bookingTime(was.at, originalZone ?? zone)}` : ""}`]
+      : []),
     ...(length && length > 0 ? [`Length: ${length} min`] : []),
-    ...(typeof title === "string" && title ? [`Title: ${title}`] : []),
+    ...(operation !== "delete" && typeof title === "string" && title ? [`Title: ${title}`] : []),
     ...(typeof args.description === "string" && args.description
       ? [`Notes: ${args.description}`]
       : []),
+    ...(typeof args.location === "string" && args.location ? [`Where: ${args.location}`] : []),
+    ...(args.addGoogleMeetUrl === true ? ["Meeting: Video call"] : []),
+    ...(conflicts === null
+      ? ["Your calendar could not be checked for other events at this time."]
+      : Array.isArray(conflicts)
+        ? conflicts.length
+          ? [`Already busy then: ${conflicts.map(busy).join("; ")}`]
+          : ["Your calendar is free then."]
+        : []),
     "",
-    update
-      ? "The candidate gets the new time once you confirm."
-      : "The candidate gets a calendar invitation once you confirm.",
+    args.notificationLevel === "NONE"
+      ? "Guests are not notified."
+      : operation === "delete"
+        ? "Every guest is told it is cancelled once you confirm."
+        : operation === "update"
+          ? "Every guest gets the change once you confirm."
+          : "Every guest gets a calendar invitation once you confirm.",
   ].join("\n");
 }
 

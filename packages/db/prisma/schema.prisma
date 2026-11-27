@@ -622,6 +622,7 @@ model Thread {
   tasks                       Task[]
   runs                        Run[]
   routines                    Routine[]
+  recruitingInboxMessages     RecruitingInboxMessage[]
 
   @@index([spaceId])
   @@map("threads")
@@ -2361,10 +2362,14 @@ model RecruitingInboxMessage {
   id String @id
   userId String @map("user_id")
   spaceId String @map("space_id")
-  roleId String @map("role_id")
+  /// Exactly one of roleId and threadId: the role the mail is for, or the conversation that sent
+  /// it outside a role.
+  roleId String? @map("role_id")
+  threadId String? @map("thread_id")
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  thread Thread? @relation(fields: [threadId], references: [id], onDelete: Cascade)
   originKey String @map("origin_key")
   dedupeKey String @map("dedupe_key")
   threadKey String? @map("thread_key")
@@ -2381,6 +2386,7 @@ model RecruitingInboxMessage {
   person Json?
   @@unique([userId, spaceId, receiptId, receiptOrdinal])
   @@index([userId, spaceId, roleId, messageAt, id])
+  @@index([userId, spaceId, threadId, messageAt, id], map: "recruiting_inbox_messages_conversation_page")
   @@index([userId, spaceId, sourceKind, receiptId])
   @@map("recruiting_inbox_messages")
 }

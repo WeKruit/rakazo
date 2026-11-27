@@ -4,6 +4,8 @@ import {
   RecruitingSchedulingApprovalEvidenceSchema,
   RecruitingSchedulingPlanInputSchema,
 } from "@rakazo/contracts";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
+import { googleEventArguments } from "@rakazo/db";
 import type { z } from "zod";
 import { calendarEvidenceHash } from "./calendar-approval.js";
 
@@ -37,8 +39,9 @@ const object = (value: unknown) =>
     : undefined;
 const sameEmail = (a: unknown, b: string) =>
   typeof a === "string" && a.toLowerCase() === b.toLowerCase();
-/** The create_booking arguments the reviewed plan allows, used when the agent passes none. */
+/** The booking call's arguments the reviewed plan allows, used when the agent passes none. */
 export function schedulingBookingArguments(plan: RecruitingSchedulingPlan) {
+  if (plan.calendar.provider === "google_calendar") return googleEventArguments(plan);
   return {
     eventTypeId: plan.calendar.eventTypeId,
     start: plan.calendar.start,
@@ -63,7 +66,17 @@ export function assertSchedulingCall(
   }
   if (route.connectorId !== "mcp")
     throw new Error("This scheduling plan requires its exact assigned native source");
-  if (operation === "book") {
+  if (operation === "book" && plan.calendar.provider === "google_calendar") {
+    if (
+      route.resourceId !== plan.calendar.sourceId ||
+      route.resourceRevision !== plan.calendar.sourceRevision ||
+      route.toolName !== "create_event" ||
+      stableJsonValue(args) !== stableJsonValue(googleEventArguments(plan))
+    )
+      throw new Error(
+        "Booking arguments do not match the exact reviewed candidate, interval and guests",
+      );
+  } else if (operation === "book") {
     const attendee = object(args.attendee);
     if (
       route.resourceId !== plan.calendar.sourceId ||
@@ -93,6 +106,7 @@ export function assertSchedulingCall(
         "Booking arguments do not match the exact reviewed candidate, interval and participant scope",
       );
   } else if (
+    !plan.originalEmail ||
     route.resourceId !== plan.mailSourceId ||
     route.resourceRevision !== plan.mailSourceRevision ||
     route.toolName !== "native_instantly_reply_to_email" ||
@@ -124,15 +138,23 @@ export function schedulingPlanReview(
     "Scheduling plan",
     `Role: ${plan.roleTitle}`,
     `Candidate: ${plan.candidate.name} <${plan.candidate.email}>`,
-    `Requested interviewer: ${plan.interviewer.name} <${plan.interviewer.email}>${operation === "book" ? " (actual calendar host must be verified after booking)" : ""}`,
+    plan.calendar.provider === "google_calendar"
+      ? `Interviewer: ${plan.interviewer.name} <${plan.interviewer.email}>`
+      : `Requested interviewer: ${plan.interviewer.name} <${plan.interviewer.email}>${operation === "book" ? " (actual calendar host must be verified after booking)" : ""}`,
     `Candidate time: ${local(plan.candidate.timeZone, plan.calendar.start)} – ${local(plan.candidate.timeZone, plan.calendar.end)} (${plan.candidate.timeZone})`,
     `Interviewer time: ${local(plan.interviewer.timeZone, plan.calendar.start)} – ${local(plan.interviewer.timeZone, plan.calendar.end)} (${plan.interviewer.timeZone})`,
     `UTC interval: ${plan.calendar.start} – ${plan.calendar.end}; ${plan.calendar.lengthInMinutes} minutes`,
-    `Original conversation: ${plan.originalEmail.subject}`,
-    `Sending mailbox: ${plan.originalEmail.eaccount}`,
+    ...(plan.originalEmail
+      ? [
+          `Original conversation: ${plan.originalEmail.subject}`,
+          `Sending mailbox: ${plan.originalEmail.eaccount}`,
+        ]
+      : []),
     ...(plan.requests?.guests.length
       ? [
-          `Requested additional guests (separate reviewed actions after booking): ${plan.requests.guests.join(", ")}`,
+          plan.calendar.provider === "google_calendar"
+            ? `Also invited: ${plan.requests.guests.join(", ")}`
+            : `Requested additional guests (separate reviewed actions after booking): ${plan.requests.guests.join(", ")}`,
         ]
       : []),
     ...(plan.requests?.notes

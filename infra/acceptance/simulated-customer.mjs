@@ -600,6 +600,55 @@ async function withoutContactLookups(rpc) {
 // its own words, as someone replying from their own mail client. Nothing is scripted.
 const CANDIDATE_RULES = `You play a job candidate who got an email from a recruiter. You get who you are and the whole email thread so far. Write your reply email body the way this person would: plain text, short, in English, signed with your first name, no subject line. Stay in character and keep to what you know; answer what the recruiter wrote and ask what you would want to know. When the thread needs no answer from you, or you would not answer, reply with null. Answer with one JSON object and nothing else: {"reply": "<email body>" | null}`;
 
+/**
+ * A journey that books (calendar: true) plays on an account whose recruiter connected their Google
+ * Calendar, the way the app's Connect does: the calendar's row, its sign-in started by the
+ * backend, consent given on the branch backend's emulated consent screen, the code handed back as
+ * the callback page does, then sign-in setup gives the booking agents the calendar.
+ */
+async function connectCalendar(rpc) {
+  const endpoint = "https://calendarmcp.googleapis.com/mcp/v1";
+  const server =
+    (await rpc("mcp/servers/list", {})).find((row) => row.endpoint === endpoint) ??
+    (await rpc("mcp/servers/create", {
+      slug: "google-calendar",
+      name: "Google Calendar",
+      transport: "streamable_http",
+      endpoint,
+    }));
+  const started = await rpc("mcp/oauth/begin", {
+    serverId: server.id,
+    redirectUri: `${ORIGIN}/mcp/oauth/callback`,
+  });
+  if (started.status === "authorization_required") {
+    const consent = await fetch(`${BASE}/__e2e/calendar`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authorizationUrl: started.authorizationUrl }),
+    });
+    if (!consent.ok)
+      throw new InfraError(
+        `this environment has no emulated calendar (${consent.status}); booking journeys play on pnpm sim:branch`,
+      );
+    const back = new URL((await consent.json()).redirect);
+    await rpc("mcp/oauth/complete", {
+      sessionId: back.searchParams.get("state"),
+      code: back.searchParams.get("code"),
+      state: back.searchParams.get("state"),
+    });
+  }
+  await rpc("bootstrap", {});
+  // Sign-in setup grants the calendar in the background; the first turn needs it.
+  for (const deadline = Date.now() + 60_000; Date.now() < deadline; await sleep(2_000))
+    if (
+      (await rpc("mcp/assignments/all", {})).some(
+        (grant) => grant.serverId === server.id && grant.allowedTools.includes("create_event"),
+      )
+    )
+      return;
+  throw new InfraError("the connected calendar was not given to the booking agents");
+}
+
 async function outreachMail() {
   const response = await fetch(`${BASE}/__e2e/outreach`, {
     headers: { accept: "application/json" },
@@ -663,6 +712,7 @@ async function mailReached(journey, tag, limitMs) {
 // Real sign-ups carry the recruiter's own name, so a template Kruit signs can use it.
 const ACCOUNT_NAME = "Alex Morgan";
 
+let playsStarted = 0;
 async function play(journey, label, owner, mailbox, out) {
   const user = client();
   let credentials = mailbox;
@@ -701,13 +751,16 @@ async function play(journey, label, owner, mailbox, out) {
     credentials = [email, password];
   }
   const { rpc } = user;
+  if (journey.calendar && credentials.fresh) await connectCalendar(rpc);
   const startedAt = Date.now();
   watchFrom(rpc, startedAt);
   const before = await campaigns(rpc);
   const groupsBefore = new Set((await groupsOf(rpc)).map((group) => group.id));
   // A per-play tag, so a journey on a reused account names a role and recipients of its own. Plays
   // of one journey start in the same minute, so the play number is part of it.
-  const tag = `${new Date(startedAt).toISOString().slice(11, 16).replace(":", "")}${label.split("#")[1] ?? ""}`;
+  // Each play in this run gets its own number: two journeys started in the same minute share
+  // a sample number, and with it their candidates' addresses and each other's mail.
+  const tag = `${new Date(startedAt).toISOString().slice(11, 16).replace(":", "")}${++playsStarted}`;
   // Plays of one journey started together still talk differently.
   const seed = [...label].reduce((sum, char) => sum + char.charCodeAt(0), Number(tag));
   journey = { ...journey, variation: variationFor(seed) };
@@ -853,10 +906,13 @@ async function play(journey, label, owner, mailbox, out) {
           turns.push(turn);
           continue;
         }
+        // A reply draft's only typed answer is its text box: an answer typed on it is the
+        // recruiter's edited reply, sent with the card's Send, never a discard.
+        const editedOnCard = card.mailReply && move.action === "answer_card" && move.text?.trim();
         let answer =
           move.action === "deny_send"
             ? "deny"
-            : move.action === "approve_send"
+            : move.action === "approve_send" || editedOnCard
               ? "allow"
               : move.text;
         if (card.send) answer = guardSend(journey, card, answer, turn);

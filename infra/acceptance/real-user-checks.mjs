@@ -374,7 +374,10 @@ export function requirementSaved(roleText, pattern) {
  */
 export function recipientsOf(title, detail) {
   const lines = detail.split("\n");
-  const start = lines.findIndex((line) => /^(?:To|收件人)(?:\s*\(\d+\+?\))?\s*[:：]/i.test(line));
+  // A calendar invitation names its guests, or the ones a change adds, on one line.
+  const start = lines.findIndex((line) =>
+    /^(?:To|收件人|Guests|Adding)(?:\s*\(\d+\+?\))?\s*[:：]/i.test(line),
+  );
   let found = [];
   if (start >= 0) {
     // A reply card names its one recipient on the To line itself.
@@ -395,7 +398,16 @@ export function cardAnswer(card, text) {
   const typed = String(text ?? "").trim();
   if (card.schema) {
     const content = {};
+    // A form with several fields takes "field: value" lines, one per field, as the page's
+    // separate boxes do; anything else fills each field with the whole answer.
+    const lines = new Map(
+      typed.split("\n").flatMap((line) => {
+        const at = line.indexOf(":");
+        return at > 0 ? [[line.slice(0, at).trim(), line.slice(at + 1).trim()]] : [];
+      }),
+    );
     for (const [name, field] of Object.entries(card.schema.properties ?? {})) {
+      const own = lines.get(name) ?? (field.title ? lines.get(field.title) : undefined);
       const choices = field.enum ?? field.oneOf?.map((option) => option.const) ?? null;
       if (choices) {
         const chosen = choices.find((choice) => typed.includes(String(choice)));
@@ -410,7 +422,7 @@ export function cardAnswer(card, text) {
         const items = field.items?.enum ?? field.items?.anyOf?.map((option) => option.const) ?? [];
         const picked = items.filter((item) => typed.includes(String(item)));
         content[name] = picked.length ? picked : items.slice(0, 1);
-      } else content[name] = typed || "按 JD 来";
+      } else content[name] = own || typed || "按 JD 来";
     }
     return { action: "accept", content };
   }

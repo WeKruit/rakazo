@@ -40,15 +40,49 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
   groupId: string | null | undefined,
 ): T[] {
   const global = Boolean(groupId?.startsWith("recruiting-global-"));
-  return tools.filter(
-    (tool) =>
-      (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
-      // In a group the room is the shared surface: hand the stage to a member
-      // rather than starting a private thread off to one side.
-      (!groupId || tool.name !== "message_bot") &&
-      // Only the account-wide conversation sits above the role teams.
-      ((tool.name !== "delegate_to_role" && tool.name !== "start_role") || global),
-  );
+  return tools
+    .map((tool) => (global && tool.name === "recruiting_role" ? withoutRoleCreate(tool) : tool))
+    .filter(
+      (tool) =>
+        (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
+        // In a group the room is the shared surface: hand the stage to a member
+        // rather than starting a private thread off to one side.
+        (!groupId || tool.name !== "message_bot") &&
+        // Only the account-wide conversation sits above the role teams.
+        ((tool.name !== "delegate_to_role" && tool.name !== "start_role") || global) &&
+        // A booking plan belongs to a role's conversation, so a candidate's booking is handed
+        // there (delegate_to_role); offered here, it always failed (branch play 11-27).
+        !(global && tool.name === "recruiting_scheduling"),
+    );
+}
+
+/**
+ * The account-wide conversation opens a role only with start_role, so its recruiting_role lists
+ * no create: one tool per action, as Anthropic's tool-writing guide advises against overlapping
+ * tools (staging 11-26: Kruit chose the create that cannot work there and told the recruiter it
+ * could not open a role).
+ */
+function withoutRoleCreate<T extends { name: string }>(tool: T): T {
+  const schema = (tool as { inputSchema?: Record<string, unknown> }).inputSchema;
+  const key = Array.isArray(schema?.oneOf)
+    ? "oneOf"
+    : Array.isArray(schema?.anyOf)
+      ? "anyOf"
+      : null;
+  if (!schema || !key) return tool;
+  const variants = (
+    schema[key] as Array<{ properties?: { operation?: { const?: unknown } } }>
+  ).filter((variant) => variant.properties?.operation?.const !== "create");
+  const description = (tool as { description?: string }).description;
+  return {
+    ...tool,
+    ...(description
+      ? {
+          description: `${description} In this conversation a new role is opened with start_role, never here.`,
+        }
+      : {}),
+    inputSchema: { ...schema, [key]: variants },
+  };
 }
 
 type ScheduleUnit = "minutes" | "hours" | "days" | "seconds";

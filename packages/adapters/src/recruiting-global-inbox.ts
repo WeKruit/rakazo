@@ -1,4 +1,4 @@
-import type { ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
+import type { ArtifactStore, ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
 import type { Actor, GlobalRecruitingInboxInput } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import {
@@ -20,6 +20,8 @@ export async function getGlobalRecruitingInbox(
     prisma: PrismaClient;
     connectors: Pick<ConnectorProvider, "execute">;
     jobs: JobPublisher;
+    /** Keeps a reply's attachments as saved files, as a role's own Inbox does. */
+    artifacts?: ArtifactStore;
     signal?: AbortSignal;
     reauthorize?: () => Promise<void>;
     stillAuthorized?: () => Promise<boolean>;
@@ -40,6 +42,9 @@ export async function getGlobalRecruitingInbox(
     const message = entry.email;
     if (!message.snippet) return page;
     const role = page.roles.find((role) => role.id === entry.roleId);
+    // Mail a conversation sent outside a role is shown as stored; no role reads it live.
+    if (!role && page.conversations.some((conversation) => conversation.id === entry.roleId))
+      return page;
     if (!role) throw new IsolationError();
     const target = () => roleTarget(deps.prisma, actor, role, authorize);
     const detail = await getRecruitingCorrespondence(
@@ -53,6 +58,7 @@ export async function getGlobalRecruitingInbox(
       {
         connectors: deps.connectors,
         jobs: deps.jobs,
+        artifacts: deps.artifacts,
         signal: deps.signal,
         stillAuthorized: deps.stillAuthorized,
         reauthorize: target,
@@ -176,6 +182,7 @@ function refreshSendingRoles(
           {
             connectors: deps.connectors,
             jobs: deps.jobs,
+            artifacts: deps.artifacts,
             stillAuthorized: deps.stillAuthorized,
             reauthorize: target,
           },

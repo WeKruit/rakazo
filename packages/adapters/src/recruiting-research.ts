@@ -161,122 +161,8 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
     },
   },
 } as const;
-/**
- * A grading run's rows: one per person given in input.data, in the research service's own row
- * format (canonical person columns, education, match_score 0–100, match_tier Strong / Promising / Partial /
- * Uncertain, fit_reasons, concerns, requirements_assessment), so Results reads them unchanged.
- */
-export const AGENT_RUN_GRADE_SCHEMA = {
-  type: "object",
-  required: ["rows"],
-  properties: {
-    rows: {
-      type: "array",
-      maxItems: 100,
-      items: {
-        type: "object",
-        required: [
-          "name",
-          "linkedin_url",
-          "current_title",
-          "current_company",
-          "location",
-          "education",
-          "evidence_urls",
-          "match_score",
-          "match_tier",
-          "fit_reasons",
-          "concerns",
-          "requirements_assessment",
-        ],
-        properties: {
-          name: { type: "string" },
-          linkedin_url: { type: "string" },
-          current_title: { type: ["string", "null"] },
-          current_company: { type: ["string", "null"] },
-          location: { type: ["string", "null"] },
-          education: EDUCATION_SCHEMA,
-          evidence_urls: { type: ["array", "null"], items: { type: "string" } },
-          match_score: { type: "integer", minimum: 0, maximum: 100 },
-          match_tier: { type: "string", enum: ["Strong", "Promising", "Partial", "Uncertain"] },
-          fit_reasons: { type: "string" },
-          concerns: { type: "array", items: { type: "string" } },
-          requirements_assessment: {
-            type: "array",
-            items: {
-              type: "object",
-              required: ["requirement", "status", "evidence"],
-              properties: {
-                requirement: { type: "string" },
-                status: { type: "string", enum: ["met", "not_met", "unknown"] },
-                evidence: { type: ["string", "null"] },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const;
-/** Most one grading run may spend, in US dollars. */
-export const AGENT_RUN_MAX_COST_USD = 10;
 /** Most one deeper search for people may spend; observed deeper runs cost $0.3 to $1.4. */
 export const AGENT_RUN_FIND_MAX_COST_USD = 2;
-/** A grading run of the same people in the same conversation is read again for this long. */
-const GRADING_REUSE_MS = 6 * 60 * 60_000;
-const FAILED_RUN_STATUSES = new Set(["failed", "cancelled", "canceled", "stopped", "expired"]);
-
-/** The people a grading request names, as one comparable key; undefined when one has no profile. */
-function gradedPeopleKey(data: unknown[]): string | undefined {
-  const keys = data.map((person) => {
-    const url = record(person)?.linkedin_url;
-    return typeof url === "string" ? linkedinPersonKey(url) : undefined;
-  });
-  if (keys.some((key) => !key)) return undefined;
-  return [...new Set(keys)].sort().join("\n");
-}
-
-/**
- * A grading run this conversation already started for exactly these people, unless it failed.
- * Its grades are read again instead of paying for the same batch twice: a grading turn that
- * restarts, or repeats its call after the run finished, used to send the identical batch again.
- */
-async function earlierGradingRun(
-  prisma: PrismaClient,
-  actor: Pick<AdapterContext, "userId" | "spaceId">,
-  server: Pick<McpServer, "id" | "revision">,
-  threadId: string,
-  people: unknown[],
-): Promise<string | undefined> {
-  const wanted = gradedPeopleKey(people);
-  if (!wanted) return undefined;
-  const receipts: Array<{ args: Record<string, unknown>; result: unknown }> = [];
-  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, "agent_run", {
-    threadId,
-    since: new Date(Date.now() - GRADING_REUSE_MS),
-  }))
-    receipts.push(receipt);
-  const failed = new Set<string>();
-  for (const receipt of receipts) {
-    const body = mcpObject(receipt.result);
-    if (typeof body?.id === "string" && FAILED_RUN_STATUSES.has(String(body.status)))
-      failed.add(body.id);
-  }
-  for (const receipt of receipts) {
-    const data = record(receipt.args.input)?.data;
-    const id = mcpObject(receipt.result)?.id;
-    if (
-      receipt.args.runId === undefined &&
-      Array.isArray(data) &&
-      typeof id === "string" &&
-      !failed.has(id) &&
-      gradedPeopleKey(data) === wanted
-    )
-      return id;
-  }
-  return undefined;
-}
-
 /**
  * People one quick people search may return. Ten is what the search's base price covers (each
  * result beyond ten is billed extra), and it keeps every search a small try, the recruiter's rule.
@@ -419,42 +305,45 @@ export async function excludeFoundPeople(
     : args;
 }
 
-/** The full profile text this run's people searches returned, by person. */
+/** Most earlier turns of the conversation read for the profile text their searches returned. */
+const PROFILE_TEXT_RUNS = 12;
+
+/**
+ * The full profile text the conversation's people searches returned, by person: this run's first,
+ * then its earlier turns'.
+ */
 async function profileTexts(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
 ): Promise<Map<string, string>> {
   const texts = new Map<string, string>();
   try {
-    for (const call of await listRunToolResults(prisma, { ...actor } as Actor, actor.runId!))
-      if (isPeopleSearchEndpoint(call.endpoint))
-        for (const person of peopleFromSearch(call.result, call.endpoint)) {
-          const key = linkedinPersonKey(person.linkedin_url);
-          if (key && person._profile_text && !texts.has(key)) texts.set(key, person._profile_text);
-        }
+    const run = await runRole(prisma, actor);
+    const earlier = run
+      ? await prisma.run.findMany({
+          where: {
+            threadId: run.threadId,
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            id: { not: actor.runId! },
+          },
+          orderBy: { createdAt: "desc" },
+          take: PROFILE_TEXT_RUNS,
+          select: { id: true },
+        })
+      : [];
+    for (const runId of [actor.runId!, ...earlier.map(({ id }) => id)])
+      for (const call of await listRunToolResults(prisma, { ...actor } as Actor, runId))
+        if (isPeopleSearchEndpoint(call.endpoint))
+          for (const person of peopleFromSearch(call.result, call.endpoint)) {
+            const key = linkedinPersonKey(person.linkedin_url);
+            if (key && person._profile_text && !texts.has(key))
+              texts.set(key, person._profile_text);
+          }
   } catch {
     // Without the text the people are graded and checked on what their row holds.
   }
   return texts;
-}
-
-/**
- * People sent for grading carry the profile text our search already returned, so the grade rests
- * on that text instead of a fresh lookup by name (measured 11-26: with only a name and link half
- * came back "insufficient public evidence" and one was graded as a namesake).
- */
-async function withProfileText(
-  prisma: PrismaClient,
-  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
-  people: unknown[],
-): Promise<unknown[]> {
-  const texts = await profileTexts(prisma, actor);
-  if (!texts.size) return people;
-  return people.map((person) => {
-    const key = linkedinPersonKey(record(person)?.linkedin_url);
-    const profile = key ? texts.get(key) : undefined;
-    return profile ? { ...record(person), profile } : person;
-  });
 }
 
 /**
@@ -514,18 +403,19 @@ export async function prepareAgentRun(
         );
   }
   if (args.runId !== undefined) return args;
+  // One people search (decided 2026-11-27): a run finds and grades people in one go. People
+  // already saved are not sent back to be graded a second way.
   const toGrade = record(args.input)?.data;
-  const grading = Array.isArray(toGrade) && toGrade.length > 0;
+  if (Array.isArray(toGrade) && toGrade.length > 0)
+    throw new IsolationError(
+      "A run searches for people and grades the ones it returns; it does not grade people given in input.data. Leave input.data out: people already in Results keep the grade their search gave them.",
+    );
   const run = await runRole(prisma, actor);
-  if (grading && run?.threadId) {
-    const earlier = await earlierGradingRun(prisma, actor, server, run.threadId, toGrade);
-    if (earlier) return { runId: earlier };
-  }
   // Every search is a small try of 10 to 20 people (the recruiter's rule), so ultra, which is for
   // thousand-person sweeps, runs as auto.
   const effort = args.effort === "ultra" ? "auto" : args.effort;
   const metered = effort === "auto";
-  const cap = grading ? AGENT_RUN_MAX_COST_USD : AGENT_RUN_FIND_MAX_COST_USD;
+  const cap = AGENT_RUN_FIND_MAX_COST_USD;
   const asked = Number(record(args.budget)?.maxCostDollars);
   const { budget: _budget, ...rest } = args;
   const prepared: Record<string, unknown> = {
@@ -539,14 +429,8 @@ export async function prepareAgentRun(
           },
         }
       : {}),
-    // A grading run always returns the research row format; an agent's own schema would drop it.
-    outputSchema: grading ? AGENT_RUN_GRADE_SCHEMA : (args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA),
+    outputSchema: args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA,
   };
-  // People given to grade are already saved; leaving them out would leave nothing to grade.
-  if (grading)
-    return actor.runId
-      ? { ...prepared, input: { ...record(args.input), data: await withProfileText(prisma, actor, toGrade) } }
-      : prepared;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
   const saved = await prisma.recruitingCandidate.findMany({

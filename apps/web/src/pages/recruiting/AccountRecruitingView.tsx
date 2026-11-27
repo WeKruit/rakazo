@@ -824,6 +824,11 @@ export function AccountRecruitingView({
                   accountKey={accountKey}
                   key={pageKey}
                   roles={page?.roles ?? []}
+                  conversations={
+                    globalInbox && indexedMail?.key === readKey
+                      ? indexedMail.data.conversations
+                      : undefined
+                  }
                   items={page?.items ?? []}
                   spaceId={spaceId}
                   serverThreads={

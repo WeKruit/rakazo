@@ -147,16 +147,36 @@ export function roundCountLine(
   counts: { counted: number; turnedDown: number },
   listed: number,
   chinese: boolean,
+  target?: number,
 ): string {
   const shown = counts.counted + counts.turnedDown;
-  if (shown <= listed && !counts.turnedDown) return "";
-  if (chinese)
-    return counts.turnedDown
+  // Staging 11-26: asked for ten, two were listed and nothing said eight were still to come.
+  const missing = Math.max(0, (target ?? 0) - counts.counted);
+  const still = missing
+    ? chinese
+      ? `还差 ${missing} 人，继续找。`
+      : `${missing} still to come.`
+    : "";
+  if (shown <= listed && !counts.turnedDown) return still;
+  const line = chinese
+    ? counts.turnedDown
       ? `累计展示 ${shown} 人，你淘汰了 ${counts.turnedDown} 人，计入 ${counts.counted} 人。`
-      : `累计展示 ${shown} 人。`;
-  return counts.turnedDown
-    ? `${shown} shown so far, ${counts.turnedDown} turned down by you, ${counts.counted} counted.`
-    : `${shown} shown so far.`;
+      : `累计展示 ${shown} 人。`
+    : counts.turnedDown
+      ? `${shown} shown so far, ${counts.turnedDown} turned down by you, ${counts.counted} counted.`
+      : `${shown} shown so far.`;
+  return still ? (chinese ? `${line}${still}` : `${line} ${still}`) : line;
+}
+
+/** What a round's result tells the agent when the request it serves is not yet met. */
+export function roundStillMissing(counted: number, target?: number) {
+  const stillMissing = Math.max(0, (target ?? 0) - counted);
+  return stillMissing
+    ? {
+        stillMissing,
+        requestOpen: `The recruiter's request is ${stillMissing} short and the list says so: search on in this step and record the next round with the same target. Never end the turn on this list.`,
+      }
+    : {};
 }
 
 type StoredBlock = { kind?: unknown; text?: unknown; recruitingRoundList?: { roundId?: unknown } };

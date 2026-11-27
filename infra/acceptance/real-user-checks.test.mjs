@@ -528,6 +528,14 @@ test("a send card's recipients are its To list, never the sending mailbox or the
     ),
     ["ethan@test.example"],
   );
+  // A calendar invitation goes to every guest on its Guests line.
+  assert.deepEqual(
+    recipientsOf(
+      "Confirm interview booking",
+      "Guests: Ethan Park <ethan@test.example>, priya@test.example\nWhen: Tue, Dec 1, 2026",
+    ),
+    ["ethan@test.example", "priya@test.example"],
+  );
 });
 
 test("cardAnswer sends a button id, a filled form, or the typed text", () => {
@@ -555,6 +563,20 @@ test("cardAnswer sends a button id, a filled form, or the typed text", () => {
   });
   // 11-26: "搬迁最高$10k" on a 提供/不提供 card was sent as the first choice.
   assert.equal(cardAnswer(form, "看情况，最多三年"), null);
+  // 11-27: an email + time zone card got the whole answer in both boxes and refused it.
+  const contact = {
+    actions: [],
+    schema: {
+      properties: {
+        priya_email: { type: "string", title: "Priya 的工作邮箱", format: "email" },
+        priya_time_zone: { type: "string", title: "时区" },
+      },
+    },
+  };
+  assert.deepEqual(cardAnswer(contact, "priya_email: p@example.test\n时区: America/Chicago"), {
+    action: "accept",
+    content: { priya_email: "p@example.test", priya_time_zone: "America/Chicago" },
+  });
 });
 
 test("Chinese with English titles, skills or a quoted email is Chinese", () => {

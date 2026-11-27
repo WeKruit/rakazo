@@ -505,6 +505,51 @@ describe("buildApprovalAskBlock", () => {
     expect(card(null)).toContain("Body: no email content yet");
   });
 
+  it("shows every email the send approves, each person's as they get it, in plain words", () => {
+    // Audit 11-26: follow-ups were never on the card, and it showed raw stored states.
+    const block = buildApprovalAskBlock("e", "instantly__demo__activate_campaign", {}, [], {
+      oneTimeOnly: true,
+      instantlyActivation: {
+        senderState: { state: "active", warmup: "active", readyAt: null },
+        campaignName: "Founding Engineer",
+        status: "Paused",
+        mailbox: "team@example.test",
+        recipients: [
+          {
+            name: "Ada Lovelace",
+            email: "ada@example.test",
+            firstEmail: { subject: "Founding role", body: "<p>Hi Ada</p>" },
+            followUps: [{ after: "3 days after the email before", subject: "", body: "<p>Ada?</p>" }],
+          },
+        ],
+        recipientCount: 1,
+        stopOnReply: true,
+        schedule: "now",
+      },
+    });
+    expect(block.detail).toBe(
+      [
+        "Role: Founding Engineer",
+        "From: team@example.test",
+        "Sending address: ready to send",
+        "Warmup: warming up",
+        "To (1):",
+        "- Ada Lovelace <ada@example.test>",
+        "  Subject: Founding role",
+        "  Body:",
+        "  Hi Ada",
+        "  Follow-up 1, 3 days after the email before:",
+        "  Subject: (a reply in the same thread)",
+        "  Body:",
+        "  Ada?",
+        "Send time: now",
+        "Campaign: paused; this send resumes it",
+        "",
+        "Confirm sending these emails to these recipients",
+      ].join("\n"),
+    );
+  });
+
   it("shows a vendor-free reply card that sends only on confirmation", () => {
     const block = buildApprovalAskBlock(
       "reply-effect",
@@ -537,6 +582,24 @@ describe("buildApprovalAskBlock", () => {
     );
     expect(`${block.text}\n${block.detail}`).not.toContain("Instantly");
     expect(block.detail).not.toContain("7a0a8e6e");
+    const copied = buildApprovalAskBlock(
+      "reply-effect",
+      "instantly__demo__reply_to_email",
+      { reply_to_uuid: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69", body: { text: "Thanks" } },
+      [],
+      {
+        oneTimeOnly: true,
+        instantlyReply: {
+          to: "ada@example.test",
+          cc: ["lead@client.test"],
+          from: "team@example.test",
+          subject: "Re: Founding Engineer",
+          inReplyTo: null,
+          body: "Thanks",
+        },
+      },
+    );
+    expect(copied.detail).toContain("To: ada@example.test\nCc: lead@client.test\n");
     expect(block.actions).toEqual([
       { id: "allow", label: "Confirm and send" },
       { id: "deny", label: "Cancel" },
@@ -588,12 +651,12 @@ describe("buildApprovalAskBlock", () => {
     expect(block.text).toBe("Confirm interview booking → Adam Test");
     expect(block.detail).toBe(
       [
-        "Candidate: Adam Test <adam@example.test>",
+        "Guests: Adam Test <adam@example.test>",
         "When: Tue, Nov 3, 2026, 2:00 PM CST (America/Chicago)",
         "Length: 30 min",
         "Title: Interview – Front Desk Supervisor",
         "",
-        "The candidate gets a calendar invitation once you confirm.",
+        "Every guest gets a calendar invitation once you confirm.",
       ].join("\n"),
     );
     expect(`${block.text}\n${block.detail}`).not.toMatch(/google|Google|primary/);
@@ -614,6 +677,127 @@ describe("buildApprovalAskBlock", () => {
     );
     expect(block.detail).toContain("When: Wed, Nov 4, 2026, 2:00 PM CST (America/Chicago)");
     expect(block.detail).toContain("Length: 30 min");
+  });
+
+  it("lists every guest of a calendar booking and what the calendar already holds then", () => {
+    const block = buildApprovalAskBlock(
+      "event-guests",
+      "mcp__google-calendar__create_event",
+      {
+        summary: "Ethan Park · Senior Data Engineer",
+        startTime: "2026-12-01T14:00:00",
+        endTime: "2026-12-01T14:30:00",
+        timeZone: "America/Chicago",
+        attendees: [
+          { email: "ethan@candidate.example.test", displayName: "Ethan Park" },
+          { email: "priya@client.example.test" },
+        ],
+        calendarConflicts: [{ start: "2026-12-01T20:15:00Z", end: "2026-12-01T21:00:00Z" }],
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview booking → Ethan Park");
+    expect(block.detail).toBe(
+      [
+        "Guests: Ethan Park <ethan@candidate.example.test>, priya@client.example.test",
+        "When: Tue, Dec 1, 2026, 2:00 PM CST (America/Chicago)",
+        "Length: 30 min",
+        "Title: Ethan Park · Senior Data Engineer",
+        "Already busy then: Tue, Dec 1, 2026, 2:15 PM CST (America/Chicago) – Tue, Dec 1, 2026, 3:00 PM CST (America/Chicago)",
+        "",
+        "Every guest gets a calendar invitation once you confirm.",
+      ].join("\n"),
+    );
+  });
+
+  it("says when the calendar could not be checked for other events", () => {
+    const block = buildApprovalAskBlock(
+      "event-unchecked",
+      "mcp__google-calendar__create_event",
+      {
+        summary: "Interview",
+        startTime: "2026-12-01T20:00:00Z",
+        endTime: "2026-12-01T20:30:00Z",
+        attendees: [{ email: "ethan@candidate.example.test" }],
+        calendarConflicts: null,
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.detail).toContain(
+      "Your calendar could not be checked for other events at this time.",
+    );
+  });
+
+  it("shows a calendar move as the current time and the new one, with the event's guests", () => {
+    const block = buildApprovalAskBlock(
+      "event-move",
+      "mcp__google-calendar__update_event",
+      {
+        eventId: "event-1",
+        startTime: "2026-12-02T20:00:00Z",
+        endTime: "2026-12-02T20:30:00Z",
+        removedAttendeeEmails: ["priya@client.example.test"],
+        addedAttendees: [{ email: "sam@client.example.test" }],
+        originalEvent: {
+          summary: "Interview",
+          start: "2026-12-01T20:00:00.000Z",
+          end: "2026-12-01T20:30:00.000Z",
+          timeZone: "America/Chicago",
+          attendees: [
+            { email: "ethan@candidate.example.test", displayName: "Ethan Park" },
+            { email: "priya@client.example.test" },
+          ],
+        },
+        calendarConflicts: [],
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview change → Ethan Park");
+    expect(block.detail).toBe(
+      [
+        "Guests: Ethan Park <ethan@candidate.example.test>, sam@client.example.test",
+        "Adding: sam@client.example.test",
+        "Removing: priya@client.example.test",
+        "From: Tue, Dec 1, 2026, 2:00 PM CST (America/Chicago)",
+        "To: Wed, Dec 2, 2026, 2:00 PM CST (America/Chicago)",
+        "Length: 30 min",
+        "Title: Interview",
+        "Your calendar is free then.",
+        "",
+        "Every guest gets the change once you confirm.",
+      ].join("\n"),
+    );
+  });
+
+  it("shows what a calendar cancellation cancels and who is told", () => {
+    const block = buildApprovalAskBlock(
+      "event-cancel",
+      "mcp__google-calendar__delete_event",
+      {
+        eventId: "event-1",
+        originalEvent: {
+          summary: "Interview",
+          start: "2026-12-01T20:00:00.000Z",
+          end: "2026-12-01T20:30:00.000Z",
+          timeZone: "America/Chicago",
+          attendees: [{ email: "ethan@candidate.example.test", displayName: "Ethan Park" }],
+        },
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview cancellation → Ethan Park");
+    expect(block.detail).toBe(
+      [
+        "Cancel: Interview, Tue, Dec 1, 2026, 2:00 PM CST (America/Chicago)",
+        "Guests: Ethan Park <ethan@candidate.example.test>",
+        "",
+        "Every guest is told it is cancelled once you confirm.",
+      ].join("\n"),
+    );
   });
 
   it("shows an interview change as who, from and to, then the original booking", () => {

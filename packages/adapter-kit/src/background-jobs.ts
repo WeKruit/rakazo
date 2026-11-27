@@ -222,12 +222,14 @@ export function cloudAgentPollJob(
 /** One pending reply check-in per conversation. */
 export function recruitingCheckinStartJob(
   payload: BackgroundJobPayloads["recruiting_checkin.start"],
+  availableAt?: Date,
 ): BackgroundJob {
   return {
     name: "recruiting_checkin.start",
     payload,
     replaceKey: `recruiting_checkin.start:${payload.threadId}`,
     keepExisting: true,
+    ...(availableAt ? { availableAt } : {}),
   };
 }
 

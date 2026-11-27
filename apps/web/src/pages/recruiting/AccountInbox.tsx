@@ -17,6 +17,8 @@ type AccountItem = RecruitingAccountViewOutput["items"][number];
 type Props = {
   accountKey?: string;
   roles: RecruitingAccountViewOutput["roles"];
+  /** Conversations whose mail sent outside a role is listed too, named like a role. */
+  conversations?: RecruitingAccountViewOutput["roles"];
   items: AccountItem[];
   spaceId?: string;
   pending: readonly string[];
@@ -144,7 +146,8 @@ export function accountInboxThreads(items: readonly AccountItem[]) {
 
 export function AccountInbox({
   accountKey,
-  roles,
+  roles: ownRoles,
+  conversations,
   items,
   spaceId,
   pending,
@@ -162,6 +165,8 @@ export function AccountInbox({
   onFilterChange,
 }: Props) {
   const { t } = useLingui();
+  // A conversation's mail shows its name and opens its reply cards; only a role opens a role.
+  const roles = conversations?.length ? [...ownRoles, ...conversations] : ownRoles;
   const requestedServerThread = serverThreads?.find((item) => item.key === requestedThread);
   const rows = accountInboxThreads(items);
   for (const row of rows) {
@@ -626,7 +631,7 @@ export function AccountInbox({
                 {roleTitle(selected.roleId)}
                 {email.eaccount ? ` · ${email.eaccount}` : ""}
               </span>
-              {roles.find((role) => role.id === selected.roleId)?.groupId ? (
+              {ownRoles.find((role) => role.id === selected.roleId)?.groupId ? (
                 <Button size="sm" variant="ghost" onClick={() => onOpenRole(selected.roleId)}>
                   <Trans>Open role</Trans>
                   <ArrowUpRight size={14} aria-hidden />
@@ -665,7 +670,7 @@ export function AccountInbox({
                   onOpenProfile={
                     selected.person &&
                     onOpenProfile &&
-                    roles.find((role) => role.id === selected.roleId)?.groupId
+                    ownRoles.find((role) => role.id === selected.roleId)?.groupId
                       ? () => onOpenProfile(selected.roleId, selected.person!)
                       : undefined
                   }

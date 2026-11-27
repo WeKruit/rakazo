@@ -4966,9 +4966,8 @@ export async function saveRecruitingCandidatePeopleSearch(
       actor,
       { run, thread, role, saving, trusted, file },
       {
-        // A person's grade for the role is given once: by the search that graded them, or by the
-        // requirement check when no search did (a quick search returns no grade). Someone already
-        // graded keeps theirs when a later search finds them.
+        // A person's grade for the role is given once, by the search that found them. The requirement check's
+        // verdicts ride with it and never grade anyone. Someone already graded keeps theirs.
         rows: captured.rows.map((entry) => {
           const key = normalizeRecruitingCandidateRow(entry.row, {
             schemaKnown: true,
@@ -4978,7 +4977,7 @@ export async function saveRecruitingCandidatePeopleSearch(
           const { match_tier: tier, match_score: score } = check ?? entry.row;
           if (typeof tier === "string" && SEARCH_MATCH_TIERS.has(tier) && typeof score === "number")
             return { ...entry, matchFields: check ?? { match_score: score, match_tier: tier } };
-          // No search grade: the check's verdicts are kept, with its own grade when it gave one.
+          // No search grade yet: the check's verdicts are kept and grade nobody.
           return check ? { ...entry, matchFields: check } : entry;
         }),
         describe: ({ artifact, observedAt, candidateRows }) => ({

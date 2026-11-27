@@ -168,6 +168,13 @@ describe("native reply_to_email", () => {
       body: "收到，谢谢",
     });
     expect(JSON.stringify(display)).not.toContain("Instantly");
+    // Audit 11-26: a Cc was sent but not on the card the recruiter approved.
+    const copied = await describeReplyToEmail(async () => ORIGINAL, {
+      reply_to_uuid: ORIGINAL.id,
+      body: { text: "Thanks" },
+      cc_address_email_list: "Hiring Lead <lead@client.test>, coordinator@client.test",
+    });
+    expect(copied.cc).toEqual(["lead@client.test", "coordinator@client.test"]);
   });
 });
 
@@ -240,7 +247,7 @@ describe("activation card for one person's own first email", () => {
     const display = await describeCampaignActivation(fromTool, "c-1", null, binding);
     expect(JSON.stringify(display)).not.toContain(OWN_EMAIL_STEP);
     expect(display.recipients[0]?.firstEmail?.subject).toBe("Ada, your compiler work");
-    expect(display.firstEmail?.subject).toBe("Founding role");
+    expect(display.recipients[1]?.firstEmail?.subject).toBe("Founding role");
   });
 
   it("names the sending mailbox from get_campaign when no role says it", async () => {
@@ -253,16 +260,65 @@ describe("activation card for one person's own first email", () => {
     expect(display.mailbox).toBe("me@x.test");
   });
 
-  it("shows the role's email for the people who keep it", async () => {
+  it("shows the role's email filled in for each person who keeps it, never its variables", async () => {
+    // Audit 11-26: the card showed the raw {{firstName}} instead of what each person receives.
     const display = await describeCampaignActivation(read, "c-1", null, binding);
-    expect(display.recipients.map((r) => r.firstEmail?.subject ?? null)).toEqual([
-      "Ada, your compiler work",
-      null,
+    expect(display.recipients.map((r) => r.firstEmail)).toEqual([
+      { subject: "Ada, your compiler work", body: "Hi Ada,<br /><br />Just you." },
+      { subject: "Founding role", body: "<p>Hi Bob,</p><p>Open to a chat?</p>" },
     ]);
-    expect(display.firstEmail).toEqual({
-      subject: "Founding role",
-      body: "<p>Hi {{firstName}},</p><p>Open to a chat?</p>",
-    });
+    expect(display).not.toHaveProperty("firstEmail");
+    expect(JSON.stringify(display)).not.toContain("{{");
+  });
+
+  it("shows every follow-up the campaign will send, filled in for each person", async () => {
+    // Audit 11-26: steps 2 and 3 went out without ever being on the card the recruiter approved.
+    const plain = {
+      id: "c-2",
+      name: "Founding Engineer",
+      status: 0,
+      email_list: ["me@x.test"],
+      sequences: [
+        {
+          steps: [
+            { variants: [{ subject: "Founding role", body: "<p>Hi there</p>" }] },
+            { delay: 3, delay_unit: "days", variants: [{ subject: "", body: "<p>Bumping this</p>" }] },
+            {
+              delay: 1,
+              delay_unit: "days",
+              variants: [{ subject: "Last note", body: "<p>{{firstName}}, closing the loop</p>" }],
+            },
+          ],
+        },
+      ],
+    };
+    const display = await describeCampaignActivation(
+      async (tool) => (tool === "native_instantly_get_campaign" ? plain : { items: leads }),
+      "c-2",
+    );
+    expect(display.firstEmail).toEqual({ subject: "Founding role", body: "<p>Hi there</p>" });
+    expect(display).not.toHaveProperty("followUps");
+    expect(display.recipients.map((r) => r.followUps)).toEqual(
+      ["Ada", "Bob"].map((name) => [
+        { after: "3 days after the email before", subject: "", body: "<p>Bumping this</p>" },
+        {
+          after: "1 day after the email before",
+          subject: "Last note",
+          body: `<p>${name}, closing the loop</p>`,
+        },
+      ]),
+    );
+    const same = await describeCampaignActivation(
+      async (tool) =>
+        tool === "native_instantly_get_campaign"
+          ? { ...plain, sequences: [{ steps: plain.sequences[0]!.steps.slice(0, 2) }] }
+          : { items: leads },
+      "c-2",
+    );
+    expect(same.followUps).toEqual([
+      { after: "3 days after the email before", subject: "", body: "<p>Bumping this</p>" },
+    ]);
+    expect(same.recipients.every((r) => !r.followUps && !r.firstEmail)).toBe(true);
   });
 
   it("shows a waiting person the email the send will add for them", async () => {
@@ -696,13 +752,51 @@ describe("reply sender checks before card creation", () => {
           kind: "instantly_role_campaign",
           AND: [
             { request: { path: ["serverId"], equals: "source-proof" } },
-            { request: { path: ["roleId"], equals: "role-proof" } },
             { result: { path: ["campaignId"], equals: "campaign-proof" } },
+            { request: { path: ["roleId"], equals: "role-proof" } },
           ],
         }),
       }),
     );
     expect(rest.mock.calls).toEqual([["GET", "/accounts/team%40example.test"]]);
+  });
+  it("replies from a one-off campaign's mailbox outside any role", async () => {
+    // Audit 11-26: replying in the main chat to a one-off campaign's email failed
+    // sender_unavailable, since only role campaign records were taken as proof.
+    const original = { ...ORIGINAL, campaign_id: "one-off" };
+    const findUnique = vi.fn(async ({ where }: any) =>
+      where.idempotencyKey === "instantly-direct-campaign:source-proof:one-off" &&
+      where.AND?.[1]?.result?.equals === "one-off"
+        ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "one-off" } }
+        : null,
+    );
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { findUnique },
+    };
+    const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        original,
+        ORIGINAL.eaccount,
+      ),
+    ).resolves.toMatchObject({ usable: true });
+    // Another campaign's email in the same mailbox is still refused.
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        { ...original, campaign_id: "foreign" },
+        ORIGINAL.eaccount,
+      ),
+    ).rejects.toThrow("sender_unavailable");
   });
   it("returns a blocked sender check from the read-only email tool", async () => {
     const prisma = { externalEffect: { findMany: vi.fn(async () => []) } };
@@ -735,7 +829,7 @@ it.each([false, true])(
         findMany: vi.fn(async () => []),
         findUnique: vi.fn(async (input: any) =>
           input.where.kind === "instantly_role_campaign" &&
-          input.where.AND[2].result.equals === "campaign-proof"
+          input.where.AND[1].result.equals === "campaign-proof"
             ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" } }
             : null,
         ),

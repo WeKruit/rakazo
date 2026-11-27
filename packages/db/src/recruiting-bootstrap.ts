@@ -991,13 +991,13 @@ export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor)
   for (const slug of PLATFORM_SERVICE_SLUGS) await ensurePlatformService(prisma, actor, slug);
   await ensureAddedTools(prisma, actor);
   await ensureSchedulingCalendar(prisma, actor);
-  await ensureOutreachGmail(prisma, actor);
+  await ensureGmailSends(prisma, actor);
 }
 
 /**
  * A Google Calendar the recruiter added lets Scheduling and Main book interviews on it, and a
- * Gmail they connected lets Outreach and Main send from it; each booking and email still waits
- * for the recruiter on its card. Main holds them too so it does the work itself instead of handing
+ * Gmail they connected lets Outreach, Scheduling (proposing times) and Main send from it; each
+ * booking and email still waits for the recruiter on its card. Main holds them too so it does the work itself instead of handing
  * it on (simulated 11-16, calendar-not-connected: Main handed a booking to Scheduling, which told
  * the recruiter "日历连接由 Main 管理"). Before the calendar is connected its holders' own calls
  * ask for the connection. Adds only missing grants and missing tools; nothing else changes.
@@ -1068,7 +1068,7 @@ async function ensureSchedulingCalendar(prisma: PrismaClient, actor: Actor): Pro
   });
 }
 
-async function ensureOutreachGmail(prisma: PrismaClient, actor: Actor): Promise<void> {
+async function ensureGmailSends(prisma: PrismaClient, actor: Actor): Promise<void> {
   const servers = await prisma.mcpServer.findMany({
     where: {
       spaceId: actor.spaceId,
@@ -1080,7 +1080,7 @@ async function ensureOutreachGmail(prisma: PrismaClient, actor: Actor): Promise<
     select: { id: true },
   });
   await ensureGrants(prisma, actor, {
-    roleKeys: ["outreach", "main"],
+    roleKeys: ["outreach", "scheduling", "main"],
     servers,
     tools: [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS],
   });

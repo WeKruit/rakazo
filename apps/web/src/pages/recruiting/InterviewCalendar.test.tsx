@@ -24,7 +24,7 @@ const source = (extra: Partial<InterviewCalendarEvent> = {}): InterviewCalendarE
   start: "2026-10-21T09:00:00Z",
   end: "2026-10-21T10:00:00Z",
   timeZone: "America/New_York",
-  status: "confirmed",
+  status: "booked",
   location: "Video room",
   attendees: ["candidate@example.test"],
   url: "https://calendar.example.test/event",
@@ -87,7 +87,7 @@ it("renders only source events and opens their time, attendee, status and locati
   const details = element.querySelector('aside[aria-label="Event details"]')!;
   expect(details.textContent).toContain("candidate@example.test");
   expect(details.textContent).toContain("Video room");
-  expect(details.textContent).toContain("confirmed");
+  expect(details.textContent).toContain("booked");
   expect(details.textContent).toContain("America/New_York");
   expect(details.querySelector("a")?.href).toBe("https://calendar.example.test/event");
   await act(async () => button("Close event details").click());
@@ -102,7 +102,7 @@ it("filters by exact source status and keeps availability visibly distinct", asy
   expect(element.querySelector('[data-event-id="available"]')?.textContent).toContain(
     "Available time",
   );
-  await change("Event status", "s:confirmed");
+  await change("Event status", "s:booked");
   expect(element.querySelectorAll("[data-event-id]")).toHaveLength(1);
   await change("Event status", "missing");
   expect(element.querySelectorAll("[data-event-id]")).toHaveLength(1);
@@ -212,7 +212,7 @@ it("places the current-time line on the actual day and minute in the selected ti
 });
 it("resets a status filter that is absent after an asynchronous source update", async () => {
   await mount([source()]);
-  await change("Event status", "s:confirmed");
+  await change("Event status", "s:booked");
   await mount([source({ status: "cancelled" })]);
   expect(button("Event status").textContent).toBe("All statuses");
   expect(element.querySelectorAll("[data-event-id]")).toHaveLength(1);
@@ -280,13 +280,13 @@ it("shows five consecutive days including weekends and moves the exact date rang
 it("combines actual status selections without turning availability into a confirmed interview", async () => {
   await mount([
     source(),
-    source({ id: "declined", status: "declined" }),
+    source({ id: "cancelled", status: "cancelled" }),
     source({ id: "available", kind: "availability", status: null }),
   ]);
-  await change("Event status", "s:confirmed");
+  await change("Event status", "s:booked");
   await act(async () => button("Event status").click());
   await act(async () =>
-    document.querySelector<HTMLInputElement>('input[aria-label="declined"]')!.click(),
+    document.querySelector<HTMLInputElement>('input[aria-label="cancelled"]')!.click(),
   );
   expect(element.querySelectorAll("[data-event-id]")).toHaveLength(2);
   expect(element.querySelector('[data-event-id="available"]')).toBeNull();

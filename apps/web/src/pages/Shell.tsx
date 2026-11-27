@@ -312,6 +312,8 @@ export function ShellPage() {
 
   const reviewSchedulingPlan = (handoff: SchedulingPlanHandoff) => {
     if (handoff.plan.threadId !== knownThreadId) return;
+    // A booking for someone who never wrote has no email to open it from.
+    if (!handoff.plan.originalEmail) return openRoleChat(handoff.text);
     setSelectedSchedulingPlan({
       scope: recruitingCacheScope,
       threadId: handoff.plan.threadId,

@@ -393,6 +393,22 @@ describe("resolveScheduleTiming", () => {
 });
 
 describe("filterBuiltinToolsForThread", () => {
+  it("lists no role create in the account-wide conversation, where start_role opens a role", () => {
+    const role = {
+      name: "recruiting_role",
+      description: "Read or create a role.",
+      inputSchema: {
+        oneOf: [
+          { properties: { operation: { const: "read" } } },
+          { properties: { operation: { const: "create" } } },
+        ],
+      },
+    };
+    const [global] = filterBuiltinToolsForThread([role], "recruiting-global-abc");
+    expect(global!.inputSchema.oneOf.map((v) => v.properties.operation.const)).toEqual(["read"]);
+    const [inRole] = filterBuiltinToolsForThread([role], "role-group");
+    expect(inRole).toBe(role);
+  });
   it("offers role-team delegation only in the account-wide conversation, beside in-room handoff", () => {
     const names = (groupId: string | null) =>
       filterBuiltinToolsForThread(
@@ -406,6 +422,12 @@ describe("filterBuiltinToolsForThread", () => {
     ]);
     expect(names("role-group")).toEqual(["handoff_to_bot"]);
     expect(names(null)).toEqual([]);
+  });
+  it("leaves booking plans to the role conversations", () => {
+    const names = (groupId: string) =>
+      filterBuiltinToolsForThread([{ name: "recruiting_scheduling" }], groupId).map((t) => t.name);
+    expect(names("recruiting-global-abc")).toEqual([]);
+    expect(names("role-group")).toEqual(["recruiting_scheduling"]);
   });
   const tools = [
     { name: "handoff_to_bot" },

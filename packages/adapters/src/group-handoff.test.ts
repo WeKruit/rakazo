@@ -31,7 +31,7 @@ function harness(
     chatGroup: {
       findFirst: vi.fn(async () => ({
         id: "group-1",
-        members: ["bot-a", "bot-b", "bot-c"].map((id) => ({
+        members: ["bot-a", "bot-b", "bot-c", "bot-d"].map((id) => ({
           bot: { id, name: id.toUpperCase(), spawnKey: crew?.spawnKeys[id] ?? null },
         })),
       })),
@@ -353,6 +353,7 @@ describe("account-wide conversation handoff", () => {
     "bot-a": "recruiting:user-1:main",
     "bot-b": "recruiting:user-1:outreach",
     "bot-c": "recruiting:user-1:sourcer",
+    "bot-d": "recruiting:user-1:scheduling",
   };
   const global = "recruiting-global-abc";
 
@@ -380,6 +381,18 @@ describe("account-wide conversation handoff", () => {
     });
     await expect(
       handoffToGroupBot(deps as never, run, global, { bot_id: "bot-c", message: "Find" }),
+    ).resolves.toEqual({ error: GLOBAL_HANDOFF_ROLE_WORK });
+    expect(runCreate).not.toHaveBeenCalled();
+  });
+
+  // 11-27 play: a booking handed to Scheduling here had no booking plan and dead-ended.
+  it("sends an interview booking to the role's team", async () => {
+    const { deps, runCreate } = harness([{ kind: "text", text: "book Ethan" }], undefined, {
+      spawnKeys,
+      activeRecruitingRoleId: null,
+    });
+    await expect(
+      handoffToGroupBot(deps as never, run, global, { bot_id: "bot-d", message: "Book" }),
     ).resolves.toEqual({ error: GLOBAL_HANDOFF_ROLE_WORK });
     expect(runCreate).not.toHaveBeenCalled();
   });

@@ -82,6 +82,7 @@ import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
 import { McpNotConnectedError, type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { addressTypedInConversation } from "./named-address.js";
+import { ownMailboxSendRefusal, recordOwnMailboxSend } from "./own-mailbox-sends.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   excludeFoundPeople,
@@ -508,6 +509,12 @@ const GmailSendInput = z.strictObject({
     .regex(/^[0-9a-f]{6,64}$/i)
     .optional()
     .describe("To follow up, the Gmail thread id of the earlier email to this person."),
+  resend: z
+    .boolean()
+    .optional()
+    .describe(
+      "Only when the recruiter asks for a new separate email to someone this account already emailed.",
+    ),
 });
 
 /**
@@ -710,34 +717,46 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
 /** Tools listed outside the lazy catalog even when an agent has many connected tools. */
 const directTools = new WeakSet<ConnectorTool>();
 
+const OUTREACH_CORE = [
+  "ensure_role_campaign",
+  "add_shortlist_leads",
+  "activate_campaign",
+  "get_campaign",
+  "list_leads",
+  "get_email",
+  "reply_to_email",
+  "find_emails",
+];
 /**
  * Each recruiting agent's own work tools, listed outside the lazy catalog on whichever connection
  * the bot is assigned, so a turn never searches for them. Matched by the tool's own name; the
  * people search is already direct for every bot.
  */
 export const CORE_TOOLS: Readonly<Record<string, readonly string[]>> = {
-  outreach: [
-    "ensure_role_campaign",
-    "add_shortlist_leads",
-    "activate_campaign",
-    "get_campaign",
-    "list_leads",
-    "get_email",
-    "reply_to_email",
-    "find_emails",
+  // Kruit answers candidates and books calls from the conversation itself (a reply wake runs it,
+  // not a specialist), so those tools need no catalog search and load first either. A booking is
+  // made with recruiting_scheduling on either calendar, so the calendars' own creates are not here.
+  main: [
+    ...OUTREACH_CORE,
+    "get_availability",
+    "reschedule_booking",
+    "cancel_booking",
+    "list_events",
+    "update_event",
+    "delete_event",
+    "suggest_time",
   ],
+  outreach: OUTREACH_CORE,
   scheduling: [
     "get_event_types",
     "get_event_type",
     "get_availability",
-    "create_booking",
     "reschedule_booking",
     "cancel_booking",
     "get_booking",
     "get_bookings",
     "suggest_time",
     "list_events",
-    "create_event",
     "update_event",
     "delete_event",
   ],
@@ -2026,6 +2045,16 @@ export class McpConnector implements ConnectorProvider {
           `${server.name} is not connected; call request_connection with serverId "${server.id}".`,
         );
       redactions.push(token);
+      // The same checks a campaign send makes, from records, right before it goes out.
+      const refusal = await ownMailboxSendRefusal(this.prisma, context, {
+        to: input.to[0]!,
+        replyThreadId: input.replyThreadId,
+        resend: input.resend,
+      });
+      if (refusal) {
+        yield { type: "error", message: refusal };
+        return;
+      }
       const gmail = async (path: string, init?: RequestInit) => {
         const response = await safeFetch(
           new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`),
@@ -2060,12 +2089,32 @@ export class McpConnector implements ConnectorProvider {
           ...(input.replyThreadId ? { threadId: input.replyThreadId } : {}),
         }),
       });
+      const sentAt = new Date().toISOString();
+      const mailbox = await gmail("profile")
+        .then((profile) => (typeof profile.emailAddress === "string" ? profile.emailAddress : null))
+        .catch(() => null);
+      // The send's record, keyed by the mailbox's own message and thread ids.
+      if (typeof sent.id === "string")
+        await recordOwnMailboxSend(this.prisma, context, {
+          sourceId: server.id,
+          sourceName: server.name,
+          mailbox,
+          to: input.to[0]!,
+          subject: input.subject,
+          body: input.body,
+          messageId: sent.id,
+          threadId: typeof sent.threadId === "string" ? sent.threadId : null,
+          sentAt,
+        });
       yield {
         type: "result",
         data: {
           structuredContent: {
             sent: true,
             to: input.to[0],
+            ...(mailbox ? { from: mailbox } : {}),
+            subject: input.subject,
+            sentAt,
             messageId: sent.id,
             threadId: sent.threadId,
           },
@@ -2665,8 +2714,9 @@ export class McpConnector implements ConnectorProvider {
       // sequence field and Lead.status (2 Paused, 3 Completed) is readOnly. POST
       // /api/v2/leads/update-interest-status is documented to complete leads and trigger
       // automations/subsequences, not to stop a sequence, so it is not used as a stop.
-      // The native stop is the campaign setting GET /api/v2/campaigns/{id} stop_on_reply
-      // ("Whether to stop the campaign on reply"); report it, never fabricate a stop.
+      // The campaign setting GET /api/v2/campaigns/{id} stop_on_reply ("Whether to stop the
+      // campaign on reply") is reported; when it does not stop them, the agent stops that one
+      // person with pause_campaign and their email, which takes them out of the campaign.
       // https://developer.instantly.ai/api-reference/campaign/get-campaign
       const repliedCampaigns = [
         ...new Set(
@@ -2718,10 +2768,7 @@ export class McpConnector implements ConnectorProvider {
           ...(stopOnReply
             ? {}
             : {
-                warning:
-                  stopOnReply === false
-                    ? "The lead replied but this campaign's stop_on_reply is off, so Instantly keeps sending follow-ups. Turn on stop on reply for the campaign in Instantly."
-                    : "The lead replied but whether this campaign stops on reply could not be confirmed; check stop on reply for the campaign in Instantly.",
+                warning: `This person replied, but ${stopOnReply === false ? "this campaign keeps sending them its follow-ups" : "whether this campaign stops their follow-ups could not be confirmed"}. Unless the recruiter wants the follow-ups to continue, call pause_campaign with their email and campaign_id ${campaignId}: it stops only them and sends nothing. Tell the recruiter in plain words that their follow-ups were stopped, never naming the mail service.`,
               }),
         });
       }
@@ -2870,12 +2917,27 @@ export class McpConnector implements ConnectorProvider {
 
   /** The one list key every account shares for a server reached with the deployment's key. */
   private sharedListingKey(server: McpServer): string | undefined {
+    // The product's own CRM server registers the same tools for every signed-in caller; each
+    // call still carries that caller's own token. Kept per account, every new account and every
+    // worker start listed it again before the first reply (gate 6eb3e360: 52 of 133, up to 3.5 s).
+    if (this.isFirstParty(server) && !Object.keys((server.headers as object | null) ?? {}).length)
+      return `first-party ${server.endpoint}`;
     const platform = platformMcpCredential(server);
     if (!platform?.key && !platform?.keyless) return undefined;
     if (server.secretId && !platform.replacesSecret) return undefined;
     if (Object.keys((server.headers as Record<string, unknown> | null) ?? {}).length)
       return undefined;
     return `platform ${server.transport} ${server.endpoint}`;
+  }
+
+  /** The product's own server, reached with the caller's product sign-in. */
+  private isFirstParty(server: McpServer): boolean {
+    return (
+      Boolean(this.options.firstParty) &&
+      !server.secretId &&
+      server.transport === "streamable_http" &&
+      server.endpoint === this.firstPartyEndpoint
+    );
   }
 
   private refusedConnection(server: McpServer, context: AdapterContext): boolean {
@@ -3146,12 +3208,7 @@ export class McpConnector implements ConnectorProvider {
           context.userId,
           this.options.allowPrivateEndpoint === true,
         );
-        const firstParty =
-          !server.secretId &&
-          server.transport === "streamable_http" &&
-          server.endpoint === this.firstPartyEndpoint
-            ? this.options.firstParty
-            : undefined;
+        const firstParty = this.isFirstParty(server) ? this.options.firstParty : undefined;
         let runtimeAuth: McpRuntimeAuth | undefined;
         if (firstParty) {
           const rejected = new WeakMap<Response, { token: string; signal?: AbortSignal }>();

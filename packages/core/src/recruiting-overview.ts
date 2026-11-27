@@ -205,9 +205,7 @@ async function bookingsRole(
   return {
     bookings: (calendarRead?.events ?? []).filter(
       (event) =>
-        event.kind === "event" &&
-        (event.status === "confirmed" || event.status === "accepted") &&
-        Date.parse(event.start) > now,
+        event.kind === "event" && event.status === "booked" && Date.parse(event.start) > now,
     ),
     bookingUnknown: !calendarRead || calendarRead.partial,
   };

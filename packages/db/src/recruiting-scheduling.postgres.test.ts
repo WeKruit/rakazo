@@ -8,12 +8,17 @@ import { createRecruitingRole, openVerifiedRecruitingCrmWorkspace } from "./recr
 import {
   bindRecruitingSchedulingOperation,
   createRecruitingSchedulingPlan,
+  googleEventArguments,
   loadVerifiedRecruitingSchedulingPlan,
   prepareRecruitingSchedulingPlan,
 } from "./recruiting-scheduling.js";
 
 const url = process.env.DATABASE_URL;
 const local = url && ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
+// These cases book from a candidate's email; the no-email plan has its own case.
+type EmailPlanInput = RecruitingSchedulingPlanInput & {
+  originalEmail: NonNullable<RecruitingSchedulingPlanInput["originalEmail"]>;
+};
 const database = process.env.VERIFY_DATABASE === "1" && local ? describe.sequential : describe.skip;
 
 database("scheduling plan persistence (local PostgreSQL)", () => {
@@ -21,7 +26,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
   let close: () => Promise<void>;
   let identity: Awaited<ReturnType<typeof provisionMessagingIdentity>>;
   let actor: Actor;
-  let input: RecruitingSchedulingPlanInput;
+  let input: EmailPlanInput;
   let revisionId: string;
   let calendarId: string;
   let mailId: string;
@@ -280,7 +285,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     });
     expect(plan.calendar).toEqual(input.calendar);
     expect(plan.candidate.email).toBe("candidate@example.test");
-    expect(plan.originalEmail.savedRead).toEqual(input.originalEmail.savedRead);
+    expect(plan.originalEmail!.savedRead).toEqual(input.originalEmail.savedRead);
     await expect(
       prepareRecruitingSchedulingPlan(prisma, actor, {
         threadId: input.threadId,
@@ -309,6 +314,98 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
         lengthInMinutes: 30,
       }),
     ).rejects.toThrow(/get_email/);
+  });
+  it("prepares a plan for a person the recruiter named only by address", async () => {
+    const person = {
+      email: "typed@example.test",
+      name: "Typed Person",
+      timeZone: "America/New_York",
+    };
+    const prepare = (candidate: Record<string, string>) =>
+      prepareRecruitingSchedulingPlan(prisma, actor, {
+        threadId: input.threadId,
+        candidate: candidate as never,
+        interviewer: input.interviewer,
+        start: "2026-11-01T06:30:00.000Z",
+        lengthInMinutes: 30,
+      });
+    const plan = await prepare(person);
+    expect(plan.originalEmail).toBeNull();
+    expect(plan.mailRead).toBeNull();
+    expect(plan.candidate.email).toBe("typed@example.test");
+    expect(plan.calendar).toEqual(input.calendar);
+    const { email: _, ...nameless } = person;
+    await expect(prepare(nameless)).rejects.toThrow(/candidate.email/);
+  });
+  // 11-27 play: a second Google plan for the same candidate and time failed on every booking
+  // ("Approval arguments must contain only JSON values"): Google plans have no event type.
+  it("replaces an unanswered Google booking with a newer plan's", async () => {
+    const google = await prisma.mcpServer.create({
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        slug: "google-calendar",
+        name: "Google Calendar",
+        transport: "http",
+        endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
+      },
+    });
+    const made: string[] = [];
+    try {
+      await prisma.botMcpServer.create({
+        data: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          serverId: google.id,
+          botId: identity.botId,
+          allowAllTools: true,
+        },
+      });
+      const start = new Date(input.calendar.start).toISOString();
+      const end = new Date(input.calendar.end).toISOString();
+      const free = await effect(
+        google.id,
+        "suggest_time",
+        { startTime: start, endTime: end, durationMinutes: 30 },
+        { timeSlots: [{ start: { dateTime: start }, end: { dateTime: end } }] },
+      );
+      made.push(free.id);
+      const calendar = {
+        provider: "google_calendar" as const,
+        sourceId: google.id,
+        sourceRevision: 1,
+        availabilityEffectId: free.id,
+        start,
+        end,
+        lengthInMinutes: 30,
+      };
+      const book = async (interviewer: typeof input.interviewer) => {
+        const plan = await createRecruitingSchedulingPlan(prisma, actor, {
+          ...input,
+          calendar,
+          interviewer,
+        });
+        const created = await effect(google.id, "create_event", googleEventArguments(plan));
+        made.push(plan.id, created.id);
+        await bindRecruitingSchedulingOperation(prisma, actor, {
+          threadId: input.threadId,
+          planId: plan.id,
+          operation: "book",
+          effectId: created.id,
+        });
+        return created;
+      };
+      const first = await book(input.interviewer);
+      await book({ name: "Priya", email: "priya@example.test", timeZone: "America/Chicago" });
+      expect(
+        (await prisma.externalEffect.findUniqueOrThrow({ where: { id: first.id } })).status,
+      ).toBe("denied");
+    } finally {
+      // Later tests read the conversation's newest calendar read; this one's calendar is gone.
+      await prisma.externalEffect.deleteMany({ where: { id: { in: made } } });
+      await prisma.botMcpServer.deleteMany({ where: { serverId: google.id } });
+      await prisma.mcpServer.delete({ where: { id: google.id } });
+    }
   });
   it("accepts a local Instantly mail read under the official server's narrow grant", async () => {
     await prisma.botMcpServer.updateMany({
@@ -346,7 +443,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
         start: "2026-11-01T06:30:00Z",
         lengthInMinutes: 30,
       });
-      expect(plan.originalEmail.providerMessageId).toBe("native-email");
+      expect(plan.originalEmail!.providerMessageId).toBe("native-email");
     } finally {
       await prisma.botMcpServer.updateMany({
         where: { botId: identity.botId },
@@ -748,7 +845,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
       },
       execution.id,
     );
-    const legacy: RecruitingSchedulingPlanInput = {
+    const legacy: EmailPlanInput = {
       ...structuredClone(input),
       threadId: opened.threadId,
       roleId: opened.roleId,
@@ -784,14 +881,14 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
     expect(f.legacy.originalEmail.savedRead).toBeNull();
     expect(f.legacy.originalEmail.sourceId).not.toBe(mailId);
     const plan = await createRecruitingSchedulingPlan(prisma, actor, f.legacy);
-    expect(plan.originalEmail.providerMessageId).toBe(f.email.id);
-    expect(plan.originalEmail.providerThreadId).toBe(f.email.thread_id);
-    expect(plan.originalEmail.eaccount).toBe(f.email.eaccount);
-    expect(plan.originalEmail.sourceId).toBe(f.server.id);
-    expect(plan.originalEmail.savedRead).toBeNull();
+    expect(plan.originalEmail!.providerMessageId).toBe(f.email.id);
+    expect(plan.originalEmail!.providerThreadId).toBe(f.email.thread_id);
+    expect(plan.originalEmail!.eaccount).toBe(f.email.eaccount);
+    expect(plan.originalEmail!.sourceId).toBe(f.server.id);
+    expect(plan.originalEmail!.savedRead).toBeNull();
     expect(plan.mailSourceId).toBe(mailId);
-    expect(plan.mailRead.effectId).toBe(f.mail.id);
-    expect(plan.mailRead.messageId).toBeNull();
+    expect(plan.mailRead!.effectId).toBe(f.mail.id);
+    expect(plan.mailRead!.messageId).toBeNull();
   });
   it.each(["organization", "campaign", "missing-message", "mailbox"])(
     "rejects a foreign legacy %s without adopting the native read",

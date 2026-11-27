@@ -358,6 +358,7 @@ async function main() {
     notifications,
     cloudAgent,
     connector: stack.connector,
+    artifacts,
     shutdownSignal: shutdown.signal,
     // Keep at least two in five slots for conversations.
     scheduledRunSlots: Math.max(1, Math.floor((workerConcurrency * 3) / 5)),
