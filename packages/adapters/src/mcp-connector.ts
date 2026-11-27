@@ -751,7 +751,7 @@ const ROLE_MAIL = new Set([
 /** Runs whose catalog left out role mail, so a search there names where that mail is sent. */
 const roleMailHidden = new WeakSet<AdapterContext>();
 const ROLE_MAIL_ELSEWHERE =
-  "Mail to candidates is not sent from this conversation. A role's first emails and its answers to candidates are written and sent in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role. Only a one-off email to an address the recruiter gave, for no role, goes to Outreach here.";
+  "Mail to candidates is not sent from this conversation. A role's first emails and its answers to candidates are written and sent in that role's conversation: for a role with no conversation yet call start_role, for a saved one delegate_to_role, with any addresses the recruiter gave. Only a one-off email that belongs to no role goes to Outreach here.";
 
 const OUTREACH_CORE = [
   "ensure_role_campaign",

@@ -31,7 +31,7 @@ export const NO_ROLE_HANDOFF =
 
 /** Above the role teams, only role-free work goes to a teammate in the room itself. */
 export const GLOBAL_HANDOFF_ROLE_WORK =
-  "Not handed off: in this conversation only an email to an address the recruiter gave (Outreach) goes to a teammate here. Role work, including every interview booking, goes to that role's team with delegate_to_role; a new role goes to start_role.";
+  "Not handed off: in this conversation only a one-off email that belongs to no role (Outreach) goes to a teammate here. Role work, including a role's emails (also to addresses the recruiter gives here) and every interview booking, goes to that role's team with delegate_to_role; a new role goes to start_role.";
 
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
