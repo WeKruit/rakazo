@@ -609,6 +609,7 @@ import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting
 import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import {
   requestCounts,
+  requestTarget,
   roundStillMissing,
   roundCountLine,
   withoutShownBefore,
@@ -8970,7 +8971,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             try {
               if (researchInput.data.operation === "calibration_round") {
                 if (!applied || !claimedEffect) throw new IsolationError();
-                const roundTarget = researchInput.data.target;
+                // The agent gives only the number asked; where the request started is data.
+                const roundAsked = researchInput.data.asked;
+                let roundTargetMemo: Promise<number | undefined> | undefined;
+                const roundTargetAt = (roleId: string, counted: number) =>
+                  (roundTargetMemo ??= roundAsked
+                    ? requestTarget(
+                        deps.prisma,
+                        { roleId, userId: run.userId, spaceId: run.spaceId },
+                        thread.id,
+                        roundAsked,
+                        counted,
+                      )
+                    : Promise.resolve(undefined));
                 // Internal record keeping: the round and this native effect complete together.
                 const round = await saveRecruitingCalibrationRound(
                   deps.prisma,
@@ -9017,12 +9030,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     userId: run.userId,
                     spaceId: run.spaceId,
                   })
-                    .then((counts) =>
+                    .then(async (counts) =>
                       roundCountLine(
                         counts,
                         (recorded.candidateKeys as string[]).length,
                         turnLanguage === "zh",
-                        roundTarget,
+                        await roundTargetAt(String(recorded.roleId), counts.counted),
                       ),
                     )
                     .catch(() => "");
@@ -9072,9 +9085,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             userId: run.userId,
                             spaceId: run.spaceId,
                           })
-                            .then((counts) => ({
+                            .then(async (counts) => ({
                               ...counts,
-                              ...roundStillMissing(counts.counted, roundTarget),
+                              ...roundStillMissing(
+                                counts.counted,
+                                await roundTargetAt(String(recorded.roleId), counts.counted),
+                              ),
                             }))
                             .catch(() => ({}))
                         : {}),

@@ -1053,14 +1053,14 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       .describe(
         "Optional. candidateKey → the heading of the group you put this person in, in the recruiter's language and your own words, from how their profile was judged against what the recruiter asked (for example 'Meet everything asked', 'Years on streaming not stated'). People are listed in candidateKeys order and a heading is printed where it changes, so give each group's people together.",
       ),
-    target: z
+    asked: z
       .number()
       .int()
       .positive()
       .max(10_000)
       .optional()
       .describe(
-        "The value of `counted` at which the recruiter's current request is done: `counted` when they asked plus the number they asked for (a role's first request for N: N). Give it with every round of a request for a number of people; the server then says under the list how many are still to come and returns stillMissing.",
+        "The number of people the recruiter's current request asked for, exactly as they said it (\"3 more\": 3; a role's first ten: 10). Give it with every round of that request and never add to it or subtract from it yourself: the server works out where the request started, says under the list how many are still to come and returns stillMissing.",
       ),
   }),
   // People returned by a people-search connector call in this same run, saved as one unassessed page.

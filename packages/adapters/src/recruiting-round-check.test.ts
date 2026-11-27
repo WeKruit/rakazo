@@ -2,6 +2,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   listedBeforeRound,
+  requestTarget,
   roundCountLine,
   roundCriteria,
   roundListedNotRecorded,
@@ -44,6 +45,44 @@ describe("roundCriteria", () => {
       { id: "titles", statement: "data engineer titles only" },
       { id: "place", statement: "Seattle metro, hybrid" },
     ]);
+  });
+});
+
+const marks = vi.hoisted(() => vi.fn());
+vi.mock("@rakazo/db", async (original) => ({
+  ...(await original<object>()),
+  readRecruitingResultsMarks: marks,
+}));
+
+describe("requestTarget", () => {
+  const role = { roleId: "role", userId: "u", spaceId: "s" };
+  const db = (asked: Date | null, sinceRounds: string[][]) => {
+    const findMany = vi.fn(async (_query: unknown) =>
+      sinceRounds.map((candidateKeys) => ({ candidateKeys })),
+    );
+    return {
+      prisma: {
+        message: { findFirst: async () => (asked ? { createdAt: asked } : null) },
+        recruitingCalibrationRound: { findMany },
+      } as unknown as PrismaClient,
+      findMany,
+    };
+  };
+
+  it("starts a request where the count stood when the recruiter asked", async () => {
+    const at = new Date("2026-11-27T05:58:00Z");
+    marks.mockResolvedValue([]);
+    // Nine counted, "3 more", first round of the request: met at twelve.
+    const first = db(at, []);
+    await expect(requestTarget(first.prisma, role, "t", 3, 9)).resolves.toBe(12);
+    expect(first.findMany.mock.calls[0]![0]).toMatchObject({
+      where: { roleId: "role", status: "shown", createdAt: { gt: at } },
+    });
+    // A later round of the same request: the one already delivered is not counted twice.
+    await expect(requestTarget(db(at, [["a"]]).prisma, role, "t", 3, 10)).resolves.toBe(12);
+    // Someone delivered in this request and turned down since no longer counts either way.
+    marks.mockResolvedValue([{ candidateKey: "a", mark: "not a fit" }]);
+    await expect(requestTarget(db(at, [["a", "b"]]).prisma, role, "t", 3, 10)).resolves.toBe(12);
   });
 });
 
