@@ -49,7 +49,10 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
         // rather than starting a private thread off to one side.
         (!groupId || tool.name !== "message_bot") &&
         // Only the account-wide conversation sits above the role teams.
-        ((tool.name !== "delegate_to_role" && tool.name !== "start_role") || global),
+        ((tool.name !== "delegate_to_role" && tool.name !== "start_role") || global) &&
+        // A booking plan belongs to a role's conversation, so a candidate's booking is handed
+        // there (delegate_to_role); offered here, it always failed (branch play 11-27).
+        !(global && tool.name === "recruiting_scheduling"),
     );
 }
 
