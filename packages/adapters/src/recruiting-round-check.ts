@@ -355,3 +355,32 @@ export async function feedbackBeforeRound(
     ];
   });
 }
+
+/**
+ * A saved search row as the agent sees it: who the person is, the search's grade and the judge's
+ * verdict on each requirement. When the judge has read the person, the search's own prose about
+ * them is left out: the list's row is written from the judge's verdicts, and headings written
+ * from the search's reason said "all requirements shown" above a row saying two of five met
+ * (staging and branch plays 11-27). Record keeping fields are never the agent's to read out.
+ */
+export function searchRowForAgent(row: Record<string, unknown>): Record<string, unknown> {
+  const {
+    rowIndex: _rowIndex,
+    email: _email,
+    locationTag: _locationTag,
+    reason,
+    snippet,
+    ...person
+  } = row;
+  const judged =
+    typeof row.requirements_assessment === "string" && row.requirements_assessment.trim();
+  return judged
+    ? person
+    : {
+        ...person,
+        ...(reason !== undefined ? { reason } : {}),
+        ...(snippet !== undefined
+          ? { snippet: typeof snippet === "string" ? snippet.slice(0, 160) : snippet }
+          : {}),
+      };
+}

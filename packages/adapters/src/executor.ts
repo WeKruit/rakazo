@@ -610,6 +610,7 @@ import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-
 import {
   requestCounts,
   requestTarget,
+  searchRowForAgent,
   roundStillMissing,
   roundCountLine,
   withoutShownBefore,
@@ -8213,11 +8214,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const rows = (saved as { candidateRows?: unknown }).candidateRows;
                   // An agent run can return hundreds; the rest stay in Results, not in context.
                   const shown = Array.isArray(rows)
-                    ? rows.slice(0, AUTOSAVED_PEOPLE_SHOWN).map((row: Record<string, unknown>) => ({
-                        ...row,
-                        snippet:
-                          typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
-                      }))
+                    ? rows.slice(0, AUTOSAVED_PEOPLE_SHOWN).map(searchRowForAgent)
                     : rows;
                   // Saved is not fit, and fit is not shown: every search states where the
                   // request stands.
