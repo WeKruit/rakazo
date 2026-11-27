@@ -51,6 +51,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   18: "d5daefd350a8246a8171fef7019e2cf4b3aeab6107ce8458788bc980d01eea32",
   // 19: a saved email read may carry no message (a read a candidate's reply woke).
   19: "c6e572a87498808a1b0ef672441c29019e8ec7c7709093945e56d0a828eb0401",
+  // 20: optional recruiterWords on bot_message_received (the words a role request hands over).
+  20: "fa320ad45ca8b85a2b59a1d312749024bf16dfebcc16706647d6c5737f9ebaa5",
 };
 
 const OLD_ROWS: unknown[] = [

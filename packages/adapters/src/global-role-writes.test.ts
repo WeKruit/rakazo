@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { otherRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
+import {
+  newestRecruiterWords,
+  otherRoleWriteRefusal,
+  roleRequestMessage,
+} from "./global-role-writes.js";
 
 function prisma(boundRoleId?: string) {
   return {
@@ -85,5 +89,73 @@ describe("roleRequestMessage", () => {
       brief: "Goal: use Ana's profile from the other role",
     });
     expect(message).toBe("Goal: use Ana's profile from the other role");
+  });
+});
+
+describe("newestRecruiterWords", () => {
+  const at = (minute: number) => new Date(Date.UTC(2026, 10, 27, 10, minute));
+  const thread = (rows: unknown[]) => ({ message: { findMany: vi.fn(async () => rows) } });
+  it("takes a card's answer over the opening message it came after (play s165)", async () => {
+    // The turn-down came as the answer to the first round's card, in the run that opened the
+    // role, and the hand-off quoted the opening "找10人" as the request.
+    const words = await newestRecruiterWords(
+      thread([
+        {
+          role: "bot",
+          blocks: [{ kind: "ask", status: "answered", answer: "张钰职级偏低，排除" }],
+          createdAt: at(39),
+          updatedAt: at(40),
+        },
+        {
+          role: "user",
+          blocks: [{ kind: "text", text: "新开岗位…找10人。" }],
+          createdAt: at(38),
+          updatedAt: at(38),
+        },
+      ]) as never,
+      "t",
+    );
+    expect(words).toBe("张钰职级偏低，排除");
+  });
+  it("takes the words a request from Kruit's conversation carried, never its brief", async () => {
+    const words = await newestRecruiterWords(
+      thread([
+        {
+          role: "user",
+          blocks: [
+            {
+              kind: "bot_message_received",
+              text: "The recruiter wrote…\n\nKruit's note: next ten",
+              recruiterWords: "新增里还有一堆不是Senior",
+            },
+          ],
+          createdAt: at(55),
+          updatedAt: at(55),
+        },
+        {
+          role: "bot",
+          blocks: [{ kind: "ask", status: "answered", answer: "older answer" }],
+          createdAt: at(39),
+          updatedAt: at(40),
+        },
+      ]) as never,
+      "t",
+    );
+    expect(words).toBe("新增里还有一堆不是Senior");
+  });
+});
+
+describe("roleRequestMessage inside a role's conversation", () => {
+  it("passes the lead's brief only as a note on who and what, after an accepted round too", async () => {
+    // Play s167: after the round was accepted the lead's brief added 继续找新候选人 as the goal.
+    const message = await roleRequestMessage({} as never, {
+      roleId: "role-1",
+      recruiterWords: "郭小明不合适",
+      brief: "Goal：继续找新候选人",
+      noteOnly: true,
+    });
+    expect(message).toContain('word for word:\n"郭小明不合适"');
+    expect(message).toContain("Kruit's note, only on who and what");
+    expect(message).not.toContain("Kruit's brief");
   });
 });

@@ -65,23 +65,84 @@ export async function otherRoleWriteRefusal(
  */
 export async function roleRequestMessage(
   prisma: Pick<PrismaClient, "recruitingCalibrationRound">,
-  input: { roleId?: string; recruiterWords: string; brief: string },
+  input: {
+    roleId?: string;
+    recruiterWords: string;
+    brief: string;
+    /** A stage handed on inside a role's conversation: the brief only says who and what. */
+    noteOnly?: boolean;
+  },
 ): Promise<string> {
   const words = input.recruiterWords.trim();
   if (!words) return input.brief;
   const quoted = `The recruiter wrote, word for word:\n"${words}"`;
-  const round = input.roleId
-    ? await prisma.recruitingCalibrationRound.findFirst({
-        where: { roleId: input.roleId },
-        orderBy: { round: "desc" },
-        select: { approvedAt: true },
-      })
-    : null;
+  const round =
+    input.roleId && !input.noteOnly
+      ? await prisma.recruitingCalibrationRound.findFirst({
+          where: { roleId: input.roleId },
+          orderBy: { round: "desc" },
+          select: { approvedAt: true },
+        })
+      : null;
   // team-has-no-email 11-16: with the brief dropped, 「没存的话现在怎么办？」 reached the team
   // without the person Kruit named, and it answered about someone else.
-  if (round && !round.approvedAt)
+  if (input.noteOnly || (round && !round.approvedAt))
     return input.brief.trim()
       ? `${quoted}\n\nKruit's note, only on who and what this refers to; the request is the recruiter's words above, never a number of people or a scale-out this note adds:\n${input.brief}`
       : quoted;
   return input.brief.trim() ? `${quoted}\n\nKruit's brief:\n${input.brief}` : quoted;
+}
+
+/**
+ * The recruiter's newest words in a conversation, as they wrote them: their latest message, the
+ * words a request from Kruit's conversation carried, or their latest answer to a card there,
+ * whichever came last. Read from the records (who wrote it,
+ * when), never from what the words say. Play s165 11-27: a turn-down came as the answer to a
+ * card in the run that opened the role, so the lead's hand-off quoted the opening "找10人" as
+ * the request and the team searched for ten more.
+ */
+export async function newestRecruiterWords(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<string> {
+  const recent = await prisma.message.findMany({
+    where: { threadId },
+    orderBy: { seq: "desc" },
+    take: 30,
+    select: { role: true, blocks: true, createdAt: true, updatedAt: true },
+  });
+  let newest: { at: number; text: string } | undefined;
+  const consider = (at: Date, text: string | undefined) => {
+    const words = text?.trim();
+    if (words && (!newest || at.getTime() > newest.at)) newest = { at: at.getTime(), text: words };
+  };
+  for (const message of recent) {
+    const blocks = Array.isArray(message.blocks)
+      ? (message.blocks as Array<Record<string, unknown>>)
+      : [];
+    if (message.role === "user")
+      consider(
+        message.createdAt,
+        blocks
+          .map((block) =>
+            block?.kind === "text" && typeof block.text === "string"
+              ? block.text
+              : // A request handed over from Kruit's conversation carries the recruiter's words.
+                block?.kind === "bot_message_received" && typeof block.recruiterWords === "string"
+                ? block.recruiterWords
+                : "",
+          )
+          .filter(Boolean)
+          .join("\n"),
+      );
+    else
+      for (const block of blocks)
+        if (
+          block?.kind === "ask" &&
+          block.status === "answered" &&
+          typeof block.answer === "string"
+        )
+          consider(message.updatedAt, block.answer);
+  }
+  return newest?.text ?? "";
 }

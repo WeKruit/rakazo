@@ -784,6 +784,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     returnThreadId: Id.optional(),
     /** Links in a bot-started chain; absent when a person started it. */
     hop: z.number().int().nonnegative().optional(),
+    /** The recruiter's own words this hands over, as they wrote them (delegate_to_role). */
+    recruiterWords: z.string().optional(),
   }),
 ]);
 export type MessageBlock = z.infer<typeof MessageBlock>;
@@ -941,7 +943,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 19;
+export const EVENT_FORMAT_VERSION = 20;
 
 export const ProductEventSchema = z
   .object({

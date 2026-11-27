@@ -92,6 +92,8 @@ export async function messageBot(
     /** Names shown for each side when they differ from the bots' own names. */
     sender_label?: string;
     target_label?: string;
+    /** The recruiter's own words the message hands over, kept apart from the brief. */
+    recruiter_words?: string;
   },
   options?: { allowTerminalSource?: boolean; forceUnread?: boolean },
 ) {
@@ -261,6 +263,9 @@ export async function messageBot(
           intent,
           returnToMessageId: outbound.id,
           ...(crossThread ? { returnThreadId: run.threadId } : {}),
+          ...(input.recruiter_words?.trim()
+            ? { recruiterWords: input.recruiter_words.trim() }
+            : {}),
         };
         const inbound = await createThreadMessageInTransaction(tx, {
           threadId: targetThreadId,

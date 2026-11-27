@@ -472,7 +472,11 @@ import {
   emailsWithAttachments,
   saveEmailAttachments,
 } from "./email-attachments.js";
-import { otherRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
+import {
+  newestRecruiterWords,
+  otherRoleWriteRefusal,
+  roleRequestMessage,
+} from "./global-role-writes.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -10683,6 +10687,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             rolesDelegatedInTurn.add(target.threadId);
             // A second's slack for the database clock, which stamps the team's answer.
             const handedAt = new Date(Date.now() - 1_000);
+            // Only the recruiter's own words are handed over: their turn's, or the message they
+            // wrote into a running turn. Branch fosp 11-21 (747382b0): 「这三个不要。换掉，再补人」
+            // arrived while Kruit read a team's report, reached the team as Kruit's paraphrase
+            // alone, and the search cap took the role's first "找10个人" as the request.
+            const delegatedWords = run.trigger === "user" ? lastRecruiterText : (steeredText ?? "");
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },
@@ -10697,17 +10706,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     roleId: role
                       ? String(args.role_id)
                       : (group?.thread?.activeRecruitingRoleId ?? undefined),
-                    // Only the recruiter's own words are handed over: their turn's, or the
-                    // message they wrote into a running turn. Branch fosp 11-21 (747382b0):
-                    // 「这三个不要。换掉，再补人」 arrived while Kruit read a team's report, reached
-                    // the team as Kruit's paraphrase alone, and the search cap took the role's
-                    // first "找10个人" as the request, so every replacement search was refused.
-                    recruiterWords:
-                      run.trigger === "user" ? lastRecruiterText : (steeredText ?? ""),
+                    recruiterWords: delegatedWords,
                     brief: String(args.message ?? ""),
                   }),
                   runSecrets,
                 ),
+                recruiter_words: redactSecrets(delegatedWords, runSecrets),
                 intent: "request",
                 deliveryKey: effectKey,
               },
@@ -11069,11 +11073,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
+            const brief = String(args.message ?? "");
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               turnKey: steeredMessageId ?? nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
               confirm_name: args.confirm_name ? String(args.confirm_name) : undefined,
-              message: String(args.message ?? ""),
+              // In a role's conversation the stage gets the recruiter's newest words as they wrote
+              // them, ahead of the lead's brief (play s165: the brief quoted the role's opening
+              // "找10人" as the request after a turn-down, and ten more people were searched).
+              message: thread.groupId.startsWith(KRUIT_ROLE_GROUP_PREFIX)
+                ? redactSecrets(
+                    await roleRequestMessage(deps.prisma, {
+                      roleId: thread.activeRecruitingRoleId ?? undefined,
+                      recruiterWords: await newestRecruiterWords(deps.prisma, thread.id),
+                      brief,
+                      // Play s167: after an accepted round the lead's "Goal" added 继续找新候选人.
+                      noteOnly: true,
+                    }),
+                    runSecrets,
+                  )
+                : brief,
               // The coordinator checks every stage it hands out, like a supervisor's job report.
               report_back: args.report_back === true || recruitingBotKey(bot) === "main",
             });
