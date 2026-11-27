@@ -970,6 +970,11 @@ export class McpConnector implements ConnectorProvider {
   >();
   /** Background re-lists in flight, one per list key. */
   private readonly relisting = new Map<string, Promise<unknown>>();
+  /** A shared list being fetched for the first time, which every account waiting on it shares. */
+  private readonly listing = new Map<
+    string,
+    Promise<Awaited<ReturnType<McpConnector["listFresh"]>>>
+  >();
   private catalogGeneration = 0;
   private readonly unsubscribe: () => void;
   private readonly firstPartyEndpoint?: string;
@@ -2890,7 +2895,18 @@ export class McpConnector implements ConnectorProvider {
       });
       return cached.listed;
     }
-    const listed = await this.listFresh(server, context, key, version);
+    // One fetch per shared list: after a deploy every account's first turn missed at once and
+    // each signed in to the CRM to list it, until the sign-ins were refused (gate 35dd105c: 18
+    // failures within a second of each other).
+    let pending = shared ? this.listing.get(key) : undefined;
+    if (!pending) {
+      pending = this.listFresh(server, context, key, version);
+      if (shared) {
+        this.listing.set(key, pending);
+        void pending.catch(() => undefined).finally(() => this.listing.delete(key));
+      }
+    }
+    const listed = await pending;
     getLogger().info("discovery.cache", {
       hit: false,
       server: server.slug,

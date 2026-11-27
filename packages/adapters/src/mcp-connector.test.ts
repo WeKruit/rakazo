@@ -3981,6 +3981,28 @@ describe("first-party product OIDC MCP connection", () => {
       await connector.close();
     }
   });
+  it("signs in once when many accounts list the product's own server at the same moment", async () => {
+    const state = { failNext: false, initializations: 0 };
+    vi.stubGlobal("fetch", mcpFetch(state, endpoint));
+    const accessToken = vi.fn(async () => "access");
+    const row = { ...ASSIGNMENT, server: { ...SERVER, endpoint } };
+    const connector = new McpConnector(
+      { botMcpServer: { findMany: vi.fn().mockResolvedValue([row]) } } as never,
+      {} as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+    );
+    try {
+      const lists = await Promise.all(
+        ["u1", "u2", "u3"].map((userId) =>
+          connector.discoverTools({ ...context, spaceId: `s-${userId}`, userId } as never),
+        ),
+      );
+      expect(lists.map((list) => list.length)).toEqual([1, 1, 1]);
+      expect(state.initializations).toBe(1);
+    } finally {
+      await connector.close();
+    }
+  });
   it("does not retain a completed run's cancellation signal and denies revoked identity before another dispatch", async () => {
     const state = { failNext: false, initializations: 0, calls: [] as string[] };
     vi.stubGlobal("fetch", mcpFetch(state, endpoint));
