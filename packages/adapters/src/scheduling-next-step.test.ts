@@ -1,8 +1,7 @@
 import type { PrismaClient } from "@rakazo/db";
 import { expect, it, vi } from "vitest";
 import {
-  CAL_PLAN_NEXT_STEP,
-  GOOGLE_CALENDAR_NEXT_STEP,
+  BOOKING_NEXT_STEP,
   NO_CALENDAR_NEXT_STEP,
   schedulingNextStep,
 } from "./scheduling-next-step.js";
@@ -16,7 +15,7 @@ const grant = (endpoint: string, allowedTools: string[]) => ({
 const prisma = (grants: unknown[]) =>
   ({ botMcpServer: { findMany: vi.fn(async () => grants) } }) as unknown as PrismaClient;
 
-it("points a Google-only account at its own calendar's booking, not the Cal.com plan", async () => {
+it("books on either connected calendar through the one plan path", async () => {
   expect(
     await schedulingNextStep(
       prisma([
@@ -24,13 +23,13 @@ it("points a Google-only account at its own calendar's booking, not the Cal.com 
       ]),
       scope,
     ),
-  ).toBe(GOOGLE_CALENDAR_NEXT_STEP);
+  ).toBe(BOOKING_NEXT_STEP);
   expect(
     await schedulingNextStep(
       prisma([grant("https://mcp.cal.com/mcp", ["get_availability", "create_booking"])]),
       scope,
     ),
-  ).toBe(CAL_PLAN_NEXT_STEP);
+  ).toBe(BOOKING_NEXT_STEP);
   // A calendar it may only read cannot book.
   expect(
     await schedulingNextStep(

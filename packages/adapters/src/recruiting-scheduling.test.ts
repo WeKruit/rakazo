@@ -101,6 +101,35 @@ describe("explicit scheduling plan dispatch", () => {
       assertSchedulingCall(f.plan, "book", f.route, schedulingBookingArguments(f.plan)),
     ).not.toThrow();
   });
+  it("books a Google Calendar plan as one event inviting candidate, interviewer and guests", () => {
+    const f = fixture();
+    const { eventTypeId: _, ...slot } = f.plan.calendar;
+    const plan = RecruitingSchedulingPlanSchema.parse({
+      ...f.plan,
+      calendar: { ...slot, provider: "google_calendar" },
+      requests: { guests: ["priya@example.test"], notes: "" },
+    });
+    const route = { ...f.route, toolName: "create_event" };
+    const args = schedulingBookingArguments(plan);
+    expect(args).toMatchObject({
+      startTime: plan.calendar.start,
+      endTime: plan.calendar.end,
+      attendees: [
+        { email: "candidate@example.test" },
+        { email: "host@example.test" },
+        { email: "priya@example.test" },
+      ],
+    });
+    expect(() => assertSchedulingCall(plan, "book", route, args)).not.toThrow();
+    expect(() =>
+      assertSchedulingCall(plan, "book", route, {
+        ...args,
+        attendees: "attendees" in args ? args.attendees.slice(0, 2) : [],
+      }),
+    ).toThrow();
+    expect(() => assertSchedulingCall(plan, "book", f.route, args)).toThrow();
+    expect(schedulingPlanReview(plan, "book")).toContain("priya@example.test");
+  });
   it("uses explicit native mail source while preserving CRM origin", () => {
     const { plan } = fixture();
     const route = {
