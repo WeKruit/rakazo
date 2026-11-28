@@ -60,6 +60,37 @@ describe("InMemoryJobQueue", () => {
     await queue.close();
   });
 
+  it("runs jobs with one serial key one at a time, as Graphile's queue does", async () => {
+    const queue = new InMemoryJobQueue();
+    const target = handlers();
+    const order: string[] = [];
+    let releaseFirst: () => void = () => undefined;
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    target["session.drive"] = vi.fn(async ({ sessionId }: { sessionId: string }) => {
+      order.push(`start ${sessionId}`);
+      if (sessionId === "first") await firstHeld;
+      order.push(`end ${sessionId}`);
+    });
+    await queue.start(target);
+    const job = (sessionId: string) => ({
+      name: "session.drive" as const,
+      payload: { sessionId },
+      replaceKey: "session:s1",
+      serialKey: "session:s1",
+    });
+    await queue.enqueue(job("first"));
+    await vi.waitFor(() => expect(order).toEqual(["start first"]));
+    await queue.enqueue(job("second"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(order).toEqual(["start first"]);
+    releaseFirst();
+    await queue.awaitIdle();
+    expect(order).toEqual(["start first", "end first", "start second", "end second"]);
+    await queue.close();
+  });
+
   it("rejects a keyed enqueue that resumes after close", async () => {
     const queue = new InMemoryJobQueue();
     let releaseCancel: () => void = () => undefined;

@@ -246,6 +246,8 @@ interface QueuedJob {
   payload: unknown;
   availableAt?: Date;
   replaceKey?: string;
+  /** Jobs with one serial key run one at a time, like Graphile's named queue. */
+  serialKey?: string;
   attempts: number;
   maxAttempts: number;
 }
@@ -256,6 +258,7 @@ function toQueuedJob(job: BackgroundJob): QueuedJob {
     payload: wrapJobPayload(job.payload),
     availableAt: job.availableAt,
     replaceKey: job.replaceKey,
+    ...(job.serialKey ? { serialKey: job.serialKey } : {}),
     attempts: 0,
     maxAttempts: job.maxAttempts ?? DEFAULT_JOB_MAX_ATTEMPTS,
   };
@@ -267,6 +270,8 @@ export class InMemoryJobQueue implements JobPublisher, JobWorkerHost {
   private readonly scheduled = new Map<ReturnType<typeof setTimeout>, QueuedJob>();
   private readonly keyed = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly active = new Set<Promise<void>>();
+  /** The last started job of each serial key; the next one waits for it. */
+  private readonly serialTails = new Map<string, Promise<void>>();
   private readonly failures = new Map<BackgroundJob["name"], number>();
   private readonly closingJobs: QueuedJob[] = [];
   private draining: Promise<void> | undefined;
@@ -390,14 +395,24 @@ export class InMemoryJobQueue implements JobPublisher, JobWorkerHost {
 
   private dispatch(handlers: BackgroundJobHandlers, job: QueuedJob): Promise<void> {
     const unpacked = unwrapJobPayload(job.payload);
-    const active = runCorrelatedJob({
-      name: job.name,
-      payload: unpacked.payload,
-      correlation: unpacked.correlation,
-      run: () => dispatchBackgroundJob(handlers, job.name, unpacked.payload),
-    }).catch(() => {
-      this.failures.set(job.name, (this.failures.get(job.name) ?? 0) + 1);
-    });
+    const run = () =>
+      runCorrelatedJob({
+        name: job.name,
+        payload: unpacked.payload,
+        correlation: unpacked.correlation,
+        run: () => dispatchBackgroundJob(handlers, job.name, unpacked.payload),
+      }).catch(() => {
+        this.failures.set(job.name, (this.failures.get(job.name) ?? 0) + 1);
+      });
+    const key = job.serialKey;
+    const previous = key ? this.serialTails.get(key) : undefined;
+    const active = previous ? previous.then(run) : run();
+    if (key) {
+      this.serialTails.set(key, active);
+      void active.finally(() => {
+        if (this.serialTails.get(key) === active) this.serialTails.delete(key);
+      });
+    }
     this.active.add(active);
     void active.finally(() => this.active.delete(active));
     return active;

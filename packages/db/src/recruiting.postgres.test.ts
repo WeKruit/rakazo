@@ -3189,7 +3189,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           botId,
           threadId: f.thread.id,
           taskId: f.run.taskId,
-          status: "running",
+          status: "completed",
           trigger: "user",
           leaseOwner: "gate-worker",
           leaseFence: 1,
@@ -3234,7 +3234,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           idempotencyKey: `gate:${approvalRun.id}`,
         },
       });
-      await prisma.run.update({ where: { id: approvalRun.id }, data: { status: "completed" } });
       return effect.id;
     };
     const approvalEffectId = await approveDocuments(role);
