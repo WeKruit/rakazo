@@ -105,23 +105,20 @@ export async function withoutShownBefore(
  * the one told to the recruiter: the people rounds have listed for them, without those they
  * turned down (`turnedDown`, as Results marks them).
  */
-export async function requestCounts(
-  prisma: PrismaClient,
+/** P5's one count for a role: the people shown to the recruiter, less those they turned down. */
+export async function shownCount(
+  prisma: Parameters<typeof readRecruitingResultsMarks>[0],
   role: { roleId: string; userId: string; spaceId: string },
 ) {
-  const { roleId } = role;
-  const [people, graded, fit, rounds, marks] = await Promise.all([
-    prisma.recruitingCandidate.count({ where: { roleId } }),
-    listRecruitingGradedCandidateKeys(prisma, roleId),
-    listRecruitingFitCandidateKeys(prisma, roleId),
+  const [rounds, marks] = await Promise.all([
     prisma.recruitingCalibrationRound.findMany({
-      where: { roleId, status: "shown" },
+      where: { roleId: role.roleId, status: "shown" },
       select: { candidateKeys: true },
     }),
     readRecruitingResultsMarks(
       prisma,
       { userId: role.userId, spaceId: role.spaceId, email: "", isDeploymentOwner: false },
-      { roleId },
+      { roleId: role.roleId },
     ),
   ]);
   const shown = new Set(rounds.flatMap((round) => round.candidateKeys));
@@ -129,8 +126,22 @@ export async function requestCounts(
     marks.filter((mark) => mark.mark === "not a fit").map((mark) => mark.candidateKey),
   );
   const turnedDown = [...shown].filter((key) => notAFit.has(key)).length;
+  return { shown, notAFit, counted: shown.size - turnedDown, turnedDown };
+}
+
+export async function requestCounts(
+  prisma: PrismaClient,
+  role: { roleId: string; userId: string; spaceId: string },
+) {
+  const { roleId } = role;
+  const [people, graded, fit, { shown, notAFit, counted, turnedDown }] = await Promise.all([
+    prisma.recruitingCandidate.count({ where: { roleId } }),
+    listRecruitingGradedCandidateKeys(prisma, roleId),
+    listRecruitingFitCandidateKeys(prisma, roleId),
+    shownCount(prisma, role),
+  ]);
   return {
-    counted: shown.size - turnedDown,
+    counted,
     turnedDown,
     fitNotShownYet: fit.filter((key) => !shown.has(key) && !notAFit.has(key)).length,
     notGradedYet: people - graded.length,

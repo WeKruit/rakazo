@@ -4271,13 +4271,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? (args.page - 1) * size + 1
               : undefined;
           const total = typeof page?.total === "number" ? page.total : undefined;
-          // Where this page sits, so the recruiter can ask for the next, previous or any page.
-          const range =
-            first !== undefined
-              ? ` · ${first}–${first + shown.length - 1}${total !== undefined ? ` / ${total}` : ""}`
-              : total !== undefined && total > shown.length
-                ? ` · 1–${shown.length} / ${total}`
-                : "";
+          // Where this page sits, so the recruiter can ask for the next, previous or any page. No
+          // total of saved people: the one count is the people shown (P5; long-search on 96dcd1c9
+          // showed a stray "1–1 / 40").
+          const range = first !== undefined ? ` · ${first}–${first + shown.length - 1}` : "";
           const text = await recruitingRoundListText(deps.prisma, {
             chinese: turnLanguage === "zh",
             threadId: role.sourceThreadId,
@@ -4295,7 +4292,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           for (const item of shown)
             if (typeof item.candidateKey === "string") globalListed.add(item.candidateKey);
           const start = first ?? 1;
-          const shownRange = `${start}–${start + shown.length - 1}${total !== undefined ? ` of ${total}` : ""}`;
+          const shownRange = `${start}–${start + shown.length - 1}`;
           return {
             ...(result as object),
             ...leftOut,

@@ -48,6 +48,9 @@ function fakePrisma(input: {
   archivedCount?: number;
 }) {
   return {
+    // No one was turned down in these fixtures.
+    $queryRaw: vi.fn(async () => []),
+    recruitingCandidate: { findMany: vi.fn(async () => []) },
     recruitingCalibrationRound: {
       findFirst: vi.fn(async () => input.round ?? null),
       findMany: vi.fn(async () =>
@@ -206,14 +209,14 @@ describe("loadWorkingState", () => {
       "Done in this conversation in the last 24 h (tool receipts): FAILED save_template (1 min ago).",
     );
     expect(card).toContain(
-      "12 people saved · team waiting on the recruiter since 5 min ago",
+      "0 people shown to the recruiter (less any they turned down) · team waiting on the recruiter since 5 min ago",
     );
     expect(card).toContain(
       "Role teams: 1175 active roles in all; the 2 most recently active are below",
     );
     expect(card).toContain('  Waiting on the recruiter: "Is USC required?"');
     // The latest run decides, not an older failed one.
-    expect(card).toContain("0 people saved · team working now");
+    expect(card).toContain("0 people shown to the recruiter (less any they turned down) · team working now");
     expect(card).toContain(
       "sent the email (1 min ago), saved people to the role ×2 (latest 2 min ago)",
     );
@@ -332,7 +335,7 @@ describe("loadWorkingState", () => {
       )
     ).text;
     expect(own).toContain("- This role's saved email for this role (2 steps");
-    expect(own).not.toContain("Saved emails: none");
+    expect(own).not.toContain("Saved emails");
   });
 
   // Staging 11-14 send-at-night: a role opened from 「…hybrid 每周3天，6年以上…base 180-220k…」 saved
@@ -434,9 +437,6 @@ describe("loadWorkingState", () => {
       (await load([{ blocks: [...card("g1").blocks, ...card("g2").blocks] }])).text,
     ).not.toContain("last opened");
     expect(state.text).toContain("nothing saved, sent or changed by a tool");
-    expect(state.text).toContain(
-      "Saved emails: none on record for the roles below. An email written only in chat",
-    );
   });
 
   it("never offers the account's own team as a role team before it holds a role", async () => {
@@ -547,7 +547,9 @@ describe("loadWorkingState", () => {
     const none = await card(null, null);
     // Kruit's own conversation hands bookings over; the role's says what its calendar lacks.
     expect(none).not.toContain("calendar");
-    expect(none).toContain("12 people saved · round 2 shown in the role team's chat 5 min ago");
+    expect(none).toContain(
+      "2 people shown to the recruiter (less any they turned down) · round 2 shown in the role team's chat 5 min ago",
+    );
     expect(none).toContain("(Sourcer, 30 min ago; its counts may be older");
     // Staging 11-26: three people named without their role cost seven reads before the first line.
     expect(none).toContain("People in its latest round: Steven Choi, Wensong Jing");

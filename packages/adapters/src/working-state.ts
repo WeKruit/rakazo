@@ -10,6 +10,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { recruitingHomeGroupId } from "@rakazo/db";
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import { openRecruitingRoles } from "./open-recruiting-roles.js";
+import { shownCount } from "./recruiting-round-check.js";
 import type { RoleRecord } from "./role-records.js";
 import { loadRoleRecords } from "./role-records.js";
 import { isTurnWork, SEND_WORK, workDoneLabel } from "./turn-report.js";
@@ -59,6 +60,8 @@ type StatePrisma = Pick<
   | "connection"
   | "recruitingCalibrationRound"
   | "recruitingCandidateOccurrence"
+  | "recruitingCandidate"
+  | "$queryRaw"
 >;
 
 /**
@@ -327,6 +330,14 @@ export async function loadWorkingState(
         })
         .catch(() => [])
     : Promise.resolve([]);
+  // P5: the one count, the same as the round tool's: people shown less those turned down.
+  const countsRead = Promise.all(
+    teamRoleIds.map((roleId) =>
+      shownCount(prisma, { roleId, ...scope })
+        .then((count) => [roleId, count.counted] as const)
+        .catch(() => [roleId, undefined] as const),
+    ),
+  );
   const [roles, recent, runs, completed, ownBotMessages, roleTotal] = await Promise.all([
     global
       ? prisma.recruitingRole.findMany({
@@ -336,7 +347,6 @@ export async function loadWorkingState(
           select: {
             id: true,
             title: true,
-            _count: { select: { candidates: true } },
           },
         })
       : [],
@@ -457,14 +467,6 @@ export async function loadWorkingState(
     if (campaign)
       lines.push(`- This role's ${campaign.charAt(0).toLowerCase()}${campaign.slice(1)}`);
   }
-  // An email shown only in chat is in no role or mailbox (staging 11-14: "草稿保留着" with no role,
-  // no mailbox and nothing saved). It is still the email above, which the Gmail send card takes up:
-  // gate df83586a, "kept nowhere" made Kruit retract "the draft is kept" after the Connect card.
-  if (![...records.values()].some((record) => record.savedEmail))
-    lines.push(
-      `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat is in no role, campaign or mailbox draft until a save tool returns it.`,
-    );
-
   // A campaign started outside any role has no role card: without its id here, a later "stop it"
   // or "who got it" had nothing to read or pause (gate 9e15e896, stop-after-approve).
   const oneOff = await prisma.externalEffect
@@ -533,6 +535,7 @@ export async function loadWorkingState(
       : [];
     const botName = new Map(bots.map((bot) => [bot.id, bot.name]));
     const roundOf = new Map((await roundsRead).map((round) => [round.roleId, round]));
+    const countOf = new Map(await countsRead);
     // Who the latest round showed, per role, from the round's own records: when the recruiter
     // names people without naming the role, the role is on this card. Staging 11-26: Kruit read
     // saved people seven times to find the role of three named people before its first line.
@@ -569,7 +572,9 @@ export async function loadWorkingState(
           // The conversation's name, as the recruiter sees it: two roles' saved titles can be the same.
           group.name || role?.title,
           role ? `roleId ${role.id}` : `groupId ${group.id}, no saved role yet`,
-          role ? `${role._count.candidates} people saved` : undefined,
+          role && countOf.get(role.id) !== undefined
+            ? `${countOf.get(role.id)} people shown to the recruiter (less any they turned down)`
+            : undefined,
           roundLine(roleId ? roundOf.get(roleId) : undefined, now),
           teamState(latestRun.get(threadId), now),
         ]
