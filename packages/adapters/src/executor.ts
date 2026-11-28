@@ -1280,7 +1280,7 @@ export interface ExecutorDeps {
    * can still run for the OAuth account whose backend lists it.
    */
   codexCatalog?: CodexLiveCatalog;
-  /** Aborted when createApp stop() begins so in-flight continueRun boot waits exit promptly. */
+  /** Aborted when createApp stop() begins so in-flight run setup exits promptly. */
   shutdownSignal?: AbortSignal;
 }
 

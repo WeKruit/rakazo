@@ -1873,11 +1873,11 @@ describe("sendUserMessage", () => {
       routineEvent: undefined,
       trigger: "follow_up",
       internal: true,
-      clientNonce: "autocontinue:run:1",
+      clientNonce: "follow-up:run:1",
     });
     expect(tx.message.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ role: "system", clientNonce: "autocontinue:run:1" }),
+        data: expect.objectContaining({ role: "system", clientNonce: "follow-up:run:1" }),
       }),
     );
     expect(tx.event.create).toHaveBeenCalledWith(

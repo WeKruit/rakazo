@@ -7,7 +7,6 @@ import type { InternalUsageCosts, UsageCosts } from "@rakazo/contracts";
 import { recordUsage } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
 import { runAutoReviewJudge } from "../../adapters/src/auto-review.js";
-import { compactHistory } from "../../adapters/src/history-compaction.js";
 import { discardBotIntroRun } from "./discard-bot-intro.js";
 import { sessionCookieHeader } from "./index.js";
 import { startModelEmulator } from "./model-emulator.js";
@@ -228,16 +227,6 @@ describe.skipIf(!enabled)("persisted Pi usage accounting", () => {
           }),
       });
       expect(review.decision).toBe("pass");
-      await compactHistory(
-        {
-          prisma: handles.prisma,
-          runtime: handles.runtime,
-          jobs: handles.jobs,
-          memoryProviders: { resolve: async () => null },
-          resolveModel: async (scope) => handles.executor.resolveModel(scope),
-        },
-        thread.id,
-      );
       const rows = await handles.prisma.usageRecord.findMany({
         where: { botId: bot.id },
         orderBy: { createdAt: "asc" },
