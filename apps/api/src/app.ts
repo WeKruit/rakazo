@@ -19,8 +19,10 @@ import type {
   RemoteConnectorDependencies,
 } from "@rakazo/adapters";
 import {
+  afterSessionRun,
   applyMessagingOutboundStatus,
   assertHomeStorageConfiguration,
+  bindSessionDriver,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   ComposioConnector,
@@ -71,7 +73,6 @@ import {
   SpaceMemoryProviderResolver,
   StripeBillingProvider,
   sandboxProviderOptionsFromEnv,
-  sessionHostNotIntegrated,
   stripeBillingConfigFromEnv,
   toTeamChatInbound,
   withSecretPersistence,
@@ -620,8 +621,13 @@ export async function createApp(
     connector: stack.connector,
     artifacts,
     shutdownSignal: shutdown.signal,
-    // TEMPORARY (plan Task 8): bind runSessionHost(deps, sessionId, signal) here at integration.
-    driveSession: sessionHostNotIntegrated,
+    driveSession: bindSessionDriver({
+      executor,
+      realtime,
+      workerId: "api",
+      projection: { events, jobs, notifications },
+      afterRun: (runId) => afterSessionRun({ prisma, events, jobs, messaging }, runId),
+    }),
     sessionHostSignal: shutdown.signal,
   });
   if (inMemoryJobs) {

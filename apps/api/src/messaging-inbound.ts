@@ -1,5 +1,5 @@
 import type { JobPublisher, MessagingInboundMessage } from "@rakazo/adapter-kit";
-import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
+import { messagingDeliverJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { parseMessagingCommand, sanitizeMessagingLabel } from "@rakazo/core";
 import type {
@@ -143,7 +143,7 @@ async function handleDirectEvent(
   // start a normal messaging continue for the same inbound handle.
   if (await wakeMessageRoutines(deps, ids, event)) return;
 
-  const sent = await deps.events.sendUserMessage({
+  await deps.events.sendUserMessage({
     spaceId: ids.spaceId,
     threadId: ids.threadId,
     botId: ids.botId,
@@ -153,19 +153,11 @@ async function handleDirectEvent(
     trigger: "messaging",
     clientNonce: `messaging:${event.provider}:${event.handle}`,
   });
-  if (sent.runId) {
-    // Typing bubbles only make sense once a reply is actually coming. Fire
-    // before the enqueue so they land ahead of a fast reply, and never await:
-    // a stalled vendor typing call must not hold the webhook open. The bubbles
-    // clear on their own after a short display window or when the reply
-    // arrives, so long runs simply outlive them.
-    void deps.typing?.(event.threadId).catch((error) => {
-      getLogger().error("messaging typing indicator error", error);
-    });
-    await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
-      getLogger().error("messaging inbound run enqueue error", error);
-    });
-  }
+  // Never await: a stalled vendor typing call must not hold the webhook open. The bubbles clear
+  // on their own after a short display window or when the reply arrives.
+  void deps.typing?.(event.threadId).catch((error) => {
+    getLogger().error("messaging typing indicator error", error);
+  });
 }
 
 /** Wake provider-neutral message routines through the same approval boundary as webhooks. */
@@ -665,7 +657,7 @@ async function handleChannelEvent(
     };
     if (await wakeMessageRoutines(deps, target, event)) continue;
 
-    const sent = await deps.events.sendUserMessage({
+    await deps.events.sendUserMessage({
       spaceId: identity.spaceId,
       threadId: thread.id,
       botId: identity.botId,
@@ -675,11 +667,6 @@ async function handleChannelEvent(
       trigger: "messaging",
       clientNonce: `messaging:${event.provider}:${event.handle}`,
     });
-    if (sent.runId) {
-      await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
-        getLogger().error("messaging channel fan-out enqueue error", error);
-      });
-    }
   }
 }
 

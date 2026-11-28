@@ -1,8 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import type { JobPublisher, SandboxProvider } from "@rakazo/adapter-kit";
-import { runContinueJob } from "@rakazo/adapter-kit";
 import {
-  agentRunWaitTarget,
   cancelComputerRunWork,
   screenLeaseIdForRun,
   toComputerRef,
@@ -34,7 +32,6 @@ import {
   projectMessages,
   resolveGroupTargetBotIds,
   runFailureError,
-  runsBesidePerson,
   screenIsChinese,
   takesPersonMessages,
 } from "@rakazo/core";
@@ -42,7 +39,6 @@ import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-qu
 import type { PrismaClient, QueuedMessageChange, ThreadEvents } from "@rakazo/db";
 import {
   appendEventInTransaction,
-  cancelFormAskInTransaction,
   cancelRunsInTransaction,
   createGroupRepos,
   createRepos,
@@ -63,7 +59,6 @@ import {
   threadStopRunWhere,
   touchGroupUpdatedAt,
   updateQueuedMessage,
-  waitingAskTakesText,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
@@ -104,112 +99,7 @@ function windowCursor(page: ThreadMessagePage) {
   };
 }
 
-const RUNS_NEEDING_CONTINUE = new Set(["queued", "waiting_takeover"]);
-
 const STEERABLE_RUN_STATUSES = new Set(["queued", "leased", "running", "waiting_takeover"]);
-/**
- * The creation intro's turn is its own prompt, not the conversation. A user message that lands
- * while it is busy (not `waiting_input`) is stored as pending steering (no run): the intro never
- * claims it, and the continuation started when it finishes answers with the full thread.
- * Starting a second run beside the intro overlaps it on a dedicated computer, where there is no
- * per-bot execution lease, and both can reply. Composer text answers a waiting ask only when no
- * steerable run is active. When one is, the text steers that run and the ask stays on its card.
- */
-/**
- * A typed message moves past an open form card: the form closes as cancelled, its run resumes
- * and the message steers it. Approval, secret and connect cards stay open.
- */
-async function cancelFormAsks(
-  tx: Prisma.TransactionClient,
-  actor: Actor,
-  threadId: string,
-  runs: Array<{ id: string; status: string }>,
-) {
-  for (const run of runs)
-    if (
-      run.status === "waiting_input" &&
-      (await cancelFormAskInTransaction(tx, {
-        spaceId: actor.spaceId,
-        threadId,
-        runId: run.id,
-        answeredByUserId: actor.userId,
-      }))
-    )
-      run.status = "queued";
-}
-
-/**
- * A message written while an approval, secret or connect card waits cannot answer it. It gets its own turn
- * beside the paused run, which keeps its card open exactly as it is, instead of waiting unread
- * until someone taps the card.
- */
-async function withoutCardHeldRuns<Run extends { id: string; status: string }>(
-  tx: Prisma.TransactionClient,
-  threadId: string,
-  runs: Run[],
-  requested: "steer" | "follow_up" | undefined,
-): Promise<Run[]> {
-  if (requested === "follow_up") return runs;
-  const open: Run[] = [];
-  for (const run of runs)
-    if (
-      run.status !== "waiting_input" ||
-      (await waitingAskTakesText(tx, { threadId, runId: run.id }))
-    )
-      open.push(run);
-  return open;
-}
-
-type YieldedWake = { threadId: string; botId: string; agentRunId: string };
-
-/**
- * The recruiter's message comes first, as an interject does: a background follow-up on a
- * still-running people search in this conversation stops at once and never takes the
- * message. The search keeps running at the provider; its follow-up is scheduled again.
- * Internal grading and background waits keep going beside the recruiter's own turn; any other
- * work (a teammate's report, a check-in, a routine) takes the message as steering.
- */
-async function yieldBackgroundWakes<
-  Run extends {
-    id: string;
-    taskId: string;
-    status: string;
-    trigger: string | null;
-    botId?: string;
-    clientNonce?: string | null;
-  },
->(
-  tx: Prisma.TransactionClient,
-  actor: Actor,
-  threadId: string,
-  live: Run[],
-  yielded: YieldedWake[],
-  botId?: string,
-): Promise<Run[]> {
-  const beside = (run: Run) =>
-    runsBesidePerson(run.trigger) && STEERABLE_RUN_STATUSES.has(run.status);
-  const wakes = live.filter((run) => agentRunWaitTarget(run.clientNonce ?? null));
-  if (!wakes.length) return live.filter((run) => !beside(run));
-  await cancelRunsInTransaction(tx, wakes, new Date());
-  for (const wake of wakes) {
-    const wakeBotId = wake.botId ?? botId!;
-    await appendEventInTransaction(tx, {
-      spaceId: actor.spaceId,
-      threadId,
-      botId: wakeBotId,
-      type: "run.cancelled",
-      runId: wake.id,
-      payload: { reason: "yielded" },
-    });
-    yielded.push({
-      threadId,
-      botId: wakeBotId,
-      agentRunId: agentRunWaitTarget(wake.clientNonce ?? null)!,
-    });
-  }
-  return live.filter((run) => !wakes.includes(run) && !beside(run));
-}
-
 /** A person's message goes into the work already running for them, not a second turn. */
 function steersUserMessage(run: { status: string; trigger?: string | null }) {
   return STEERABLE_RUN_STATUSES.has(run.status) && takesPersonMessages(run.trigger);
@@ -269,22 +159,6 @@ function sendRunClientNonce(
   return botId ? `send:${messageId}:${botId}` : `send:${messageId}`;
 }
 
-async function enqueueRunsNeedingContinue(
-  jobs: JobPublisher,
-  runs: Array<{ id: string; status: string }>,
-) {
-  await Promise.all(
-    runs
-      .filter((run) => RUNS_NEEDING_CONTINUE.has(run.status))
-      .map((run) =>
-        jobs.enqueue(runContinueJob(run.id)).catch((error) => {
-          // The queued run is durable; the reconciler repairs a missed immediate wake.
-          getLogger().error("thread send enqueue", error);
-        }),
-      ),
-  );
-}
-
 async function findSendReceipt(prisma: PrismaClient, threadId: string, clientNonce: string) {
   return prisma.message.findUnique({
     where: { threadId_clientNonce: { threadId, clientNonce } },
@@ -336,14 +210,6 @@ async function replayExistingSend(
     : message.sourceRuns.length
       ? message.sourceRuns
       : [linkedRun!];
-  const pendingSteering = releaseTakeover
-    ? await deps.prisma.steeringMessage.findFirst({
-        where: { messageId: message.id, claimedAt: null },
-        select: { runId: true },
-      })
-    : null;
-  if (releaseTakeover && pendingSteering?.runId) await releaseTakeover(pendingSteering.runId);
-  await enqueueRunsNeedingContinue(deps.jobs, runs);
   const latestEvent = await deps.prisma.event.findFirst({
     where: { threadId },
     orderBy: { seq: "desc" },
@@ -373,32 +239,6 @@ function sendResult(message: { seq: number }, runs: Array<{ id: string; taskId: 
     seq: message.seq,
     runIds: runs.map((run) => run.id),
   };
-}
-
-export async function cancelSupersededQueuedRuns(
-  tx: Prisma.TransactionClient,
-  input: { threadId: string; botIds: string[]; keepRunIds: string[] },
-) {
-  const superseded = await tx.run.findMany({
-    where: {
-      threadId: input.threadId,
-      botId: { in: input.botIds },
-      status: "queued",
-      OR: [{ trigger: "user", sourceMessage: { role: "user" } }, { trigger: "reaction" }],
-      id: { notIn: input.keepRunIds },
-    },
-    select: { id: true, taskId: true },
-  });
-  if (superseded.length === 0) return;
-  const now = new Date();
-  await tx.run.updateMany({
-    where: { id: { in: superseded.map((run) => run.id) } },
-    data: { status: "cancelled", completedAt: now },
-  });
-  await tx.task.updateMany({
-    where: { id: { in: superseded.map((run) => run.taskId) } },
-    data: { status: "cancelled" },
-  });
 }
 
 async function lockAndLoadGroupMembers(
@@ -1223,10 +1063,6 @@ export async function updateQueuedThreadMessage(
           // Subscribers catch up from the durable event cursor after a missed realtime wake.
           getLogger().error("queued message realtime notification", error);
         }),
-    enqueueRunsNeedingContinue(
-      deps.jobs,
-      result.startedRunIds.map((id) => ({ id, status: "queued" })),
-    ),
   ]);
 }
 

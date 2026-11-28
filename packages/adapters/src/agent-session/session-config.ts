@@ -54,6 +54,8 @@ export interface SessionConfig {
   compaction: CompactionSettings;
   retry?: RetryPolicy;
   streamOptions?: AgentHarnessStreamOptions;
+  /** Supplier names are hidden from the recruiter in projected rows. */
+  hideVendors?: boolean;
   /** Registers hooks once the harness and its lane exist; returns their disposer. */
   install?(harness: AgentHarness<RakazoToolContext>, lane: AgentLane): () => void;
 }
@@ -67,6 +69,9 @@ export interface SessionConfigPieces {
   guardrails?: GuardrailDeps;
   maxImagesPerPrompt?: number;
   retry?: RetryPolicy;
+  hideVendors?: boolean;
+  /** Waits until an operation's tools can execute (its run setup has finished). */
+  beforeExecute?: (operationId: string) => Promise<void>;
 }
 
 function installContextHooks(
@@ -114,7 +119,8 @@ export function buildSessionConfig(pieces: SessionConfigPieces): SessionConfig {
     model: pieces.model,
     ...(pieces.thinkingLevel === undefined ? {} : { thinkingLevel: pieces.thinkingLevel }),
     systemPrompt: pieces.systemPrompt,
-    tools: pieces.tools.map((tool) => toHarnessTool(tool)),
+    tools: pieces.tools.map((tool) => toHarnessTool(tool, undefined, pieces.beforeExecute)),
+    ...(pieces.hideVendors === undefined ? {} : { hideVendors: pieces.hideVendors }),
     compaction: SESSION_COMPACTION,
     ...(pieces.retry === undefined ? {} : { retry: pieces.retry }),
     install(harness, lane) {

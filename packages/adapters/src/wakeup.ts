@@ -5,7 +5,6 @@ import {
   type JobPublisher,
   type JobWorkerHost,
 } from "@rakazo/adapter-kit";
-import { AUTOMATION_RUN_TRIGGERS } from "@rakazo/core";
 import { isDatabaseUnreachable } from "@rakazo/db";
 import { getLogger, runCorrelatedJob, unwrapJobPayload, wrapJobPayload } from "@rakazo/logging";
 import { makeWorkerUtils, type Runner, run, type WorkerUtils } from "graphile-worker";
@@ -30,7 +29,7 @@ export class GraphileJobPublisher implements JobPublisher {
     // replace resets attempts and run_at. unsafe_dedupe leaves both, so an
     // exhausted row would stay queued forever. Dedupe only while attempts remain.
     const jobKeyMode = await this.keepExistingMode(utils, job);
-    const priority = await this.priority(utils, job);
+    const priority = this.priority(job);
     await utils.addJob(job.name, wrapJobPayload(job.payload), {
       runAt: job.availableAt,
       jobKey: job.replaceKey,
@@ -41,23 +40,10 @@ export class GraphileJobPublisher implements JobPublisher {
     });
   }
 
-  private async priority(utils: WorkerUtils, job: BackgroundJob): Promise<number> {
+  private priority(job: BackgroundJob): number {
     // Staging 11-16: about 20,000 routine wakeups due in one hour queued ahead of recruiters'
     // turns at the same priority, and a first reply waited 12 s to start.
-    if (job.name === "routine.wakeup") return BACKGROUND_PRIORITY;
-    if (job.name !== "run.continue") return 0;
-    const background = await utils.withPgClient(async (client) => {
-      // A role team's turn on work handed over from the recruiter's conversation has them waiting,
-      // as a Claude Code subagent starts at once.
-      const found = await client.query(
-        `select 1 from runs r left join messages m on m.id = r."sourceMessageId"
-          where r.id = $1 and r."trigger" = any($2::text[])
-            and not coalesce(r."trigger" = 'bot_message' and m.blocks->0 ? 'returnThreadId', false)`,
-        [job.payload.runId, [...AUTOMATION_RUN_TRIGGERS]],
-      );
-      return (found.rowCount ?? 0) > 0;
-    });
-    return background ? BACKGROUND_PRIORITY : 0;
+    return job.name === "routine.wakeup" ? BACKGROUND_PRIORITY : 0;
   }
 
   async cancel(key: string): Promise<void> {

@@ -15,7 +15,7 @@ import { cloudAgentLaunchSchema, cloudAgentReplySchema } from "./cloud-agent-too
 export interface CloudAgentDeps {
   prisma: PrismaClient;
   jobs: JobPublisher;
-  events: Pick<ThreadEvents, "notify">;
+  events: Pick<ThreadEvents, "notify" | "wakeSessions">;
   cloudAgent: CloudAgentConnection | null | undefined;
 }
 

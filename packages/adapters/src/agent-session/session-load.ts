@@ -1,3 +1,4 @@
+import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { isRecruitingSpawnKey, RECRUITER_LANGUAGE, recruitingBotKey } from "@rakazo/core";
@@ -13,10 +14,10 @@ import { cloudAgentsEnabled } from "../cloud-agent-factory.js";
 import type { ExecutorDeps } from "../executor.js";
 import { loadGroupContext } from "../group-handoff.js";
 import { modelAcceptsImageInput } from "../model-vision.js";
-import type { ToolHost } from "../pi-runtime.js";
 import { listAgentSkillRecords } from "../skill-tools.js";
 import { TASK_CATALOG_GUIDANCE } from "../task-catalog.js";
 import { createAccountModels } from "./harness-models.js";
+import type { SessionToolHost } from "./run-turns.js";
 import type { SessionConfig } from "./session-config.js";
 import { buildSessionConfig } from "./session-config.js";
 import type { ModelDeps } from "./session-models.js";
@@ -58,7 +59,7 @@ export type SessionLoadDeps = ModelDeps &
     | "listConnectedPluginSlugs"
   > & {
     /** Executes the session's tools: the run path's executor behind a ToolHost. */
-    toolHost(tools: Parameters<typeof toAgentTools>[0]): ToolHost;
+    toolHost(models: { models: Models; model: Model<Api> }): SessionToolHost;
     /** Receives secret values that must never reach a projected row. */
     registerSecrets?(values: string[]): void;
     /** What started a run: a person's message unless the caller knows otherwise. */
@@ -248,11 +249,14 @@ export async function loadSessionConfig(
   });
   const models = createAccountModels({ ...model, tools });
   if (!models) throw new Error(`Model ${model.model.provider}/${model.model.id} is not available`);
+  const toolHost = deps.toolHost(models);
   return buildSessionConfig({
     ...models,
+    hideVendors,
+    beforeExecute: (operationId) => toolHost.ready(operationId),
     ...(model.model.thinkingLevel ? { thinkingLevel: model.model.thinkingLevel } : {}),
     systemPrompt,
-    tools: toAgentTools(tools, deps.toolHost(tools), { perCallSignal: true }),
+    tools: toAgentTools(tools, toolHost, { perCallSignal: true }),
     maxImagesPerPrompt: model.model.maxImagesPerPrompt,
     guardrails: {
       checkTool: createToolGate({

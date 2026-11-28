@@ -4,10 +4,15 @@ import type {
   BackgroundJobPayloads,
   CloudAgentSnapshot,
 } from "@rakazo/adapter-kit";
-import { CloudAgentRequestRejected, runContinueJob } from "@rakazo/adapter-kit";
+import { CloudAgentRequestRejected } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { cloudAgentHttpsUrl } from "@rakazo/core";
-import { appendEventInTransaction, type CloudAgent, Prisma } from "@rakazo/db";
+import {
+  appendEventInTransaction,
+  type CloudAgent,
+  Prisma,
+  submitConversationWakeOnce,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { cloudAgentsEnabled } from "./cloud-agent-factory.js";
 import { type CloudAgentDeps, cloudAgentBlock, enqueueCloudAgent } from "./cloud-agent-service.js";
@@ -275,7 +280,7 @@ async function finishPoll(
     if (!updated.count) return null;
     const saved = await tx.cloudAgent.findUniqueOrThrow({ where: { id: agent.id } });
     let seq: number | undefined;
-    let wakeRunId: string | undefined;
+    let wakeSessionId: string | undefined;
     if (message && !detached) {
       const nextBlock = cloudAgentBlock(saved);
       const blocks = (message.blocks as MessageBlock[]).map((block) =>
@@ -294,46 +299,37 @@ async function finishPoll(
       }
       if (terminal && saved.wakeGeneration < saved.generation) {
         // Provider text is untrusted. Wake with local identity and status only.
-        const summary = `Cloud agent ${agent.id} is ${status}. Use cloud_agent_status to inspect its result.`;
-        const task = await tx.task.create({
-          data: {
+        const summary = `Cloud agent ${agent.id} is ${status}. cloud_agent_status returns its result.`;
+        const submitted = await submitConversationWakeOnce(
+          tx,
+          {
             spaceId: agent.spaceId,
-            botId: agent.botId,
-            threadId: agent.threadId,
             userId: agent.userId,
-            prompt: summary,
-            status: "queued",
+            threadId: agent.threadId,
+            botId: agent.botId,
           },
-        });
-        const run = await tx.run.create({
-          data: {
-            spaceId: agent.spaceId,
-            botId: agent.botId,
-            threadId: agent.threadId,
-            userId: agent.userId,
-            taskId: task.id,
-            status: "queued",
+          {
+            kind: "message",
             trigger: "cloud_agent",
-            clientNonce: `cloud-agent-wake-run:${agent.id}:${saved.generation}`,
+            payload: {
+              text: summary,
+              internal: true,
+              wakeKey: `cloud-agent-wake-run:${agent.id}:${saved.generation}`,
+            },
           },
-        });
+        );
         await tx.cloudAgent.update({
           where: { id: agent.id },
           data: { wakeGeneration: saved.generation },
         });
-        wakeRunId = run.id;
+        wakeSessionId = submitted?.sessionId;
       }
     }
-    return { seq, wakeRunId, nextPollAt };
+    return { seq, wakeSessionId, nextPollAt };
   });
   if (!committed) return;
   if (committed.seq !== undefined)
     await deps.events.notify(agent.threadId, committed.seq).catch(() => undefined);
-  if (committed.wakeRunId) {
-    // The existing run reconciler recovers a queued wake after an enqueue failure.
-    await deps.jobs.enqueue(runContinueJob(committed.wakeRunId)).catch(() => {
-      getLogger().warn("cloud agent wake deferred to reconciliation");
-    });
-  }
+  if (committed.wakeSessionId) await deps.events.wakeSessions([committed.wakeSessionId]);
   if (committed.nextPollAt) await enqueueCloudAgent(deps, agent.id, committed.nextPollAt);
 }

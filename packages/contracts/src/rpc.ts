@@ -1082,7 +1082,7 @@ export const appContract = {
           clientNonce: z.string().min(1).max(200).optional(),
         }),
       )
-      .output(z.object({ runId: Id })),
+      .output(z.object({ ok: z.literal(true) })),
   },
   scratchpad: {
     list: oc
@@ -1151,7 +1151,7 @@ export const appContract = {
       .output(TaughtSkillSchema),
     testRun: oc
       .input(z.object({ skillId: Id, prompt: z.string().optional() }))
-      .output(z.object({ runId: Id })),
+      .output(z.object({ ok: z.literal(true) })),
     remove: oc.input(z.object({ skillId: Id })).output(z.object({ ok: z.literal(true) })),
   },
   /** Claude Agent Skills (SKILL.md recipes) shared across assistants (not taught/demo skills). Pi already understands this format; we persist and inject them. */

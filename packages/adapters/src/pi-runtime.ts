@@ -163,7 +163,7 @@ function catalogModels(): Models {
   );
   return catalogModelsCache;
 }
-const MAX_PARALLEL_SUBAGENTS = 4;
+export const MAX_PARALLEL_SUBAGENTS = 4;
 const MODEL_PROVIDER_RETRY_DELAYS_MS = [2_000, 8_000, 20_000] as const;
 // Rate limits clear on the provider's clock, so they get their own longer budget.
 const MODEL_RATE_LIMIT_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000] as const;
@@ -3464,7 +3464,7 @@ export function fallbackAwareModelStream(
   return output;
 }
 
-function createGate(max: number) {
+export function createGate(max: number) {
   let active = 0;
   const waiters: Array<() => void> = [];
   return {

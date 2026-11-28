@@ -19,8 +19,10 @@ export interface SessionInputPayload {
   modelPin?: { modelProvider: string; modelId: string; thinkingLevel: string | null };
   /** For `stop`: the run the person stopped, when they stopped one in particular. */
   runId?: string;
-  /** For a search follow-up: the provider answer it was started for (one wake per answer). */
+  /** A wake that reaches the session once: the source it was started for. */
   wakeKey?: string;
+  /** For a recruiting check-in: the replies it reports. */
+  checkinReplyIds?: string[];
 }
 
 /** Realtime topic the owner of a session listens on. */
@@ -71,4 +73,35 @@ export async function wakeSessions(
       });
     }),
   );
+}
+
+/**
+ * A wake that must reach the session once (a poll close, a finished child, a ticket change): the
+ * thread row serializes it with the conversation's other starts, and an earlier input with the
+ * same `wakeKey` makes it a no-op. Null when it was already submitted or the thread is gone.
+ */
+export async function submitConversationWakeOnce(
+  tx: Prisma.TransactionClient,
+  key: ConversationSessionKey,
+  input: {
+    kind: SessionInputKind;
+    trigger: string;
+    messageId?: string;
+    payload: SessionInputPayload & { wakeKey: string };
+  },
+): Promise<{ sessionId: string; inputId: string; seq: number } | null> {
+  const locked = await tx.thread.updateMany({
+    where: { id: key.threadId, spaceId: key.spaceId },
+    data: { nextEventSeq: { increment: 0 } },
+  });
+  if (!locked.count) return null;
+  const earlier = await tx.sessionInput.findFirst({
+    where: {
+      session: { threadId: key.threadId, botId: key.botId },
+      payload: { path: ["wakeKey"], equals: input.payload.wakeKey },
+    },
+    select: { id: true },
+  });
+  if (earlier) return null;
+  return submitConversationInput(tx, key, input);
 }

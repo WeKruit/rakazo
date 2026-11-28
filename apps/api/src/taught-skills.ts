@@ -3,7 +3,6 @@ import { ORPCError } from "@orpc/server";
 import type { AgentHomeStore, JobPublisher, SandboxProvider } from "@rakazo/adapter-kit";
 import {
   type AdapterContext,
-  runContinueJob,
   skillTeachingExpireJob,
   skillTeachingExpireJobKey,
 } from "@rakazo/adapter-kit";
@@ -45,7 +44,9 @@ import {
   expireComputerExecutionLeases,
   IsolationError,
   type PrismaClient,
+  submitConversationInput,
   type ThreadEvents,
+  wakeSessions,
 } from "@rakazo/db";
 
 type TaughtSkillRow = {
@@ -512,7 +513,7 @@ export function createTaughtSkillsService(deps: TaughtSkillsDeps) {
       return mapTaughtSkill(row);
     },
 
-    async testRun(actor: Actor, skillId: string, prompt?: string): Promise<{ runId: string }> {
+    async testRun(actor: Actor, skillId: string, prompt?: string): Promise<{ ok: true }> {
       const skill = await getOwnedSkill(deps, actor, skillId);
       if (skill.status !== "saved" && skill.status !== "draft") {
         throw new ORPCError("BAD_REQUEST", { message: "Skill must be saved or drafted first" });
@@ -522,32 +523,19 @@ export function createTaughtSkillsService(deps: TaughtSkillsDeps) {
         include: { thread: true },
       });
       if (!bot?.thread) throw new IsolationError();
+      const threadId = bot.thread.id;
       const playbook = parsePlaybook(skill.playbook);
-      const taskPrompt =
+      const text =
         prompt ?? formatSkillRunPrompt(skill.name || skill.goal.slice(0, 80), playbook, true);
-      const task = await deps.prisma.task.create({
-        data: {
-          spaceId: actor.spaceId,
-          botId: bot.id,
-          threadId: bot.thread.id,
-          userId: actor.userId,
-          prompt: taskPrompt,
-          status: "queued",
-        },
-      });
-      const run = await deps.prisma.run.create({
-        data: {
-          spaceId: actor.spaceId,
-          botId: bot.id,
-          threadId: bot.thread.id,
-          taskId: task.id,
-          userId: actor.userId,
-          status: "queued",
-          trigger: "skill",
-        },
-      });
-      await deps.jobs.enqueue(runContinueJob(run.id));
-      return { runId: run.id };
+      const { sessionId } = await deps.prisma.$transaction((tx) =>
+        submitConversationInput(
+          tx,
+          { spaceId: actor.spaceId, userId: actor.userId, threadId, botId: bot.id },
+          { kind: "message", trigger: "skill", payload: { text, internal: true } },
+        ),
+      );
+      await wakeSessions({ jobs: deps.jobs }, [sessionId]);
+      return { ok: true };
     },
 
     async remove(actor: Actor, skillId: string): Promise<{ ok: true }> {

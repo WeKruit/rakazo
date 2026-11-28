@@ -10,12 +10,12 @@ import type {
   SandboxProvider,
   SecretStore,
 } from "@rakazo/adapter-kit";
-import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
+import { messagingDeliverJob } from "@rakazo/adapter-kit";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { sendRunNotification } from "./agent-session/run-projection.js";
-import type { DriveSession } from "./agent-session/ports.js";
 import { cutoverToSessions } from "./agent-session/session-cutover.js";
+import type { DriveSession } from "./agent-session/session-driver.js";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
 import { pollCloudAgent } from "./cloud-agent-poll.js";
 import { expireComputerControl } from "./computer-control.js";
@@ -41,9 +41,46 @@ import { expireTaughtSkillTeaching } from "./teaching-session.js";
  * Run triggers with no conversation behind them. A handoff (bot_message) or research result is
  * part of a conversation someone is following, so it is not limited here.
  */
-const SCHEDULED_TRIGGERS = ["routine", "webhook", "tickets", "cloud_agent"];
-/** How long a scheduled run waits before trying for a slot again. */
-const SCHEDULED_RUN_RETRY_MS = 5_000;
+
+/**
+ * After a session run's terminal row is written: a routine whose last five runs all failed stops
+ * firing, and the run's bot messages are mirrored to the messaging outbox.
+ */
+export async function afterSessionRun(
+  deps: {
+    prisma: PrismaClient;
+    events: ThreadEvents;
+    jobs: JobPublisher;
+    messaging?: MessagingSurface;
+  },
+  runId: string,
+): Promise<void> {
+  await pauseRoutineAfterRepeatedFailures(deps, runId).catch((error) => {
+    getLogger().error("routine failure pause error", error);
+  });
+  if (!deps.messaging) return;
+  const messaging = {
+    prisma: deps.prisma,
+    messaging: deps.messaging,
+    events: deps.events,
+    jobs: deps.jobs,
+  };
+  await mirrorMessagingOutbound(messaging, runId);
+  await deps.jobs.enqueue(messagingDeliverJob()).catch(async (error) => {
+    getLogger().error("messaging.deliver enqueue error", error);
+    await deliverMessagingOutbound(
+      messaging,
+      { runId: undefined },
+      {
+        operationId: "messaging.deliver:drain",
+        traceId: "messaging.deliver:drain",
+        spaceId: "",
+        userId: "",
+        signal: new AbortController().signal,
+      },
+    );
+  });
+}
 
 export function createBackgroundJobHandlers(deps: {
   executor: ReturnType<typeof createRunExecutor>;
@@ -66,21 +103,11 @@ export function createBackgroundJobHandlers(deps: {
   connector?: ConnectorProvider;
   /** Saved files; a reply's attachments read in the background are kept here. */
   artifacts?: ArtifactStore;
-  /**
-   * Most worker slots scheduled runs may hold at once in this process, so a burst of routines
-   * cannot take every slot from people chatting. Unset means no limit.
-   */
-  scheduledRunSlots?: number;
   /** Owns one session until it is idle (plan Task 4 `runSessionHost`, deps bound). */
   driveSession: DriveSession;
   /** Aborted when the worker drains: each owned session quiesces and releases its lease. */
   sessionHostSignal: AbortSignal;
 }): BackgroundJobHandlers {
-  let scheduledRunsActive = 0;
-  const isScheduledRun = async (runId: string) =>
-    (await deps.prisma.run.count({
-      where: { id: runId, trigger: { in: SCHEDULED_TRIGGERS } },
-    })) > 0;
   const deliverMessaging = async (runId?: string) => {
     if (!deps.messaging) return;
     await deliverMessagingOutbound(
@@ -97,42 +124,6 @@ export function createBackgroundJobHandlers(deps: {
   };
 
   return {
-    "run.continue": async (payload) => {
-      const limited = deps.scheduledRunSlots !== undefined && (await isScheduledRun(payload.runId));
-      if (limited && scheduledRunsActive >= deps.scheduledRunSlots!) {
-        getLogger().info("run.scheduled.deferred", {
-          runId: payload.runId,
-          active: scheduledRunsActive,
-        });
-        await deps.jobs.enqueue({
-          ...runContinueJob(payload.runId),
-          availableAt: new Date(Date.now() + SCHEDULED_RUN_RETRY_MS),
-        });
-        return;
-      }
-      if (limited) scheduledRunsActive++;
-      try {
-        await deps.executor.continueRun(payload.runId, deps.workerId);
-      } finally {
-        if (limited) scheduledRunsActive--;
-      }
-      // A routine whose last five runs all failed stops firing; never let this fail the run.
-      await pauseRoutineAfterRepeatedFailures(deps, payload.runId).catch((error) => {
-        getLogger().error("routine failure pause error", error);
-      });
-      // Automatic messaging mirror: once the run's bot messages are durable,
-      // copy them into the outbox. Never let mirror failures fail the run.
-      if (deps.messaging) {
-        await mirrorMessagingOutbound(
-          { prisma: deps.prisma, messaging: deps.messaging, events: deps.events, jobs: deps.jobs },
-          payload.runId,
-        );
-        await deps.jobs.enqueue(messagingDeliverJob()).catch(async (error) => {
-          getLogger().error("messaging.deliver enqueue error", error);
-          await deliverMessaging();
-        });
-      }
-    },
     "messaging.deliver": async (payload) => {
       await deliverMessaging(payload.runId);
     },
@@ -204,10 +195,7 @@ export function createBackgroundJobHandlers(deps: {
       if (deps.connector) await warmBotDiscovery(deps.prisma, deps.connector, payload.botId);
     },
     "poll.close": async (payload) => {
-      await closePollAndWake(
-        { prisma: deps.prisma, jobs: deps.jobs, events: deps.events },
-        payload,
-      );
+      await closePollAndWake({ prisma: deps.prisma, events: deps.events }, payload);
     },
     // Retired: checks already queued before the upgrade finish without pushing the agent.
     "thread.reply_check": async () => {},
@@ -216,6 +204,7 @@ export function createBackgroundJobHandlers(deps: {
         {
           prisma: deps.prisma,
           jobs: deps.jobs,
+          events: deps.events,
           connector: deps.connector,
           artifacts: deps.artifacts,
         },

@@ -7,7 +7,6 @@ import {
   messagingDeliverJob,
   recruitingCandidateProfilesJob,
   routineWakeupJob,
-  runContinueJob,
   sessionDriveJob,
 } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
@@ -159,7 +158,6 @@ export function createJobReconciler(
   let reconciling: Promise<void> | undefined;
   let stuckCursor: Cursor | undefined;
   let questionCursor: Cursor | undefined;
-  let runCursor: Cursor | undefined;
   let routineCursor: Cursor | undefined;
   let controlCursor: ControlCursor | undefined;
   let profileCursor: Cursor | undefined;
@@ -261,14 +259,6 @@ export function createJobReconciler(
       }
       if (stopped) return;
       controlScanDeadline ??= new Date(now.getTime() + CONTROL_LOOKAHEAD_MS);
-      const runCursorFilter = runCursor
-        ? {
-            OR: [
-              { updatedAt: { gt: runCursor.at } },
-              { updatedAt: runCursor.at, id: { gt: runCursor.id } },
-            ],
-          }
-        : undefined;
       const routineCursorFilter = routineCursor
         ? {
             OR: [
@@ -291,26 +281,7 @@ export function createJobReconciler(
             }
           : { controlLeaseExpiresAt: null, id: { gt: controlCursor.id } }
         : undefined;
-      const [runs, routines, controls, dueOutbound, unmirroredMessagingRuns] = await Promise.all([
-        deps.prisma.run.findMany({
-          where: {
-            AND: [
-              {
-                OR: [
-                  { status: "queued" },
-                  {
-                    status: { in: ["leased", "running"] },
-                    leaseExpiresAt: { lte: now },
-                  },
-                ],
-              },
-              ...(runCursorFilter ? [runCursorFilter] : []),
-            ],
-          },
-          orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-          take: batchSize,
-          select: { id: true, updatedAt: true, status: true },
-        }),
+      const [routines, controls, dueOutbound, unmirroredMessagingRuns] = await Promise.all([
         deps.prisma.routine.findMany({
           where: {
             AND: [
@@ -449,13 +420,7 @@ export function createJobReconciler(
         getLogger().error("session lease reconciliation", error);
       }
 
-      // Preserve queued-run backoff, but replace expired owners' wakeups: deduping
-      // a dead worker's locked job would block native lease recovery for four hours.
-      // Graphile replacement leaves that handler locked; the run fence guards takeover.
       await Promise.all([
-        ...runs.map((run) =>
-          deps.jobs.enqueue({ ...runContinueJob(run.id), keepExisting: run.status === "queued" }),
-        ),
         ...routines.flatMap((routine) =>
           routine.nextRunAt
             ? [deps.jobs.enqueue(routineWakeupJob(routine.id, routine.nextRunAt))]
@@ -477,11 +442,6 @@ export function createJobReconciler(
         ...unmirroredMessagingRuns.map((run) => deps.jobs.enqueue(messagingDeliverJob(run.id))),
       ]);
 
-      const lastRun = runs.at(-1);
-      runCursor =
-        runs.length === batchSize && lastRun
-          ? { at: lastRun.updatedAt, id: lastRun.id }
-          : undefined;
       const lastRoutine = routines.at(-1);
       routineCursor =
         routines.length === batchSize && lastRoutine?.nextRunAt
@@ -525,7 +485,7 @@ export function createJobReconciler(
 
 /**
  * Sessions whose lease has lapsed (or was never taken) that still have undelivered input or a
- * projected run that never ended. Projected runs carry no run lease; run-harness runs do.
+ * projected run that never ended: its owner died, and the next owner resumes it from storage.
  */
 export async function sessionsWithoutOwner(
   prisma: Pick<PrismaClient, "$queryRaw">,
@@ -540,7 +500,7 @@ export async function sessionsWithoutOwner(
           WHERE i."sessionId" = s.id AND i."deliveredAt" IS NULL)
         OR EXISTS (SELECT 1 FROM runs r
           WHERE r."threadId" = s."threadId" AND r."botId" = s."botId"
-            AND r.status = 'running' AND r."leaseExpiresAt" IS NULL)
+            AND r.status = 'running')
       )
     ORDER BY s."leaseExpiresAt" ASC NULLS FIRST, s.id
     LIMIT ${limit}

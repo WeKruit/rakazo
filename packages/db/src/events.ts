@@ -265,11 +265,6 @@ function resumeChoiceLabel(
  * Keep authoritative task state, including resolved private choice labels. The
  * executor separately projects native goals/questions/answers into conversation turns.
  */
-/** A message typed in the chat box while a card was open: the agent decides whether it answers. */
-export function chatReplyToAsk(text: string): string {
-  return `${text}\n(Typed in the chat while this question was open, not picked on the card; the card is closed.)`;
-}
-
 /**
  * The bot's last question, when a message typed in the chat closed its card and the bot has said
  * nothing since. A teammate's report back then reminds the bot to act on that reply or ask again;
@@ -299,16 +294,6 @@ export async function questionClosedByChat(
   });
   if (spokeSince) return;
   return { question: ask.text, reply: ask.answer };
-}
-
-function resumePrompt(
-  run: { trigger: string; task?: { prompt: string } | null },
-  question: string,
-  answer: string,
-): string {
-  return [run.task?.prompt, `${question}\nAnswer: ${answer}`]
-    .filter((part) => part?.trim())
-    .join("\n\n");
 }
 
 export interface PauseRunForTakeover {
@@ -415,7 +400,8 @@ export function createThreadEvents(
   } = {},
 ): ThreadEvents {
   return {
-    answerRunInput: (input) => answerRunInput(prisma, input, realtime, options.runSecretWriter),
+    answerRunInput: (input) =>
+      answerRunInput(prisma, input, realtime, options.runSecretWriter, options.jobs),
     append: (input) => appendEvent(prisma, input, realtime),
     claimSteering: (input) => claimSteering(prisma, input),
     clearThread: (input) => clearThread(prisma, input, realtime),
@@ -935,12 +921,12 @@ async function commitAnswerRunInput(
   // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
   // concurrent clear cannot deadlock against this transaction.
   await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+  // The card ended its run; the answer is the next input of that agent's session.
   const run = await tx.run.findFirst({
     where: {
       id: input.runId,
       spaceId: input.spaceId,
       threadId: input.threadId,
-      status: "waiting_input",
     },
     select: {
       botId: true,
@@ -1203,20 +1189,6 @@ async function commitAnswerRunInput(
       return null;
   }
 
-  const queued = await tx.run.updateMany({
-    where: {
-      id: input.runId,
-      spaceId: input.spaceId,
-      threadId: input.threadId,
-      status: "waiting_input",
-    },
-    data: {
-      status: "queued",
-      ...(choiceAsk ? { checkpoint: null } : {}),
-    },
-  });
-  if (queued.count !== 1) return null;
-
   const recordedAnswer = secretAsk ? "" : (connectAnswer ?? selectedChoice?.id ?? answerText);
   const callId = callIdFromClientNonce(input.clientNonce);
   const recordsCallUtterance = Boolean(callId && !secretAsk);
@@ -1323,32 +1295,33 @@ async function commitAnswerRunInput(
         ...(pendingAsk.credential ? { result: { credentialSaved: pendingAsk.credential } } : {}),
       },
     });
-  } else {
-    const resumeLabel = selectedChoice
-      ? resumeChoiceLabel(selectedChoice, run.checkpoint)
-      : undefined;
-    const task = await tx.task.updateMany({
-      where: { runs: { some: { id: input.runId } } },
-      data: {
-        prompt: resumePrompt(
-          run,
-          pendingAsk.text,
-          formResponse
-            ? JSON.stringify(formResponse)
-            : connection
-              ? connectAnswer === "connected"
-                ? `${connection.name} is connected.`
-                : `${connection.name} is still not connected.`
-              : selectedChoice
-                ? `Selected choice ${selectedChoice.id}: ${resumeLabel}`
-                : input.answerMessageId
-                  ? chatReplyToAsk(answerText)
-                  : answerText,
-        ),
-      },
-    });
-    if (task.count !== 1) throw new Error("Run task was not available to answer");
   }
+  // What the session reads: the question and its answer. A protected value never appears in it.
+  const cardAnswerText = secretAsk
+    ? `${pendingAsk.text}\nThe person entered it on the card.`
+    : `${pendingAsk.text}\nAnswer: ${
+        formResponse
+          ? JSON.stringify(formResponse)
+          : connection
+            ? connectAnswer === "connected"
+              ? `${connection.name} is connected.`
+              : `${connection.name} is still not connected.`
+            : selectedChoice
+              ? selectedChoice.id && run.checkpoint
+                ? resumeChoiceLabel(selectedChoice, run.checkpoint)
+                : selectedChoice.label
+              : answerText
+      }`;
+  const cardInput = await submitConversationInput(
+    tx,
+    { spaceId: input.spaceId, userId: run.userId, threadId: input.threadId, botId: run.botId },
+    {
+      kind: "cardAnswer",
+      trigger: run.trigger,
+      ...(answerMessageId ? { messageId: answerMessageId } : {}),
+      payload: { text: cardAnswerText },
+    },
+  );
 
   const blocks = parsed.data.map((block) =>
     block === pendingAsk
@@ -1403,7 +1376,7 @@ async function commitAnswerRunInput(
         answeredByUserId: input.answeredByUserId,
       },
     });
-    return { threadId: proof.threadId, seq: proof.seq, mirrors };
+    return { threadId: proof.threadId, seq: proof.seq, mirrors, sessionId: cardInput.sessionId };
   }
   if (approvalAsk) {
     const proof = await appendEventInTransaction(tx, {
@@ -1426,9 +1399,9 @@ async function commitAnswerRunInput(
           .digest("hex"),
       },
     });
-    return { threadId: proof.threadId, seq: proof.seq, mirrors };
+    return { threadId: proof.threadId, seq: proof.seq, mirrors, sessionId: cardInput.sessionId };
   }
-  return { threadId: updated.threadId, seq: updated.seq, mirrors };
+  return { threadId: updated.threadId, seq: updated.seq, mirrors, sessionId: cardInput.sessionId };
 }
 
 /** The answered card's event, plus the events of its copies in other conversations. */
@@ -1436,6 +1409,8 @@ export type AnsweredCard = {
   threadId: string;
   seq: number;
   mirrors?: { threadId: string; seq: number }[];
+  /** The session the answer was submitted to. */
+  sessionId?: string;
 };
 
 /** Tell open clients about an answered card and every copy of it. */
@@ -1453,6 +1428,7 @@ export async function answerRunInput(
   input: AnswerRunInput,
   realtime?: RealtimeFanout,
   runSecretWriter?: RunSecretWriter,
+  jobs?: Pick<JobPublisher, "enqueue">,
 ): Promise<boolean> {
   const commit = (writer = runSecretWriter) =>
     prisma.$transaction(async (tx: Prisma.TransactionClient) =>
@@ -1464,33 +1440,8 @@ export async function answerRunInput(
 
   if (!committed) return false;
   await notifyAnsweredCard(realtime, committed);
+  if (committed.sessionId) await wakeSessions({ realtime, jobs }, [committed.sessionId]);
   return true;
-}
-
-/** Answer a waiting question ask with composer free-text. Approval and secret cards stay on the card path. */
-export async function answerWaitingRunWithTextInTransaction(
-  tx: Prisma.TransactionClient,
-  input: {
-    spaceId: string;
-    threadId: string;
-    runId: string;
-    answeredByUserId: string;
-    answer: string;
-    /** Server-only native composer message, reused across the waiting runs it answers. */
-    answerMessageId?: string;
-  },
-): Promise<AnsweredCard | null> {
-  if (!input.answer.trim()) return null;
-  const found = await findPendingAsk(tx, input);
-  if (!found) return null;
-  if (
-    isApprovalAskBlock(found.pendingAsk) ||
-    isSecretAskBlock(found.pendingAsk) ||
-    found.pendingAsk.requestedSchema ||
-    found.pendingAsk.connection
-  )
-    return null;
-  return commitAnswerRunInput(tx, { ...input, messageId: found.messageId });
 }
 
 /**
@@ -1536,57 +1487,6 @@ export async function cancelFormAskInTransaction(
       answer: { action: "cancel" },
     }),
   );
-}
-
-/**
- * A recruiter who writes while the turn is still finishing (for example "find 100" typed as soon
- * as the ten appear) can land after the turn's last steering read and just before it pauses on a
- * question card. Sent a moment later, the same text would have answered the card, so it answers
- * the card now; otherwise the message would sit unread behind a card nobody answers.
- * Returns the answered run's event when the paused run was resumed.
- */
-export async function answerPausedAskWithSteering(
-  prisma: PrismaClient,
-  input: { spaceId: string; threadId: string; botId: string; runId: string },
-): Promise<AnsweredCard | null> {
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
-    const rows = await tx.steeringMessage.findMany({
-      where: {
-        runId: input.runId,
-        botId: input.botId,
-        claimedAt: null,
-        OR: [{ originTrigger: null }, { originTrigger: { not: FOLLOW_UP_ORIGIN } }],
-      },
-      include: { message: { select: { id: true, role: true, threadId: true, blocks: true } } },
-      orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
-    });
-    const human = rows.filter(
-      (row) =>
-        row.message.threadId === input.threadId &&
-        row.message.role === "user" &&
-        Array.isArray(row.message.blocks) &&
-        (row.message.blocks as MessageBlock[]).length > 0 &&
-        (row.message.blocks as MessageBlock[]).every((block) => block.kind === "text"),
-    );
-    const last = human.at(-1);
-    if (!last) return null;
-    // The latest message answers the card; earlier ones stay steering for the resumed turn.
-    const answered = await answerWaitingRunWithTextInTransaction(tx, {
-      spaceId: input.spaceId,
-      threadId: input.threadId,
-      runId: input.runId,
-      answeredByUserId: last.userId,
-      answer: (last.message.blocks as MessageBlock[])
-        .map((block) => (block.kind === "text" ? block.text : ""))
-        .join("\n"),
-      answerMessageId: last.message.id,
-    });
-    if (!answered) return null;
-    // The message is the answer now; left as steering it would reach the resumed turn twice.
-    await tx.steeringMessage.delete({ where: { id: last.id } });
-    return answered;
-  });
 }
 
 export async function pauseRunForInput(

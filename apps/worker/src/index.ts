@@ -15,8 +15,10 @@ import { createWorkerSecretStore } from "./secret-store.js";
 if (process.env.RAKAZO_RELEASE_PROFILE !== "staging") loadRootEnv();
 
 import {
+  afterSessionRun,
   artifactStorageOptionsFromEnv,
   assertHomeStorageConfiguration,
+  bindSessionDriver,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   createAgentHomeStore,
@@ -62,7 +64,6 @@ import {
   SmtpEmailProvider,
   SpaceMemoryProviderResolver,
   sandboxProviderOptionsFromEnv,
-  sessionHostNotIntegrated,
   startJobQueueReporter,
   withSecretPersistence,
 } from "@rakazo/adapters";
@@ -365,10 +366,13 @@ async function main() {
     connector: stack.connector,
     artifacts,
     shutdownSignal: shutdown.signal,
-    // Keep at least two in five slots for conversations.
-    scheduledRunSlots: Math.max(1, Math.floor((workerConcurrency * 3) / 5)),
-    // TEMPORARY (plan Task 8): bind runSessionHost(deps, sessionId, signal) here at integration.
-    driveSession: sessionHostNotIntegrated,
+    driveSession: bindSessionDriver({
+      executor,
+      realtime,
+      workerId: process.pid.toString(),
+      projection: { events, jobs, notifications },
+      afterRun: (runId) => afterSessionRun({ prisma, events, jobs, messaging }, runId),
+    }),
     sessionHostSignal: sessionHosts.signal,
   });
   // graphile-worker run() connects through the shared pool. createPool already

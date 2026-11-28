@@ -4,12 +4,11 @@ import type {
   MessagingOutboundStatus,
   MessagingSurface,
 } from "@rakazo/adapter-kit";
-import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
+import { messagingDeliverJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { botMessageHopExhausted, nextBotMessageHop } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { appendEventInTransaction, createThreadMessageInTransaction } from "@rakazo/db";
-import { getLogger } from "@rakazo/logging";
 
 /**
  * Margin under vendor consecutive-outbound caps (sendblue enforces one hard):
@@ -211,7 +210,7 @@ async function mirrorChannelRun(
         ? new RegExp(`@${escapeRegExp(peerBot.name)}\\b`, "i").test(text)
         : false;
       if (mentioned && !botMessageHopExhausted(hop)) {
-        const sent = await deps.events.sendUserMessage({
+        await deps.events.sendUserMessage({
           spaceId: peerIdentity.spaceId,
           threadId: peerThread.id,
           botId: peerIdentity.botId,
@@ -221,11 +220,6 @@ async function mirrorChannelRun(
           trigger: "messaging",
           clientNonce,
         });
-        if (sent.runId) {
-          await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
-            getLogger().error("messaging peer wake enqueue error", error);
-          });
-        }
         continue;
       }
       // Context only: the peer sees the post in history without a wake.

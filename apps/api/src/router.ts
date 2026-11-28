@@ -19,7 +19,6 @@ import {
   pollCloseJob,
   routineJobKey,
   routineWakeupJob,
-  runContinueJob,
   runJobKey,
   SecretStoreUnavailableError,
 } from "@rakazo/adapter-kit";
@@ -47,8 +46,8 @@ import {
   applyTeachingDesktopInput,
   archiveBot,
   assertSafeRemoteUrl,
-  bindImportedCampaigns,
   BotSecretInputError,
+  bindImportedCampaigns,
   blockNewConnections,
   buildMcpCredentialBlob,
   buildModelConnectPlaintext,
@@ -132,7 +131,6 @@ import {
   resolveBotWorkspacePath,
   revokeScreenControl,
   routineOptionError,
-  routineRunModelPin,
   sanitizeComposioError,
   savePushToken,
   scheduleComputerControlExpiry,
@@ -142,6 +140,7 @@ import {
   selectDefaultCredentialId,
   serializeModelSecret,
   storeBotSecret,
+  submitRoutineInput,
   takeoverLeaseMs,
   toComputerRef,
   touchRunningComputer,
@@ -196,12 +195,10 @@ import {
   ACTIVE_RUN_STATUSES,
   AttachmentValidationError,
   CALL_CLIENT_NONCE_PREFIX,
-  callClientNonce,
   clampCatalogThinkingLevel,
   closedAskClientNonce,
   containsSecret,
   hasMixedOneShotSchedule,
-  isConversationalRun,
   isOneShotRoutineCrons,
   nextRoutineWakeAt,
   promptTextForAttachments,
@@ -288,6 +285,8 @@ import {
   seesOperatorSpend,
   selectSpaceModelPreference,
   selectSpaceVoicePreference,
+  submitConversationInput,
+  submitConversationWakeOnce,
   summarizeInternalUsageCosts,
   summarizeUsageCosts,
   summarizeWorkMetrics,
@@ -859,31 +858,18 @@ export async function enqueueBotIntroRun(deps: RouterDeps, actor: Actor, bot: Bo
   // harness queued next, for a bot it doesn't otherwise get to opt out of.
   if (deps.env.agentRuntime === "scripted") return;
   if ((await modelSetup(deps, actor)).needsModel) return;
-  const run = await deps.prisma.$transaction(async (tx) => {
-    const task = await tx.task.create({
-      data: {
-        spaceId: actor.spaceId,
-        botId: bot.id,
-        threadId,
-        userId: actor.userId,
-        prompt: BOT_INTRO_PROMPT,
-        status: "queued",
-      },
-    });
-    return tx.run.create({
-      data: {
-        spaceId: actor.spaceId,
-        botId: bot.id,
-        threadId,
-        taskId: task.id,
-        userId: actor.userId,
-        status: "queued",
+  const submitted = await deps.prisma.$transaction((tx) =>
+    submitConversationWakeOnce(
+      tx,
+      { spaceId: actor.spaceId, userId: actor.userId, threadId, botId: bot.id },
+      {
+        kind: "message",
         trigger: "created",
+        payload: { text: BOT_INTRO_PROMPT, internal: true, wakeKey: `bot-intro:${bot.id}` },
       },
-      select: { id: true },
-    });
-  });
-  await deps.jobs.enqueue(runContinueJob(run.id));
+    ),
+  );
+  if (submitted) await deps.events.wakeSessions([submitted.sessionId]);
 }
 
 async function resolveSpaceBoard(
@@ -3018,7 +3004,7 @@ export function createRouter(deps: RouterDeps) {
               ? { ...block, recruitingFeedback: input.recruitingFeedback }
               : block,
           );
-          const sent = await deps.events.sendUserMessage({
+          await deps.events.sendUserMessage({
             spaceId: context.actor.spaceId,
             threadId: target.threadId,
             botId: target.botId,
@@ -3028,11 +3014,6 @@ export function createRouter(deps: RouterDeps) {
             trigger: "follow_up",
             clientNonce: input.clientNonce,
           });
-          if (sent.taskId && sent.runId) {
-            await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
-              getLogger().error("follow-up enqueue", error);
-            });
-          }
           return { ok: true as const };
         }
         const committed = await deps.prisma.$transaction(async (tx) => {
@@ -3120,89 +3101,49 @@ export function createRouter(deps: RouterDeps) {
               input.recruitingFeedback,
               message.id,
             );
-          const runIds: string[] = [];
-          const createdRunIds: string[] = [];
+          // Each addressed agent's session takes the message: answered now when idle, steered
+          // into its live run otherwise.
+          const prompt = promptTextForAttachments(
+            input.text,
+            artifacts,
+            undefined,
+            input.crmRoleReference,
+            input.recruitingContext,
+          );
+          const sessionIds: string[] = [];
           for (const botId of botIds) {
-            const active = await tx.run.findFirst({
-              where: {
+            const submitted = await submitConversationInput(
+              tx,
+              {
+                spaceId: context.actor.spaceId,
+                userId: context.actor.userId,
                 threadId: target.threadId,
                 botId,
-                status: { in: [...ACTIVE_RUN_STATUSES] },
               },
-              select: { id: true, trigger: true },
-            });
-            if (active) {
-              await tx.steeringMessage.create({
-                data: {
-                  messageId: message.id,
-                  botId,
-                  userId: context.actor.userId,
-                  runId: isConversationalRun(active.trigger) ? active.id : null,
-                },
-              });
-              runIds.push(active.id);
-            } else {
-              const task = await tx.task.create({
-                data: {
-                  spaceId: context.actor.spaceId,
-                  botId,
-                  threadId: target.threadId,
-                  userId: context.actor.userId,
-                  prompt: promptTextForAttachments(
-                    input.text,
-                    artifacts,
-                    undefined,
-                    input.crmRoleReference,
-                    input.recruitingContext,
-                  ),
-                  status: "queued",
-                },
-              });
-              const run = await tx.run.create({
-                data: {
-                  spaceId: context.actor.spaceId,
-                  botId,
-                  threadId: target.threadId,
-                  taskId: task.id,
-                  userId: context.actor.userId,
-                  status: "queued",
-                  trigger: "follow_up",
-                  sourceMessageId: message.id,
-                },
-                select: { id: true },
-              });
-              runIds.push(run.id);
-              createdRunIds.push(run.id);
-            }
+              {
+                kind: "message",
+                trigger: "follow_up",
+                messageId: message.id,
+                payload: { text: prompt },
+              },
+            );
+            sessionIds.push(submitted.sessionId);
           }
-          await tx.message.update({ where: { id: message.id }, data: { runId: runIds[0] } });
           const event = await appendEventInTransaction(tx, {
             spaceId: context.actor.spaceId,
             threadId: target.threadId,
             botId: botIds[0]!,
             type: "thread.message.created",
-            runId: runIds[0],
-            payload: {
-              messageId: message.id,
-              role: "user",
-              blocks,
-              runIds,
-              // Every addressed bot is busy and holds it as unread steering.
-              ...(runIds.length && !createdRunIds.length ? { queued: true } : {}),
-            },
+            payload: { messageId: message.id, role: "user", blocks },
           });
           await touchGroupUpdatedAt(tx, target.groupId);
-          return { runIds: createdRunIds, eventSeq: event.seq };
+          return { sessionIds, eventSeq: event.seq };
         });
         if (committed) {
           await deps.events.notify(target.threadId, committed.eventSeq).catch((error) => {
             getLogger().error("group follow-up realtime notification", error);
           });
-          for (const runId of committed.runIds) {
-            await deps.jobs.enqueue(runContinueJob(runId)).catch((error) => {
-              getLogger().error("group follow-up enqueue", error);
-            });
-          }
+          await deps.events.wakeSessions(committed.sessionIds);
         }
         return { ok: true as const };
       }),
@@ -3243,35 +3184,20 @@ export function createRouter(deps: RouterDeps) {
               type: "thread.message.created",
               payload: { messageId: message.id, role: "bot", blocks, callId: input.callId },
             });
-            const task = await tx.task.create({
-              data: {
-                spaceId: context.actor.spaceId,
-                botId,
-                threadId,
-                userId: context.actor.userId,
-                prompt: HANG_UP_PROMPT,
-                status: "queued",
-              },
-            });
-            const run = await tx.run.create({
-              data: {
-                spaceId: context.actor.spaceId,
-                botId,
-                threadId,
-                taskId: task.id,
-                userId: context.actor.userId,
-                status: "queued",
+            const submitted = await submitConversationInput(
+              tx,
+              { spaceId: context.actor.spaceId, userId: context.actor.userId, threadId, botId },
+              {
+                kind: "message",
                 trigger: "call_end",
-                clientNonce: callClientNonce(input.callId),
+                payload: { text: HANG_UP_PROMPT, internal: true },
               },
-              select: { id: true },
-            });
+            );
             const ended = await appendEventInTransaction(tx, {
               spaceId: context.actor.spaceId,
               threadId,
               botId,
               type: "thread.call.ended",
-              runId: run.id,
               payload: {
                 botId,
                 threadId,
@@ -3281,7 +3207,7 @@ export function createRouter(deps: RouterDeps) {
                 messageId: message.id,
               },
             });
-            return { runId: run.id, eventSeq: ended.seq };
+            return { sessionId: submitted.sessionId, eventSeq: ended.seq };
           })
           .catch((error) => {
             if (!isUniqueViolation(error)) throw error;
@@ -3291,10 +3217,7 @@ export function createRouter(deps: RouterDeps) {
         await deps.events.notify(threadId, committed.eventSeq).catch((error) => {
           getLogger().error("call end realtime notification", error);
         });
-        // The queued run is durable; a missed wake is repaired by the reconciler.
-        await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
-          getLogger().error("call end enqueue", error);
-        });
+        await deps.events.wakeSessions([committed.sessionId]);
         return { ok: true as const };
       }),
       answer: authed.threads.answer.handler(async ({ context, input }) => {
@@ -3332,9 +3255,6 @@ export function createRouter(deps: RouterDeps) {
               throw new ORPCError("CONFLICT", {
                 message: "This prompt is no longer awaiting an answer",
               });
-            await deps.jobs.enqueue(runContinueJob(source.runId)).catch((error) => {
-              getLogger().error("thread answer enqueue", error);
-            });
             return { ok: true as const };
           }
           if (MailReplySendAnswerSchema.safeParse(input.answer).success)
@@ -3381,10 +3301,6 @@ export function createRouter(deps: RouterDeps) {
           }
           return { ok: true as const };
         }
-        await deps.jobs.enqueue(runContinueJob(input.runId)).catch((error) => {
-          // The answer and queued run are durable; the reconciler repairs a missed immediate wake.
-          getLogger().error("thread answer enqueue", error);
-        });
         return { ok: true as const };
       }),
       markRead: authed.threads.markRead.handler(async ({ context, input }) => {
@@ -4760,89 +4676,42 @@ export function createRouter(deps: RouterDeps) {
           : bot.thread;
         if (!targetThread) throw new ORPCError("NOT_FOUND");
         const threadId = targetThread.id;
-        const nonce = input.clientNonce ? `routine-test:${input.clientNonce}` : undefined;
-        if (nonce) {
-          const existing = await deps.prisma.run.findFirst({
-            where: { threadId, clientNonce: nonce },
-            select: { id: true },
-          });
-          if (existing) return { runId: existing.id };
-        }
         const skillRecords = await agentSkills.listWithContent(context.actor);
         const prompt = expandRoutineSkills(routine.prompt, skillRecords);
-        let run: { id: string };
-        try {
-          // Task + run must commit together so a nonce collision cannot leave an orphan queued Task.
-          run = await deps.prisma.$transaction(async (tx) => {
-            if (targetThread.groupId) {
-              await lockOwnedGroup(tx, context.actor, targetThread.groupId);
-              const group = await tx.chatGroup.findFirst({
-                where: {
-                  id: targetThread.groupId,
-                  spaceId: context.actor.spaceId,
-                  userId: context.actor.userId,
-                  archivedAt: null,
-                  thread: { id: threadId },
-                  members: { some: { botId: bot.id, bot: { archivedAt: null } } },
-                },
-                select: { id: true },
-              });
-              if (!group) throw new IsolationError();
-            }
-            if (nonce) {
-              const existing = await tx.run.findFirst({
-                where: { threadId, clientNonce: nonce },
-                select: { id: true },
-              });
-              if (existing) return existing;
-            }
-            const task = await tx.task.create({
-              data: {
+        const submitted = await deps.prisma.$transaction(async (tx) => {
+          if (targetThread.groupId) {
+            await lockOwnedGroup(tx, context.actor, targetThread.groupId);
+            const group = await tx.chatGroup.findFirst({
+              where: {
+                id: targetThread.groupId,
                 spaceId: context.actor.spaceId,
-                botId: bot.id,
-                threadId,
                 userId: context.actor.userId,
-                prompt,
-                status: "queued",
-              },
-            });
-            const currentModel = await tx.routine.findUnique({
-              where: { id: routine.id },
-              select: { modelProvider: true, modelId: true, thinkingLevel: true },
-            });
-            if (!currentModel) throw new IsolationError();
-            return tx.run.create({
-              data: {
-                spaceId: context.actor.spaceId,
-                botId: bot.id,
-                threadId,
-                taskId: task.id,
-                userId: context.actor.userId,
-                status: "queued",
-                trigger: "routine",
-                routineId: routine.id,
-                ...routineRunModelPin(currentModel),
-                clientNonce: nonce,
+                archivedAt: null,
+                thread: { id: threadId },
+                members: { some: { botId: bot.id, bot: { archivedAt: null } } },
               },
               select: { id: true },
             });
-          });
-        } catch (error) {
-          if (nonce) {
-            const existing = await deps.prisma.run.findFirst({
-              where: { threadId, clientNonce: nonce },
-              select: { id: true },
-            });
-            if (existing) return { runId: existing.id };
+            if (!group) throw new IsolationError();
           }
-          throw error;
-        }
-        // Keep enqueue outside the nonce-collision catch. The queued run is durable;
-        // log enqueue failures and still return success — the reconciler repairs a missed wake.
-        await deps.jobs.enqueue(runContinueJob(run.id)).catch((error) => {
-          getLogger().error("routine testRun enqueue", error);
+          const model = await tx.routine.findUnique({
+            where: { id: routine.id },
+            select: { modelProvider: true, modelId: true, thinkingLevel: true },
+          });
+          if (!model) throw new IsolationError();
+          return submitRoutineInput(tx, {
+            routineId: routine.id,
+            spaceId: context.actor.spaceId,
+            userId: context.actor.userId,
+            threadId,
+            botId: bot.id,
+            prompt,
+            model,
+            ...(input.clientNonce ? { wakeKey: `routine-test:${input.clientNonce}` } : {}),
+          });
         });
-        return { runId: run.id };
+        if (submitted) await deps.events.wakeSessions([submitted.sessionId]);
+        return { ok: true as const };
       }),
     },
     scratchpad: {
@@ -7902,7 +7771,7 @@ async function releaseComputerControl(
       reason: reason ?? "released",
     });
     if (released) {
-      await enqueueTakeoverContinuation(deps.jobs, released.runId);
+      await enqueueTakeoverContinuation(deps, released.runId);
       scheduleComputerSleep(deps.jobs, bot.computer.id);
       return;
     }
@@ -7949,7 +7818,7 @@ async function releaseComputerControl(
       getLogger().error("computer control expiry cancellation", error);
     });
 
-  await enqueueTakeoverContinuation(deps.jobs, released.runId);
+  await enqueueTakeoverContinuation(deps, released.runId);
   scheduleComputerSleep(deps.jobs, bot.computer.id);
 }
 

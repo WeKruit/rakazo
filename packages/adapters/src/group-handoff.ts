@@ -1,4 +1,3 @@
-import { runContinueJob } from "@rakazo/adapter-kit";
 import { MessageBlock } from "@rakazo/contracts";
 import {
   botMessageHopExhausted,
@@ -15,6 +14,7 @@ import {
   lockOwnedGroup,
   type PrismaClient,
   questionClosedByChat,
+  submitConversationInput,
   touchGroupUpdatedAt,
   waitingCardBlocks,
   withTransactionRetry,
@@ -88,23 +88,16 @@ export async function handoffToGroupBot(
 
       const existing = await tx.message.findUnique({
         where: { threadId_clientNonce: { threadId: run.threadId, clientNonce: deliveryKey } },
-        select: {
-          sourceRuns: {
-            orderBy: { createdAt: "asc" },
-            take: 1,
-            select: { id: true, botId: true },
-          },
-        },
+        select: { blocks: true },
       });
+      // This turn already handed the stage over; its input was submitted with that message.
       if (existing) {
-        const nextRun = existing.sourceRuns[0];
-        const event = await tx.event.findFirst({
-          where: { threadId: run.threadId, runId: run.id, type: "group.handoff" },
-          orderBy: { seq: "desc" },
-          select: { seq: true },
-        });
-        if (!nextRun || !event) return { error: "recorded handoff is incomplete" } as const;
-        return { ok: true, botId: nextRun.botId, runId: nextRun.id, eventSeq: event.seq } as const;
+        const recorded = (existing.blocks as MessageBlock[]).find(
+          (block) => block.kind === "handoff",
+        );
+        if (recorded?.kind !== "handoff")
+          return { error: "recorded handoff is incomplete" } as const;
+        return { ok: true as const, botId: recorded.toBotId, replayed: true as const };
       }
 
       // Models sometimes pass a stale id or a name as bot_id; a member's exact name still counts.
@@ -183,28 +176,16 @@ export async function handoffToGroupBot(
         runId: run.id,
         clientNonce: deliveryKey,
       });
-      const task = await tx.task.create({
-        data: {
-          spaceId: run.spaceId,
-          botId: targetId,
-          threadId: run.threadId,
-          userId: run.userId,
-          prompt: text,
-          status: "queued",
-        },
-      });
-      const nextRun = await tx.run.create({
-        data: {
-          spaceId: run.spaceId,
-          botId: targetId,
-          threadId: run.threadId,
-          taskId: task.id,
-          userId: run.userId,
-          status: "queued",
+      const submitted = await submitConversationInput(
+        tx,
+        { spaceId: run.spaceId, userId: run.userId, threadId: run.threadId, botId: targetId },
+        {
+          kind: "message",
           trigger: "follow_up",
-          sourceMessageId: message.id,
+          messageId: message.id,
+          payload: { text, internal: true },
         },
-      });
+      );
       const event = await appendEventInTransaction(tx, {
         spaceId: run.spaceId,
         threadId: run.threadId,
@@ -219,21 +200,24 @@ export async function handoffToGroupBot(
         },
       });
       await touchGroupUpdatedAt(tx, groupId);
-      return { ok: true, botId: targetId, runId: nextRun.id, eventSeq: event.seq } as const;
+      return {
+        ok: true as const,
+        botId: targetId,
+        sessionId: submitted.sessionId,
+        eventSeq: event.seq,
+      };
     }),
   );
   if ("error" in committed) return committed;
-  await deps.events.notify(run.threadId, committed.eventSeq).catch((error) => {
-    getLogger().error("group handoff realtime notification", error);
-  });
-  await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
-    // The queued run is durable and the job reconciler will repair a missed immediate wake.
-    getLogger().error("group handoff enqueue", error);
-  });
+  if (!("replayed" in committed)) {
+    await deps.events.notify(run.threadId, committed.eventSeq).catch((error) => {
+      getLogger().error("group handoff realtime notification", error);
+    });
+    await deps.events.wakeSessions([committed.sessionId]);
+  }
   return {
     ok: true,
     botId: committed.botId,
-    runId: committed.runId,
     note: input.report_back
       ? "Handoff recorded; the result comes back to you when that stage ends."
       : "Handoff recorded; the next bot owns the next stage.",
@@ -286,7 +270,7 @@ export async function reportGroupHandoffOutcome(
   },
   groupId: string,
   outcome: { status: "completed" | "failed"; error?: string },
-): Promise<{ runId: string } | undefined> {
+): Promise<{ sessionId: string } | undefined> {
   if (!run.sourceMessageId) return undefined;
   const deliveryKey = `group-report:${run.id}`;
   const committed = await withTransactionRetry(() =>
@@ -376,68 +360,33 @@ export async function reportGroupHandoffOutcome(
           runId: run.id,
           payload: { messageId: message.id, fromBotId: run.botId, toBotId: asked.fromBotId, text },
         });
-      // Staging 11-16 (change-mind-mid-run): the teammate's result came back while the sender's
-      // turn was still running; a new turn started for it and the running one ended saying it had
-      // no draft. As Workloop steers a child's result into the parent's current turn, the report
-      // joins the sender's running turn; a turn that ends before reading it is requeued with it.
-      const working = await tx.run.findFirst({
-        where: {
-          threadId: run.threadId,
-          botId: asked.fromBotId,
-          status: { in: ["leased", "running"] },
-        },
-        orderBy: { createdAt: "desc" },
-        select: { id: true, status: true },
-      });
-      if (working?.status) {
-        await tx.steeringMessage.create({
-          data: {
-            messageId: message.id,
-            botId: asked.fromBotId,
-            userId: run.userId,
-            runId: working.id,
-          },
-        });
-        const steered = await event();
-        await touchGroupUpdatedAt(tx, groupId);
-        return { runId: working.id, eventSeq: steered.seq, steered: true };
-      }
-      const task = await tx.task.create({
-        data: {
+      // The report joins the sender's session: a live turn is steered, an idle one starts.
+      const submitted = await submitConversationInput(
+        tx,
+        {
           spaceId: run.spaceId,
-          botId: asked.fromBotId,
-          threadId: run.threadId,
           userId: run.userId,
-          prompt: text,
-          status: "queued",
+          threadId: run.threadId,
+          botId: asked.fromBotId,
         },
-      });
-      const nextRun = await tx.run.create({
-        data: {
-          spaceId: run.spaceId,
-          botId: asked.fromBotId,
-          threadId: run.threadId,
-          taskId: task.id,
-          userId: run.userId,
-          status: "queued",
+        {
+          kind: "message",
           trigger: "follow_up",
-          sourceMessageId: message.id,
+          messageId: message.id,
+          payload: { text, internal: true },
         },
-      });
+      );
       const created = await event();
       await touchGroupUpdatedAt(tx, groupId);
-      return { runId: nextRun.id, eventSeq: created.seq, steered: false };
+      return { sessionId: submitted.sessionId, eventSeq: created.seq };
     }),
   );
   if (!committed) return undefined;
   await deps.events.notify(run.threadId, committed.eventSeq).catch((error) => {
     getLogger().error("group report realtime notification", error);
   });
-  if (committed.steered) return { runId: committed.runId };
-  await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
-    getLogger().error("group report enqueue", error);
-  });
-  return { runId: committed.runId };
+  await deps.events.wakeSessions([committed.sessionId]);
+  return { sessionId: committed.sessionId };
 }
 
 type StageDeps = Pick<ExecutorDeps, "prisma" | "events" | "jobs">;
@@ -514,7 +463,7 @@ export async function reportGroupStageOutcome(
   turn: WorkerTurn,
   groupId: string,
   outcome: { status: "completed" | "failed"; error?: string },
-): Promise<{ runId: string } | undefined> {
+): Promise<{ sessionId: string } | undefined> {
   const wake = turn.trigger === "recruiting_research";
   if (!wake && turn.trigger !== "follow_up") return undefined;
   const stage = wake ? await handedStage(deps.prisma, turn) : await retriedStage(deps.prisma, turn);

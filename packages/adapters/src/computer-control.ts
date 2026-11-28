@@ -2,10 +2,10 @@ import {
   type AdapterContext,
   computerControlExpireJob,
   type JobPublisher,
-  runContinueJob,
   type SandboxProvider,
 } from "@rakazo/adapter-kit";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { submitConversationWakeOnce, wakeSessions } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { toComputerRef } from "./computer-support.js";
 import { isSandboxGoneError } from "./e2b-sandbox.js";
@@ -62,16 +62,45 @@ export function scheduleComputerControlExpiry(
   return jobs.enqueue(computerControlExpireJob(computerId, leaseId, expiresAt));
 }
 
+/** The person handed the computer back: one input into the session of the bot that asked. */
 export async function enqueueTakeoverContinuation(
-  jobs: JobPublisher,
+  deps: {
+    prisma: PrismaClient;
+    jobs: Pick<JobPublisher, "enqueue">;
+    events?: Partial<Pick<ThreadEvents, "wakeSessions">>;
+  },
   runId: string | null,
 ): Promise<void> {
   if (!runId) return;
   try {
-    await jobs.enqueue(runContinueJob(runId));
+    const sessionId = await deps.prisma.$transaction(async (tx) => {
+      const run = await tx.run.findUnique({
+        where: { id: runId },
+        select: { spaceId: true, userId: true, threadId: true, botId: true },
+      });
+      if (!run) return null;
+      // The run that asked for the computer has ended; its card is closed.
+      await tx.run.updateMany({
+        where: { id: runId, status: { in: ["queued", "waiting_takeover"] } },
+        data: { status: "completed", completedAt: new Date(), leaseOwner: null },
+      });
+      const submitted = await submitConversationWakeOnce(tx, run, {
+        kind: "message",
+        trigger: "takeover",
+        payload: {
+          text: "The person handed the computer back.",
+          internal: true,
+          wakeKey: `takeover-release:${runId}`,
+        },
+      });
+      return submitted?.sessionId ?? null;
+    });
+    if (!sessionId) return;
+    // Without realtime here the owner finds the input at its next lease renewal.
+    if (deps.events?.wakeSessions) await deps.events.wakeSessions([sessionId]);
+    else await wakeSessions({ jobs: deps.jobs }, [sessionId]);
   } catch (error) {
-    // The release is durable; reconciliation will retry this queued run.
-    getLogger().error("takeover continuation enqueue", error);
+    getLogger().error("takeover continuation", error);
   }
 }
 
@@ -277,6 +306,6 @@ export async function expireComputerControl(
     holder: "none",
     reason: "expired",
   });
-  await enqueueTakeoverContinuation(deps.jobs, released ? released.runId : null);
+  await enqueueTakeoverContinuation(deps, released ? released.runId : null);
   return Boolean(released);
 }

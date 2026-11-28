@@ -5,11 +5,15 @@ import type {
   ConnectorProvider,
   JobPublisher,
 } from "@rakazo/adapter-kit";
-import { recruitingCheckinStartJob, runContinueJob } from "@rakazo/adapter-kit";
+import { recruitingCheckinStartJob } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingCorrespondence, RunTrigger } from "@rakazo/contracts";
 import { automaticReplyVerdict, recruitingBotKey } from "@rakazo/core";
-import type { PrismaClient } from "@rakazo/db";
-import { listRecruitingCandidates, projectRecruitingInboxMessages } from "@rakazo/db";
+import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import {
+  listRecruitingCandidates,
+  projectRecruitingInboxMessages,
+  submitConversationWakeOnce,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
   conversationCalls,
@@ -270,6 +274,7 @@ export async function startRecruitingCheckin(
   deps: {
     prisma: PrismaClient;
     jobs: JobPublisher;
+    events: Pick<ThreadEvents, "wakeSessions">;
     connector?: Pick<ConnectorProvider, "execute">;
     /** Keeps a reply's attachments as saved files the Inbox opens. */
     artifacts?: ArtifactStore;
@@ -338,15 +343,21 @@ export async function startRecruitingCheckin(
     ? await checkinBots(deps.prisma, thread, target.mcpServerId)
     : members && { speaker: members.speaker, reader: members.speaker };
   if (!bots || !members) return skipped("no reader");
-  const earlier = await deps.prisma.run.findMany({
-    where: {
-      threadId: thread.id,
-      clientNonce: { startsWith: `${RECRUITING_CHECKIN_NONCE_PREFIX}${thread.id}:` },
-    },
-    orderBy: { createdAt: "desc" },
-    take: REPORTED_CHECKINS,
-    select: { createdAt: true, checkinReplyIds: true },
-  });
+  const earlier = (
+    await deps.prisma.sessionInput.findMany({
+      where: {
+        session: { threadId: thread.id },
+        trigger: "recruiting_checkin" satisfies RunTrigger,
+      },
+      orderBy: { createdAt: "desc" },
+      take: REPORTED_CHECKINS,
+      select: { createdAt: true, payload: true },
+    })
+  ).map((input) => ({
+    createdAt: input.createdAt,
+    checkinReplyIds:
+      (input.payload as { checkinReplyIds?: string[] } | null)?.checkinReplyIds ?? [],
+  }));
   const since = new Date(
     earlier[0] ? earlier[0].createdAt.getTime() - OVERLAP_MS : now - FIRST_LOOKBACK_MS,
   ).toISOString();
@@ -444,56 +455,41 @@ export async function startRecruitingCheckin(
     .digest("hex")
     .slice(0, 24);
   const clientNonce = `${RECRUITING_CHECKIN_NONCE_PREFIX}${thread.id}:${batch}`;
-  const runId = await deps.prisma.$transaction(async (tx) => {
+  const sessionId = await deps.prisma.$transaction(async (tx) => {
     // The thread row serializes this with other automated starts in the conversation.
     const locked = await tx.thread.updateMany({
       where: { id: thread.id, spaceId: thread.spaceId },
       data: { nextEventSeq: { increment: 0 } },
     });
     if (!locked.count) return null;
-    const [existing, running] = await Promise.all([
-      tx.run.findFirst({ where: { spaceId: thread.spaceId, clientNonce }, select: { id: true } }),
-      tx.run.findFirst({
-        where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
-        select: { id: true },
-      }),
-    ]);
-    if (existing || running) return null;
-    const task = await tx.task.create({
-      data: {
-        spaceId: thread.spaceId,
-        botId: bots.speaker,
-        threadId: thread.id,
-        userId: thread.userId,
-        prompt,
-        status: "queued",
-      },
+    const running = await tx.run.findFirst({
+      where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
+      select: { id: true },
     });
-    const run = await tx.run.create({
-      data: {
-        spaceId: thread.spaceId,
-        botId: bots.speaker,
-        threadId: thread.id,
-        userId: thread.userId,
-        taskId: task.id,
-        status: "queued",
+    if (running) return null;
+    const submitted = await submitConversationWakeOnce(
+      tx,
+      { spaceId: thread.spaceId, userId: thread.userId, threadId: thread.id, botId: bots.speaker },
+      {
+        kind: "message",
         trigger: "recruiting_checkin" satisfies RunTrigger,
-        clientNonce,
-        checkinReplyIds: left.map((reply) => reply.id),
+        payload: {
+          text: prompt,
+          internal: true,
+          wakeKey: clientNonce,
+          checkinReplyIds: left.map((reply) => reply.id),
+        },
       },
-    });
-    return run.id;
+    );
+    return submitted?.sessionId ?? null;
   });
-  if (!runId) return skipped("already started");
+  if (!sessionId) return skipped("already started");
   getLogger().info("recruiting.checkin.started", {
-    runId,
+    sessionId,
     roleId: role?.id ?? null,
     replies: left.length,
   });
   // Replies that arrive while this run works are read as soon as it ends.
   await offerAgain();
-  // The existing run reconciler recovers a queued run after an enqueue failure.
-  await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
-    getLogger().warn("recruiting check-in start deferred to reconciliation");
-  });
+  await deps.events.wakeSessions([sessionId]);
 }

@@ -8,7 +8,6 @@ import type {
 } from "./types.js";
 
 const payloadSchemas = {
-  "run.continue": z.object({ runId: z.string().min(1) }),
   "routine.wakeup": z.object({
     routineId: z.string().min(1),
     scheduledFor: z.string().datetime({ offset: true }),
@@ -132,14 +131,6 @@ export function sessionDriveJob(sessionId: string): BackgroundJob {
 
 export function sessionCutoverJob(): BackgroundJob {
   return { name: "session.cutover", payload: {}, replaceKey: "session.cutover" };
-}
-
-export function runContinueJob(runId: string): BackgroundJob {
-  return {
-    name: "run.continue",
-    payload: { runId },
-    replaceKey: runJobKey(runId),
-  };
 }
 
 export function routineWakeupJob(routineId: string, scheduledFor: Date): BackgroundJob {

@@ -29,15 +29,13 @@ import type {
   WebProvider,
 } from "@rakazo/adapter-kit";
 import {
-  DEFAULT_CONTEXT_STRATEGY,
-  historyCompactJob,
   ByteLimitError,
+  DEFAULT_CONTEXT_STRATEGY,
   MemoryRevisionConflictError,
   pollCloseJob,
   recruitingAgentRunWaitJob,
   routineJobKey,
   routineWakeupJob,
-  runContinueJob,
 } from "@rakazo/adapter-kit";
 import type {
   ComputerCommand,
@@ -80,7 +78,6 @@ import {
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
-  assertTransition,
   attachmentExtensionForMimeType,
   BACKGROUND_RUN_TRIGGERS,
   BLOCKED_TOOL_REFUSAL,
@@ -91,7 +88,6 @@ import {
   boundDirectApprovalDetails,
   boundDirectApprovalRequest,
   CALL_CLIENT_NONCE_PREFIX,
-  COMPUTER_START_FAILED,
   callIdFromClientNonce,
   catalogApprovalDetails,
   catalogApprovalRequest,
@@ -100,6 +96,7 @@ import {
   connectorKindFromToolName,
   containsSecret,
   creditEstimateNote,
+  EMAIL_SEND_TOOLS,
   endsSentence,
   externalTextTriggerToolRefusal,
   findSkillByName,
@@ -111,7 +108,6 @@ import {
   inferAttachmentMimeType,
   internalMcpWriteEndpoint,
   isApprovalAskBlock,
-  isAutomationRunTrigger,
   isBackgroundRunTrigger,
   isCallClientNonce,
   isMessagingChannelRun,
@@ -133,8 +129,6 @@ import {
   planActionGate,
   pollResultLines,
   RateWindow,
-  EMAIL_SEND_TOOLS,
-  RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RETIRED_APPROVAL_KINDS,
   RecruitingPlaybookValidationError,
@@ -144,9 +138,8 @@ import {
   recruitingBotKey,
   redactSecrets,
   resolveActionApprovalDetail,
-  runBudgetExceeded,
-  runBudgetStopText,
   sandboxCommandTimeoutMs,
+  screenIsChinese,
   screenLanguage,
   screenNote,
   shortQuestion,
@@ -160,7 +153,6 @@ import {
   waitingApprovalCards,
   waitingApprovalNote,
   workActivityForTool,
-  screenIsChinese,
 } from "@rakazo/core";
 import {
   approvalEffectKey,
@@ -174,7 +166,6 @@ import type {
   PauseRunForInput,
   PrismaClient,
   RecruitingRoleToolResult,
-  RunStopKind,
   RunTiming,
   TextEmbedder,
   ThreadEvents,
@@ -182,10 +173,7 @@ import type {
 import {
   admitRecruitingCrmImport,
   admitRecruitingReply,
-  answerPausedAskWithSteering,
   appendEventInTransaction,
-  automationRateLimited,
-  backgroundToolRun,
   backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
   campaignSendCardHash,
@@ -194,7 +182,6 @@ import {
   citeRecruiterMessages,
   claimRecruitingCrmImport,
   claimRecruitingReply,
-  completedRunBlocks,
   createRunHistoryCache,
   createSpaceForMember,
   earlierConfirmedSends,
@@ -210,11 +197,10 @@ import {
   findWaitingCampaignSend,
   getRecruitingCrmTarget,
   hasUnclaimedSteering,
-  isRetryableTransactionConflict,
   InvalidSpaceNameError,
   IsolationError,
   isNativeHumanMessage,
-  isTooManyDatabaseConnections,
+  isRetryableTransactionConflict,
   loadMessageThinking,
   loadRunHistoryMessages,
   loadRunHumanSources,
@@ -241,10 +227,8 @@ import {
   resolveRecruitingReply,
   SpaceLimitError,
   saveRecruitingCalibrationRound,
-  saveRunThinking,
   searchHistory,
   seesOperatorSpend,
-  skipRateLimitedRun,
   unitVector,
   votePoll,
   waitingCardBlocks,
@@ -262,23 +246,18 @@ import {
 } from "./agent-environment.js";
 import { submitRoutineInput } from "./agent-session/routine-input.js";
 import {
-  agentSkillsLineFor,
-  botInstructionsFor,
-  builtinOffered,
-  computerInstructionFor,
-  FILE_TOOL_NAMES,
-  loadBotDirectory,
-  messagingContextFor,
-  pluginLineFor,
-  runAllowsSilentEmpty,
-  runReplyGuidance,
-  runSystemPrompt,
-  taughtSkillsLineFor,
-  workspaceInstructionFor,
-} from "./agent-session/system-prompt.js";
-import { runHasReadExternalText } from "./agent-session/tool-gate.js";
+  appendToolCompletionAudit,
+  appendUsageTimingAudit,
+  createProgressRedactor,
+  notifyRun,
+  persistMessageInTransaction,
+  publishMessage,
+  stepDetail,
+  toolArgsSummary,
+  toolResultError,
+} from "./agent-session/run-projection.js";
+import type { RunTurnBinding } from "./agent-session/run-turns.js";
 import {
-  backupModelResolver,
   loadBackupModels,
   MISSING_MODEL_MESSAGE,
   resolveBotModel,
@@ -293,28 +272,20 @@ import {
   PAGE_BROWSER_TOOL_NAMES,
 } from "./agent-session/session-tools.js";
 import {
-  appendToolCalledEvent,
-  appendToolCompletionAudit,
-  appendUsageTimingAudit,
-  completionNotificationPreview,
-  createProgressRedactor,
-  notifyRun,
-  persistMessageInTransaction,
-  publishMessage,
-  recordRunUsage,
-  redactBlocks,
-  runSendsFinishNotification,
-  stepDetail,
-  toolArgsSummary,
-  toolCompletionFromResult,
-  toolResultError,
-} from "./agent-session/run-projection.js";
-import {
-  desktopProtectionGuardMessage,
-  protectedComputerLifecycleRefusal,
-} from "./computer-lifecycle-guard.js";
+  agentSkillsLineFor,
+  builtinOffered,
+  computerInstructionFor,
+  FILE_TOOL_NAMES,
+  loadBotDirectory,
+  messagingContextFor,
+  pluginLineFor,
+  runAllowsSilentEmpty,
+  taughtSkillsLineFor,
+  workspaceInstructionFor,
+} from "./agent-session/system-prompt.js";
+import { runHasReadExternalText } from "./agent-session/tool-gate.js";
+import { expandForcedSkill, expandRoutineSkills } from "./agent-skills.js";
 import { buildApprovalAskBlock } from "./approval-ask.js";
-import { approvalKeyAfterDenial } from "./approval-key-after-denial.js";
 import {
   approvalPausedToolResult,
   approvalReplayPathError,
@@ -336,18 +307,14 @@ import {
   deniedContinuationNote,
   deniedEarlierThisTurn,
   inputPausedToolResult,
-  isToolPauseResult,
   parseCatalogApprovalTarget,
   replaceCompletedExternalEffectResult,
   resolveDuplicateEffectGate,
   settleUncertainEffect,
   uncertainEffectResult,
 } from "./approval-effect.js";
-import {
-  artifactReadFromTool,
-  InternalArtifactError,
-  readActorArtifact,
-} from "./artifact-read.js";
+import { approvalKeyAfterDenial } from "./approval-key-after-denial.js";
+import { artifactReadFromTool, InternalArtifactError, readActorArtifact } from "./artifact-read.js";
 import {
   autoReviewTimeoutMs,
   deploymentAutoReviewDefault,
@@ -376,7 +343,6 @@ import {
   messageBot,
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
-  returnSettledDelegations,
   showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
@@ -411,11 +377,6 @@ import {
   readCalBookingSnapshot,
 } from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
-import {
-  GOOGLE_CALENDAR_EVENT_WRITES,
-  googleCalendarApprovalFacts,
-} from "./google-calendar-approval.js";
-import { roleLinkBlocks } from "./role-links.js";
 import { changedPaths, connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
@@ -434,12 +395,15 @@ import type { ComputerExecutionLease } from "./computer-lifecycle.js";
 import {
   acquireComputerExecutionLease,
   ComputerBusyError,
-  holdComputerExecutionLeaseForTakeover,
   provisionComputer,
   releaseComputerExecutionLease,
   renewComputerExecutionLease,
   screenLeaseIdForRun,
 } from "./computer-lifecycle.js";
+import {
+  desktopProtectionGuardMessage,
+  protectedComputerLifecycleRefusal,
+} from "./computer-lifecycle-guard.js";
 import {
   applyComputerNetworkPolicy,
   EGRESS_ALL_SITES,
@@ -483,21 +447,22 @@ import {
   roleRequestMessage,
 } from "./global-role-writes.js";
 import {
+  GOOGLE_CALENDAR_EVENT_WRITES,
+  googleCalendarApprovalFacts,
+} from "./google-calendar-approval.js";
+import {
   handoffToGroupBot,
   isQuietStageReport,
   loadGroupContext,
   reportGroupStageOutcome,
 } from "./group-handoff.js";
 import {
-  COMPACTION_BATCH_SIZE,
   formatCompactedSummary,
   formatRecalledMemory,
-  HISTORY_WINDOW_SIZE,
   historyWindowSize,
   LEGACY_HISTORY_WINDOW_SIZE,
   MAX_RECALLED_MEMORIES,
   selectCompactedHistory,
-  shouldEnqueueCompaction,
   steppedHistoryWindow,
 } from "./history-compaction.js";
 import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
@@ -511,7 +476,6 @@ import {
 } from "./instantly-reply.js";
 import {
   isSenderRead,
-  ownMailboxSendingAllowed,
   senderApprovalDisplay,
 } from "./instantly-senders.js";
 import type { TextJudge } from "./judge.js";
@@ -565,7 +529,6 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
-import { oneLineNote } from "./reply-line.js";
 import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import type { RecruiterListItem } from "./recruiting-candidates-tool.js";
@@ -576,6 +539,7 @@ import {
 } from "./recruiting-candidates-tool.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
+import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
 import type { RecruitingFeedbackResult } from "./recruiting-feedback.js";
 import {
   executeRecruitingFeedback,
@@ -588,16 +552,6 @@ import {
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
-import { checkPeopleCriteria, checkUnjudgedPeople } from "./recruiting-criteria-check.js";
-import {
-  inGroupOrder,
-  requestCounts,
-  requestTarget,
-  searchRowForAgent,
-  roundStillMissing,
-  roundCountLine,
-  withoutShownBefore,
-} from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import {
   keepProfileText,
@@ -605,6 +559,15 @@ import {
   mcpObject,
   searchThatFoundNobody,
 } from "./recruiting-research.js";
+import {
+  inGroupOrder,
+  requestCounts,
+  requestTarget,
+  roundCountLine,
+  roundStillMissing,
+  searchRowForAgent,
+  withoutShownBefore,
+} from "./recruiting-round-check.js";
 import {
   assertSchedulingCall,
   SchedulingApprovalEvidenceSchema,
@@ -625,6 +588,7 @@ import {
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
+import { oneLineNote } from "./reply-line.js";
 import {
   openQuestionsAnsweredNote,
   openQuestionsForEmail,
@@ -634,6 +598,7 @@ import {
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
+import { roleLinkBlocks } from "./role-links.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
 import {
@@ -646,7 +611,6 @@ import {
   secretPausedToolResult,
   tryCompleteConnectionWithCode,
 } from "./run-secret.js";
-import { withRuntimeCleanup } from "./runtime-stream.js";
 import {
   cancelScheduleFromTool,
   compactScheduleInput,
@@ -673,7 +637,6 @@ import {
 } from "./shell-command-stream.js";
 import {
   createSilenceWatch,
-  SILENT_RUN_RETRIED_TEXT,
   SILENT_RUN_STOP_TEXT,
 } from "./silence-watch.js";
 import {
@@ -689,14 +652,12 @@ import {
   skillReadFromTool,
   skillUpdateFromTool,
 } from "./skill-tools.js";
-import { expandForcedSkill, expandRoutineSkills } from "./agent-skills.js";
+import { stopConversationWork } from "./stop-work.js";
 import type { TakeoverResumeCheckpoint } from "./takeover-resume.js";
 import {
-  continueRunClaimFence,
   DESKTOP_HELD_FOR_TAKEOVER_MESSAGE,
   refreshTakeoverContinuePlan,
   TAKEOVER_RESUME_CHECKPOINTS,
-  takeoverCheckpointOf,
   takeoverContinuePlan,
 } from "./takeover-resume.js";
 import { TASK_CATALOG_GUIDANCE, taskCatalogFromTool } from "./task-catalog.js";
@@ -713,22 +674,14 @@ import {
   updateTicket,
 } from "./ticket-tools.js";
 import { createToolFixMemory, withKnownFix } from "./tool-fixes.js";
-import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
-import { stopConversationWork } from "./stop-work.js";
 import { recruitingRoundListText } from "./turn-end-guard.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
+import { readsOnly, TurnReportLedger, turnReportText } from "./turn-report.js";
 import {
-  readsOnly,
-  TurnReportLedger,
-  turnReportText,
-} from "./turn-report.js";
-import {
-  botMessageOutcomeFromMidTurn,
   clampUserProgressMessage,
   extractNarrationText,
-  finalBlocksAfterMidTurnProgress,
   isProgressMessageTruncated,
   isUserProgressClientNonce,
   userProgressClientNonce,
@@ -745,11 +698,7 @@ import {
   workStartNote,
 } from "./work-estimate.js";
 import type { WorkingState } from "./working-state.js";
-import {
-  loadWorkingState,
-  ROLE_START_NONCE,
-  recruiterScreenLanguage,
-} from "./working-state.js";
+import { loadWorkingState, ROLE_START_NONCE, recruiterScreenLanguage } from "./working-state.js";
 
 /** Built-in tools that reach the outside network for the run. */
 const EGRESS_BUILTIN_TOOLS = new Set(["web_fetch", "web_search", "browser_navigate"]);
@@ -909,8 +858,7 @@ const KRUIT_ROLE_GROUP_PREFIX = "role-";
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
-const FEEDBACK_NOT_SAVED =
-  "Not recorded: nothing was saved.";
+const FEEDBACK_NOT_SAVED = "Not recorded: nothing was saved.";
 
 /** Marks a feedback call naming people who are not saved on the role, which only the agent can fix. */
 const FEEDBACK_INPUT_ERROR = "FEEDBACK_INPUT";
@@ -1604,6 +1552,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
   return {
     resolveConnectedModel,
     contextStrategy,
+    /** What a session's configuration is loaded with: this executor's own dependencies. */
+    sessionLoadDeps: deps,
     resolveModel(scope: { userId: string; spaceId: string; botId?: string }) {
       return resolveBotModel(deps, scope);
     },
@@ -1731,7 +1681,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
       }
     },
 
-    async continueRun(runId: string, workerId: string) {
+    /**
+     * Sets up one Pi operation's tools on its run row (created by the session projection at
+     * run_start) and hands them to the session through `binding`; returns when the operation ends.
+     */
+    async openRunTurn(runId: string, workerId: string, binding: RunTurnBinding) {
       const run = await deps.prisma.run.findUnique({ where: { id: runId } });
       // Cumulative ms from pickup to each setup milestone, logged once before the model runtime starts.
       const setupStartedAt = performance.now();
@@ -1751,148 +1705,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
         });
       };
       if (!run) return;
+      if (run.status !== "running") return;
       const schedulingTrigger = run.trigger;
-      const previouslyClaimed = run.leaseFence > 0;
-      // Only an answer queues a waiting ask; a redelivered wake must leave its card pending.
-      if (isTerminal(run.status as RunStatus) || run.status === "waiting_input") return;
+      const previouslyClaimed = false;
       let { resumeCheckpoint, heldForTakeover, resumeHeldLease, takeoverResume } =
         takeoverContinuePlan(run);
-
+      // The session owner drives this operation. Its run row is claimed for this worker so card
+      // and effect writes stay bound to this one turn.
       const fence = nextFence(run.leaseFence);
-      const now = new Date();
-      const lease = (db: Pick<PrismaClient, "run">) =>
-        db.run.updateMany({
-          where: {
-            id: runId,
-            ...continueRunClaimFence(run),
-            OR: [
-              { status: { in: ["queued", "waiting_takeover"] } },
-              {
-                status: { in: ["leased", "running"] },
-                leaseExpiresAt: { lte: now },
-              },
-            ],
-          },
-          data: {
-            status: "leased",
-            leaseOwner: workerId,
-            leaseFence: fence,
-            leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
-            error: null,
-            checkpoint: null,
-          },
-        });
-      // Each agent's automations in a thread take turns: a queued one is claimed only when no
-      // earlier run of that agent there is still queued and none holds its turn. Different agents
-      // work at once (reliability plan S3, as Workloop runs child agents in parallel). A person's
-      // message, a resumed takeover and lease recovery keep their own claim path.
-      // A fire past its automation's per-minute cap is skipped before it ever starts.
-      const leased =
-        run.status === "queued" && isAutomationRunTrigger(run.trigger)
-          ? await deps.prisma.$transaction(async (tx) => {
-              await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`run-lane:${run.threadId}:${run.botId}`}))::text`;
-              if (run.leaseFence === 0 && (await automationRateLimited(tx, run))) {
-                return (await skipRateLimitedRun(tx, run, now)) ? RATE_LIMITED : { count: 0 };
-              }
-              return (await threadLaneBusy(tx, run)) ? null : lease(tx);
-            })
-          : await lease(deps.prisma);
-      if (leased === RATE_LIMITED) {
-        getLogger().warn("run.automation.rate_limited", {
-          runId,
-          trigger: run.trigger,
-          routineId: run.routineId,
-        });
-        await deps.events
-          .append({
-            spaceId: run.spaceId,
-            threadId: run.threadId,
-            botId: run.botId,
-            type: "run.cancelled",
-            runId,
-            payload: { reason: "rate_limited" },
-          })
-          .catch((error) => {
-            getLogger().warn("rate-limited run event not recorded", {
-              error: String(error),
-            });
-          });
-        return;
-      }
-      if (!leased) {
-        getLogger().info("run.lane.deferred", {
-          runId,
-          threadId: run.threadId,
-        });
-        await deps.jobs.enqueue({
-          ...runContinueJob(runId),
-          availableAt: new Date(Date.now() + THREAD_LANE_RETRY_MS),
-        });
-        return;
-      }
-      if (leased.count !== 1) return;
-
-      const current = await deps.prisma.run.findUniqueOrThrow({
-        where: { id: runId },
+      const claimed = await deps.prisma.run.updateMany({
+        where: { id: runId, status: "running", leaseFence: run.leaseFence },
+        data: {
+          leaseOwner: workerId,
+          leaseFence: fence,
+          leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
+        },
       });
-      if (
-        current.status === "queued" ||
-        current.status === "leased" ||
-        current.status === "waiting_takeover"
-      ) {
-        assertTransition(current.status as RunStatus, "running");
-      }
+      if (claimed.count !== 1) return;
+      const current = await deps.prisma.run.findUniqueOrThrow({ where: { id: runId } });
       let computerLease: ComputerExecutionLease | null = null;
-      // Retained takeover ownership must be reclaimed even when this continuation only chats.
-      if (resumeHeldLease) {
-        const leaseTarget = await deps.prisma.bot.findUniqueOrThrow({
-          where: { id: run.botId },
-          select: { computerId: true, computerSwitching: true },
-        });
-        if (!leaseTarget.computerId) throw new Error("Bot has no computer");
-        try {
-          if (leaseTarget.computerSwitching) throw new ComputerBusyError();
-          computerLease = await acquireComputerExecutionLease(deps.prisma, {
-            computerId: leaseTarget.computerId,
-            runId,
-            botId: run.botId,
-            resumeHeldLease: true,
-          });
-        } catch (error) {
-          if (!(error instanceof ComputerBusyError)) throw error;
-          await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
-          return;
-        }
-      }
-      const started = await deps.prisma.run
-        .updateMany({
-          where: {
-            id: runId,
-            status: "leased",
-            leaseOwner: workerId,
-            leaseFence: fence,
-          },
-          data: {
-            status: "running",
-            startedAt: current.startedAt ?? new Date(),
-          },
-        })
-        .catch(async (error) => {
-          await releaseComputerExecutionLease(deps.prisma, computerLease).catch(() => undefined);
-          throw error;
-        });
-      if (started.count !== 1) {
-        await releaseComputerExecutionLease(deps.prisma, computerLease).catch(() => undefined);
-        return;
-      }
-      const attempt = await deps.prisma.attempt
-        .create({
-          data: { runId, fence, status: "running" },
-        })
-        .catch(async (error) => {
-          await releaseComputerExecutionLease(deps.prisma, computerLease).catch(() => undefined);
-          throw error;
-        });
+      const attempt = await deps.prisma.attempt.create({
+        data: { runId, fence, status: "running" },
+      });
 
       // A run that already had startedAt before this attempt is resuming after a restart.
       const attemptStartedAt = (attempt.startedAt ?? new Date()).toISOString();
@@ -1902,7 +1736,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
       };
       // Model calls retried after a stalled stream, kept on the run's end event so a slow step
       // can be told apart from a stall in replays.
-      let modelRetries = 0;
+      const modelRetries = 0;
       const pauseRunForInput = async (input: PauseRunForInput) => {
         const paused = await deps.events.pauseRunForInput(
           modelRetries ? { ...input, modelRetries } : input,
@@ -1920,8 +1754,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
       let leaseValid = true;
       /** Why this run's computer would not start, if it did not. */
       let computerStartFailure: unknown;
-      let lastLeaseCheckAt = 0;
-      let retainComputerLease = false;
+      const lastLeaseCheckAt = 0;
+      const retainComputerLease = false;
       let screenRelease: { computer: ComputerRef; context: AdapterContext } | undefined;
       let runAbortController: AbortController | null = null;
       let detachShutdown: (() => void) | undefined;
@@ -2102,10 +1936,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         });
         runAbortController = new AbortController();
         if (!leaseValid) runAbortController.abort();
-        if (deps.shutdownSignal?.aborted) runAbortController.abort(deps.shutdownSignal.reason);
-        const onShutdown = () => runAbortController?.abort(deps.shutdownSignal?.reason);
-        deps.shutdownSignal?.addEventListener("abort", onShutdown);
-        detachShutdown = () => deps.shutdownSignal?.removeEventListener("abort", onShutdown);
+        // The operation's end or Stop ends its tools; a deploy drain lets the turn finish.
+        if (binding.signal.aborted) runAbortController.abort(binding.signal.reason);
+        const onTurnEnd = () => runAbortController?.abort(binding.signal.reason);
+        binding.signal.addEventListener("abort", onTurnEnd);
+        detachShutdown = () => binding.signal.removeEventListener("abort", onTurnEnd);
         const { connectedPlugins, connectedComposio } = await loadRunConnections(
           deps,
           run,
@@ -2476,7 +2311,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           peerMessage?.repliesToRequest,
         );
         // Reading a teammate's finished stage stays quiet unless the user needs to know.
-        let quietRun =
+        const quietRun =
           runAllowsSilentEmpty(run.trigger) ||
           isQuietStageReport(
             run.trigger,
@@ -2484,7 +2319,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             historyMessages.find((message) => message.id === run.sourceMessageId)?.blocks,
             bot.id,
           );
-        let allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun || quietRun;
+        const allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun || quietRun;
         // Someone waits on this turn: its consequential work ends with a visible report.
         const turnReport = new TurnReportLedger(
           !quietRun && !allowSilentPeerMessage && !isBackgroundRunTrigger(run.trigger),
@@ -2693,7 +2528,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let readExternalText = false;
         const runReadExternalText = async () => {
           if (readExternalText) return true;
-          readExternalText = await runHasReadExternalText(deps.prisma, { runId, threadId: thread.id });
+          readExternalText = await runHasReadExternalText(deps.prisma, {
+            runId,
+            threadId: thread.id,
+          });
           return readExternalText;
         };
         const refreshMemoryContext = async () => {
@@ -2842,11 +2680,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             error: message,
           });
           if (!failed) return;
-          if (failed.continuationRunId) {
-            await deps.jobs
-              .enqueue(runContinueJob(failed.continuationRunId))
-              .catch((error) => getLogger().error("steering continuation enqueue", error));
-          }
           if (thread.groupId && !failed.continuationRunId) {
             await reportGroupStageOutcome(deps, run, thread.groupId, {
               status: "failed",
@@ -3137,6 +2970,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // independent, so they share one round trip. The thread's other runs are read beside them:
         // filtered through the run relation, the denied read scanned effects across accounts and
         // took up to 10 s before a reply (gate 11-26); by run id it is an index lookup.
+        // A card's answer starts a new run: the approvals it gave move to this run, which replays
+        // them before the model's first step.
+        await deps.prisma.externalEffect.updateMany({
+          where: {
+            spaceId: run.spaceId,
+            status: "approved",
+            run: {
+              threadId: thread.id,
+              botId: bot.id,
+              id: { not: runId },
+              status: { in: ["completed", "cancelled", "failed"] },
+            },
+          },
+          data: { runId },
+        });
         const [continuationEffects, [, previousHuman], threadRuns] = await Promise.all([
           deps.prisma.externalEffect.findMany({
             where: { runId, status: { in: ["approved", "denied"] } },
@@ -3203,7 +3051,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return reply.success ? [reply.data] : [];
         });
         // ponytail: this continuation's decision stops replacements, until a new human message arrives.
-        let replyDiscardActive = true;
+        const replyDiscardActive = true;
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
         const computerInstruction = computerInstructionFor({
           heldForTakeover,
@@ -3221,7 +3069,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Terminal subagent rows are published as their own messages (not appended to
         // messageSegments). Treat that like tool/step durable activity so we do not invent
         // an empty-run "done." completion afterward.
-        let publishedTerminalSubagent = false;
+        const publishedTerminalSubagent = false;
         // Durable chat messages posted mid-turn (message_user / promoted narration).
         // Rehydrate from this run's prior progress rows so a resume after ask/takeover
         // still knows progress was already published (skip hollow finals; status outcome).
@@ -3285,10 +3133,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let pendingProgress = "";
         let lastProgressAt = 0;
         let hasStreamedText = false;
-        let toolCallStreak: ToolCallStreak = { key: undefined, count: 0 };
+        const toolCallStreak: ToolCallStreak = { key: undefined, count: 0 };
         let lastComputerFrameId: string | undefined;
         let unchangedVisualStreak: UnchangedVisualStreak = { count: 0 };
-        let terminalCheckpointComplete = false;
+        const terminalCheckpointComplete = false;
         let approvalPausePending = false;
         // Set once this run shows an approval card; a second card in the same step waits for it.
         let approvalCardShown = false;
@@ -4326,8 +4174,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const roleId = thread.activeRecruitingRoleId;
             if (!roleId)
               return {
-                error:
-                  "next_from_role needs this conversation's saved role, and none is saved.",
+                error: "next_from_role needs this conversation's saved role, and none is saved.",
               };
             const actor = { spaceId: run.spaceId, userId: run.userId };
             const target = args.next_from_role;
@@ -5649,7 +5496,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             const refusal = await ownMailboxSendRefusal(deps.prisma, context, {
               to: args.to[0],
-              replyThreadId: typeof args.replyThreadId === "string" ? args.replyThreadId : undefined,
+              replyThreadId:
+                typeof args.replyThreadId === "string" ? args.replyThreadId : undefined,
               resend: args.resend === true,
             });
             if (refusal) return { error: refusal };
@@ -5682,11 +5530,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
             ).some((resolved) => resolved.source === "require_approval");
           const requiresExplicitApproval = toolRequiresExplicitApproval(
-              policyToolName,
-              connectorCall.route,
-              args,
-              nativeMcpWriteServer?.endpoint,
-            );
+            policyToolName,
+            connectorCall.route,
+            args,
+            nativeMcpWriteServer?.endpoint,
+          );
           const senderConfirmation =
             connectorCall.route?.connectorId === "mcp" &&
             connectorCall.route.toolName === "native_instantly_ensure_sender" &&
@@ -5811,11 +5659,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const requiresApprovalByDefault =
             !verifiedInternalWrite &&
             (requiresUnattendedApproval ||
-              toolRequiresApproval(
-                policyToolName,
-                viaConnector,
-                declaredReadOnly,
-              ));
+              toolRequiresApproval(policyToolName, viaConnector, declaredReadOnly));
           const requiresMandatoryApproval =
             requiresUnattendedApproval || requiresExplicitApproval || memoryNeedsConfirmation;
           const connectorKind = connectorKindFromToolName(
@@ -5897,11 +5741,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const plan = requiresMandatoryApproval
             ? "ask"
             : planActionGate({
-                  resolved: approvalResolved,
-                  consequential: requiresApprovalByDefault,
-                  autoReviewEnabled: autoReviewPref,
-                  checkerConfigured,
-                });
+                resolved: approvalResolved,
+                consequential: requiresApprovalByDefault,
+                autoReviewEnabled: autoReviewPref,
+                checkerConfigured,
+              });
           let reviewReason: string | undefined;
           let gateDecision: "ask" | "allow" = plan === "ask" ? "ask" : "allow";
           const needsApprovalEarly = plan === "ask" || plan === "judge";
@@ -6126,8 +5970,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               !result.schedulingApprovalEvidence
             )
               return {
-                error:
-                  "Not booked: this booking has no approved scheduling plan.",
+                error: "Not booked: this booking has no approved scheduling plan.",
               };
           }
           // Connector read-only hints must not bypass approval, review, or replay decisions.
@@ -7103,7 +6946,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           r.firstEmail,
                           ...(r.followUps ?? []),
                         ]),
-                      ].some((email) => email && unfilledPlaceholder(`${email.subject}\n${email.body}`))
+                      ].some(
+                        (email) => email && unfilledPlaceholder(`${email.subject}\n${email.body}`),
+                      )
                     ? PLACEHOLDER_NOTE
                     : instantlyActivation?.recipientCount === 0
                       ? "This campaign has no recipients yet. Add the people the recruiter named (recruiting_candidates) with add_shortlist_leads, then activate again."
@@ -7577,11 +7422,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }),
               ]);
               const roleId = current?.activeRecruitingRoleId;
-              if (
-                !server?.endpoint ||
-                !isPeopleSearchEndpoint(server.endpoint) ||
-                !roleId
-              )
+              if (!server?.endpoint || !isPeopleSearchEndpoint(server.endpoint) || !roleId)
                 return null;
               const nobody = searchThatFoundNobody(returned, server.endpoint);
               if (nobody) return nobody;
@@ -8705,9 +8546,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 Array.isArray(args.show) &&
                 thread.groupId?.startsWith("recruiting-global-") &&
                 run.trigger !== "bot_message"
-                  ? await roleLinkBlocks(deps.prisma, { spaceId: run.spaceId, userId: run.userId }, [
-                      ...new Set(args.show.filter((id): id is string => typeof id === "string")),
-                    ])
+                  ? await roleLinkBlocks(
+                      deps.prisma,
+                      { spaceId: run.spaceId, userId: run.userId },
+                      [...new Set(args.show.filter((id): id is string => typeof id === "string"))],
+                    )
                       .then(async (links) => {
                         if (links.length) await publishMessage(deps, run, "bot", links);
                         return {};
@@ -10591,9 +10434,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             handedOff = false;
           const outOfCredits = credits.refusal(name);
           const applied = (
-            outOfCredits
-              ? Promise.resolve<unknown>(outOfCredits)
-              : applyToolNow(...call)
+            outOfCredits ? Promise.resolve<unknown>(outOfCredits) : applyToolNow(...call)
           ).then(
             async (result) => {
               const failure = toolResultError(result);
@@ -10932,36 +10773,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return false;
         };
-        const [intake, replyContext, waitingCards, attached] =
-          await ownTime(
-            "turnNotes",
-            Promise.all([
-              intakeTurnNote().catch((error) => {
-                getLogger().warn("saved job page not loaded", {
-                  error: String(error),
-                });
-                return undefined;
-              }),
-              loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
-              run.trigger === "user" && currentTurnMessage?.role === "user"
-                ? waitingCardBlocks(deps.prisma, thread.id)
-                    .then(waitingApprovalCards)
-                    .catch(() => [])
-                : [],
-              attachedFileReads().catch((error) => {
-                getLogger().warn("attached file not read before the turn", {
-                  error: String(error),
-                });
-                return [];
-              }),
-            ]),
-          );
+        const [intake, replyContext, waitingCards, attached] = await ownTime(
+          "turnNotes",
+          Promise.all([
+            intakeTurnNote().catch((error) => {
+              getLogger().warn("saved job page not loaded", {
+                error: String(error),
+              });
+              return undefined;
+            }),
+            loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
+            run.trigger === "user" && currentTurnMessage?.role === "user"
+              ? waitingCardBlocks(deps.prisma, thread.id)
+                  .then(waitingApprovalCards)
+                  .catch(() => [])
+              : [],
+            attachedFileReads().catch((error) => {
+              getLogger().warn("attached file not read before the turn", {
+                error: String(error),
+              });
+              return [];
+            }),
+          ]),
+        );
         const waitingCardsNote = waitingApprovalNote(waitingCards);
         const fileNote =
           attached
-            .filter(
-              ({ read }) => typeof read?.text === "string" && read.text.trim(),
-            )
+            .filter(({ read }) => typeof read?.text === "string" && read.text.trim())
             .map(
               ({ file, read }) =>
                 `The recruiter's attached file (${file.name}) is already read for this turn with artifact_read.${read.hasMore === true ? " Only its first part is below; the rest starts at offset 16000." : ""} Its text:\n\n${String(read.text)}`,
@@ -11003,7 +10841,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : "",
           );
         // The recruiter's newest own message is the one a hand-off carries.
-        let lastRecruiterText = recruiterTexts[0] ?? "";
+        const lastRecruiterText = recruiterTexts[0] ?? "";
         const roleReferenceOverruled = new Set<string>();
         const creditsLeft = hideVendors
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
@@ -11136,12 +10974,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           redactedRecruitingContext: messagingChannelRun
             ? undefined
             : (initialRecruitingContext?.text ??
-              [
-                noRoleContext(thread.groupId),
-                memoryContext.text,
-              ]
-                .filter(Boolean)
-                .join("\n\n")),
+              [noRoleContext(thread.groupId), memoryContext.text].filter(Boolean).join("\n\n")),
           redactedMemoryContext: memoryContext.text,
           redactedScratchpadContext: scratchpadContext
             ? redactSecrets(scratchpadContext, runSecrets)
@@ -11178,21 +11011,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           botId: bot.id,
           groupId: thread.groupId,
         });
-
-        if (heldForTakeover) {
-          const releasedCheckpoint = takeoverCheckpointOf(
-            (
-              await deps.prisma.run.findUnique({
-                where: { id: runId },
-                select: { checkpoint: true },
-              })
-            )?.checkpoint,
-          );
-          if (releasedCheckpoint) {
-            await requeueComputerRun(deps, run, workerId, fence, releasedCheckpoint, false);
-            return;
-          }
-        }
 
         // A recruiter clicked Send on a saved reply: replay the native approved request now,
         // before any model call. The regular tool path still owns preflight, claim and receipt.
@@ -11640,1330 +11458,132 @@ export function createRunExecutor(deps: ExecutorDeps) {
         if (handedIn && runModel.thinkingLevel !== "off")
           runModel = { ...runModel, firstStepThinkingLevel: "low" };
 
-        try {
-          setupMark("runtimeStart");
-          // ponytail: this attempt's spend only; earlier attempts of a resumed run are not summed.
-          const runtimeStartedAt = Date.now();
-          let runCostUsd = 0;
-          // Prompt cache use for the run.timing log: cached tokens out of all prompt tokens.
-          const promptCache = { calls: 0, cachedTokens: 0, promptTokens: 0 };
-          const countPromptCache = (usage: {
-            inputTokens: number | null;
-            cacheReadTokens?: number | null;
-            cacheWriteTokens?: number | null;
-          }) => {
-            promptCache.calls += 1;
-            promptCache.cachedTokens += usage.cacheReadTokens ?? 0;
-            promptCache.promptTokens +=
-              (usage.inputTokens ?? 0) +
-              (usage.cacheReadTokens ?? 0) +
-              (usage.cacheWriteTokens ?? 0);
-          };
-          // Spend is counted in memory above; the usage row and timing audit are written in the
-          // background so a model call's end never waits on the database.
-          const recordUsageInBackground = (
-            event: Extract<AgentRuntimeEvent, { type: "usage" }>,
-          ) => {
-            void recordRunUsage(
-              deps,
-              {
-                spaceId: run.spaceId,
-                userId: run.userId,
-                threadId: run.threadId,
-                botId: bot.id,
-                runId,
-              },
-              event,
-            );
-          };
-          let firstModelEventMs: number | null = null;
-          // Logged for a turn that ends with a question too, not only a completed one.
-          const logRunTiming = (outcome: "completed" | "waiting_input") =>
-            getLogger().info("run.timing", {
-              runId,
-              outcome,
-              sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
-              firstModelEventMs,
-              runtimeMs: Date.now() - runtimeStartedAt,
-              modelCalls: promptCache.calls,
-              // The tools between model calls, in order: what a slow turn spent its steps on.
-              tools: runToolNames.join(" "),
-              promptSize: promptCache.promptTokens,
-              cachedPromptSize: promptCache.cachedTokens,
-              promptCacheHitRate: promptCache.promptTokens
-                ? Math.round((promptCache.cachedTokens / promptCache.promptTokens) * 1000) / 1000
-                : null,
-            });
-          let runToolCalls = 0;
-          const runToolNames: string[] = [];
-          // Pi runs a tool the moment it queues the "tool" event, so a fast tool's completion
-          // audit raced ahead of the "called" audit this loop appends after flushing narration.
-          // Completions wait for the matching called append; the stream's close releases
-          // any still waiting (tools skipped or rejected before dispatch never get a called).
-          const toolCalledAudits = new Map<
-            string,
-            { settled: Promise<void>; release: () => void }
-          >();
-          const toolCalledAudit = (executionId: string) => {
-            let entry = toolCalledAudits.get(executionId);
-            if (!entry) {
-              let release!: () => void;
-              const settled = new Promise<void>((resolve) => {
-                release = resolve;
-              });
-              entry = { settled, release };
-              toolCalledAudits.set(executionId, entry);
-            }
-            return entry;
-          };
-          getLogger().info("run.setup.timing", {
-            runId,
-            sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
-            modelId: runModel.id,
-            provider: runModel.provider,
-            routed: turnModel.routed,
-            routeReason: turnModel.reason,
-            ...setupMarks,
-          });
-          // An empty probe means nothing to do: end quietly without calling the model.
-          const runtimeEvents = probeFoundNothing
-            ? quietRoutineEvents()
-            : deps.runtime.run(
-                {
-                  botId: bot.id,
-                  threadId: thread.id,
-                  runId,
-                  sourceMessageId: nativeSources?.currentAnswer?.id ?? run.sourceMessageId,
-                  onUsage: (event) => {
-                    runCostUsd += event.costUsd ?? 0;
-                    countPromptCache(event);
-                    recordUsageInBackground(event);
-                  },
-                  prompt,
-                  contextStrategy,
-                  instructions: runSystemPrompt({
-                    botInstructions: botInstructionsFor(thread.groupId, bot, run.trigger),
-                    groupContext,
-                    messagingContext,
-                    hasHistoricalContext: runtimeHistory.length > 0,
-                    computerInstruction,
-                    pageBrowserAllowed,
-                    taskCatalogInstruction,
-                    workspaceInstruction,
-                    agentEnvironmentInstruction,
-                    botDirectory,
-                    pluginLine,
-                    agentSkillsLine,
-                    taughtSkillsLine,
-                    replyGuidance: runReplyGuidance(run.trigger),
-                    disabledBuiltinTools,
-                    recruiterLanguage: hideVendors ? RECRUITER_LANGUAGE : undefined,
-                  }),
-                  history: runtimeHistory,
-                  currentTurnImages,
-                  tools,
-                  model: runModel,
-                  fallbackModels: runFallbackModels,
-                  resolveFallbackModel: backupModelResolver(deps, {
-                    scope: { userId: run.userId, spaceId: run.spaceId },
-                    selected: fallbackModelKeys,
-                    configured: { key: configuredModelKey, model: configuredRunModel },
-                    registerSecrets: (values) => runSecrets.push(...values),
-                  }),
-                  onModelChange: async (provider, modelId) => {
-                    if (!fallbackModelKeys.has(JSON.stringify([provider, modelId]))) {
-                      throw new Error("Backup model is not selected");
-                    }
-                    const updated = await deps.prisma.run.updateMany({
-                      where: {
-                        id: runId,
-                        status: "running",
-                        leaseOwner: workerId,
-                        leaseFence: fence,
-                      },
-                      data: { modelProvider: provider, modelId },
-                    });
-                    if (updated.count !== 1) {
-                      throw new Error("Run lease was lost before the backup model could be used");
-                    }
-                  },
-                  resumeFromCheckpoint: takeoverResume?.checkpoint,
-                  script,
-                  allowSilentEmpty: allowSilentEmptyRun,
-                  emptyResponseText,
-                  reportOwed: turnReport.enabled ? () => turnReport.owed().length > 0 : undefined,
-                  executeTool: scripted ? undefined : applyTool,
-                  onSlowTool: async (tool) => {
-                    const promoted = await backgroundToolRun(deps.prisma, {
-                      runId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      spaceId: run.spaceId,
-                      userId: run.userId,
-                      leaseOwner: workerId,
-                      leaseFence: fence,
-                      executionId: tool.executionId,
-                      toolName: tool.name,
-                      durationMs: tool.durationMs,
-                    });
-                    if (promoted.eventSeq !== null)
-                      await deps.events.notify(thread.id, promoted.eventSeq).catch((error) => {
-                        getLogger().warn("slow tool promotion notification", {
-                          error: String(error),
-                        });
-                      });
-                    if (promoted.continuationRunId)
-                      await deps.jobs.enqueue(runContinueJob(promoted.continuationRunId));
-                  },
-                  storeToolOutput:
-                    scripted || !deps.artifacts
-                      ? undefined
-                      : async (output) => {
-                          try {
-                            return await storeToolOutputArtifact(
-                              {
-                                prisma: deps.prisma,
-                                artifacts: deps.artifacts!,
-                              },
-                              {
-                                spaceId: run.spaceId,
-                                userId: run.userId,
-                                botId: bot.id,
-                                groupId: thread.groupId ?? undefined,
-                                runId: run.id,
-                                toolName: output.name,
-                                executionId: output.executionId,
-                                text: redactSecrets(output.text, runSecrets),
-                              },
-                            );
-                          } catch (error) {
-                            getLogger().warn("tool output artifact not stored", {
-                              runId,
-                              tool: output.name,
-                              error: error instanceof Error ? error.message : String(error),
-                            });
-                            return undefined;
-                          }
-                        },
-                  resolveModel: scripted
-                    ? undefined
-                    : (provider, modelId) =>
-                        resolveConnectedModel(run, provider, modelId, (values) =>
-                          runSecrets.push(...values),
-                        ),
-                  onToolCallDelta: (call) => {
-                    streamRoundPicks(call);
-                    streamQuestion(call);
-                  },
-                  beforeAsk: async () => {
-                    if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
-                    // One question at a time: a card already waiting here is answered first.
-                    const waiting = hideVendors ? await openQuestionElsewhere() : undefined;
-                    if (waiting !== undefined) return { instead: questionAlreadyWaiting(waiting) };
-                    // Workloop: work running behind the conversation never asks the person after
-                    // they moved on; a newer message another reply answers wins.
-                    const moved = await newerMessageAnsweredElsewhere();
-                    if (moved !== undefined) {
-                      movedElsewhere = true;
-                      return { instead: askAfterNewerMessage(moved) };
-                    }
-                    await turnReport.caughtUpToAsk();
-                    return undefined;
-                  },
-                  onToolCompleted: async (completion) => {
-                    await toolCalledAudit(completion.executionId).settled;
-                    toolCalledAudits.delete(completion.executionId);
-                    await appendToolCompletionAudit(
-                      deps,
-                      {
-                        spaceId: run.spaceId,
-                        threadId: thread.id,
-                        botId: bot.id,
-                        runId,
-                      },
-                      {
-                        ...withConnectorReadOnly(completion),
-                        work: turnReport.workFor(completion.executionId),
-                      },
-                      runSecrets,
-                      completeRunStep,
-                    );
-                  },
-                  claimContextNotice: scripted
-                    ? undefined
-                    : () =>
-                        lateNotes.withNotice(
-                          workingStateNotes.withNotice(contextWatch?.claimNotice()),
-                        ),
-                  claimSteering: scripted
-                    ? undefined
-                    : async (seenIds) => {
-                        const steering = await deps.events.claimSteering({
-                          threadId: thread.id,
-                          botId: bot.id,
-                          runId,
-                          leaseOwner: workerId,
-                          leaseFence: fence,
-                          seenIds,
-                        });
-                        const isHuman = (item: (typeof steering)[number]) =>
-                          item.blocks.length > 0 &&
-                          item.blocks.every((block) =>
-                            ["text", "file", "image"].includes(block.kind),
-                          );
-                        const humanSteering = steering.findLast(isHuman);
-                        // A message an earlier attempt already took is context, not a new message
-                        // to acknowledge again after the turn resumes.
-                        const freshHumanSteering = steering.findLast(
-                          (item) => isHuman(item) && !item.earlier,
-                        );
-                        if (humanSteering) {
-                          recruitingSourceMessageId = humanSteering.messageId;
-                          replyDiscardActive = false;
-                        }
-                        const personSteering = steering.findLast(
-                          (item) => isHuman(item) && !item.internal,
-                        );
-                        if (personSteering) {
-                          steeredMessageId = personSteering.messageId;
-                          steeredText = personSteering.text;
-                          if (!personSteering.earlier) steeredUnanswered = true;
-                        }
-                        // A new message from the person is this turn's to answer, whoever had the
-                        // request before it (gate 493e9f2e: its reply was dropped as handed off).
-                        if (freshHumanSteering && !freshHumanSteering.internal) {
-                          lastRecruiterText = freshHumanSteering.text;
-                          const steeredScreen = screenLanguage(
-                            freshHumanSteering.blocks.flatMap((block) =>
-                              block.kind === "text" && block.uiLocale ? [block.uiLocale] : [],
-                            )[0],
-                          );
-                          if (steeredScreen) turnLanguage = steeredScreen;
-                          handedOff = false;
-                          // Nor is a teammate's report quiet once the person writes into it (gate
-                          // f25185df: its answers to 「草稿还在吗」 were dropped).
-                          if (quietRun) {
-                            quietRun = false;
-                            allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun;
-                          }
-                        }
-                        const recruitingContextMessage = humanSteering ?? steering.at(-1);
-                        const currentThread =
-                          steering.length > 0 && !messagingChannelRun
-                            ? await deps.prisma.thread.findUniqueOrThrow({
-                                where: { id: thread.id },
-                                select: { activeRecruitingRoleId: true },
-                              })
-                            : undefined;
-                        const steeringRecruitingContext = currentThread?.activeRecruitingRoleId
-                          ? await adoptRecruitingContext(
-                              "steering",
-                              "steering",
-                              recruitingContextMessage!.messageId,
-                            )
-                          : undefined;
-                        if (currentThread && !currentThread.activeRecruitingRoleId) {
-                          currentRecruitingContext = undefined;
-                          await refreshMemoryContext();
-                        }
-                        const steeringRoleText =
-                          steeringRecruitingContext &&
-                          steeringRecruitingContext.text === initialRecruitingContext?.text
-                            ? unchangedRecruitingContextText
-                            : (steeringRecruitingContext?.text ??
-                              (currentThread
-                                ? [noRoleContext(thread.groupId), memoryContext.text]
-                                    .filter(Boolean)
-                                    .join("\n\n")
-                                : undefined));
-                        return Promise.all(
-                          steering.map(async (item) => {
-                            const { images, unavailableInstruction } =
-                              await settleSteeringAttachmentLoads(
-                                loadCurrentTurnImages(deps, item.blocks, context),
-                                item.blocks,
-                                context.signal,
-                              );
-                            return {
-                              id: item.id,
-                              messageId: item.messageId,
-                              historyText: item.text,
-                              ...(item.interrupt ? { interrupt: true as const } : {}),
-                              text: [
-                                await loadReplyContext(deps.prisma, thread.id, item.messageId),
-                                item.text,
-                                item.messageId === recruitingContextMessage?.messageId
-                                  ? steeringRoleText
-                                  : undefined,
-                                unavailableInstruction,
-                                item.blocks.every((block) =>
-                                  ["text", "file", "image"].includes(block.kind),
-                                )
-                                  ? nativeMessageSourceInstruction(item.messageId, item.blocks)
-                                  : undefined,
-                                item.earlier
-                                  ? EARLIER_STEERING
-                                  : item === freshHumanSteering
-                                    ? STEERING_ACK
-                                    : undefined,
-                              ]
-                                .filter(Boolean)
-                                .join("\n\n"),
-                              images,
-                            };
-                          }),
-                        );
-                      },
-                },
-                context,
-              );
-          // Finish the run as completed with one explanatory reply instead of opening
-          // another model call (loop guard, budget guardrails).
-          const stopRunEarly = async (text: string, stopKind: RunStopKind) => {
-            approvedEffectReplays.assertDrained();
-            flushPendingTools();
-            if (!(await renewRunLease(deps, runId, workerId, fence))) return;
-            if (messageSegments.length > 0) {
-              await publishMessage(
-                deps,
-                run,
-                "bot",
-                redactBlocks(messageSegments, runSecrets, hideVendors),
-              );
-            }
-            await workspaceCheckpoint.flush();
-            terminalCheckpointComplete = true;
-            const stopped = await deps.events.finalizeRun({
-              spaceId: run.spaceId,
-              threadId: thread.id,
-              botId: bot.id,
-              runId,
-              taskId: run.taskId,
-              attemptId: attempt.id,
-              leaseOwner: workerId,
-              leaseFence: fence,
-              outcome: "completed",
-              blocks: isBackgroundRunTrigger(run.trigger) ? [] : [{ kind: "text", text }],
-              stopKind,
-            });
-            if (!stopped) return;
-            if (stopped.continuationRunId) {
-              await deps.jobs
-                .enqueue(runContinueJob(stopped.continuationRunId))
-                .catch((error) => getLogger().error("steering continuation enqueue", error));
-            }
-            if (run.trigger === "bot_message") {
-              await returnBotMessageOutcome(
-                deps,
-                { ...run, sourceMessageId: run.sourceMessageId },
-                { id: bot.id, name: bot.name },
-                text,
-                "result",
-                { forceUnread: true },
-              ).catch((error) => getLogger().error("bot message early-stop return", error));
-            }
-            runAbortController?.abort();
-          };
-          let lastTakeoverExecutionId: string | undefined;
-          silenceWatch.touch();
-          for await (const event of withRuntimeCleanup(runtimeEvents, runAbortController, () => {
-            for (const entry of toolCalledAudits.values()) entry.release();
-          })) {
-            silenceWatch.touch();
-            if (approvalPausePending) return;
-            if (!leaseValid) return;
-            const now = Date.now();
-            if (now - lastLeaseCheckAt >= 1_000) {
-              lastLeaseCheckAt = now;
-              const still = await deps.prisma.run.findUnique({
-                where: { id: runId },
-                select: {
-                  status: true,
-                  leaseOwner: true,
-                  leaseFence: true,
-                  checkpoint: true,
-                },
-              });
-              if (
-                !still ||
-                still.status === "cancelled" ||
-                still.leaseOwner !== workerId ||
-                still.leaseFence !== fence
-              ) {
-                leaseValid = false;
-                return;
-              }
-              const releasedHold = takeoverCheckpointOf(still.checkpoint);
-              if (heldForTakeover && releasedHold) {
-                await requeueComputerRun(deps, run, workerId, fence, releasedHold, false);
-                leaseValid = false;
-                runAbortController?.abort();
-                return;
-              }
-            }
-
-            firstModelEventMs ??= Date.now() - runtimeStartedAt;
-            if (event.type === "text") {
-              if (event.text.trim()) turnReport.report();
-              assembled += event.text;
-              currentTextSegment += event.text;
-              toolCallStreak = { key: undefined, count: 0 };
-              tryFlushPendingTools();
-              pendingProgress += progressRedactor.push(event.text);
-              const now = Date.now();
-              if (!scripted && pendingProgress && now - lastProgressAt >= 250) {
-                await flushProgress();
-              }
-            } else if (event.type === "progress") {
-              toolCallStreak = { key: undefined, count: 0 };
-              if (event.phase === "retrying") modelRetries += 1;
-              if (isBackgroundRunTrigger(run.trigger)) continue;
-              // Flush batched text deltas first so an activity line cannot land
-              // ahead of text the model streamed before the tool call.
-              if (pendingProgress) {
-                await deps.events.publishTransient({
-                  spaceId: run.spaceId,
-                  threadId: thread.id,
-                  botId: bot.id,
-                  type: "thread.progress",
-                  runId,
-                  payload: {
-                    delta: pendingProgress,
-                    streaming: true,
-                    ...runTiming,
-                  },
-                });
-                pendingProgress = "";
-                lastProgressAt = Date.now();
-              }
-              await deps.events.publishTransient({
-                spaceId: run.spaceId,
-                threadId: thread.id,
-                botId: bot.id,
-                type: "thread.progress",
-                runId,
-                payload: {
-                  ...runTiming,
-                  text: visible(redactSecrets(event.text, runSecrets)),
-                  ...(event.activity ? { activity: true } : {}),
-                  ...(event.phase ? { phase: event.phase } : {}),
-                  ...(event.summary ? { summary: visible(event.summary) } : {}),
-                  ...(event.thought ? { thought: visible(event.thought) } : {}),
-                  ...(event.at ? { at: event.at } : {}),
-                  ...(event.thinkingSince ? { thinkingSince: event.thinkingSince } : {}),
-                },
-              });
-            } else if (event.type === "ask") {
-              await withinDeadline<unknown>(Promise.all(savesInFlight), SAVE_WAIT_MS, () =>
-                getLogger().warn("run.ask.saves_still_running", { runId }),
-              );
-              if (!(await renewRunLease(deps, runId, workerId, fence))) return;
-              // Schema keys and enum values are identities: reject secrets rather than redact them.
-              if (
-                event.requestedSchema &&
-                containsSecret(JSON.stringify(event.requestedSchema), runSecrets)
-              )
-                throw new Error("Ask form contains protected input");
-              // The card never replaces a report: unreported work gets the server's report first.
-              const unreportedWork = turnReport.owed();
-              if (unreportedWork.length) {
-                const report = await turnReportFor(unreportedWork);
-                await publishMessage(
-                  deps,
-                  run,
-                  "bot",
-                  [{ kind: "text", text: report }],
-                  undefined,
-                  userProgressClientNonce(run.id, midTurnProgressCount++),
-                );
-                midTurnUserTexts.push(report);
-                publishedMidTurnUserMessage = true;
-                turnReport.report();
-              }
-              const safeText = visible(redactSecrets(event.text, runSecrets));
-              const safeDetail = event.detail
-                ? visible(redactSecrets(event.detail, runSecrets))
-                : event.detail;
-              const safeActions = event.actions?.map((action) => ({
-                id: action.id,
-                label: visible(redactSecrets(action.label, runSecrets)),
-              }));
-              await workspaceCheckpoint.flush();
-              await cardTakesLinesPlace().catch((error) =>
-                getLogger().warn("one-line note kept beside the card", { error: String(error) }),
-              );
-              // The recruiter's likely answer, typed for them in the composer and the card (Tab).
-              const cardSuggestion = event.requestedSchema
-                ? null
-                : startReplySuggestion(
-                    [
-                      ...midTurnUserTexts,
-                      safeText,
-                      ...(safeActions?.length
-                        ? [`Choices: ${safeActions.map((action) => action.label).join(" / ")}`]
-                        : []),
-                    ].join("\n\n"),
-                  );
-              const paused = await pauseRunForInput({
-                spaceId: run.spaceId,
-                threadId: run.threadId,
-                botId: run.botId,
-                runId,
-                attemptId: attempt.id,
-                leaseOwner: workerId,
-                leaseFence: fence,
-                blocks: [
-                  {
-                    kind: "ask",
-                    text: safeText,
-                    detail: safeDetail,
-                    status: "pending",
-                    actions: safeActions,
-                    ...(event.multiple && safeActions?.length ? { multiple: true } : {}),
-                    requestedSchema: event.requestedSchema,
-                  },
-                ],
-                // Keep unredacted labels on the run for resume; message blocks stay redacted.
-                offeredActions: event.actions,
-              });
-              if (!paused) return;
-              logRunTiming("waiting_input");
-              // A recruiter message that arrived while this turn was finishing answers the card.
-              const answeredBySteering = await answerPausedAskWithSteering(deps.prisma, {
-                spaceId: run.spaceId,
-                threadId: thread.id,
-                botId: bot.id,
-                runId,
-              }).catch((error) => {
-                getLogger().error("steering answer for paused ask", error);
-                return null;
-              });
-              if (answeredBySteering) {
-                getLogger().info("run.waiting_input.answered_by_steering", {
-                  runId,
-                });
-                await deps.events.notify(answeredBySteering.threadId, answeredBySteering.seq);
-                for (const copy of answeredBySteering.mirrors ?? [])
-                  await deps.events.notify(copy.threadId, copy.seq);
-                await deps.jobs
-                  .enqueue(runContinueJob(runId))
-                  .catch((error) => getLogger().error("steering answer enqueue", error));
-                return;
-              }
-              if (cardSuggestion) saveReplySuggestion(cardSuggestion, true);
-              await notifyRun(deps, run, {
-                kind: "help",
-                title: `${bot.name} needs an answer`,
-                body: safeText,
-                botId: bot.id,
-                threadId: thread.id,
-              });
-              await sendCompletionEmailIfDone(
-                deps,
-                { ...run, id: runId, threadId: thread.id },
-                {
-                  text: safeText,
-                  groupId: thread.groupId,
-                  continuing: false,
-                  question: true,
-                },
-              );
-              return;
-            } else if (event.type === "takeover") {
-              // The catalog filter only hides tools; a runtime can still emit a takeover.
-              // Refuse it before any computer, lease or "Needs you" card exists.
-              if (disabledBuiltinTools.has("request_takeover")) {
-                await appendToolCompletionAudit(
-                  deps,
-                  {
-                    spaceId: run.spaceId,
-                    threadId: thread.id,
-                    botId: bot.id,
-                    runId,
-                  },
-                  {
-                    name: "request_takeover",
-                    executionId: lastTakeoverExecutionId ?? `${runId}:takeover`,
-                    durationMs: 0,
-                    error: disabledToolError("request_takeover"),
-                  },
-                  runSecrets,
-                  completeRunStep,
-                );
-                continue;
-              }
-              if (!(await renewRunLease(deps, runId, workerId, fence))) return;
-              await runComputer.get();
-              const safeReason = redactSecrets(event.reason, runSecrets);
-              // Publish pending narration as tagged mid-turn progress so reconciliation
-              // does not treat pre-takeover text as the delegated final result.
-              await publishMidTurnNarration();
-              if (assembled.trim()) {
-                const narration = visible(redactSecrets(assembled, runSecrets)).trim();
-                if (narration && runPromotesMidTurnNarration(run.trigger) && !quietRun) {
-                  await publishMessage(
-                    deps,
-                    run,
-                    "bot",
-                    [{ kind: "text", text: narration }],
-                    undefined,
-                    userProgressClientNonce(run.id, midTurnProgressCount++),
-                  );
-                  midTurnUserTexts.push(narration);
-                  publishedMidTurnUserMessage = true;
-                } else if (narration) {
-                  discardedMidTurnNarration = true;
-                }
-                assembled = "";
-                hasStreamedText = false;
-                pendingProgress = "";
-              }
-              await publishMessage(
-                deps,
-                run,
-                "bot",
-                [{ kind: "computer", state: "Needs you", text: safeReason }],
-                true,
-              );
-              await workspaceCheckpoint.flush();
-              if (!(await holdComputerExecutionLeaseForTakeover(deps.prisma, computerLease))) {
-                throw new Error("Computer lease expired before takeover");
-              }
-              const paused = await deps.events.pauseRunForTakeover({
-                spaceId: run.spaceId,
-                threadId: run.threadId,
-                botId: run.botId,
-                runId,
-                attemptId: attempt.id,
-                leaseOwner: workerId,
-                leaseFence: fence,
-                reason: safeReason,
-                computerId: storedComputer.id,
-              });
-              if (!paused) return;
-              retainComputerLease = true;
-              await notifyRun(deps, run, {
-                kind: "takeover",
-                title: `${bot.name} needs you on the screen`,
-                body: safeReason,
-                botId: bot.id,
-                threadId: thread.id,
-              });
-              return;
-            } else if (event.type === "tool") {
-              turnReport.tool(event.executionId, event.name, event.args);
-              if (event.name === "message_user") turnReport.report();
-              // Preserve event ordering when the throttle still holds recent narration: the
-              // client must see that text before the tool call it describes.
-              await flushProgress();
-              // Promote streamed narration into a durable, replyable chat message before
-              // tools continue, so long turns do not look stalled and stay replyable.
-              if (event.name !== "message_user") {
-                await publishMidTurnNarration();
-              }
-              const toolStartedAt = new Date().toISOString();
-              const toolActivity = workActivityForTool(event.name, event.args);
-              const toolDetail = stepDetail(event.name, event.args);
-              try {
-                await appendToolCalledEvent(
-                  deps,
-                  { spaceId: run.spaceId, threadId: thread.id, botId: bot.id, runId },
-                  { ...event, startedAt: toolStartedAt, activity: toolActivity, ...toolDetail },
-                  runSecrets,
-                );
-              } finally {
-                toolCalledAudit(event.executionId).release();
-              }
-              pendingTools.push({
-                name: event.name,
-                executionId: event.executionId,
-                startedAt: toolStartedAt,
-                activity: toolActivity,
-                ...toolDetail,
-              });
-              if (event.name === "request_takeover") lastTakeoverExecutionId = event.executionId;
-              tryFlushPendingTools();
-              // A tool call is followed by another model call: stop here when the run is
-              // over budget, before that call opens.
-              const spent = {
-                costUsd: runCostUsd,
-                elapsedMs: Date.now() - runtimeStartedAt,
-                toolCalls: runToolCalls,
-              };
-              const budgetLimit = runBudgetExceeded(spent);
-              if (budgetLimit) {
-                await stopRunEarly(runBudgetStopText(budgetLimit, spent), budgetLimit);
-                return;
-              }
-              runToolCalls += 1;
-              runToolNames.push(event.name);
-              const loopGuard = advanceToolCallLoopGuard(toolCallStreak, event.name, event.args);
-              toolCallStreak = loopGuard.streak;
-              if (loopGuard.stuck) {
-                await stopRunEarly(
-                  loopGuardStopText(humanizeToolName(event.name), toolCallStreak.count),
-                  "loop_guard",
-                );
-                return;
-              }
-              if (scripted) {
-                const startedAt = Date.now();
-                try {
-                  const result = await applyTool(event.name, event.args, event.executionId);
-                  await appendToolCompletionAudit(
-                    deps,
-                    {
-                      spaceId: run.spaceId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      runId,
-                    },
-                    withConnectorReadOnly(
-                      toolCompletionFromResult(
-                        {
-                          name: event.name,
-                          executionId: event.executionId,
-                          durationMs: Date.now() - startedAt,
-                        },
-                        result,
-                      ),
-                    ),
-                    runSecrets,
-                    completeRunStep,
-                  );
-                  if (isToolPauseResult(result)) return;
-                } catch (error) {
-                  await appendToolCompletionAudit(
-                    deps,
-                    {
-                      spaceId: run.spaceId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      runId,
-                    },
-                    {
-                      name: event.name,
-                      executionId: event.executionId,
-                      durationMs: Date.now() - startedAt,
-                      error,
-                    },
-                    runSecrets,
-                    completeRunStep,
-                  );
-                  throw error;
-                }
-              }
-            } else if (event.type === "subagent") {
-              const safeTask = visible(redactSecrets(event.task, runSecrets));
-              const safeProgress = event.progress
-                ? visible(redactSecrets(event.progress, runSecrets))
-                : undefined;
-              const safeResult = event.result
-                ? visible(redactSecrets(event.result, runSecrets))
-                : undefined;
-              await deps.events.append({
-                spaceId: run.spaceId,
-                threadId: thread.id,
-                botId: bot.id,
-                type: "thread.subagent",
-                runId,
-                payload: {
-                  agentId: event.agentId,
-                  name: event.name,
-                  task: safeTask,
-                  status: event.status,
-                  progress: safeProgress,
-                  result: safeResult,
-                },
-              });
-              if (event.status === "completed" || event.status === "failed") {
-                publishedTerminalSubagent ||= !subagentMarksUnread(
-                  run.trigger,
-                  event.status,
-                  peerMessage?.repliesToRequest === true,
-                );
-                await publishMessage(
-                  deps,
-                  run,
-                  "bot",
-                  [
-                    {
-                      kind: "subagent",
-                      agentId: event.agentId,
-                      name: event.name,
-                      task: safeTask,
-                      status: event.status,
-                      progress: safeProgress,
-                      result: safeResult,
-                    },
-                  ],
-                  subagentMarksUnread(
-                    run.trigger,
-                    event.status,
-                    peerMessage?.repliesToRequest === true,
-                  ),
-                );
-              }
-            } else if (event.type === "usage" && !event.accounted) {
-              runCostUsd += event.costUsd ?? 0;
-              countPromptCache(event);
-              recordUsageInBackground(event);
-            } else if (event.type === "thinking") {
-              const { type: _type, ...thinking } = event;
-              lastThinking = thinking;
-            } else if (event.type === "done") {
-              if (!assembled && event.text) {
-                if (publishedMidTurnUserMessage || discardedMidTurnNarration) {
-                  // Mid-turn narration was already published or discarded (routines).
-                  // Post-tool finals are streamed into assembled; do not restore
-                  // cumulative done.text (clamp/redaction make substring stripping brittle).
-                } else {
-                  assembled = event.text;
-                  currentTextSegment += event.text;
-                  if (event.text.trim()) turnReport.report();
-                }
-              }
-            }
-          }
-
+        setupMark("runtimeStart");
+        getLogger().info("run.setup.timing", {
+          runId,
+          sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
+          modelId: runModel.id,
+          provider: runModel.provider,
+          ...setupMarks,
+        });
+        // The ask card is written before the run ends; its answer arrives as a new input.
+        const showAsk = async (event: Extract<AgentRuntimeEvent, { type: "ask" }>) => {
           await withinDeadline<unknown>(Promise.all(savesInFlight), SAVE_WAIT_MS, () =>
-            getLogger().warn("run.end.saves_still_running", { runId }),
+            getLogger().warn("run.ask.saves_still_running", { runId }),
           );
-          runComputer.throwIfFailed();
-          if (approvalPausePending || !leaseValid) return;
-          approvedEffectReplays.assertDrained();
-          pendingProgress += progressRedactor.finish();
-          await flushProgress();
-
-          for (const turn of script ?? []) {
-            for (const file of turn.files ?? []) {
-              workspaceCheckpoint.markDirty();
-              await deps.sandbox.writeFile(
-                await runComputer.get(),
-                {
-                  path: resolveBotWorkspacePath(computerMode, bot.id, file.path),
-                  content: new TextEncoder().encode(file.content),
-                },
-                context,
-              );
-            }
-            for (const mem of turn.memory ?? []) {
-              await deps.memory.commit(
-                {
-                  scope: mem.scope,
-                  botId: mem.scope === "bot" ? bot.id : undefined,
-                  path: mem.path,
-                  content: mem.content,
-                  expectedRevision: mem.expectedRevision,
-                  sourceRunId: runId,
-                  sourceThreadId: thread.id,
-                },
-                context,
-              );
-              await deps.events.append({
-                spaceId: run.spaceId,
-                threadId: thread.id,
-                botId: bot.id,
-                type: "memory.revised",
-                runId,
-                payload: { path: mem.path, scope: mem.scope },
-              });
-            }
-          }
-
-          flushPendingTools();
-          // The server's no-model completion uses the same silent token as quiet model replies.
-          // A recruiting agent that answers only NO_RESPONSE (a report-back with nothing to add)
-          // stays silent: the recruiter never sees the token, nor at the edge of a longer reply
-          // (gate 36e6d7f0, change-mind: the revised email went out headed NO_RESPONSE).
-          const recruitingSilent = hideVendors && isExactNoResponse(assembled);
-          let silentReply =
-            quietRun || probeFoundNothing || hideVendors
-              ? stripNoResponseReply(assembled, messageSegments)
-              : { assembled, blocks: messageSegments };
-          // Consequential work ends with a report of it: when the model wrote none (its report
-          // step included), the server reports from the run's own records.
-          const unreportedAtEnd = handedOff ? [] : turnReport.owed();
-          if (unreportedAtEnd.length && !silentReply.assembled.trim()) {
-            const report = await turnReportFor(unreportedAtEnd);
-            silentReply = {
-              assembled: report,
-              blocks: appendTextSegment(silentReply.blocks, report),
-            };
-            turnReport.report();
-          }
-          let completionBlocks = silentReply.blocks;
-          if (!silentReply.assembled || isBackgroundRunTrigger(run.trigger)) {
-            // Mid-turn progress already posted durable chat messages; skip the empty
-            // "…" fallback so we do not add a junk final bubble. Delegated bot_message
-            // runs still return via botMessageOutcomeFromMidTurn below (status when
-            // only progress was posted, result when a final reply exists). Exact
-            // NO_RESPONSE finals are treated as empty before this fallback runs.
-            completionBlocks = completionMessageSegments(completionBlocks, {
-              allowSilentEmpty:
-                allowSilentEmptyRun ||
-                probeFoundNothing ||
-                publishedMidTurnUserMessage ||
-                recruitingSilent,
-              emptyResponseText,
-              suppressOutput: handedOff || isBackgroundRunTrigger(run.trigger),
-              skipEmptyFallback: publishedTerminalSubagent || publishedMidTurnUserMessage,
-            });
-          }
-          let blocks = handedOff
-            ? []
-            : finalBlocksAfterMidTurnProgress(
-                redactBlocks(completionBlocks, runSecrets, hideVendors),
-                publishedMidTurnUserMessage || quietRun,
-              );
-          let text = handedOff
-            ? ""
-            : visible(
-                redactSecrets(
-                  completionNotificationBody(silentReply.assembled, blocks),
-                  runSecrets,
-                ),
-              );
-          if (containsSecret(text, runSecrets)) {
-            throw new Error("refusing to persist a secret in the thread");
-          }
-          // Tool steps succeeded and the only completion text is the synthetic
-          // empty notice. That is a missed final answer or a swallowed provider
-          // failure, not a successful delegated summary.
+          // Schema keys and enum values are identities: reject secrets rather than redact them.
           if (
-            !handedOff &&
-            !silentReply.assembled.trim() &&
-            emptyDelegatedToolTurnShouldFail(completionBlocks)
-          ) {
-            throw new Error(TOOL_STEPS_WITHOUT_RESPONSE);
-          }
-          const textOnly =
-            blocks.some((block) => block.kind === "text") &&
-            blocks.every((block) => block.kind === "text" || block.kind === "steps");
-          // Which check dropped the reply is logged: gate b2005684's onemail reply vanished with
-          // no trace of why.
-          const dropped =
-            !textOnly || run.trigger === "bot_message"
-              ? undefined
-              : (await handbackSuperseded())
-                ? "handback_superseded"
-                : // Gate 95185659, change-mind: the old 60–80万 version came after the
-                  // recruiter changed the base; the coordinator hands the change on with
-                  // the request. The server's retry of a turn is past it too (gate c8855b72).
-                  hideVendors &&
-                    (handedIn ||
-                      historyMessages.find((message) => message.id === run.sourceMessageId)
-                        ?.internal === true) &&
-                    (await newerMessageAnsweredElsewhere()) !== undefined
-                  ? "newer_message_answered"
-                  : undefined;
-          if (dropped) {
-            getLogger().info("final_reply.dropped", {
-              runId,
-              reason: dropped,
-              chars: text.length,
-              trigger: run.trigger,
-            });
-            text = "";
-            blocks = [];
-          }
-          // Gray next-message text in the composer. It starts as soon as the reply text is final,
-          // beside the checkpoint and finalize below, so it is ready about when the reply lands.
-          const suggestionPending =
-            text.trim() && !blocks.some((block) => block.kind === "ask")
-              ? startReplySuggestion(text)
-              : null;
-          const markUnread = completionMarksUnread(
-            run.trigger,
-            text,
-            peerMessage?.repliesToRequest === true,
-          );
-          // The workspace export can take minutes; the reply is ready now. Publish it as a
-          // durable message first, then checkpoint while the run still holds its lease, and
-          // finalize without a second copy. Failures still fail the run as before.
-          let finalBlocks = blocks;
-          // Simulated 11-14: a one-line note, then the answer saying the same again. When the
-          // note is still the newest message, the answer takes its place.
-          if (
-            // Gate b19c9913: an answer that read records first carries its steps row as well.
-            // Gate 2a73ed94: one that ends in a question card takes its place too.
-            blocks.some((block) => block.kind === "text" || block.kind === "ask") &&
-            blocks.every(
-              (block) =>
-                block.kind === "text" ||
-                block.kind === "steps" ||
-                (block.kind === "ask" && !block.approvalEffectId),
-            ) &&
-            (await replaceLatestReply(blocks, null))
-          ) {
-            finalBlocks = [];
-          }
-          if (workspaceCheckpoint.pending && finalBlocks.length > 0) {
-            if (!(await renewRunLease(deps, runId, workerId, fence))) return;
-            await publishMessage(
-              deps,
-              run,
-              "bot",
-              completedRunBlocks(blocks, attempt.startedAt ?? null, new Date()),
-              markUnread,
-            );
-            finalBlocks = [];
-          }
+            event.requestedSchema &&
+            containsSecret(JSON.stringify(event.requestedSchema), runSecrets)
+          )
+            throw new Error("Ask form contains protected input");
+          const safeText = visible(redactSecrets(event.text, runSecrets));
+          const safeDetail = event.detail
+            ? visible(redactSecrets(event.detail, runSecrets))
+            : event.detail;
+          const safeActions = event.actions?.map((action) => ({
+            id: action.id,
+            label: visible(redactSecrets(action.label, runSecrets)),
+          }));
           await workspaceCheckpoint.flush();
-          terminalCheckpointComplete = true;
-
-          if (!(await renewRunLease(deps, runId, workerId, fence))) return;
-          const botMessageOutcome =
-            run.trigger === "bot_message"
-              ? botMessageOutcomeFromMidTurn(text, midTurnUserTexts)
-              : null;
-          const completed = await deps.events.finalizeRun({
+          const paused = await pauseRunForInput({
             spaceId: run.spaceId,
-            threadId: thread.id,
-            botId: bot.id,
+            threadId: run.threadId,
+            botId: run.botId,
             runId,
-            taskId: run.taskId,
             attemptId: attempt.id,
             leaseOwner: workerId,
             leaseFence: fence,
-            outcome: "completed",
-            blocks: finalBlocks,
-            markUnread,
-            timing: runTiming,
-            ...(modelRetries ? { modelRetries } : {}),
+            blocks: [
+              {
+                kind: "ask",
+                text: safeText,
+                detail: safeDetail,
+                status: "pending",
+                actions: safeActions,
+                ...(event.multiple && safeActions?.length ? { multiple: true } : {}),
+                requestedSchema: event.requestedSchema,
+              },
+            ],
+            // Keep unredacted labels on the run for resume; message blocks stay redacted.
+            offeredActions: event.actions,
           });
-          if (!completed) return;
-          logRunTiming("completed");
-          // Saved as soon as it is ready, without waiting for the checks below. The composer shows it
-          // only while this reply is the newest message and nothing is running.
-          if (suggestionPending && !completed.continuationRunId)
-            saveReplySuggestion(suggestionPending);
-          // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
-          if (lastThinking)
-            await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>
-              getLogger().warn("run thinking save failed", {
-                reason: String(error),
-              }),
-            );
-          if (completed.continuationRunId) {
-            await deps.jobs
-              .enqueue(runContinueJob(completed.continuationRunId))
-              .catch((error) => getLogger().error("steering continuation enqueue", error));
-          }
-          if (thread.groupId && !handedOff) {
-            await reportGroupStageOutcome(deps, run, thread.groupId, {
-              status: "completed",
-            }).catch((error) => getLogger().error("group handoff report", error));
-          }
-          if (botMessageOutcome) {
-            // Prefer the final reply. If the turn only posted mid-turn progress, return that
-            // text explicitly as status. Delivery uses a stable auto-outcome key; mark
-            // botOutcomeReturnedAt only after a successful (or intentionally skipped) return
-            // so a crash or failed delivery stays visible to the reconciler.
-            await returnBotMessageOutcome(
-              deps,
-              { ...run, sourceMessageId: run.sourceMessageId },
-              { id: bot.id, name: bot.name },
-              botMessageOutcome.text,
-              botMessageOutcome.intent,
-            ).catch((error) => getLogger().error("bot message result return", error));
-          }
-          // Work delegated to this conversation (a role's, or an agent's own) returns once it is
-          // idle (bot-messages.ts): this run may be the teammate's or the continuation that ended it.
-          if (!thread.groupId?.startsWith("recruiting-global-"))
-            await returnSettledDelegations(deps, thread.id).catch((error) =>
-              getLogger().error("settled delegation return", error),
-            );
-          const notifyBody = completionNotificationPreview(text);
-          if (
-            runSendsFinishNotification(run.trigger, Boolean(completed.continuationRunId)) &&
-            notifyBody
-          ) {
-            await notifyRun(deps, run, {
-              kind: "completion",
-              title: `${bot.name} finished`,
-              body: notifyBody,
-              botId: bot.id,
-              threadId: thread.id,
-            });
-          }
+          if (!paused) return;
+          await notifyRun(deps, run, {
+            kind: "help",
+            title: `${bot.name} needs an answer`,
+            body: safeText,
+            botId: bot.id,
+            threadId: thread.id,
+          });
           await sendCompletionEmailIfDone(
             deps,
             { ...run, id: runId, threadId: thread.id },
-            {
-              text,
-              groupId: thread.groupId,
-              continuing: handedOff || Boolean(completed.continuationRunId),
-            },
+            { text: safeText, groupId: thread.groupId, continuing: false, question: true },
           );
-          // Last, and never fatal: the run is already finalized, so a failure here must not reach
-          // the catch block below, where a second finalizeRun would match no rows and silently
-          // skip the completion notification.
-          try {
-            const updatedThread = await deps.prisma.thread.findUniqueOrThrow({
-              where: { id: thread.id },
-              select: {
-                nextMessageSeq: true,
-                historyCompactedUpToSeq: true,
-              },
-            });
-            if (
-              shouldEnqueueCompaction(
-                updatedThread.nextMessageSeq,
-                updatedThread.historyCompactedUpToSeq,
-                HISTORY_WINDOW_SIZE,
-                COMPACTION_BATCH_SIZE,
-              )
-            ) {
-              await deps.jobs.enqueue({
-                ...historyCompactJob(thread.id, run.id),
-                keepExisting: true,
-              });
-            }
-          } catch (error) {
-            getLogger().error("history.compact enqueue failed", error);
-          }
-        } catch (error) {
-          let runtimeError = error;
-          try {
-            runComputer.throwIfFailed();
-          } catch (startupError) {
-            if (!deps.shutdownSignal?.aborted || startupError !== deps.shutdownSignal.reason)
-              throw startupError;
-            // Pi may wrap a tool exception; preserve the original shutdown identity for recovery.
-            runtimeError = startupError;
-          }
-          const interruptedByShutdown =
-            deps.shutdownSignal?.aborted &&
-            runAbortController?.signal.aborted &&
-            runtimeError === deps.shutdownSignal.reason &&
-            runAbortController.signal.reason === deps.shutdownSignal.reason;
-          if (!terminalCheckpointComplete) {
-            await workspaceCheckpoint.flush().catch(() => undefined);
-          }
-          if (interruptedByShutdown) {
-            getLogger().info("run interrupted by worker shutdown", { runId });
-            await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
-            return;
-          }
-          const reported = redactSecrets(
-            error instanceof Error ? error.message : String(error),
-            runSecrets,
-          );
-          const retryable = hideVendors && (silenceWatch.fired || MODEL_OUTAGE.test(reported));
-          const retryDelay = retryable
-            ? modelOutageRetryDelayMs(
-                await deps.prisma.attempt.count({
-                  where: { runId, error: MODEL_OUTAGE_RETRY },
-                }),
-                silenceWatch.fired,
-              )
-            : undefined;
-          const retried = retryable && retryDelay === undefined;
-          const message = silenceWatch.fired
-            ? retried
-              ? SILENT_RUN_RETRIED_TEXT
-              : SILENT_RUN_STOP_TEXT
-            : reported;
-          // A recruiter's request must not vanish because the model went silent, the run made no
-          // progress for the silence limit, or the model was briefly unavailable after its own
-          // retries: resume the turn (the resume brief says what was done and cut off) before
-          // reporting failure.
-          if (retryDelay !== undefined) {
-            const released = await writeComputerRunRequeue(
-              deps,
-              run,
-              workerId,
-              fence,
-              resumeCheckpoint,
-              heldForTakeover,
-              MODEL_OUTAGE_RETRY,
-            );
-            if (released) {
-              getLogger().warn("run.model_outage.retry", {
-                runId,
-                errorText: message.slice(0, 200),
-              });
-              await deps.prisma.attempt.update({
-                where: { id: attempt.id },
-                data: {
-                  status: "failed",
-                  error: MODEL_OUTAGE_RETRY,
-                  finishedAt: new Date(),
-                },
-              });
-              await deps.jobs.enqueue({
-                ...runContinueJob(runId),
-                availableAt: new Date(Date.now() + Math.max(retryDelay, computerRetryDelay(fence))),
-              });
-              return;
-            }
-          }
-          const failed = await deps.events.finalizeRun({
-            spaceId: run.spaceId,
-            threadId: thread.id,
+        };
+        await binding.serve({
+          request: {
             botId: bot.id,
+            threadId: thread.id,
             runId,
-            taskId: run.taskId,
-            attemptId: attempt.id,
-            leaseOwner: workerId,
-            leaseFence: fence,
-            outcome: "failed",
-            error: message,
-          });
-          if (!failed) return;
-          if (failed.continuationRunId) {
-            await deps.jobs
-              .enqueue(runContinueJob(failed.continuationRunId))
-              .catch((error) => getLogger().error("steering continuation enqueue", error));
-          }
-          if (run.trigger === "bot_message") {
-            await returnBotMessageOutcome(
-              deps,
-              { ...run, sourceMessageId: run.sourceMessageId },
-              { id: bot.id, name: bot.name },
-              `Could not complete the delegated request: ${message}`,
-              "status",
-              { forceUnread: true },
-            ).catch((returnError) => getLogger().error("bot message failure return", returnError));
-          }
-          if (thread.groupId && !failed.continuationRunId) {
-            await reportGroupStageOutcome(deps, run, thread.groupId, {
-              status: "failed",
-              error: message,
-            }).catch((reportError) => getLogger().error("group handoff report", reportError));
-            // A teammate's failure on delegated work reaches the conversation that asked for it.
-            if (run.trigger !== "bot_message")
-              await reportDelegatedTeamBlocked(deps, run, {
-                kind: "failed",
-                text: message,
-              }).catch((reportError) =>
-                getLogger().error("delegated team failure report", reportError),
-              );
-          }
-          if (runSendsFinishNotification(run.trigger) && !failed.continuationRunId) {
-            await notifyRun(deps, run, {
-              kind: "failure",
-              ...(await failureNotice(
-                deps.prisma,
-                thread.id,
-                bot.name,
-                message,
-                silenceWatch.fired ? "time" : undefined,
-              )),
-              botId: bot.id,
-              threadId: thread.id,
-            });
-          }
-        }
+            contextStrategy,
+            tools,
+            model: runModel,
+            fallbackModels: runFallbackModels,
+            executeTool: scripted ? undefined : applyTool,
+            storeToolOutput:
+              scripted || !deps.artifacts
+                ? undefined
+                : async (output) => {
+                    try {
+                      return await storeToolOutputArtifact(
+                        { prisma: deps.prisma, artifacts: deps.artifacts! },
+                        {
+                          spaceId: run.spaceId,
+                          userId: run.userId,
+                          botId: bot.id,
+                          groupId: thread.groupId ?? undefined,
+                          runId: run.id,
+                          toolName: output.name,
+                          executionId: output.executionId,
+                          text: redactSecrets(output.text, runSecrets),
+                        },
+                      );
+                    } catch (error) {
+                      getLogger().warn("tool output artifact not stored", {
+                        runId,
+                        tool: output.name,
+                        error: error instanceof Error ? error.message : String(error),
+                      });
+                      return undefined;
+                    }
+                  },
+            resolveModel: scripted
+              ? undefined
+              : (provider, modelId) =>
+                  resolveConnectedModel(run, provider, modelId, (values) =>
+                    runSecrets.push(...values),
+                  ),
+          },
+          showAsk,
+          // What the approved replays above did, read before the model's first step.
+          notes: [
+            approvedEffectReplays.nextToolName() ? approvalContinuation : undefined,
+            replyOutcome,
+            ...sendOutcomes,
+          ].filter((note): note is string => Boolean(note)),
+        });
+        await withinDeadline<unknown>(Promise.all(savesInFlight), SAVE_WAIT_MS, () =>
+          getLogger().warn("run.end.saves_still_running", { runId }),
+        );
+        await workspaceCheckpoint
+          .flush()
+          .catch((error: unknown) =>
+            getLogger().warn("run workspace checkpoint", { runId, error: String(error) }),
+          );
       } catch (setupError) {
-        const computerBusy = setupError instanceof ComputerBusyError;
-        const retryForever = computerBusy || isTooManyDatabaseConnections(setupError);
-        // A run stopped while it was setting up (the person pressed Stop, or the chat was archived)
-        // fails its live-run checks by design; that is not a setup error.
-        if (!computerBusy && !(await stoppedDuringSetup(deps.prisma, runId, setupError))) {
-          // undici collapses every network failure to "fetch failed"; the cause names the
-          // host and errno, which is the only part worth paging over.
+        if (!(await stoppedDuringSetup(deps.prisma, runId, setupError))) {
           const causeMessage =
             setupError instanceof Error && setupError.cause instanceof Error
               ? `: ${setupError.cause.message}`
@@ -12976,119 +11596,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : String(setupError),
               runSecrets,
             ),
-            // The stack names the lookup that failed; the message alone ("Resource not found") does not.
             setupError instanceof Error && setupError.stack
-              ? {
-                  stack: redactSecrets(setupError.stack.slice(0, 2000), runSecrets),
-                }
+              ? { stack: redactSecrets(setupError.stack.slice(0, 2000), runSecrets) }
               : undefined,
           );
         }
-        // A thread, role or member that is gone (an archived chat) never comes back on a retry,
-        // so the turn ends instead of staying queued and retried forever.
-        if (
-          !retryForever &&
-          leaseValid &&
-          setupError instanceof IsolationError &&
-          (await chatGone(deps.prisma, run.threadId))
-        ) {
-          await deps.events.finalizeRun({
-            spaceId: run.spaceId,
-            threadId: run.threadId,
-            botId: run.botId,
-            runId,
-            taskId: run.taskId,
-            attemptId: attempt.id,
-            leaseOwner: workerId,
-            leaseFence: fence,
-            outcome: "failed",
-            error: "This conversation is no longer available.",
-          });
-          return;
-        }
-        // A computer that keeps failing to start will not fix itself on the next retry: end the
-        // turn with the reset button instead of leaving it queued until the stuck-work reaper.
-        if (
-          !retryForever &&
-          leaseValid &&
-          computerStartFailure !== undefined &&
-          setupError === computerStartFailure &&
-          (await setupFailures(deps.prisma, runId)) >= COMPUTER_START_ATTEMPTS - 1
-        ) {
-          const failed = await deps.events.finalizeRun({
-            spaceId: run.spaceId,
-            threadId: run.threadId,
-            botId: run.botId,
-            runId,
-            taskId: run.taskId,
-            attemptId: attempt.id,
-            leaseOwner: workerId,
-            leaseFence: fence,
-            outcome: "failed",
-            error: COMPUTER_START_FAILED,
-          });
-          if (failed) {
-            if (failed.continuationRunId)
-              await deps.jobs
-                .enqueue(runContinueJob(failed.continuationRunId))
-                .catch((error) => getLogger().error("steering continuation enqueue", error));
-            else if (runSendsFinishNotification(run.trigger)) {
-              try {
-                const owner = await deps.prisma.bot.findUnique({
-                  where: { id: run.botId },
-                  select: { name: true },
-                });
-                await notifyRun(deps, run, {
-                  kind: "failure",
-                  ...(await failureNotice(
-                    deps.prisma,
-                    run.threadId,
-                    owner?.name ?? "Your assistant",
-                    COMPUTER_START_FAILED,
-                  )),
-                  botId: run.botId,
-                  threadId: run.threadId,
-                });
-              } catch (error) {
-                getLogger().error("computer start failure notice", error);
-              }
-            }
-          }
-          return;
-        }
-        const released = await writeComputerRunRequeue(
-          deps,
-          run,
-          workerId,
-          fence,
-          resumeCheckpoint,
-          heldForTakeover,
-          retryForever ? null : "Run setup failed; retrying",
-        );
-        if (released) {
-          await deps.prisma.attempt.update({
+        await deps.prisma.attempt
+          .update({
             where: { id: attempt.id },
-            data: {
-              status: "setup_failed",
-              error: retryForever ? null : "Run setup failed; retrying",
-              finishedAt: new Date(),
-            },
-          });
-          if (retryForever) {
-            await deps.jobs.enqueue({
-              ...runContinueJob(runId),
-              availableAt: new Date(Date.now() + computerRetryDelay(fence)),
-            });
-            return;
-          }
-          // Retries back off for hours; after a few the recruiter hears that the work is still
-          // coming, once, instead of a silent chat.
-          if (!isBackgroundRunTrigger(run.trigger))
-            await announceSetupRetry(deps, run).catch((error) =>
-              getLogger().error("setup retry notice", error),
-            );
-          throw new Error("Run setup failed; retrying");
-        }
+            data: { status: "setup_failed", finishedAt: new Date() },
+          })
+          .catch(() => undefined);
+        throw setupError;
       } finally {
         detachShutdown?.();
         clearInterval(heartbeat);
@@ -14040,9 +12559,7 @@ async function threadLaneBusy(
       threadId: run.threadId,
       botId: run.botId,
       id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
-      ...(delegated
-        ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } }
-        : {}),
+      ...(delegated ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } } : {}),
       OR: [
         { status: { in: ["leased", "running"] } },
         // A delegated child inherits an active ancestor turn; queued work cannot preempt that turn.
@@ -14060,29 +12577,6 @@ async function threadLaneBusy(
     },
   });
   return blockers > 0;
-}
-
-async function requeueComputerRun(
-  deps: ExecutorDeps,
-  run: { id: string; spaceId: string; threadId: string; botId: string },
-  workerId: string,
-  fence: number,
-  resumeCheckpoint: TakeoverResumeCheckpoint | null,
-  heldForTakeover = false,
-): Promise<void> {
-  const released = await writeComputerRunRequeue(
-    deps,
-    run,
-    workerId,
-    fence,
-    resumeCheckpoint,
-    heldForTakeover,
-  );
-  if (!released) return;
-  await deps.jobs.enqueue({
-    ...runContinueJob(run.id),
-    availableAt: new Date(Date.now() + computerRetryDelay(fence)),
-  });
 }
 
 function isUniqueViolation(error: unknown): boolean {

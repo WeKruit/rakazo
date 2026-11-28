@@ -87,7 +87,7 @@ export interface SessionHostDeps {
 export type SessionHostOutcome = "released" | "not_owner" | "lease_lost";
 
 /** A Pi user message that remembers which outbox input it came from. */
-export type SessionInputMessage = UserMessage & { rakazoInputId: string };
+export type SessionInputMessage = UserMessage & { rakazoInputId: string; rakazoMessageId?: string };
 
 const HARNESS_EVENT_TYPES: readonly HarnessEventType[] = [
   "run_start",
@@ -137,6 +137,7 @@ export function inputMessage(input: SessionInputRow): SessionInputMessage {
     content: [{ type: "text", text: inputText(input.payload) }],
     timestamp: Date.now(),
     rakazoInputId: input.id,
+    ...(input.messageId ? { rakazoMessageId: input.messageId } : {}),
   };
 }
 
@@ -427,6 +428,8 @@ async function ownSession(own: Ownership): Promise<SessionHostOutcome> {
         await finish("lease_lost");
         return;
       }
+      // An input whose notify was lost is delivered within one renewal.
+      schedule();
       if (
         !quiescing &&
         !pumping &&

@@ -783,7 +783,6 @@ export interface RecruitingInboxObservation {
 }
 
 export interface BackgroundJobPayloads {
-  "run.continue": { runId: string };
   "routine.wakeup": { routineId: string; scheduledFor: string };
   "computer.sleep": { computerId: string };
   "computer.update": { updateId: string };

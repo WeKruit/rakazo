@@ -1,5 +1,5 @@
 import type { Prisma, SessionInputPayload } from "@rakazo/db";
-import { submitConversationInput } from "@rakazo/db";
+import { submitConversationInput, submitConversationWakeOnce } from "@rakazo/db";
 
 /**
  * A routine that fires is one input into the session of its agent in its conversation, in the
@@ -16,8 +16,10 @@ export async function submitRoutineInput(
     /** The routine's saved prompt, skill references expanded. */
     prompt: string;
     model: { modelProvider: string | null; modelId: string | null; thinkingLevel: string | null };
+    /** A retried request with the same key submits nothing. */
+    wakeKey?: string;
   },
-): Promise<{ sessionId: string }> {
+): Promise<{ sessionId: string } | null> {
   const payload: SessionInputPayload = { text: fired.prompt, routineId: fired.routineId };
   if (fired.model.modelProvider && fired.model.modelId)
     payload.modelPin = {
@@ -25,10 +27,22 @@ export async function submitRoutineInput(
       modelId: fired.model.modelId,
       thinkingLevel: fired.model.thinkingLevel,
     };
-  const { sessionId } = await submitConversationInput(
-    tx,
-    { spaceId: fired.spaceId, userId: fired.userId, threadId: fired.threadId, botId: fired.botId },
-    { kind: "message", trigger: "routine", payload },
-  );
+  const key = {
+    spaceId: fired.spaceId,
+    userId: fired.userId,
+    threadId: fired.threadId,
+    botId: fired.botId,
+  };
+  if (fired.wakeKey)
+    return submitConversationWakeOnce(tx, key, {
+      kind: "message",
+      trigger: "routine",
+      payload: { ...payload, wakeKey: fired.wakeKey },
+    });
+  const { sessionId } = await submitConversationInput(tx, key, {
+    kind: "message",
+    trigger: "routine",
+    payload,
+  });
   return { sessionId };
 }

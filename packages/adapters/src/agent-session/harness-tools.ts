@@ -27,12 +27,18 @@ export function replayPolicyFor(toolName: string): ReplayPolicy {
 export function toHarnessTool(
   tool: AgentTool,
   replay: ReplayPolicy = replayPolicyFor(tool.name),
+  /** Waits until the operation's run setup can execute its tools. */
+  beforeExecute?: (operationId: string) => Promise<void>,
 ): AgentHarnessTool<RakazoToolContext> {
   const { execute, ...definition } = tool;
   return {
     ...definition,
     replay,
-    execute: (_toolCallId, params, onUpdate, _toolContext, invocation, context) =>
-      execute(invocation.invocationId, params, context.abortSignal, (partial) => onUpdate(partial)),
+    execute: async (_toolCallId, params, onUpdate, _toolContext, invocation, context) => {
+      await beforeExecute?.(invocation.operationId);
+      return execute(invocation.invocationId, params, context.abortSignal, (partial) =>
+        onUpdate(partial),
+      );
+    },
   };
 }
