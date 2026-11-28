@@ -318,7 +318,7 @@ const onAccount = (scenario, run) => {
 let nextPlay = 0;
 async function worker(plays) {
   while (nextPlay < plays.length) {
-    const { scenario, sample, retry } = plays[nextPlay++];
+    const { scenario, sample } = plays[nextPlay++];
     const at = Date.now();
     let failures;
     try {
@@ -351,7 +351,6 @@ async function worker(plays) {
           }
         : {}),
       ...(scenario.known ? { known: scenario.known } : {}),
-      ...(retry ? { retry: true } : {}),
       ...(infra ? { infra: true } : {}),
     };
     rows.push(row);
@@ -364,21 +363,9 @@ const pool = async (list) => {
   nextPlay = 0;
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, list.length) }, () => worker(list)));
 };
+// Each sample plays once: a failure is reported, not played again, so the gate does not wait
+// for replays. A sample the environment broke is reported as such, not as a product failure.
 await pool(plays);
-// One sample can fail on a reply that varies from run to run. A failed free sample is played once
-// more on a fresh account; it blocks the release only when the second play fails too. Both rows
-// stay on the scoreboard. Paid scenarios are never played twice.
-const retries = rows
-  .filter((row) => !row.pass && !row.known && !row.paid)
-  .map((row) => ({
-    scenario: wanted.find((scenario) => scenario.name === row.scenario),
-    sample: `${row.sample}-again`,
-    retry: true,
-  }));
-if (retries.length) {
-  log(`playing ${retries.length} failed free sample(s) once more`);
-  await pool(retries);
-}
 fs.writeFileSync(
   path.join(OUT, "results.jsonl"),
   `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
@@ -394,28 +381,14 @@ if (BENCH) {
   fs.appendFileSync(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
 }
 const failed = rows.filter((row) => !row.pass);
-const againOf = (row) =>
-  rows.find(
-    (item) => item.retry && item.scenario === row.scenario && item.sample === `${row.sample}-again`,
-  );
-// A sample the environment broke on both plays says nothing about the product: it is reported
-// as an infrastructure failure (exit code 2), not a product one.
-const blocking = failed.filter(
-  (row) =>
-    !row.known &&
-    !row.retry &&
-    (row.paid || !againOf(row) || !againOf(row).pass) &&
-    !(row.infra && (!againOf(row) || againOf(row).infra)),
-);
-const broken = failed.filter(
-  (row) => !row.retry && row.infra && (!againOf(row) || againOf(row).infra),
-);
+// A sample the environment broke says nothing about the product: it is reported as an
+// infrastructure failure (exit code 2), not a product one.
+const blocking = failed.filter((row) => !row.known && !row.infra);
+const broken = failed.filter((row) => row.infra);
 for (const row of broken)
   log(
     `infrastructure failure, not a product result: ${row.scenario}#${row.sample} (${row.failures[0]})`,
   );
-for (const row of failed.filter((item) => !item.known && !item.retry && againOf(item)?.pass))
-  log(`failed once, passed when played again, not blocking: ${row.scenario}#${row.sample}`);
 log(`${rows.length - failed.length}/${rows.length} conversations pass`);
 for (const row of failed.filter((item) => item.known))
   log(`known failure, not blocking: ${row.scenario}#${row.sample} (${row.known})`);
