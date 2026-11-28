@@ -282,7 +282,11 @@ describe("activation card for one person's own first email", () => {
         {
           steps: [
             { variants: [{ subject: "Founding role", body: "<p>Hi there</p>" }] },
-            { delay: 3, delay_unit: "days", variants: [{ subject: "", body: "<p>Bumping this</p>" }] },
+            {
+              delay: 3,
+              delay_unit: "days",
+              variants: [{ subject: "", body: "<p>Bumping this</p>" }],
+            },
             {
               delay: 1,
               delay_unit: "days",
@@ -634,7 +638,10 @@ describe("shared mail account isolation", () => {
       },
       { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
     );
-    expect(result).toMatchObject({ id: NEW, next: "Draft campaign with no leads; nothing was sent." });
+    expect(result).toMatchObject({
+      id: NEW,
+      next: "Draft campaign with no leads; nothing was sent.",
+    });
     // Recorded as this account's campaign, so add_leads and activate_campaign may use it.
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({

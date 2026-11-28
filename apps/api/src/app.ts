@@ -19,8 +19,10 @@ import type {
   RemoteConnectorDependencies,
 } from "@rakazo/adapters";
 import {
+  afterSessionRun,
   applyMessagingOutboundStatus,
   assertHomeStorageConfiguration,
+  bindSessionDriver,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   ComposioConnector,
@@ -247,6 +249,8 @@ export async function createApp(
   prisma = withSecretPersistence(prisma, secrets);
   const events = createThreadEvents(prisma, realtime, {
     runSecretWriter: createRunSecretWriter(secrets),
+    // The publisher is made below; sessions are only woken once requests arrive.
+    jobs: { enqueue: (job) => jobs.enqueue(job) },
   });
   const ticketBoardEnabled = env.ticketBoardEnabled;
   const boardEvents = createBoardEvents(realtime);
@@ -617,6 +621,14 @@ export async function createApp(
     connector: stack.connector,
     artifacts,
     shutdownSignal: shutdown.signal,
+    driveSession: bindSessionDriver({
+      executor,
+      realtime,
+      workerId: "api",
+      projection: { events, jobs, notifications },
+      afterRun: (runId) => afterSessionRun({ prisma, events, jobs, messaging }, runId),
+    }),
+    sessionHostSignal: shutdown.signal,
   });
   if (inMemoryJobs) {
     await inMemoryJobs.start(jobHandlers);
@@ -627,7 +639,6 @@ export async function createApp(
         jobs,
         events,
         notifications,
-        completionEmail: Boolean(email),
         reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
         reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
       })
@@ -653,6 +664,8 @@ export async function createApp(
   const actorEvents = actorDb
     ? createThreadEvents(actorPrisma, realtime, {
         runSecretWriter: createRunSecretWriter(secrets),
+        // The publisher is made below; sessions are only woken once requests arrive.
+        jobs: { enqueue: (job) => jobs.enqueue(job) },
       })
     : events;
   const router = createRouter({

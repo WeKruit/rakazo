@@ -92,7 +92,7 @@ describePostgres("cloud agent lifecycle and recovery (PostgreSQL + Cursor emulat
     const deps = {
       prisma,
       jobs,
-      events: { notify: vi.fn(async () => undefined) },
+      events: { notify: vi.fn(async () => undefined), wakeSessions: vi.fn(async () => undefined) },
       cloudAgent: connection,
     };
     const context: AdapterContext & { botId: string } = {

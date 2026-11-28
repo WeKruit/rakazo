@@ -187,25 +187,6 @@ describe("Pi runtime cancellation", () => {
     expect(agent.settled).toBe(true);
   });
 
-  it("does not start a prompt after cancellation during asynchronous setup", async () => {
-    const setup = fake.deferred();
-    const runtime = new PiAgentRuntime();
-    const stream = runtime
-      .run({
-        ...request,
-        claimSteering: async () => {
-          await setup.promise;
-          return [];
-        },
-      })
-      [Symbol.asyncIterator]();
-    const first = stream.next();
-    const closing = stream.return!();
-    setup.resolve();
-    await Promise.all([first, closing]);
-    expect(fake.state.agents.every((agent) => !agent.listener)).toBe(true);
-  });
-
   it("does not dispatch another tool after cancellation", async () => {
     const executeTool = vi.fn();
     const runtime = new PiAgentRuntime();

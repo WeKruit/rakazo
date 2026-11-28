@@ -6,7 +6,7 @@ export const RAW_ID =
 export const SUPPLIER =
   /\b(?:exa|coresignal|fullenrich|contactout|leadmagic|instantly|composio|juicebox|serper)\b/i;
 export const TOOL_NAME =
-  /\b(?:agent_run|ask_user|delegate_to_role|handoff_to_bot|start_role|search_history|recruiting_[a-z_]+|mcp__\w+|work_estimate)\b/;
+  /\b(?:agent_run|ask_user|delegate_work|handoff_to_bot|search_history|recruiting_[a-z_]+|mcp__\w+|work_estimate)\b/;
 /** The strings on a page that look like raw IDs: short chips, buttons and links only. */
 // CamelCase words and brands ("LinkedIn", "iPhone", "GitHub") are words, not IDs.
 const CAMEL_WORD = /^[a-z]*(?:[A-Z][a-z]+)+$/;

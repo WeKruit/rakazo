@@ -1,12 +1,12 @@
 import type { AdapterContext, ComputerRef } from "@rakazo/adapter-kit";
 import { describe, expect, it } from "vitest";
+import { filterPageBrowserTools, PAGE_BROWSER_TOOL_NAMES } from "./agent-session/session-tools.js";
 import {
   browserActFromTool,
   browserNavigateFromTool,
   browserSnapshotFromTool,
   parseBrowserActions,
 } from "./browser-tools.js";
-import { filterPageBrowserTools, PAGE_BROWSER_TOOL_NAMES } from "./executor.js";
 import { FakeBrowserProvider } from "./fake-browser.js";
 
 const context: AdapterContext = {

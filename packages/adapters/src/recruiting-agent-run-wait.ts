@@ -1,8 +1,8 @@
 import type { BackgroundJobPayloads, JobPublisher } from "@rakazo/adapter-kit";
-import { recruitingAgentRunWaitJob, runContinueJob } from "@rakazo/adapter-kit";
+import { recruitingAgentRunWaitJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
-import type { PrismaClient } from "@rakazo/db";
-import { RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX } from "@rakazo/db";
+import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX, submitConversationInput } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { mcpObject } from "./recruiting-research.js";
 import {
@@ -19,7 +19,7 @@ import {
  * A people-search agent run can keep working at the provider for hours, longer than any one
  * turn. When a turn ends with the run still going, the agent that started it is woken in the
  * same conversation to collect it, as often as it takes, until the run finishes. Not a new
- * orchestrator: each wake is one ordinary run whose own agent_run call either collects the
+ * orchestrator: each wake is one follow-up in its session whose agent_run call either collects the
  * people (saved to Results as usual) or, still running, schedules the next wake.
  */
 export { RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX };
@@ -29,9 +29,6 @@ export const RECRUITING_AGENT_RUN_WAIT_MS = 60_000;
 const MAX_WAIT_MS = 12 * 60 * 60_000;
 /** A wake waits until the recruiter has not written for this long. */
 const QUIET_MS = 5 * 60_000;
-/** Wakes for one provider answer that may give way to the recruiter before the next is skipped. */
-const MAX_YIELDS = 20;
-const BUSY_STATUSES = ["queued", "leased", "running"];
 const STILL_RUNNING = new Set(["running", "pending", "queued", "in_progress"]);
 
 /** The agent run a wake was started for, read back from its run nonce. */
@@ -58,7 +55,7 @@ export function recruitingAgentRunWaitPrompt(
 ): string {
   // Facts only, like a background-task notification: what to do with it is the skill's.
   return [
-    `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message: it is a notice about your own work. agent_run with runId "${agentRunId}" collects it; the people it returns are saved to Results automatically. An empty reply posts nothing.`,
+    `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message: it is a notice about your own work. The people it returns are saved to Results automatically. An empty reply posts nothing.`,
     countdown
       ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over.`
       : "",
@@ -89,7 +86,11 @@ async function memberOf(
 }
 
 export async function waitForRecruitingAgentRun(
-  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
+  deps: {
+    prisma: PrismaClient;
+    jobs: Pick<JobPublisher, "enqueue">;
+    events: Pick<ThreadEvents, "wakeSessions">;
+  },
   payload: BackgroundJobPayloads["recruiting_agent_run.wait"],
   now = Date.now(),
 ): Promise<void> {
@@ -151,70 +152,57 @@ export async function waitForRecruitingAgentRun(
     return skipped("recruiter active");
   }
   // One wake per provider answer: a wake that ends without asking again is the agent's choice.
-  // A wake that gave way to the recruiter was cancelled before it finished, so it is retried.
-  const answerNonce = `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}${payload.agentRunId}:${latest.id}`;
-  const runId = await deps.prisma.$transaction(async (tx) => {
+  const wakeKey = `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}${payload.agentRunId}:${latest.id}`;
+  const sessionId = await deps.prisma.$transaction(async (tx) => {
     // The thread row serializes this with other automated starts in the conversation.
     const locked = await tx.thread.updateMany({
       where: { id: thread.id, spaceId: thread.spaceId },
       data: { nextEventSeq: { increment: 0 } },
     });
     if (!locked.count) return null;
-    const [earlier, running] = await Promise.all([
-      tx.run.findMany({
-        where: { spaceId: thread.spaceId, clientNonce: { startsWith: answerNonce } },
-        select: { status: true },
+    const [earlierInput, earlierRun] = await Promise.all([
+      tx.sessionInput.findFirst({
+        where: {
+          session: { threadId: thread.id, botId: payload.botId },
+          payload: { path: ["wakeKey"], equals: wakeKey },
+        },
+        select: { id: true },
       }),
+      // A wake started on the run harness before the upgrade.
       tx.run.findFirst({
-        where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
+        where: {
+          spaceId: thread.spaceId,
+          clientNonce: { startsWith: wakeKey },
+          status: { not: "cancelled" },
+        },
         select: { id: true },
       }),
     ]);
-    if (earlier.some((run) => run.status !== "cancelled") || earlier.length >= MAX_YIELDS)
-      return null;
-    if (running) return "busy";
-    const clientNonce = earlier.length ? `${answerNonce}:${earlier.length}` : answerNonce;
-    const task = await tx.task.create({
-      data: {
-        spaceId: thread.spaceId,
-        botId: payload.botId,
-        threadId: thread.id,
-        userId: thread.userId,
-        prompt: recruitingAgentRunWaitPrompt(
-          payload.agentRunId,
-          due && estimate?.estimateMs ? { estimateMs: estimate.estimateMs } : undefined,
-        ),
-        status: "queued",
-      },
-    });
-    const run = await tx.run.create({
-      data: {
-        spaceId: thread.spaceId,
-        botId: payload.botId,
-        threadId: thread.id,
-        userId: thread.userId,
-        taskId: task.id,
-        status: "queued",
+    if (earlierInput || earlierRun) return null;
+    // A follow-up: it waits for the turn in progress, which may collect the run itself.
+    const submitted = await submitConversationInput(
+      tx,
+      { spaceId: thread.spaceId, userId: thread.userId, threadId: thread.id, botId: payload.botId },
+      {
+        kind: "followUp",
         trigger: "recruiting_research" satisfies RunTrigger,
-        clientNonce,
+        payload: {
+          text: recruitingAgentRunWaitPrompt(
+            payload.agentRunId,
+            due && estimate?.estimateMs ? { estimateMs: estimate.estimateMs } : undefined,
+          ),
+          internal: true,
+          wakeKey,
+        },
       },
-    });
-    return run.id;
-  });
-  if (runId === "busy") {
-    // The open turn may collect the run itself; look again once it ends.
-    await deps.jobs.enqueue(
-      recruitingAgentRunWaitJob(payload, new Date(now + RECRUITING_AGENT_RUN_WAIT_MS)),
     );
-    return skipped("busy");
-  }
-  if (!runId) return skipped("already woken");
-  if (due && estimate) await markCountdownReported(deps.prisma, estimate.id, due);
-  getLogger().info("recruiting.agent_run_wait.woken", { ...payload, runId });
-  // The existing run reconciler recovers a queued run after an enqueue failure.
-  await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
-    getLogger().warn("recruiting agent run wake deferred to reconciliation");
+    return submitted.sessionId;
   });
+  if (!sessionId) return skipped("already woken");
+  if (due && estimate) await markCountdownReported(deps.prisma, estimate.id, due);
+  getLogger().info("recruiting.agent_run_wait.woken", { ...payload, sessionId });
+  // The session sweep drives a session whose input was not taken after a lost wake.
+  await deps.events.wakeSessions([sessionId]);
 }
 
 /** Re-arms the follow-up of every search still running, from the reconciler. Idempotent. */

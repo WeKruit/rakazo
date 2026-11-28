@@ -49,7 +49,7 @@ type LatestRowsDb = Pick<PrismaClient, "$queryRaw"> | Pick<Prisma.TransactionCli
 export async function latestThreadMessages(
   db: LatestRowsDb,
   threadIds: readonly string[],
-  options: { take: number; hideAutocontinue?: boolean },
+  options: { take: number },
 ): Promise<Map<string, LatestThreadMessage[]>> {
   const ids = [...new Set(threadIds)];
   const byThread = new Map<string, LatestThreadMessage[]>(ids.map((id) => [id, []]));
@@ -60,11 +60,6 @@ export async function latestThreadMessages(
     FROM unnest(${ids}::text[]) AS t(id)
     CROSS JOIN LATERAL (
       SELECT * FROM "messages" WHERE "threadId" = t.id
-      ${
-        options.hideAutocontinue
-          ? Prisma.sql`AND ("clientNonce" IS NULL OR "clientNonce" NOT LIKE 'autocontinue:%')`
-          : Prisma.empty
-      }
       ORDER BY "seq" DESC LIMIT ${options.take}
     ) m
     ORDER BY m."threadId", m."seq" DESC`;

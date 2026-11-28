@@ -57,7 +57,8 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
       },
     });
   }
-  async function run() {
+  /** A run of the agent: live by default, or another (ended) run beside the live one. */
+  async function run(status: "running" | "completed" = "running") {
     const task = await prisma.task.create({
       data: {
         spaceId: actor.spaceId,
@@ -75,7 +76,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
         botId: identity.botId,
         threadId: identity.threadId,
         taskId: task.id,
-        status: "running",
+        status,
         trigger: "user",
         sourceMessageId: input?.originalEmail.savedRead?.messageId,
         initialRecruitingRoleRevisionId: revisionId,
@@ -464,7 +465,13 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
       },
     };
     const first = await effect(calendarId, "create_booking", args);
-    const second = await effect(calendarId, "create_booking", args, undefined, (await run()).id);
+    const second = await effect(
+      calendarId,
+      "create_booking",
+      args,
+      undefined,
+      (await run("completed")).id,
+    );
     const bind = (effectId: string) =>
       bindRecruitingSchedulingOperation(prisma, actor, {
         threadId: input.threadId,
@@ -583,7 +590,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
       "native_instantly_reply_to_email",
       args,
       undefined,
-      (await run()).id,
+      (await run("completed")).id,
     );
     const bind = (effectId: string) =>
       bindRecruitingSchedulingOperation(prisma, actor, {
@@ -951,7 +958,7 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
         attendee: input.candidate,
       },
       undefined,
-      (await run()).id,
+      (await run("completed")).id,
     );
     await expect(
       bindRecruitingSchedulingOperation(prisma, actor, {

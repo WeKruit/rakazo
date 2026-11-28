@@ -1,19 +1,18 @@
-import type { BackgroundJobPayloads, JobPublisher } from "@rakazo/adapter-kit";
-import { runContinueJob } from "@rakazo/adapter-kit";
+import type { BackgroundJobPayloads } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
 import { pollWakePrompt } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
-import { closePoll } from "@rakazo/db";
+import { closePoll, submitConversationWakeOnce } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
 export const POLL_WAKE_NONCE_PREFIX = "poll:";
 
 /**
  * Closes a poll and wakes the bot that asked it in the same conversation. Not a scheduler of
- * its own: the wake is one ordinary queued run behind the conversation's other work.
+ * its own: the wake is one input into that bot's session in the conversation.
  */
 export async function closePollAndWake(
-  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue">; events: ThreadEvents },
+  deps: { prisma: PrismaClient; events: ThreadEvents },
   payload: BackgroundJobPayloads["poll.close"],
 ): Promise<void> {
   const closed = await closePoll(deps.prisma, payload);
@@ -24,7 +23,7 @@ export async function closePollAndWake(
   const botId = closed.askerBotId;
   if (!botId) return;
   const clientNonce = `${POLL_WAKE_NONCE_PREFIX}${closed.block.pollId}`;
-  const runId = await deps.prisma.$transaction(async (tx) => {
+  const sessionId = await deps.prisma.$transaction(async (tx) => {
     const thread = await tx.thread.findUnique({
       where: { id: closed.threadId },
       select: { botId: true, groupId: true },
@@ -37,38 +36,18 @@ export async function closePollAndWake(
         })
       : thread.botId === botId;
     if (!member) return null;
-    const earlier = await tx.run.findFirst({
-      where: { spaceId: closed.spaceId, clientNonce },
-      select: { id: true },
-    });
-    if (earlier) return null;
-    const task = await tx.task.create({
-      data: {
-        spaceId: closed.spaceId,
-        botId,
-        threadId: closed.threadId,
-        userId: closed.userId,
-        prompt: pollWakePrompt(closed.block),
-        status: "queued",
-      },
-    });
-    const run = await tx.run.create({
-      data: {
-        spaceId: closed.spaceId,
-        botId,
-        threadId: closed.threadId,
-        userId: closed.userId,
-        taskId: task.id,
-        status: "queued",
+    const submitted = await submitConversationWakeOnce(
+      tx,
+      { spaceId: closed.spaceId, userId: closed.userId, threadId: closed.threadId, botId },
+      {
+        kind: "message",
         trigger: "poll" satisfies RunTrigger,
-        clientNonce,
+        payload: { text: pollWakePrompt(closed.block), internal: true, wakeKey: clientNonce },
       },
-    });
-    return run.id;
+    );
+    return submitted?.sessionId ?? null;
   });
-  if (!runId) return;
-  // The existing run reconciler recovers a queued run after an enqueue failure.
-  await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
-    getLogger().warn("poll wake deferred to reconciliation");
-  });
+  if (!sessionId) return;
+  // The input is durable; a lost wake is repaired by the session sweep.
+  await deps.events.wakeSessions([sessionId]);
 }

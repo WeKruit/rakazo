@@ -232,7 +232,10 @@ export async function queueComputerUpdate(
             .catch((error) => {
               getLogger().error("computer control expiry cancellation", error);
             });
-          await enqueueTakeoverContinuation(deps.jobs, released.runId);
+          await enqueueTakeoverContinuation(
+            { prisma: deps.prisma, jobs: deps.jobs },
+            released.runId,
+          );
           if (released.runId) {
             await recordTakeoverHandback(deps, botId, prepared.handback, released.runId);
           }

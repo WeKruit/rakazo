@@ -189,6 +189,16 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ...(await runAdmission({ roleId: role.role.id }, { runId: run.id, threadId: thread.id })),
     };
   }
+  async function endLiveRuns(thread: string) {
+    await prisma.run.updateMany({
+      where: {
+        threadId: thread,
+        botId,
+        status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
+      },
+      data: { status: "completed" },
+    });
+  }
   async function mutateRole(
     db: PrismaClient,
     owner: Actor,
@@ -446,7 +456,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       definitionQuestions: [],
       intent: { basis: "direct", quote: words },
     });
-    expect(created.source?.anchor).toMatchObject({ messageId: asked.id });
+    // Provenance is the message this run acts for, as a structured fact.
+    expect(created.source?.anchor).toMatchObject({ messageId: delivery.id });
     const updated = await mutateRole(prisma, actor, context, {
       operation: "update",
       roleId: created.workspace!.role.id,
@@ -455,12 +466,14 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       preferences: ["Seattle"],
     } as recruiting.RecruitingRoleMutationInput);
     expect(updated).toMatchObject({ status: "saved", workspace: { role: { revision: 2 } } });
-    // The recruiter writing in the role's conversation after the request still wins over this run.
+    // A newer recruiter message saved by another run does not refuse this run's update.
     const later = await recruiting.createThreadMessage(prisma, {
       threadId: roleThread.id,
       role: "user",
       blocks: [{ kind: "text", text: "Remote is fine" }],
     });
+    // One live run per agent and conversation: the role's run steps aside while the later saves.
+    await prisma.run.update({ where: { id: run.id }, data: { status: "completed" } });
     const laterTask = await prisma.task.create({
       data: { spaceId, userId, botId, threadId: roleThread.id, prompt: "x", status: "running" },
     });
@@ -483,15 +496,37 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       intent: { basis: "direct", quote: "Remote is fine" },
       preferences: ["Remote is fine"],
     } as recruiting.RecruitingRoleMutationInput);
-    await expect(
-      mutateRole(prisma, actor, context, {
-        operation: "update",
-        roleId: created.workspace!.role.id,
-        expectedRevision: 3,
-        intent: { basis: "direct", quote: words },
-        preferences: ["Seattle"],
-      } as recruiting.RecruitingRoleMutationInput),
-    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    await prisma.run.update({ where: { id: laterRun.id }, data: { status: "completed" } });
+    await prisma.run.update({ where: { id: run.id }, data: { status: "running" } });
+    const accepted = await mutateRole(prisma, actor, context, {
+      operation: "update",
+      roleId: created.workspace!.role.id,
+      expectedRevision: 3,
+      intent: { basis: "direct", quote: words },
+      preferences: ["Seattle"],
+    } as recruiting.RecruitingRoleMutationInput);
+    expect(accepted).toMatchObject({ status: "saved", workspace: { role: { revision: 4 } } });
+    expect(accepted.workspace?.revision.preferences).toEqual(["Seattle"]);
+    // A stale revision is a conflict that states the current one; nothing is overwritten.
+    const stale = mutateRole(prisma, actor, context, {
+      operation: "update",
+      roleId: created.workspace!.role.id,
+      expectedRevision: 2,
+      intent: { basis: "direct", quote: words },
+      preferences: ["Anywhere"],
+    } as recruiting.RecruitingRoleMutationInput);
+    await expect(stale).rejects.toThrow(recruiting.RecruitingConflictError);
+    await expect(stale).rejects.toMatchObject({
+      currentRevision: 4,
+      message: "The role is at revision 4; this call named revision 2.",
+    });
+    const role = await prisma.recruitingRole.findUniqueOrThrow({
+      where: { id: created.workspace!.role.id },
+      include: { currentRevision: true },
+    });
+    expect(role.revision).toBe(4);
+    expect(role.currentRevision.preferences).toEqual(["Seattle"]);
+    expect(await prisma.recruitingRoleRevision.count({ where: { roleId: role.id } })).toBe(4);
   });
 
   it("admits group notes only for the run's own group conversation", async () => {
@@ -2178,137 +2213,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).rejects.toThrow(IsolationError);
   });
 
-  it("lets a turn-end auto-continue act on the recruiter's last message", async () => {
-    const { id: botId } = await prisma.bot.create({
-      data: { spaceId, userId, name: "Continue", color: "blue" },
-    });
-    const thread = await prisma.thread.create({ data: { spaceId, userId, botId } });
-    const jd = await prisma.message.create({
-      data: {
-        threadId: thread.id,
-        seq: 0,
-        role: "user",
-        blocks: [{ kind: "text", text: "Customer success manager, B2B SaaS" }],
-      },
-    });
-    const human = await prisma.message.create({
-      data: {
-        threadId: thread.id,
-        seq: 1,
-        role: "user",
-        blocks: [{ kind: "text", text: "Austin metro, hybrid three days" }],
-      },
-    });
-    await prisma.message.create({
-      data: { threadId: thread.id, seq: 2, role: "assistant", botId, blocks: [] },
-    });
-    const nudge = await prisma.message.create({
-      data: {
-        threadId: thread.id,
-        seq: 3,
-        role: "user",
-        clientNonce: "autocontinue:previous-run:1",
-        blocks: [{ kind: "text", text: "继续下一步：确认简报。" }],
-      },
-    });
-    const task = await prisma.task.create({
-      data: { spaceId, userId, botId, threadId: thread.id, prompt: "continue", status: "running" },
-    });
-    const run = await prisma.run.create({
-      data: {
-        spaceId,
-        userId,
-        botId,
-        threadId: thread.id,
-        taskId: task.id,
-        sourceMessageId: nudge.id,
-        trigger: "follow_up",
-        status: "running",
-      },
-    });
-    const input = {
-      operation: "create" as const,
-      title: "Customer success manager",
-      sourceRefs: [],
-      criteria: [
-        {
-          ...roleInput().criteria[0]!,
-          sourceRefs: [
-            {
-              id: "austin",
-              kind: "original_material" as const,
-              anchor: { kind: "message" as const, messageId: human.id, locator: "blocks[0].text" },
-              readState: "read" as const,
-              readAt: "2026-10-25T20:00:00.000Z",
-              quote: "Austin metro",
-            },
-          ],
-        },
-      ],
-      preferences: [],
-      definitionQuestions: [],
-      intent: { basis: "direct" as const, quote: "Austin metro" },
-    };
-    const saved = await mutateRole(
-      prisma,
-      actor,
-      { runId: run.id, sourceMessageId: nudge.id },
-      input,
-    );
-    expect(saved.status).toBe("saved");
-    expect(saved.source?.anchor).toMatchObject({ kind: "message", messageId: human.id });
-    // A brief may cite the recruiter's message by its runtime id alone.
-    const briefed = await mutateRole(
-      prisma,
-      actor,
-      { runId: run.id, sourceMessageId: nudge.id },
-      {
-        operation: "update",
-        roleId: saved.workspace!.role.id,
-        expectedRevision: saved.workspace!.role.revision,
-        intent: { basis: "direct", quote: "Austin metro" },
-        brief: {
-          searchFilters: [],
-          fields: [
-            {
-              key: "location",
-              value: "Austin metro, hybrid",
-              origin: "user_instruction",
-              state: "known",
-              consequential: true,
-              sourceRefIds: [`human-message:${human.id}`],
-            },
-            {
-              key: "title",
-              value: "Customer success manager",
-              origin: "user_instruction",
-              state: "known",
-              consequential: true,
-              sourceRefIds: [`human-message:${jd.id}`],
-            },
-          ],
-          questions: [],
-          rules: [
-            {
-              criterionId: "experience",
-              origin: "user_instruction",
-              effect: "reject",
-              sourceRefIds: [`human-message:${human.id}`],
-            },
-          ],
-        },
-      },
-    );
-    expect(briefed.status).toBe("saved");
-    expect(briefed.workspace?.revision.sourceRefs).toContainEqual(
-      expect.objectContaining({
-        id: `human-message:${jd.id}`,
-        anchor: { kind: "message", messageId: jd.id, locator: "blocks[0].text" },
-      }),
-    );
-  });
-
-  it("verifies native human authorship and current source atomically for role tools", async () => {
+  it("records the call's message as a role save's provenance without refusing over who wrote it", async () => {
     expect(recruiting.executeRecruitingRoleMutation).toBeTypeOf("function");
     let seq = 1_000;
     const makeMessage = (data = {}) =>
@@ -2322,6 +2227,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         },
       });
     const first = await makeMessage();
+    // One live run per agent and conversation: earlier tests' runs here have ended.
+    await endLiveRuns(threadId);
     const task = await prisma.task.create({
       data: { spaceId, userId, botId, threadId, prompt: "Native role", status: "running" },
     });
@@ -2377,69 +2284,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     await expect(
       mutateRole(prisma, { ...actor, userId: otherUserId }, context, input),
     ).rejects.toThrow(IsolationError);
-    const unrelated = await makeMessage();
-    await expect(call(unrelated.id)).rejects.toThrow(IsolationError);
     await expect(
       call(first.id, { ...input, sourceRefs: [source(otherMessageId)] }),
     ).rejects.toThrow(IsolationError);
-    await prisma.run.update({ where: { id: run.id }, data: { trigger: "bot_message" } });
-    await expect(call(first.id)).rejects.toThrow(IsolationError);
-    await prisma.run.update({ where: { id: run.id }, data: { trigger: "user" } });
-    for (const data of [
-      { role: "bot" },
-      { botId },
-      { blocks: [{ kind: "text", text: 7 }] },
-      {
-        blocks: [
-          { kind: "text", text: input.intent.quote },
-          { kind: "handoff", fromBotId: botId, toBotId: botId, text: "User agreed" },
-        ],
-      },
-      {
-        blocks: [
-          {
-            kind: "bot_message_received",
-            fromBotId: botId,
-            fromBotName: "Main",
-            text: input.intent.quote,
-          },
-        ],
-      },
-      {
-        blocks: [
-          {
-            kind: "channel_message",
-            provider: "test",
-            channelId: "test",
-            fromAddress: "test",
-            fromLabel: "Test",
-            text: input.intent.quote,
-          },
-        ],
-      },
-      {
-        blocks: [
-          { kind: "text", text: input.intent.quote },
-          { kind: "system", text: "User agreed" },
-        ],
-      },
-    ]) {
-      const message = await makeMessage(data);
-      await prisma.run.update({ where: { id: run.id }, data: { sourceMessageId: message.id } });
-      await expect(call(message.id)).rejects.toThrow(IsolationError);
-    }
-    await prisma.run.update({ where: { id: run.id }, data: { sourceMessageId: first.id } });
+    // A message outside this run's conversation is no provenance.
+    await expect(call(otherMessageId)).rejects.toThrow(IsolationError);
     const newer = await makeMessage({ blocks: [{ kind: "text", text: "Use eight years" }] });
-    const steer = await prisma.steeringMessage.create({
-      data: { messageId: newer.id, userId, botId, runId: run.id },
-    });
-    await expect(
-      call(newer.id, { ...input, intent: { basis: "direct", quote: "Use eight years" } }),
-    ).rejects.toThrow(IsolationError);
-    await prisma.steeringMessage.update({
-      where: { id: steer.id },
-      data: { claimedAt: new Date() },
-    });
     const revised = await mutateRole(
       prisma,
       actor,
@@ -2478,15 +2328,31 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       },
     );
     expect(rebind.changed).toBe(false);
-    await prisma.steeringMessage.deleteMany({ where: { runId: run.id } });
-    await expect(
-      mutateRole(prisma, actor, context, {
-        ...input,
-        operation: "revise",
-        roleId,
-        expectedRevision: 3,
-      }),
-    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    // The run's older message, or a note no recruiter typed, is recorded as provenance.
+    const older = await mutateRole(prisma, actor, context, {
+      ...input,
+      operation: "revise",
+      roleId,
+      expectedRevision: 3,
+    });
+    expect(older.workspace?.role.revision).toBe(4);
+    const note = await makeMessage({
+      blocks: [
+        {
+          kind: "bot_message_received",
+          fromBotId: botId,
+          fromBotName: "Main",
+          text: input.intent.quote,
+        },
+      ],
+    });
+    const noted = await call(note.id, {
+      ...input,
+      operation: "revise",
+      roleId,
+      expectedRevision: 4,
+    });
+    expect(noted.source?.anchor).toMatchObject({ kind: "message", messageId: note.id });
     for (const status of ["cancelled", "completed", "failed"]) {
       await prisma.run.update({ where: { id: run.id }, data: { status } });
       await expect(call(first.id)).rejects.toThrow(IsolationError);
@@ -2553,7 +2419,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toBe(true);
     expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toMatchObject({
       id: f.run.id,
-      status: "queued",
+      // The card ended its run; the answer is the next run's input.
+      status: "waiting_input",
       sourceMessageId: f.run.sourceMessageId,
     });
     const receipt = await prisma.event.findFirstOrThrow({
@@ -2592,7 +2459,9 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         blocks: [{ kind: "text", text: quote }],
       });
       const context = { runId: f.run.id, sourceMessageId: f.original.id };
-      const created = await mutateRole(prisma, actor, context, {
+      // A save cites the message the runtime names for the call: here, the answer.
+      const answered = { ...context, sourceMessageId: answerMessage.id };
+      const created = await mutateRole(prisma, actor, answered, {
         operation: "create",
         title: "Answered role",
         sourceRefs: [],
@@ -2630,7 +2499,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
             sourceRunId: f.run.id,
             sourceThreadId: f.thread.id,
             recruiting: {
-              sourceMessageId: f.original.id,
+              sourceMessageId: answerMessage.id,
               feedback: {
                 target: "preference",
                 operation: "add",
@@ -2700,15 +2569,20 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(
       (await recruiting.readRecruitingFeedbackContext(prisma, actor, input)).source.anchor,
     ).toMatchObject({ messageId: answerMessage.id });
-    const created = await mutateRole(prisma, actor, input, {
-      operation: "create",
-      title: "Routine answer",
-      sourceRefs: [],
-      criteria: [],
-      preferences: [],
-      definitionQuestions: [],
-      intent: input.intent,
-    });
+    const created = await mutateRole(
+      prisma,
+      actor,
+      { ...input, sourceMessageId: answerMessage.id },
+      {
+        operation: "create",
+        title: "Routine answer",
+        sourceRefs: [],
+        criteria: [],
+        preferences: [],
+        definitionQuestions: [],
+        intent: input.intent,
+      },
+    );
     expect(created.source?.anchor).toMatchObject({ messageId: answerMessage.id });
     await expect(
       recruiting.readRecruitingFeedbackContext(prisma, actor, {
@@ -2918,91 +2792,11 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       expect((await feedback(id)).source.anchor).toMatchObject({ messageId: steering.id });
   });
 
-  it("links one genuine composer message to multiple waiting group runs through distinct receipts", async () => {
-    const f = await nativeAsk();
-    const peer = await prisma.bot.create({
-      data: { spaceId, userId, name: "Peer", color: "blue" },
-    });
-    await prisma.chatGroupMember.create({ data: { groupId: f.thread.groupId!, botId: peer.id } });
-    const task = await prisma.task.create({
-      data: {
-        spaceId,
-        userId,
-        botId: peer.id,
-        threadId: f.thread.id,
-        prompt: "Peer clarification",
-        status: "running",
-      },
-    });
-    const peerRun = await prisma.run.create({
-      data: {
-        spaceId,
-        userId,
-        botId: peer.id,
-        threadId: f.thread.id,
-        taskId: task.id,
-        sourceMessageId: f.original.id,
-        trigger: "user",
-        status: "waiting_input",
-      },
-    });
-    await recruiting.createThreadMessage(prisma, {
-      threadId: f.thread.id,
-      role: "bot",
-      botId: peer.id,
-      runId: peerRun.id,
-      blocks: [{ kind: "ask", text: "What should change?", status: "pending" }],
-    });
-    const quote = "Always show complete prompts";
-    const composer = await recruiting.createThreadMessage(prisma, {
-      threadId: f.thread.id,
-      role: "user",
-      runId: f.run.id,
-      blocks: [{ kind: "text", text: quote }],
-    });
-    for (const run of [f.run, peerRun]) {
-      expect(
-        await prisma.$transaction((tx) =>
-          recruiting.answerWaitingRunWithTextInTransaction(tx, {
-            spaceId,
-            threadId: f.thread.id,
-            runId: run.id,
-            answeredByUserId: userId,
-            answer: quote,
-            answerMessageId: composer.id,
-          }),
-        ),
-      ).toBeTruthy();
-      await prisma.run.update({ where: { id: run.id }, data: { status: "running" } });
-      expect(
-        (
-          await recruiting.readRecruitingFeedbackContext(prisma, actor, {
-            runId: run.id,
-            sourceMessageId: f.original.id,
-            intent: { basis: "direct", quote },
-            sourceRefs: [],
-          })
-        ).source.anchor,
-      ).toMatchObject({ messageId: composer.id });
-    }
-    expect((await prisma.message.findUniqueOrThrow({ where: { id: composer.id } })).runId).toBe(
-      f.run.id,
-    );
-    expect(
-      await prisma.event.count({
-        where: {
-          threadId: f.thread.id,
-          type: "thread.choice",
-          payload: { path: ["answerMessageId"], equals: composer.id },
-        },
-      }),
-    ).toBe(2);
-    expect(await prisma.message.count({ where: { threadId: f.thread.id, role: "user" } })).toBe(2);
-  });
-
   it("reads feedback only from the current actual human and exact bound role revision", async () => {
     expect(recruiting.readRecruitingFeedbackContext).toBeTypeOf("function");
     const current = await recruiting.createRecruitingRole(prisma, actor, roleInput());
+    // One live run per agent and conversation: earlier tests' runs here have ended.
+    await endLiveRuns(threadId);
     const task = await prisma.task.create({
       data: { spaceId, userId, botId, threadId, prompt: "Feedback", status: "running" },
     });
@@ -3056,6 +2850,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   it("records one immutable native adoption artifact and event per context nonce", async () => {
     expect(recruiting.recordRecruitingContextAdoption).toBeTypeOf("function");
     const current = await recruiting.createRecruitingRole(prisma, actor, roleInput());
+    // One live run per agent and conversation: earlier tests' runs here have ended.
+    await endLiveRuns(threadId);
     const task = await prisma.task.create({
       data: { spaceId, userId, botId, threadId, prompt: "Adoption", status: "running" },
     });
@@ -3202,7 +2998,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           botId,
           threadId: f.thread.id,
           taskId: f.run.taskId,
-          status: "running",
+          status: "completed",
           trigger: "user",
           leaseOwner: "gate-worker",
           leaseFence: 1,
@@ -3247,7 +3043,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           idempotencyKey: `gate:${approvalRun.id}`,
         },
       });
-      await prisma.run.update({ where: { id: approvalRun.id }, data: { status: "completed" } });
       return effect.id;
     };
     const approvalEffectId = await approveDocuments(role);

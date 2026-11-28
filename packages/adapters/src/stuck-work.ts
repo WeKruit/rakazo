@@ -1,5 +1,4 @@
 import type { JobPublisher, NotificationMessage, NotificationProvider } from "@rakazo/adapter-kit";
-import { runContinueJob } from "@rakazo/adapter-kit";
 import type { StuckWorkStatus } from "@rakazo/core";
 import {
   isStuckWorkStatus,
@@ -332,11 +331,6 @@ async function expireOne(
   await deps.events?.notify(run.threadId, expired.seq).catch((error) => {
     getLogger().error("stuck work realtime notification", error);
   });
-  if (expired.continuationRunId) {
-    await deps.jobs.enqueue(runContinueJob(expired.continuationRunId)).catch((error) => {
-      getLogger().error("stuck work continuation", error);
-    });
-  }
   // A handed stage that stopped here still reports to the teammate that handed it over.
   if (run.thread.groupId && deps.events) {
     await reportGroupHandoffOutcome(

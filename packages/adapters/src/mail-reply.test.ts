@@ -135,9 +135,7 @@ describe("mail reply provenance", () => {
 it("reports the recorded card outcome rather than inventing missing or unconfirmed cards", () => {
   expect(mailReplyOutcome({ status: "discarded" })).toContain("reply card was created");
   expect(mailReplyOutcome({ status: "failed" })).toContain("definite send failure");
-  expect(mailReplyOutcome({ status: "unknown" })).toContain(
-    "whether it was sent is not known yet",
-  );
+  expect(mailReplyOutcome({ status: "unknown" })).toContain("whether it was sent is not known yet");
 });
 
 describe("verified reply outcome handoff", () => {

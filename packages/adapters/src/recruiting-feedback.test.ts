@@ -148,6 +148,7 @@ describe("recruiting feedback", () => {
       sourceMessageId: "human",
       intent,
       sourceRefs: [],
+      recordKeeping: true,
     });
     expect(f.read).toHaveBeenCalledWith({ scope: "user", path: preference.path }, context);
     expect(f.commit).toHaveBeenCalledWith(
@@ -337,7 +338,10 @@ describe("recruiting feedback", () => {
         workspace,
         status: "recorded",
         // A decision on people leaves the role's requirements as they were, and says so.
-        requirements: { changed: false, note: expect.stringContaining("requirements are unchanged") },
+        requirements: {
+          changed: false,
+          note: expect.stringContaining("requirements are unchanged"),
+        },
       });
       expect(db.readContext).toHaveBeenCalledWith(
         f.deps.prisma,
@@ -437,6 +441,7 @@ describe("recruiting feedback", () => {
       sourceMessageId: trusted.sourceMessageId,
       intent: preference.intent,
       sourceRefs: preference.sourceRefs,
+      recordKeeping: true,
     });
   });
 

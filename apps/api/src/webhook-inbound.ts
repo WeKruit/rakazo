@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { JobPublisher, SecretStore } from "@rakazo/adapter-kit";
-import { runContinueJob, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { inboundRoutineModelPin } from "@rakazo/adapters";
 import { evaluateRoutineCondition } from "@rakazo/core";
 import type { PrismaClient, SendUserMessageInput } from "@rakazo/db";
@@ -411,11 +411,6 @@ export async function deliverWebhookEvent(
     } catch (error) {
       if (error instanceof IsolationError) continue;
       throw error;
-    }
-    if (sent.runId && !sent.replayed) {
-      await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
-        getLogger().error(`${input.source} run enqueue error`, error);
-      });
     }
     deliveries.push({
       routineId: routine.id,

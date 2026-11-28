@@ -29,6 +29,47 @@ describe("worker deployment drain", () => {
     await first;
     expect(drain.state()).toBe("drained");
   });
+  it("SIGTERM quiesces: live turn finishes within 45 s then lease released", async () => {
+    vi.useFakeTimers();
+    try {
+      const sessionHosts = new AbortController();
+      const order: string[] = [];
+      let leaseHeld = true;
+      // Stand-in for the session host's contract (plan Task 4): on abort it stops taking inputs,
+      // lets the live turn run for at most 45 s, then releases the lease and returns.
+      const driving = (async (signal: AbortSignal) => {
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        order.push("quiesce");
+        const turnLeftMs = 120_000;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(turnLeftMs, 45_000)));
+        leaseHeld = false;
+        order.push("released");
+      })(sessionHosts.signal);
+      const drain = createWorkerDrain({
+        // The job host waits for its running session.drive job.
+        stopJobs: async () => {
+          order.push("stopJobs");
+          await driving;
+        },
+        stopReconciler: async () => undefined,
+        quiesceSessions: () => sessionHosts.abort(),
+      });
+      const done = drain.begin();
+      expect(sessionHosts.signal.aborted).toBe(true);
+      await vi.advanceTimersByTimeAsync(44_999);
+      expect(drain.state()).toBe("draining");
+      expect(leaseHeld).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      expect(leaseHeld).toBe(false);
+      expect(drain.state()).toBe("drained");
+      expect(order).toEqual(["quiesce", "stopJobs", "released"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("never reports drained when a stop operation fails", async () => {
     const drain = createWorkerDrain({
       stopJobs: async () => {

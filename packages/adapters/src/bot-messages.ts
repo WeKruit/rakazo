@@ -1,8 +1,5 @@
-import { runContinueJob } from "@rakazo/adapter-kit";
 import type { BotMessageIntent, MessageBlock } from "@rakazo/contracts";
 import {
-  ACTIVE_RUN_STATUSES,
-  BACKGROUND_RUN_TRIGGERS,
   BOT_MESSAGE_MAX_LENGTH,
   botMessageContext,
   botMessageHopExhausted,
@@ -19,14 +16,14 @@ import {
   lockConversationPair,
   mirrorAskInTransaction,
   type PrismaClient,
+  submitConversationInput,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { sleep } from "./background-wait.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { roundListedNotRecorded } from "./recruiting-round-check.js";
-import { ROLE_START_NONCE } from "./working-state.js";
+import { ROLE_START_NONCE } from "./role-start.js";
 
 /**
  * The hop the current run sits at, read back from the message that woke this
@@ -89,7 +86,10 @@ export async function messageBot(
     message: string;
     intent?: BotMessageIntent;
     deliveryKey?: string;
-    /** Another conversation of this user that the target bot belongs to (a role team's chat). */
+    /**
+     * Another conversation of this user that the target bot works in: a role team's chat, or the
+     * target's own conversation (a child job in no role).
+     */
     thread_id?: string;
     /** Names shown for each side when they differ from the bots' own names. */
     sender_label?: string;
@@ -133,7 +133,10 @@ export async function messageBot(
           id: input.thread_id,
           spaceId: run.spaceId,
           userId: run.userId,
-          group: { archivedAt: null, members: { some: { botId: target.id } } },
+          OR: [
+            { group: { archivedAt: null, members: { some: { botId: target.id } } } },
+            { botId: target.id },
+          ],
         },
         select: { id: true },
       })
@@ -150,8 +153,7 @@ export async function messageBot(
   if (botMessageHopExhausted(hop) && !returnsToSender) {
     return {
       ok: false as const,
-      error:
-        "bot-to-bot message limit reached for this chain; report back to the user instead of messaging another bot",
+      error: "Not sent: this chain reached its bot-to-bot message limit.",
     };
   }
 
@@ -186,7 +188,7 @@ export async function messageBot(
   let committed:
     | {
         ok: true;
-        runId: string;
+        sessionId: string;
         targetEventSeq: number;
         senderEventSeq: number;
         working: boolean;
@@ -327,51 +329,29 @@ export async function messageBot(
             : null;
         // Staging 11-15: "where are the new ones?" queued behind the round it asked about, then
         // ran a second paid search after that round was shown. A request from the same
-        // conversation is steered into the team's running turn instead, like a person's message.
-        let targetRunId: string;
-        if (working) {
-          await tx.steeringMessage.create({
-            data: {
-              messageId: inbound.id,
-              botId: working.botId,
-              userId: run.userId,
-              runId: working.id,
-            },
-          });
-          targetRunId = working.id;
-        } else {
-          const task = await tx.task.create({
-            data: {
-              spaceId: run.spaceId,
-              botId: target.id,
-              threadId: targetThreadId,
-              userId: run.userId,
-              prompt: wakePrompt,
-              status: "queued",
-            },
-          });
-          const nextRun = await tx.run.create({
-            data: {
-              spaceId: run.spaceId,
-              botId: target.id,
-              threadId: targetThreadId,
-              taskId: task.id,
-              userId: run.userId,
-              status: "queued",
-              trigger: "bot_message",
-              sourceMessageId: inbound.id,
-            },
-            select: { id: true },
-          });
-          targetRunId = nextRun.id;
-        }
-        await tx.message.update({ where: { id: inbound.id }, data: { runId: targetRunId } });
+        // conversation goes to the session of the agent doing that work, like a person's message:
+        // its lane steers it into the running turn, or starts the next turn with it.
+        const recipientBotId = working?.botId ?? target.id;
+        const submitted = await submitConversationInput(
+          tx,
+          {
+            spaceId: run.spaceId,
+            userId: run.userId,
+            threadId: targetThreadId,
+            botId: recipientBotId,
+          },
+          {
+            kind: "message",
+            trigger: "bot_message",
+            messageId: inbound.id,
+            payload: { text: wakePrompt, internal: true },
+          },
+        );
         const inboundEvent = await appendEventInTransaction(tx, {
           spaceId: run.spaceId,
           threadId: targetThreadId,
-          botId: working?.botId ?? target.id,
+          botId: recipientBotId,
           type: "thread.message.created",
-          runId: targetRunId,
           payload: { messageId: inbound.id, role: "user", blocks: [inboundBlock] },
         });
         const outboundEvent = await appendEventInTransaction(tx, {
@@ -385,7 +365,7 @@ export async function messageBot(
         });
         return {
           ok: true as const,
-          runId: targetRunId,
+          sessionId: submitted.sessionId,
           targetEventSeq: inboundEvent.seq,
           senderEventSeq: outboundEvent.seq,
           working: Boolean(working),
@@ -413,12 +393,7 @@ export async function messageBot(
   await deps.events.notify(run.threadId, committed.senderEventSeq).catch((error) => {
     getLogger().error("bot message sender echo notification", error);
   });
-  // A request steered into the team's running turn has no turn of its own to start.
-  if (!committed.working)
-    await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
-      // The queued run is durable; the job reconciler repairs a missed wake.
-      getLogger().error("bot message enqueue", error);
-    });
+  await deps.events.wakeSessions([committed.sessionId]);
   const progress = committed.working
     ? await teamProgress(deps.prisma, {
         threadId: targetThreadId,
@@ -581,8 +556,9 @@ export async function teamProgress(
 
 /**
  * The result of work another conversation delegated to this run, once the role's conversation is
- * idle: "working" while any run there is still active (up to the delegation window, Workloop's
- * deadlock bound), "later" when a later request from the same conversation, with a live turn of its
+ * idle: "working" while any run there is queued or running (up to the delegation window, Workloop's
+ * deadlock bound; a run waiting on a card is not working, its card is shown in the asking
+ * conversation), "later" when a later request from the same conversation, with a live turn of its
  * own, carries the result, else the newest reply since the request.
  */
 async function settledTeamResult(
@@ -601,7 +577,8 @@ async function settledTeamResult(
     where: {
       threadId: run.threadId,
       id: { not: run.id },
-      status: { in: [...ACTIVE_RUN_STATUSES] },
+      // Branch play 11-28: a send card left waiting held every later answer here for 24 h.
+      status: { in: ["queued", "leased", "running"] },
     },
   });
   if (active && Date.now() - request.createdAt.getTime() < DELEGATION_RETURN_WINDOW_MS)
@@ -804,7 +781,6 @@ async function recruiterInRoleChat(
     (message) =>
       message.botId === null &&
       !message.externalTranscriptFor &&
-      !message.clientNonce?.startsWith("autocontinue:") &&
       !message.clientNonce?.startsWith(ROLE_START_NONCE) &&
       Array.isArray(message.blocks) &&
       message.blocks.length > 0 &&
@@ -841,7 +817,7 @@ async function openDelegation(prisma: PrismaClient, threadId: string) {
 }
 
 /**
- * A role team working on delegated work failed: tell the conversation that delegated it right
+ * A role team (or an agent in its own conversation) working on delegated work failed: tell the conversation that delegated it right
  * away, once per turn, so it never waits silently.
  */
 export async function reportDelegatedTeamBlocked(
@@ -857,23 +833,25 @@ export async function reportDelegatedTeamBlocked(
   blocked: { kind: "failed"; text: string },
 ): Promise<"later" | undefined> {
   const thread = await deps.prisma.thread.findFirst({
-    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
-    select: { group: { select: { name: true } } },
+    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId },
+    select: { group: { select: { name: true } }, bot: { select: { name: true } } },
   });
-  if (!thread?.group) return;
+  // A role team, or an agent working in its own conversation (a child job in no role).
+  const name = thread?.group ? `${thread.group.name} team` : thread?.bot?.name;
+  if (!name) return;
   const found = await openDelegation(deps.prisma, run.threadId);
   if (!found) return;
   const detail = blocked.text.trim().slice(0, 600);
   const sent = await messageBot(
     deps,
     run,
-    { id: run.botId, name: thread.group.name },
+    { id: run.botId, name },
     {
       bot_id: found.root.fromBotId,
       thread_id: found.root.returnThreadId,
-      sender_label: `${thread.group.name} team`,
+      sender_label: name,
       target_label: found.root.fromBotName,
-      message: clampBotMessage(`The ${thread.group.name} team could not finish: ${detail}`),
+      message: clampBotMessage(`${name} could not finish: ${detail}`),
       intent: "status",
       deliveryKey: `delegation-${blocked.kind}:${run.id}`,
     },
@@ -884,7 +862,7 @@ export async function reportDelegatedTeamBlocked(
 }
 
 /**
- * A role team working on delegated work stopped on a card (a question, form or approval): show
+ * A role team (or an agent in its own conversation) working on delegated work stopped on a card (a question, form or approval): show
  * that card in the conversation that delegated the work, where the recruiter is, and route the
  * answer back to the waiting run. Workloop does the same for a child agent waiting on a person;
  * the delegating agent is not woken. Staging 11-16: the old "waiting on its card" message was
@@ -894,11 +872,6 @@ export async function showDelegatedTeamCard(
   deps: Pick<ExecutorDeps, "prisma" | "events">,
   run: { id: string; spaceId: string; threadId: string; userId: string },
 ): Promise<"later" | undefined> {
-  const thread = await deps.prisma.thread.findFirst({
-    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
-    select: { id: true },
-  });
-  if (!thread) return;
   const found = await openDelegation(deps.prisma, run.threadId);
   if (!found) return;
   const card = await deps.prisma.message.findFirst({

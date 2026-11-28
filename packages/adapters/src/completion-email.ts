@@ -30,9 +30,6 @@ export const completionEmailTool = {
   },
 };
 
-/** Added to a long stage's first check-in when the recruiter has not been asked yet. */
-export const COMPLETION_EMAIL_OFFER = "The recruiter has not been offered an email for when this work finishes.";
-
 type Turn = { id: string; spaceId: string; threadId: string; botId: string; userId: string };
 
 /** Record the recruiter's answer; a later yes replaces an earlier one still waiting. */
@@ -64,19 +61,6 @@ export async function recordCompletionEmailChoice(
     update: { status: args.email ? "armed" : "declined" },
   });
   return { ok: true, email: args.email };
-}
-
-/** Whether the recruiter already answered an email offer in this conversation. */
-export async function completionEmailAnswered(
-  prisma: Pick<PrismaClient, "externalEffect">,
-  run: { spaceId: string; threadId: string },
-): Promise<boolean> {
-  return Boolean(
-    await prisma.externalEffect.findFirst({
-      where: { kind: COMPLETION_EMAIL_KIND, spaceId: run.spaceId, run: { threadId: run.threadId } },
-      select: { id: true },
-    }),
-  );
 }
 
 /**

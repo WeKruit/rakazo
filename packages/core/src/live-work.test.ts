@@ -807,7 +807,7 @@ describe("specific step labels", () => {
     expect(workActivityForTool("recruiting_candidates", { operation: "roles" })).toBe("roles");
     expect(workActivityForTool("recruiting_candidates", { operation: "list" })).toBe("candidates");
     expect(workActivityForTool("recruiting_role", { operation: "create" })).toBe("role_save");
-    expect(workActivityForTool("delegate_to_role", { role_id: "r1" })).toBe("delegating");
+    expect(workActivityForTool("delegate_work", { role_id: "r1" })).toBe("delegating");
   });
 
   it("quotes a recruiter-facing topic and never ids, links or tool names", () => {

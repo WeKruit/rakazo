@@ -1,5 +1,9 @@
 export * from "./agent-connections.js";
 export * from "./agent-environment.js";
+export { submitRoutineInput } from "./agent-session/routine-input.js";
+export * from "./agent-session/session-cutover.js";
+export * from "./agent-session/session-driver.js";
+export * from "./agent-skills.js";
 export * from "./ai-consent.js";
 export { buildApprovalAskBlock } from "./approval-ask.js";
 export * from "./artifact-read.js";

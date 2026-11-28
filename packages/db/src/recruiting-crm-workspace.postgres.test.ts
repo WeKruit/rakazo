@@ -252,7 +252,8 @@ suite("verified legacy CRM workspace", () => {
         botId: bots[0]!,
         threadId: workspace.threadId,
         taskId: task.id,
-        status: "running",
+        // An earlier run that bound the CRM role; the workspace's own run is the live one.
+        status: "completed",
         trigger: "user",
       },
     });

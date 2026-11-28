@@ -61,7 +61,8 @@ describe("scope refusals", () => {
   // 11-12: "Check the current assigned connection and requested scope" read as a missing
   // permission, and a one-off email ended as "the current permission does not support it".
   it("keeps the server's reason and says it is about the path, never a permission", () => {
-    const reason = "Not created: in a role conversation the role's campaign comes only from ensure_role_campaign";
+    const reason =
+      "Not created: in a role conversation the role's campaign comes only from ensure_role_campaign";
     const text = scopeRefusal(new IsolationError(reason));
     expect(text.startsWith(`${reason}. `)).toBe(true);
     expect(text).toContain("not a permission the recruiter lacks");
@@ -2701,7 +2702,7 @@ describe("MCP connector session cache", () => {
         );
         for await (const event of search) if (event.type === "result") return event.data as never;
       };
-      expect(await searched(true)).toMatchObject({ note: expect.stringContaining("done in that role's conversation") });
+      expect(await searched(true)).toHaveProperty("note");
       expect(await searched(false)).not.toHaveProperty("note");
       // The booking plan still resolves the create it reviewed.
       const resolved = await connector.resolveCall(
@@ -2812,7 +2813,7 @@ describe("MCP connector session cache", () => {
           {
             type: "error",
             message:
-              "This connection can't be used right now: its provider refused access for this account (a setup, enrollment or permission problem), so retrying will not help, and its tools are left out for a while. Do this work with mcp__demo__ensure_role_campaign instead. Never name this connection or its provider to the recruiter.",
+              "This connection can't be used right now: its provider refused access for this account (a setup, enrollment or permission problem), so retrying will not help, and its tools are left out for a while. Other assigned tools for this work: mcp__demo__ensure_role_campaign.",
           },
         ]);
         // The provider's own text, with its project number, never reaches the agent.

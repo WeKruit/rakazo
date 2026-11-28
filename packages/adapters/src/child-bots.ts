@@ -7,7 +7,7 @@ import type {
   JobPublisher,
   SandboxProvider,
 } from "@rakazo/adapter-kit";
-import { routineJobKey, runContinueJob, runJobKey } from "@rakazo/adapter-kit";
+import { routineJobKey, runJobKey } from "@rakazo/adapter-kit";
 import { type Actor, type Bot, type ComputerMode, GROUP_MEMBER_MIN } from "@rakazo/contracts";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import {
@@ -19,6 +19,8 @@ import {
   expireComputerExecutionLeases,
   type Prisma,
   type PrismaClient,
+  submitConversationWakeOnce,
+  type ThreadEvents,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -49,7 +51,7 @@ export function confirmSpawnedBotName(confirmName: string, botName: string) {
 export async function spawnBot(
   deps: {
     prisma: PrismaClient;
-    jobs: JobPublisher;
+    events: Pick<ThreadEvents, "wakeSessions">;
   },
   input: {
     spawnedBy: {
@@ -117,7 +119,7 @@ export async function spawnBot(
 
   const prompt = (input.prompt ?? "").trim();
   if (prompt) {
-    const run = await ensureSpawnRun(deps.prisma, {
+    const sessionId = await ensureSpawnInput(deps.prisma, {
       spaceId: input.spawnedBy.spaceId,
       userId: input.spawnedBy.userId,
       botId: created.id,
@@ -126,9 +128,7 @@ export async function spawnBot(
       spawnKey: input.spawnKey,
       prompt,
     });
-    await deps.jobs
-      .enqueue(runContinueJob(run.id))
-      .catch((error) => getLogger().error("spawned bot enqueue", error));
+    if (sessionId) await deps.events.wakeSessions([sessionId]);
   }
 
   return {
@@ -141,7 +141,8 @@ export async function spawnBot(
   };
 }
 
-async function ensureSpawnRun(
+/** The spawned bot's first message, once per spawn key: posted and given to its session. */
+async function ensureSpawnInput(
   prisma: PrismaClient,
   input: {
     spaceId: string;
@@ -152,53 +153,37 @@ async function ensureSpawnRun(
     spawnKey: string;
     prompt: string;
   },
-) {
-  const clientNonce = `spawn:${input.spawnKey}`;
-  const where = {
-    spaceId_clientNonce: {
+): Promise<string | null> {
+  return prisma.$transaction(async (tx) => {
+    const key = {
       spaceId: input.spaceId,
-      clientNonce,
-    },
-  } as const;
-  const existing = await prisma.run.findUnique({ where });
-  if (existing) return existing;
-
-  try {
-    return await prisma.$transaction(async (tx) => {
-      await createThreadMessageInTransaction(tx, {
-        threadId: input.threadId,
-        role: "user",
-        blocks: [{ kind: "text", text: input.prompt }],
-        runId: input.sourceRunId,
-      });
-      const task = await tx.task.create({
-        data: {
-          spaceId: input.spaceId,
-          botId: input.botId,
-          threadId: input.threadId,
-          userId: input.userId,
-          prompt: input.prompt,
-          status: "queued",
-        },
-      });
-      return tx.run.create({
-        data: {
-          spaceId: input.spaceId,
-          botId: input.botId,
-          threadId: input.threadId,
-          taskId: task.id,
-          userId: input.userId,
-          status: "queued",
-          trigger: "spawn",
-          clientNonce,
-        },
-      });
+      userId: input.userId,
+      threadId: input.threadId,
+      botId: input.botId,
+    };
+    const wakeKey = `spawn:${input.spawnKey}`;
+    const earlier = await tx.sessionInput.findFirst({
+      where: {
+        session: { threadId: input.threadId, botId: input.botId },
+        payload: { path: ["wakeKey"], equals: wakeKey },
+      },
+      select: { id: true },
     });
-  } catch (error) {
-    const winner = await prisma.run.findUnique({ where });
-    if (winner) return winner;
-    throw error;
-  }
+    if (earlier) return null;
+    const message = await createThreadMessageInTransaction(tx, {
+      threadId: input.threadId,
+      role: "user",
+      blocks: [{ kind: "text", text: input.prompt }],
+      runId: input.sourceRunId,
+    });
+    const submitted = await submitConversationWakeOnce(tx, key, {
+      kind: "message",
+      trigger: "spawn",
+      messageId: message.id,
+      payload: { text: input.prompt, wakeKey },
+    });
+    return submitted?.sessionId ?? null;
+  });
 }
 
 type BotLifecycleDeps = {

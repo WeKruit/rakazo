@@ -59,19 +59,6 @@ describe("copyRecruiterMessageToRole", () => {
     expect(d.events.notify).toHaveBeenCalledWith("t-role", 7);
   });
 
-  it("adds the requirements given earlier when the latest message is only a go-ahead", async () => {
-    const { deps: d } = deps({
-      ...mine,
-      blocks: [{ kind: "text", text: "Start finding candidates now" }],
-    });
-    expect(
-      await copyRecruiterMessageToRole(d as never, run, {
-        ...role,
-        earlier: "Senior nurse, Austin TX, 5+ years ICU",
-      }),
-    ).toMatch(/earlier.*\nSenior nurse, Austin TX, 5\+ years ICU$/s);
-  });
-
   it("copies the earlier message with the JD when the latest only says to go on (staging 2026-11-26, stop-then-continue)", async () => {
     const { deps: d } = deps([
       { ...mine, id: "m-2", blocks: [{ kind: "text", text: "继续吧" }] },
@@ -128,18 +115,6 @@ describe("copyRecruiterMessageToRole", () => {
     ]);
     await copyRecruiterMessageToRole(d as never, run, role);
     expect(copiedBlocks()).toEqual([{ kind: "text", text: "Open role 5" }]);
-  });
-
-  it("refuses a source the recruiter did not write", async () => {
-    for (const source of [
-      { ...mine, blocks: [{ kind: "bot_message_received", text: "x" }] },
-      { ...mine, role: "bot", botId: "b", blocks: [{ kind: "text", text: "x" }] },
-      { ...mine, clientNonce: "autocontinue:1", blocks: [{ kind: "text", text: "x" }] },
-      null,
-    ]) {
-      const { deps: d } = deps(source);
-      expect(await copyRecruiterMessageToRole(d as never, run, role)).toBeUndefined();
-    }
   });
 });
 

@@ -38,7 +38,6 @@ import type {
   AgentRunRequest,
   AgentRuntime,
   AgentRuntimeEvent,
-  AgentSteeringMessage,
   AgentThinking,
   AgentToolCompletion,
   AgentToolExecutionResult,
@@ -46,26 +45,14 @@ import type {
   ConnectorTool,
   ModelCallObserver,
 } from "@rakazo/adapter-kit";
-import { AskUserInputSchema, usableModelId } from "@rakazo/contracts";
-import {
-  abortableDelay,
-  shortQuestion,
-  type WorkActivity,
-  workActivityForTool,
-} from "@rakazo/core";
+import { usableModelId } from "@rakazo/contracts";
+import { abortableDelay, type WorkActivity, workActivityForTool } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
-import { isToolPauseResult } from "./approval-effect.js";
+import { toAgentTools } from "./agent-session/session-tools.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
-import { databaseConflictText } from "./connector-safety.js";
 import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
-import {
-  RECORD_TOOL_DEADLINE_MS,
-  RECORD_TOOL_LATE_TEXT,
-  RECORD_TOOLS,
-  withinDeadline,
-} from "./deadline.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -87,7 +74,6 @@ import {
   CODEX_STREAM_HEADERS_TIMEOUT_MS,
   clipContentWithFullOutput,
   clipToolResultText,
-  clipWithFullOutput,
   compactionReserveTokens,
   MODEL_ERROR_BODY_TIMEOUT_MS,
   MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
@@ -98,15 +84,11 @@ import {
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
-  spillRequiredResult,
   type ToolOutputStore,
-  withoutUndeclaredArguments,
 } from "./pi-runtime-limits.js";
 import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { observedPiStream } from "./pi-usage.js";
-import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
-import { normalizeRecruitingRoleArgs, repairSourceRefs } from "./recruiting-tools.js";
 import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
@@ -122,11 +104,9 @@ import {
   waitForSubagents,
 } from "./subagent-delivery.js";
 import { sanitizeThought } from "./thought.js";
-import { textContentArg } from "./tool-text.js";
 import { REPORT_BEFORE_END } from "./turn-report.js";
 
 const running = new Map<string, { controller: AbortController; work: Promise<void> }>();
-export const SLOW_TOOL_BACKGROUND_MS = 10_000;
 interface ToolCallBudget {
   count: number;
   exceeded: boolean;
@@ -181,7 +161,7 @@ function catalogModels(): Models {
   );
   return catalogModelsCache;
 }
-const MAX_PARALLEL_SUBAGENTS = 4;
+export const MAX_PARALLEL_SUBAGENTS = 4;
 const MODEL_PROVIDER_RETRY_DELAYS_MS = [2_000, 8_000, 20_000] as const;
 // Rate limits clear on the provider's clock, so they get their own longer budget.
 const MODEL_RATE_LIMIT_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000] as const;
@@ -264,8 +244,6 @@ export interface PiAgentRuntimeOptions {
   /** Directory where Pi JSONL sessions are written. Omit to disable recording. */
   sessionRoot?: string;
   modelCallObserver?: ModelCallObserver;
-  /** How often a live model stream checks for an interjecting user message. */
-  interjectPollMs?: number;
   /** Sanitized per-call selection telemetry; never includes prompt or credentials. */
   onContextDecision?: (
     decision: RuntimeContextDecision & {
@@ -280,12 +258,10 @@ export class PiAgentRuntime implements AgentRuntime {
   private readonly sessionRecorder?: PiSessionRecorder;
   private readonly modelCallObserver?: ModelCallObserver;
   private readonly onContextDecision?: PiAgentRuntimeOptions["onContextDecision"];
-  private readonly interjectPollMs: number;
 
   constructor(options: PiAgentRuntimeOptions = {}) {
     this.modelCallObserver = options.modelCallObserver;
     this.onContextDecision = options.onContextDecision;
-    this.interjectPollMs = options.interjectPollMs ?? INTERJECT_POLL_MS;
     this.sessionRecorder = options.sessionRoot
       ? new PiJsonlSessionRecorder(options.sessionRoot)
       : undefined;
@@ -395,15 +371,7 @@ export class PiAgentRuntime implements AgentRuntime {
         };
         resumeHost = host;
         const tools = toAgentTools(toolDefs, host);
-        const seenSteeringIds: string[] = [];
-        const initialSteering = request.claimSteering ? await request.claimSteering([]) : [];
-        seenSteeringIds.push(...initialSteering.map((item) => item.id));
-        const history = toHistory(
-          withoutSteeringMessages(request.history, initialSteering),
-          request.prompt,
-          request.sourceMessageId,
-          model,
-        );
+        const history = toHistory(request.history, request.prompt, request.sourceMessageId, model);
         const systemPrompt =
           request.instructions ||
           (toolDefs.some((tool) => tool.name === "computer_observe")
@@ -580,18 +548,9 @@ export class PiAgentRuntime implements AgentRuntime {
           },
           prepareNextTurnWithContext: async () => {
             // Whatever was steered in so far reaches the model in the step that starts now.
-            host.steeredUnseen = 0;
             // Memory, skills or tools changed mid-run: a notice, never a rebuilt prompt prefix.
             const notice = await request.claimContextNotice?.().catch(() => undefined);
             if (notice) agent.steer({ role: "user", content: notice, timestamp: Date.now() });
-            if (!request.claimSteering) return undefined;
-            // A mid-stream claim still in flight already owns its ids; wait so neither
-            // path claims the same row twice.
-            await interjectClaim;
-            const steering = await request.claimSteering([...seenSteeringIds]);
-            if (steering.length === 0) return undefined;
-            seenSteeringIds.push(...steering.map((item) => item.id));
-            for (const item of steering) steerIn(item);
             return undefined;
           },
           initialState: {
@@ -604,49 +563,6 @@ export class PiAgentRuntime implements AgentRuntime {
             messages: history,
           },
         });
-
-        const steerIn = (item: AgentSteeringMessage) => agent.steer(userMessage(item));
-        // Interject: while the model is streaming, a flagged steering message aborts only
-        // that stream (tools in flight are untouched), is steered in, and the same run
-        // continues from the partial assistant message.
-        let modelStreaming = false;
-        let interjected = false;
-        // The reader sees where a reply was cut off by their new message.
-        let cutMidReply = false;
-        let interjectClaim: Promise<void> | undefined;
-        const pollInterject = () => {
-          if (!modelStreaming || interjectClaim || !request.claimSteering || signal.aborted) return;
-          interjectClaim = request
-            .claimSteering([...seenSteeringIds])
-            .then((steering) => {
-              seenSteeringIds.push(...steering.map((item) => item.id));
-              for (const item of steering) steerIn(item);
-              // Unread until a step starts with them: an interjection can land after the step
-              // already called ask_user, so it counts too.
-              host.steeredUnseen = (host.steeredUnseen ?? 0) + steering.length;
-              if (modelStreaming && steering.some((item) => item.interrupt)) {
-                interjected = true;
-                cutMidReply ||= currentMessageStreamed.trim().length > 0;
-                agent.abort();
-              }
-            })
-            .catch(() => undefined)
-            .finally(() => {
-              interjectClaim = undefined;
-            });
-        };
-        const interjectTimer = request.claimSteering
-          ? setInterval(pollInterject, this.interjectPollMs)
-          : undefined;
-        host.claimNewSteering = async () => {
-          if (!request.claimSteering || signal.aborted) return 0;
-          await interjectClaim;
-          const steering = await request.claimSteering([...seenSteeringIds]).catch(() => []);
-          seenSteeringIds.push(...steering.map((item) => item.id));
-          for (const item of steering) steerIn(item);
-          return steering.length;
-        };
-        interjectTimer?.unref?.();
 
         const onAbort = () => {
           agent.abort();
@@ -703,10 +619,8 @@ export class PiAgentRuntime implements AgentRuntime {
             currentTextPart = undefined;
             thinkingText = "";
             thinkingSince = undefined;
-            modelStreaming = true;
           }
           if (event.type === "message_end" && event.message.role === "assistant") {
-            modelStreaming = false;
             if (firstStep) {
               firstStep = false;
               agent.state.thinkingLevel = thinkingLevel;
@@ -779,10 +693,7 @@ export class PiAgentRuntime implements AgentRuntime {
               queue.push({ type: "text", text });
             }
           }
-          if (event.type === "turn_end" && interjected) {
-            // The interrupted turn is neither a final reply nor a silent tool turn; the
-            // continuation below answers the interjection.
-          } else if (event.type === "turn_end") {
+          if (event.type === "turn_end") {
             const messageText =
               event.message.role === "assistant" ? assistantText(event.message) : "";
             const hasToolCalls = messageHasToolCall(event.message);
@@ -862,35 +773,7 @@ export class PiAgentRuntime implements AgentRuntime {
         // placeholder while a run is active, and emitting one here shows two.
         const images = toPiImages(request.currentTurnImages);
         try {
-          // A message that arrived before the first step (for example right after a card
-          // answer) is its own, latest user turn: folded into the prompt as extra context,
-          // the model answered only the prompt and the message counted as answered.
-          if (initialSteering.length)
-            await agent.prompt([
-              userMessage({ text: request.prompt, images: request.currentTurnImages }),
-              ...initialSteering.map(userMessage),
-            ]);
-          else await agent.prompt(request.prompt, images.length ? images : undefined);
-          while (!signal.aborted && !host.pausePending && !host.toolCallBudget.exceeded) {
-            // A message claimed just as the last step ended was steered in after the loop
-            // stopped looking: answer it in this run, or it would count as answered unseen.
-            await interjectClaim;
-            if (!interjected && !agent.hasQueuedMessages?.()) break;
-            if (interjected) keepInterruptedAssistantMessage(agent.state.messages);
-            interjected = false;
-            const gap = cutMidReply
-              ? `${streamed.endsWith("\n") ? "\n" : "\n\n"}${INTERRUPTED_DIVIDER}\n\n`
-              : streamed.trim() && !streamed.endsWith("\n")
-                ? "\n\n"
-                : "";
-            cutMidReply = false;
-            if (gap) {
-              queue.push({ type: "text", text: gap });
-              streamed += gap;
-            }
-            host.steeredUnseen = 0;
-            await agent.continue();
-          }
+          await agent.prompt(request.prompt, images.length ? images : undefined);
           // The provider counts tokens its own way: when it rejects the request as too long,
           // compact what our estimate let through and try once more instead of failing the run.
           const overflowError =
@@ -900,7 +783,6 @@ export class PiAgentRuntime implements AgentRuntime {
             await agent.continue();
           }
         } finally {
-          if (interjectTimer) clearInterval(interjectTimer);
           try {
             await agent.waitForIdle();
           } finally {
@@ -1011,19 +893,6 @@ export class PiAgentRuntime implements AgentRuntime {
       if (running.get(request.runId) === active) running.delete(request.runId);
     }
   }
-}
-
-/** One user turn for the model, with its images. */
-function userMessage(item: {
-  text: string;
-  images?: AgentRunRequest["currentTurnImages"];
-}): AgentMessage {
-  const images = toPiImages(item.images);
-  return {
-    role: "user",
-    content: images.length ? [{ type: "text", text: item.text }, ...images] : item.text,
-    timestamp: Date.now(),
-  };
 }
 
 function toPiImages(images: AgentRunRequest["currentTurnImages"]) {
@@ -1153,44 +1022,6 @@ export function modelsForRequest(
     });
   }
   return catalogModels();
-}
-
-function toAgentTools(toolDefs: readonly ConnectorTool[], host: ToolHost): AgentTool[] {
-  // Registration order is incidental. Canonicalize before allocating collision suffixes
-  // so both provider-visible names and JSON schema serialization stay stable.
-  const canonicalJson = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(canonicalJson);
-    if (value && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value)
-          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-          .map(([key, item]) => [key, canonicalJson(item)]),
-      );
-    }
-    return value;
-  };
-  const ordered = toolDefs
-    .map((tool) => ({
-      tool: {
-        ...tool,
-        inputSchema: canonicalJson(tool.inputSchema) as Record<string, unknown>,
-      },
-      key: JSON.stringify(canonicalJson(tool)),
-    }))
-    .sort((a, b) =>
-      a.tool.name < b.tool.name
-        ? -1
-        : a.tool.name > b.tool.name
-          ? 1
-          : a.key < b.key
-            ? -1
-            : a.key > b.key
-              ? 1
-              : 0,
-    )
-    .map(({ tool }) => tool);
-  const names = normalizeAgentToolNames(ordered);
-  return ordered.map((tool, index) => toAgentTool(tool, host, names[index]!));
 }
 
 function auditUndispatchedToolFailure(
@@ -1698,33 +1529,6 @@ export function messageThinking(message: {
     : null;
 }
 
-function withoutSteeringMessages(
-  history: AgentRunRequest["history"],
-  steering: AgentSteeringMessage[],
-): AgentRunRequest["history"] {
-  if (steering.length === 0) return history;
-  const result = [...history];
-  let beforeIndex = result.length - 1;
-  for (let steeringIndex = steering.length - 1; steeringIndex >= 0; steeringIndex -= 1) {
-    const steeringMessage = steering[steeringIndex];
-    for (let index = beforeIndex; index >= 0; index -= 1) {
-      const message = result[index];
-      if (
-        message?.role !== "user" ||
-        (message.id
-          ? message.id !== steeringMessage?.messageId
-          : message.content !== (steeringMessage?.historyText ?? steeringMessage?.text))
-      ) {
-        continue;
-      }
-      result.splice(index, 1);
-      beforeIndex = index - 1;
-      break;
-    }
-  }
-  return result;
-}
-
 /**
  * Normalize `request_secret` arguments.
  *
@@ -1758,407 +1562,12 @@ export function prepareRequestSecretArguments(raw: Record<string, unknown>) {
   };
 }
 
-function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): AgentTool {
-  return {
-    name: exposedName,
-    label: tool.name,
-    description: tool.description,
-    parameters: parametersFor(tool),
-    prepareArguments: (args: unknown) => {
-      const raw = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-      if (tool.name === "destination.write") {
-        return {
-          collection: String(raw.collection ?? "notes"),
-          title: String(raw.title ?? "Rakazo result"),
-          body: String(raw.body ?? ""),
-        };
-      }
-      if (tool.name === "remember") {
-        return {
-          // An edit carries no content; an undefined value here failed every edit-mode save.
-          ...(raw.content === undefined ? {} : { content: raw.content }),
-          path: String(raw.path ?? "MEMORY.md"),
-          expectedRevision: raw.expectedRevision,
-          // The schema offers a partial edit; dropping it here failed every edit-mode save.
-          ...(raw.edit === undefined ? {} : { edit: raw.edit }),
-          ...(raw.recruitingFeedback === undefined
-            ? {}
-            : { recruitingFeedback: raw.recruitingFeedback }),
-        };
-      }
-      // Repair slips before the schema check so they never reject a regenerated brief.
-      if (tool.name === "recruiting_role")
-        return normalizeRecruitingRoleArgs(raw, new Date().toISOString());
-      // A preference cites the recruiter's words; a citation written in another tool's shape is
-      // rewritten to this one instead of failing the save.
-      if (tool.name === "recruiting_feedback" && raw.target === "preference") {
-        const sourceRefs = repairSourceRefs(raw.sourceRefs, new Date().toISOString());
-        return sourceRefs ? { ...raw, sourceRefs } : raw;
-      }
-      // The server fills sources and names the people; an empty list reaches it for a precise error.
-      if (tool.name === "recruiting_feedback" && raw.target !== "preference") {
-        const { candidateKeys, ...rest } = raw;
-        return {
-          ...rest,
-          sourceRefs: Array.isArray(raw.sourceRefs) ? raw.sourceRefs : [],
-          ...(typeof candidateKeys === "string"
-            ? { candidateKeys: [candidateKeys] }
-            : Array.isArray(candidateKeys) && candidateKeys.length
-              ? { candidateKeys }
-              : {}),
-        };
-      }
-      if (tool.name === "request_takeover") {
-        return { reason: String(raw.reason ?? "I need you on the screen.") };
-      }
-      if (tool.name === "ask_user") {
-        // An over-long option keeps its start instead of failing the card (80 characters).
-        const options = Array.isArray(raw.options)
-          ? raw.options.map((option) => {
-              const text = String(option).trim();
-              return text.length > 80 ? `${text.slice(0, 79).trimEnd()}…` : text;
-            })
-          : raw.options;
-        return {
-          // An over-long question loses its leading sentences instead of failing the card.
-          question: shortQuestion(String(raw.question ?? "What should I use?")),
-          // Keep a missing/invalid options value as-is so schema minItems can reject it;
-          // do not coerce to [] (that used to look like a valid empty list upstream).
-          ...(options === undefined ? {} : { options }),
-          ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
-          ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
-        };
-      }
-      if (tool.name === "request_secret") {
-        return prepareRequestSecretArguments(raw);
-      }
-      if (tool.name === "write_file") {
-        return {
-          ...(raw.path === undefined ? {} : { path: String(raw.path) }),
-          ...(Object.hasOwn(raw, "content") ? { content: textContentArg(raw.content, "") } : {}),
-          ...(Object.hasOwn(raw, "artifactId") ? { artifactId: raw.artifactId } : {}),
-        };
-      }
-      if (tool.name === "computer_act") {
-        return {
-          actions: Array.isArray(raw.actions) ? raw.actions : [],
-          observe: raw.observe === undefined ? true : Boolean(raw.observe),
-          settle_ms: Number(raw.settle_ms ?? 350),
-        };
-      }
-      if (tool.name === "list_files") return { path: String(raw.path ?? "") };
-      if (tool.name === "read_file" || tool.name === "open_path") {
-        return { path: String(raw.path ?? "") };
-      }
-      if (tool.name === "launch_app") {
-        return {
-          application: String(raw.application ?? ""),
-          uri: raw.uri ? String(raw.uri) : "",
-        };
-      }
-      if (tool.name === "shell") {
-        return {
-          command: String(raw.command ?? ""),
-          // The executor chooses the bot-scoped default, including Team workspaces.
-          ...(raw.cwd ? { cwd: String(raw.cwd) } : {}),
-        };
-      }
-      if (tool.name === "run_subagent") {
-        return {
-          name: String(raw.name ?? "helper"),
-          task: String(raw.task ?? ""),
-          instructions: raw.instructions ? String(raw.instructions) : "",
-          model_provider: raw.model_provider ? String(raw.model_provider) : "",
-          model_id: raw.model_id ? String(raw.model_id) : "",
-          ...(raw.background === true ? { background: true } : {}),
-          ...(raw.handle ? { handle: String(raw.handle) } : {}),
-          ...(Array.isArray(raw.wait) ? { wait: raw.wait.map(String) } : {}),
-          ...(raw.timeout_seconds !== undefined ? { timeout_seconds: raw.timeout_seconds } : {}),
-        };
-      }
-      if (tool.name === "spawn_bot") {
-        return {
-          name: String(raw.name ?? ""),
-          title: raw.title ? String(raw.title) : "",
-          instructions: raw.instructions ? String(raw.instructions) : "",
-          prompt: raw.prompt ? String(raw.prompt) : "",
-          computer_mode: raw.computer_mode ? String(raw.computer_mode) : "",
-        };
-      }
-      if (tool.name === "update_bot") {
-        const notifyRaw = raw.notifyOnFinish ?? raw.notify_on_finish;
-        return {
-          ...(raw.name !== undefined ? { name: String(raw.name) } : {}),
-          ...(raw.title !== undefined ? { title: String(raw.title) } : {}),
-          ...(raw.description !== undefined ? { description: String(raw.description) } : {}),
-          ...(raw.color !== undefined ? { color: String(raw.color) } : {}),
-          ...(raw.artifact_id !== undefined ? { artifact_id: String(raw.artifact_id) } : {}),
-          ...(raw.use_attached_image !== undefined
-            ? { use_attached_image: raw.use_attached_image }
-            : {}),
-          ...(notifyRaw !== undefined ? { notifyOnFinish: notifyRaw } : {}),
-        };
-      }
-      if (tool.name === "create_space") {
-        return { name: String(raw.name ?? "") };
-      }
-      if (tool.name === "archive_bot" || tool.name === "delete_bot") {
-        return {
-          confirm_name: String(raw.confirm_name ?? raw.confirmName ?? ""),
-          bot_id: raw.bot_id ? String(raw.bot_id) : raw.botId ? String(raw.botId) : "",
-        };
-      }
-      return withoutUndeclaredArguments(raw, tool.inputSchema) as never;
-    },
-    execute: async (toolCallId, params): Promise<AgentToolResult<unknown>> => {
-      host.signal.throwIfAborted();
-      const args = (params ?? {}) as Record<string, unknown>;
-      const rawCallId =
-        toolCallId || `${host.request.runId}:${tool.name}:${host.toolCallSeq.value++}`;
-      // Backend idempotency includes the agent namespace; Pi wire IDs remain untouched.
-      const executionId = JSON.stringify(["pi-tool", host.agentNamespace ?? "main", rawCallId]);
-      if (!beginToolCall(host)) {
-        return {
-          content: [{ type: "text", text: "Skipped: tool-call limit reached." }],
-          details: { skipped: true },
-        };
-      }
-      host.queue.push({ type: "tool", name: tool.name, args, executionId });
-      const startedAt = Date.now();
-      let result: unknown;
-      let failure: unknown;
-      host.dispatchedToolCalls.add(toolCallId);
-      let promotion: Promise<void> | undefined;
-      // Human interaction tools pause explicitly; only executing work moves to the background.
-      const promotionTimer =
-        host.request.onSlowTool &&
-        !["ask_user", "request_takeover", "request_secret"].includes(tool.name)
-          ? setTimeout(() => {
-              promotion = host.request.onSlowTool!({
-                name: tool.name,
-                executionId,
-                durationMs: Date.now() - startedAt,
-              }).catch((error) => {
-                getLogger().error("slow tool promotion failed", error);
-              });
-            }, SLOW_TOOL_BACKGROUND_MS)
-          : undefined;
-      try {
-        result = await (async () => {
-          if (tool.name === "request_takeover") {
-            const helped = await subagentResultsBeforePause(host);
-            if (helped) return helped;
-            host.pausePending = true;
-            host.queue.push({
-              type: "takeover",
-              reason: String(args.reason ?? "I need you on the screen."),
-            });
-            return {
-              content: [{ type: "text", text: "Takeover requested." }],
-              details: args,
-              terminate: true,
-            };
-          }
-          if (tool.name === "ask_user") {
-            const parsed = AskUserInputSchema.safeParse(args);
-            if (!parsed.success)
-              throw new Error(
-                "ask_user requires two to four unique, non-empty options or a valid requestedSchema. Add two to four short options (the card already offers a custom answer) and ask again; never ask in plain text instead.",
-              );
-            const { question } = parsed.data;
-            const known = await host.request.beforeAsk?.(question);
-            if (known) {
-              // Each bounce costs the person another model step before the card; say which check.
-              getLogger().info("ask.not_shown", {
-                runId: host.request.runId,
-                reason: typeof known === "string" ? "already_answered" : known.instead.slice(0, 80),
-              });
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text:
-                      typeof known === "string"
-                        ? `The recruiter already replied after this question: ${known}\nIf that reply answers it, use it and continue without asking again. If it was about something else, ask the question again now.`
-                        : known.instead,
-                  },
-                ],
-                details: args,
-              };
-            }
-            const helped = await subagentResultsBeforePause(host);
-            if (helped) return helped;
-            // A message the user sent while this question was being written may already answer
-            // it; read it before pausing, so the user is never left waiting behind the card.
-            const arrived = (host.steeredUnseen ?? 0) + ((await host.claimNewSteering?.()) ?? 0);
-            if (arrived)
-              return {
-                content: [{ type: "text", text: ASK_SUPERSEDED_BY_MESSAGE }],
-                details: args,
-              };
-            const options = "options" in parsed.data ? parsed.data.options : undefined;
-            const requestedSchema =
-              "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
-            host.pausePending = true;
-            host.queue.push({
-              type: "ask",
-              text: question,
-              ...(requestedSchema
-                ? { requestedSchema }
-                : {
-                    actions: options!.map((label, index) => ({
-                      id: `choice-${index + 1}`,
-                      label,
-                    })),
-                    ...("multiple" in parsed.data && parsed.data.multiple
-                      ? { multiple: true }
-                      : {}),
-                  }),
-            });
-            return {
-              content: [{ type: "text", text: "Waiting for the user's answer." }],
-              details: args,
-              terminate: true,
-            };
-          }
-          if (tool.name === "request_secret") {
-            if (host.request.executeTool) {
-              const result = await host.request.executeTool(tool.name, args, executionId);
-              if (isAgentToolExecutionResult(result)) {
-                if (isToolPauseResult(result)) host.pausePending = true;
-                return result;
-              }
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: serializeToolResult(
-                      result,
-                      host.request.contextStrategy,
-                      tool.name,
-                      args,
-                    ),
-                  },
-                ],
-                details: result,
-              };
-            }
-            host.pausePending = true;
-            return {
-              content: [{ type: "text", text: "Protected input requested." }],
-              details: args,
-              terminate: true,
-            };
-          }
-          if (tool.name === "run_subagent") {
-            const result = await executeSubagent(host, executionId, args);
-            return {
-              content: [{ type: "text", text: result }],
-              details: { result },
-            };
-          }
-          if (host.request.executeTool) {
-            const call = host.request.executeTool(tool.name, args, executionId, tool.route, {
-              onShellStillRunning: (completion) => {
-                host.pendingShells.push(completion);
-              },
-            });
-            const result = await untilStopped(
-              RECORD_TOOLS.has(tool.name)
-                ? withinDeadline(call, RECORD_TOOL_DEADLINE_MS, () => {
-                    getLogger().warn("run.tool.late", {
-                      runId: host.request.runId,
-                      tool: tool.name,
-                      executionId,
-                    });
-                    return { error: RECORD_TOOL_LATE_TEXT };
-                  })
-                : call,
-              host.signal,
-              () =>
-                getLogger().warn("run.tool.abandoned", {
-                  runId: host.request.runId,
-                  tool: tool.name,
-                  executionId,
-                }),
-            );
-            if (isAgentToolExecutionResult(result)) {
-              if (isToolPauseResult(result)) host.pausePending = true;
-              return boundAgentToolResult(result);
-            }
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: await clipWithFullOutput(
-                    toolResultJson(result),
-                    (full) =>
-                      shortenToolResultText(full, 12_000, { name: tool.name, arguments: args }),
-                    VERBATIM_TOOL_RESULTS.has(tool.name)
-                      ? undefined
-                      : toolOutputStore(host, tool.name, executionId),
-                    VERBATIM_TOOL_RESULTS.has(tool.name) ? Number.POSITIVE_INFINITY : 12_000,
-                  ),
-                },
-              ],
-              details: result,
-            };
-          }
-          return {
-            content: [
-              {
-                type: "text",
-                text: `${tool.name} is unavailable without an executor.`,
-              },
-            ],
-            details: { error: "no executor" },
-          };
-        })();
-        clearTimeout(promotionTimer);
-        await promotion;
-        if (VERBATIM_TOOL_RESULTS.has(tool.name))
-          return spillRequiredResult(
-            result as AgentToolResult<unknown>,
-            toolOutputStore(host, tool.name, executionId),
-            host.activeModel.config.contextWindow ?? host.activeModel.model.contextWindow,
-          );
-        return boundAgentToolResult(
-          result as AgentToolResult<unknown>,
-          toolOutputStore(host, tool.name, executionId),
-        );
-      } catch (error) {
-        failure = error;
-        // A database conflict reaches the model as plain words, never its SQL or code.
-        const conflict = databaseConflictText(error);
-        if (conflict) throw new Error(conflict, { cause: error });
-        throw error;
-      } finally {
-        clearTimeout(promotionTimer);
-        endToolCall(host);
-        const completion: AgentToolCompletion = {
-          name: tool.name,
-          executionId,
-          durationMs: Math.max(0, Date.now() - startedAt),
-          ...(result === undefined ? {} : { result }),
-          ...(failure === undefined ? {} : { error: failure }),
-          ...(host.pausePending ? { paused: true } : {}),
-        };
-        try {
-          void Promise.resolve(host.request.onToolCompleted?.(completion)).catch(() => undefined);
-        } catch {
-          // Audit hooks are best effort and must never change tool behavior.
-        }
-      }
-    },
-  };
-}
-
 /** Helpers one turn may start, and how many may work at the same time. */
 export const SUBAGENT_TURN_LIMIT = 32;
 export const SUBAGENT_CONCURRENCY = 8;
 
 /** run_subagent: start a helper, continue one by handle, or wait for background results. */
-async function executeSubagent(
+export async function executeSubagent(
   host: ToolHost,
   executionId: string,
   args: Record<string, unknown>,
@@ -2215,7 +1624,7 @@ async function executeSubagent(
  * A question or takeover ends the run, and helpers cannot outlive it: first wait for background
  * helpers and give their results to the model, which then asks again if it still needs to.
  */
-async function subagentResultsBeforePause(
+export async function subagentResultsBeforePause(
   host: ToolHost,
 ): Promise<AgentToolResult<unknown> | undefined> {
   if (host.depth > 0) return undefined;
@@ -2436,7 +1845,6 @@ async function createSubagent(
     initialState: {
       systemPrompt: [
         `You are a Rakazo subagent named "${name}".`,
-        RECRUITING_PRESENTATION_INSTRUCTION,
         "You run inside the parent bot's turn — you are not a separate bot chat.",
         "Complete the task and return a concise result. Do not spawn bots or further subagents.",
         extra,
@@ -2896,7 +2304,7 @@ function isComputerScreenshotMessage(
   );
 }
 
-function isAgentToolExecutionResult(result: unknown): result is AgentToolExecutionResult {
+export function isAgentToolExecutionResult(result: unknown): result is AgentToolExecutionResult {
   if (
     !result ||
     typeof result !== "object" ||
@@ -3129,7 +2537,7 @@ export function toolResultJson(result: unknown): string {
   }
 }
 
-async function boundAgentToolResult<T>(
+export async function boundAgentToolResult<T>(
   result: AgentToolResult<T>,
   store?: ToolOutputStore,
 ): Promise<AgentToolResult<T>> {
@@ -3149,7 +2557,7 @@ const STORED_DATA_READ_TOOLS: ReadonlySet<string> = new Set([
   "skill_read",
 ]);
 
-function toolOutputStore(
+export function toolOutputStore(
   host: ToolHost,
   name: string,
   executionId: string,
@@ -3181,8 +2589,6 @@ function messageHasToolCall(message: unknown): boolean {
     (part) => !!part && typeof part === "object" && "type" in part && part.type === "toolCall",
   );
 }
-
-const INTERJECT_POLL_MS = 2_000;
 
 /** Markdown rule between a reply cut off by a new message and the answer that follows. */
 export const INTERRUPTED_DIVIDER = "---";
@@ -3324,10 +2730,10 @@ interface EventQueue {
   iterate(): AsyncIterable<AgentRuntimeEvent>;
 }
 
-const ASK_SUPERSEDED_BY_MESSAGE =
-  "Not asked: the user sent a new message while this question was being written. It comes next; act on it, and ask this question again only if that message leaves it open.";
+export const ASK_SUPERSEDED_BY_MESSAGE =
+  "Not asked: the user sent a new message while this question was being written. It comes next.";
 
-interface ToolHost {
+export interface ToolHost {
   context?: Partial<AdapterContext>;
   onContextDecision?: PiAgentRuntimeOptions["onContextDecision"];
   modelCallObserver?: ModelCallObserver;
@@ -3355,10 +2761,6 @@ interface ToolHost {
   /** Helpers this run started, by handle (shared with nested hosts, used at depth 0 only). */
   subagents: Map<string, SubagentHelper>;
   subagentCount: { value: number };
-  /** Messages steered in while the current model step streamed; the model has not read them yet. */
-  steeredUnseen?: number;
-  /** Claims messages that arrived since the last read, steers them in and returns how many. */
-  claimNewSteering?: () => Promise<number>;
 }
 
 function toolCallBudgetExceededMessage(limit: number) {
@@ -3392,7 +2794,7 @@ function maybeAbortToolCallBudget(host: ToolHost) {
   }
 }
 
-function beginToolCall(host: ToolHost): boolean {
+export function beginToolCall(host: ToolHost): boolean {
   const budget = host.toolCallBudget;
   if (budget.limit <= 0) {
     budget.count += 1;
@@ -3418,12 +2820,12 @@ function beginToolCall(host: ToolHost): boolean {
   return false;
 }
 
-function endToolCall(host: ToolHost) {
+export function endToolCall(host: ToolHost) {
   host.toolCallBudget.inFlight = Math.max(0, host.toolCallBudget.inFlight - 1);
   maybeAbortToolCallBudget(host);
 }
 
-function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Model<Api> {
+export function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Model<Api> {
   const maxTokens = resolveCompletionMaxTokens(
     model.maxTokens,
     configuredMaxTokens,
@@ -3434,7 +2836,7 @@ function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Mo
   return { ...model, maxTokens };
 }
 
-interface RuntimeModelTarget {
+export interface RuntimeModelTarget {
   config: AgentRunRequest["model"];
   models: Models;
   model: Model<Api>;
@@ -3442,8 +2844,8 @@ interface RuntimeModelTarget {
   credentials?: PiRuntimeCredentialStore;
 }
 
-interface FallbackStreamState {
-  request: AgentRunRequest;
+export interface FallbackStreamState {
+  request: Pick<AgentRunRequest, "model" | "fallbackModels" | "resolveFallbackModel" | "tools">;
   getActive(): RuntimeModelTarget;
   signal: AbortSignal;
   attempted: Set<string>;
@@ -3679,7 +3081,7 @@ function fallbackSupportsContext(
   return !requiresReasoning || candidate.model.reasoning;
 }
 
-function fallbackAwareModelStream(
+export function fallbackAwareModelStream(
   state: FallbackStreamState,
   context: TranscriptContext,
   options: ModelsSimpleStreamOptions | undefined,
@@ -3916,7 +3318,7 @@ function fallbackAwareModelStream(
   return output;
 }
 
-function createGate(max: number) {
+export function createGate(max: number) {
   let active = 0;
   const waiters: Array<() => void> = [];
   return {

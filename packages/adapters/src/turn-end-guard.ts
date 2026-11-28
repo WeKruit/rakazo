@@ -1,8 +1,6 @@
 import type { PrismaClient } from "@rakazo/db";
 import { inGroupOrder } from "./recruiting-round-check.js";
 
-export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
-
 type RoundPrisma = Pick<PrismaClient, "externalEffect"> & {
   recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
 };
@@ -199,11 +197,4 @@ export function roundPassage(snippet: string | null | undefined): string | undef
   const cut = text.slice(0, PASSAGE_MAX);
   const space = cut.lastIndexOf(" ");
   return `${(space > PASSAGE_MAX * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "")}…`;
-}
-
-/** The declined turn a retry message was sent for, from that message's nonce. */
-export function declinedRunId(clientNonce: string | null | undefined): string | undefined {
-  if (!clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX) || !clientNonce.endsWith(":decline"))
-    return undefined;
-  return clientNonce.slice(AUTOCONTINUE_NONCE_PREFIX.length, -":decline".length) || undefined;
 }

@@ -4,7 +4,6 @@ import type {
   TeamChatSendRequest,
   TeamChatSendResult,
 } from "@rakazo/adapter-kit";
-import { runContinueJob } from "@rakazo/adapter-kit";
 import { AutomatedSenderPoliciesSchema, type MessageBlock } from "@rakazo/contracts";
 import { BOT_MESSAGE_MAX_HOPS } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
@@ -663,12 +662,17 @@ export class TeamChatBridge {
           botId: target.id,
         },
       },
-      include: { run: true, externalConversation: true },
+      include: {
+        run: true,
+        externalConversation: { include: { thread: { select: { id: true } } } },
+      },
       orderBy: { createdAt: "asc" },
       take: BATCH_SIZE,
     });
     for (const message of running) {
-      if (message.run?.status === "completed") {
+      if (!message.runId) {
+        await this.linkRun(message).catch((error) => this.retry(message, error));
+      } else if (message.run?.status === "completed") {
         await this.deliverCompletion(message).catch((error) => this.retry(message, error));
       } else if (message.run?.status === "failed" || message.run?.status === "cancelled") {
         await this.deliverFailure(message).catch((error) => this.retry(message, error));
@@ -1122,58 +1126,58 @@ export class TeamChatBridge {
       linkMessageToRun: true,
       allowParallelRun: true,
     });
-    // Routine wake may have committed during sendUserMessage. Cancel the
-    // fallback run before abandoning so the job reconciler cannot enqueue it
-    // beside the routine wake.
+    // Routine wake may have committed during sendUserMessage. Withdraw the fallback input
+    // before abandoning so the agent does not answer beside the routine wake.
     if (await findWake()) {
-      if (sent.runId) {
-        const cancelledAt = new Date();
-        await this.deps.prisma.run.updateMany({
-          where: {
-            id: sent.runId,
-            status: { in: ["queued", "running", "leased", "waiting_input", "waiting_takeover"] },
-          },
-          data: {
-            status: "cancelled",
-            completedAt: cancelledAt,
-            leaseOwner: null,
-            leaseExpiresAt: null,
-          },
-        });
-        const taskId =
-          sent.taskId ??
-          (
-            await this.deps.prisma.run.findUnique({
-              where: { id: sent.runId },
-              select: { taskId: true },
-            })
-          )?.taskId;
-        if (taskId) {
-          await this.deps.prisma.task.updateMany({
-            where: { id: taskId },
-            data: { status: "cancelled" },
-          });
-        }
-      }
+      await this.deps.prisma.sessionInput.deleteMany({
+        where: { messageId: sent.messageId, deliveredAt: null },
+      });
       await abandonForRoutine("queueing");
       return;
     }
-    if (!sent.runId) throw new Error("Team chat message did not create an agent run");
+    // The run is linked once the agent's session takes the message in (see linkRun).
     const linked = await this.deps.prisma.externalMessage.updateMany({
       where: {
         id: message.id,
         status: "queueing",
         engagementReason: AGENT_OWNERSHIP_REASON,
       },
-      data: {
-        status: "running",
-        runId: sent.runId,
-        lastError: null,
-        nextAttemptAt: null,
-      },
+      data: { status: "running", lastError: null, nextAttemptAt: null },
     });
     if (linked.count !== 1) throw new Error("Team chat queue reservation was lost");
-    await this.deps.jobs.enqueue(runContinueJob(sent.runId));
+  }
+
+  /**
+   * The run that took this message in answers it. A message steered into a run another team chat
+   * message already owns is answered by that run's one reply.
+   */
+  private async linkRun(message: {
+    id: string;
+    providerEventId: string;
+    externalConversation: { thread: { id: string } | null };
+  }): Promise<void> {
+    const threadId = message.externalConversation.thread?.id;
+    if (!threadId) return;
+    const source = await this.deps.prisma.message.findUnique({
+      where: {
+        threadId_clientNonce: {
+          threadId,
+          clientNonce: `teamchat:${this.deps.providerId}:${message.providerEventId}`,
+        },
+      },
+      select: { runId: true },
+    });
+    if (!source?.runId) return;
+    const owner = await this.deps.prisma.externalMessage.findUnique({
+      where: { runId: source.runId },
+      select: { id: true },
+    });
+    await this.deps.prisma.externalMessage.updateMany({
+      where: { id: message.id, status: "running", runId: null },
+      data: owner
+        ? { status: "ignored", engagementReason: "answered_by_run", nextAttemptAt: null }
+        : { runId: source.runId },
+    });
   }
 
   private async deliverCompletion(message: {

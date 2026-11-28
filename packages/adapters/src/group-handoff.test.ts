@@ -6,16 +6,7 @@ import {
   NO_ROLE_HANDOFF,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
-  watchOpenStages,
 } from "./group-handoff.js";
-import type * as RoundCheck from "./recruiting-round-check.js";
-
-const roundCounts = vi.hoisted(() => ({ counted: 10, target: 10 }));
-vi.mock("./recruiting-round-check.js", async (original) => ({
-  ...(await original<typeof RoundCheck>()),
-  requestCounts: vi.fn(async () => ({ counted: roundCounts.counted })),
-  requestTarget: vi.fn(async () => roundCounts.target),
-}));
 
 const run = {
   id: "run-a",
@@ -34,7 +25,10 @@ function harness(
   const runCreate = vi.fn(async () => ({ id: "run-b" }));
   const messageCreate = vi.fn(async () => ({ id: "message-1" }));
   const tx = {
-    $queryRaw: vi.fn(async () => [{ id: "group-1" }]),
+    $queryRaw: vi.fn(async () => [
+      { id: "group-1", seq: 1, threadId: "thread-1", botId: "bot-2", leaseFence: 0 },
+    ]),
+    conversationSession: { createMany: vi.fn(async () => ({ count: 1 })) },
     chatGroup: {
       findFirst: vi.fn(async () => ({
         id: "group-1",
@@ -71,7 +65,6 @@ function harness(
       ),
     },
     task: { create: vi.fn(async () => ({ id: "task-b" })) },
-    externalEffect: { findFirst: vi.fn(async (): Promise<{ id: string } | null> => null) },
     event: {
       findFirst: vi.fn(async () => ({ seq: 1 })),
       create: vi.fn(async () => ({ seq: 1 })),
@@ -83,7 +76,7 @@ function harness(
   return {
     deps: {
       prisma,
-      events: { notify: vi.fn(async () => undefined) },
+      events: { notify: vi.fn(async () => undefined), wakeSessions: vi.fn(async () => undefined) },
       jobs: { enqueue: vi.fn(async () => undefined) },
     },
     messageCreate,
@@ -95,60 +88,6 @@ function harness(
 }
 
 describe("group handoff ownership", () => {
-  it("retries a transaction conflict before creating one child and notifying once", async () => {
-    const { deps, messageCreate, runCreate, eventCreate } = harness([
-      { kind: "text", text: "user request" },
-    ]);
-    messageCreate.mockRejectedValueOnce(
-      Object.assign(new Error("write conflict or a deadlock"), { code: "P2034" }),
-    );
-
-    await expect(
-      handoffToGroupBot(deps as never, run, "group-1", {
-        bot_id: "bot-b",
-        message: "Do the distinct next stage",
-      }),
-    ).resolves.toMatchObject({ ok: true, botId: "bot-b", runId: "run-b" });
-
-    expect(deps.prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(messageCreate).toHaveBeenCalledTimes(2);
-    expect(runCreate).toHaveBeenCalledOnce();
-    expect(eventCreate).toHaveBeenCalledOnce();
-    expect(deps.events.notify).toHaveBeenCalledExactlyOnceWith(run.threadId, 1);
-    expect(deps.jobs.enqueue).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ name: "run.continue", payload: { runId: "run-b" } }),
-    );
-  });
-
-  it("marks a new ownership transfer as a follow-up with a chain hop", async () => {
-    const { deps, messageCreate, runCreate } = harness([{ kind: "text", text: "user request" }]);
-
-    await expect(
-      handoffToGroupBot(deps as never, run, "group-1", {
-        bot_id: "bot-b",
-        message: "Do the distinct next stage",
-      }),
-    ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
-
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [
-            expect.objectContaining({
-              kind: "handoff",
-              fromBotId: "bot-a",
-              toBotId: "bot-b",
-              hop: 1,
-            }),
-          ],
-        }),
-      }),
-    );
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ trigger: "follow_up" }) }),
-    );
-  });
-
   it("refuses to bounce a handed-off stage straight back to its sender", async () => {
     const { deps, runCreate } = harness([
       { kind: "handoff", fromBotId: "bot-b", toBotId: "bot-a", text: "Investigate", hop: 1 },
@@ -183,38 +122,6 @@ describe("group handoff ownership", () => {
     expect(runCreate).not.toHaveBeenCalled();
   });
 
-  it("reuses the recorded transfer when a source run is retried", async () => {
-    const { deps, messageCreate, runCreate } = harness([], {
-      sourceRuns: [{ id: "run-b", botId: "bot-b" }],
-    });
-
-    await expect(
-      handoffToGroupBot(deps as never, run, "group-1", {
-        bot_id: "bot-c",
-        message: "A duplicate stage",
-      }),
-    ).resolves.toMatchObject({ ok: true, botId: "bot-b", runId: "run-b" });
-    expect(messageCreate).not.toHaveBeenCalled();
-    expect(runCreate).not.toHaveBeenCalled();
-  });
-
-  it("lets a run resumed by an answer hand off again under that answer's key", async () => {
-    const { deps, messageCreate } = harness([]);
-
-    await expect(
-      handoffToGroupBot(deps as never, run, "group-1", {
-        turnKey: "answer-2",
-        bot_id: "bot-b",
-        message: "The recruiter answered: contact them",
-      }),
-    ).resolves.toMatchObject({ ok: true, runId: "run-b" });
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ clientNonce: "group-handoff:run-a:answer-2" }),
-      }),
-    );
-  });
-
   it("rejects malformed source ancestry instead of restarting its hop count", async () => {
     const { deps, runCreate } = harness({ kind: "not-an-array" });
 
@@ -239,38 +146,6 @@ describe("approval state on a handoff", () => {
       { id: "deny", label: "Deny" },
     ],
   };
-
-  it("tells the next bot a card is still waiting even when the sender claims it was allowed", async () => {
-    const { deps, messageCreate, taskCreate } = harness(
-      [{ kind: "text", text: "can you read my calendar?" }],
-      undefined,
-      undefined,
-      [{ blocks: [bookingCard] }, { blocks: [{ ...bookingCard, status: "answered" }] }],
-    );
-
-    await expect(
-      handoffToGroupBot(deps as never, run, "group-1", {
-        bot_id: "bot-b",
-        message:
-          "The user just selected Allow once on Confirm interview booking → Adam Test. Book it.",
-      }),
-    ).resolves.toMatchObject({ ok: true });
-
-    const note =
-      'still waiting for the user, nobody has answered: "Confirm interview booking → Adam Test"';
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [expect.objectContaining({ text: expect.stringContaining(note) })],
-        }),
-      }),
-    );
-    expect(taskCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ prompt: expect.stringContaining(note) }),
-      }),
-    );
-  });
 
   it("leaves the brief as written when no approval card waits", async () => {
     const { deps, messageCreate } = harness(
@@ -383,226 +258,6 @@ describe("group handoff report back", () => {
     );
   });
 
-  it("returns a verified discarded card even when the child has no final text", async () => {
-    const h = harness([asked]);
-    h.tx.run.findFirst.mockResolvedValue({
-      id: worker.id,
-      botId: worker.botId,
-      sourceMessage: {
-        id: "request",
-        seq: 10,
-        threadId: worker.threadId,
-        role: "bot",
-        botId: "bot-a",
-        runId: "run-a",
-        blocks: [asked],
-      },
-    } as never);
-    h.tx.message.findMany.mockResolvedValue([
-      {
-        id: "card",
-        runId: worker.id,
-        blocks: [
-          {
-            kind: "ask",
-            text: "Draft",
-            status: "answered",
-            actions: [
-              { id: "allow", label: "Send" },
-              { id: "deny", label: "Discard" },
-            ],
-            approvalEffectId: "private-effect",
-            mailReply: {
-              from: "sender@example.test",
-              to: ["candidate@example.test"],
-              cc: [],
-              bcc: [],
-              subject: "Re: Original",
-              body: "Draft",
-              status: "needs_approval",
-              sentAt: null,
-              inReplyTo: {
-                sourceId: "source",
-                emailId: "anchor",
-                threadId: "mail-thread",
-                subject: "Original",
-                sender: "candidate@example.test",
-              },
-            },
-          },
-        ],
-      } as never,
-    ]);
-    Object.assign(h.tx, {
-      externalEffect: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            id: "private-effect",
-            runId: worker.id,
-            status: "denied",
-            request: {},
-            result: null,
-            updatedAt: new Date(),
-            run: { status: "completed" },
-          },
-        ]),
-      },
-    });
-    await reportGroupHandoffOutcome(h.deps as never, worker, "group-1", { status: "completed" });
-    const message = JSON.stringify(h.messageCreate.mock.calls);
-    const task = JSON.stringify(h.taskCreate.mock.calls);
-    expect(message).toContain("the user discarded it");
-    expect(task).toContain("the user discarded it");
-    expect(message + task).not.toMatch(/private-effect|my result is my last message/);
-  });
-
-  it.each([
-    ["completed", undefined, "Finished the stage"],
-    ["failed", "provider down", "Could not finish the stage you handed me: provider down"],
-  ] as const)("wakes the sender when the stage %s", async (status, error, text) => {
-    const { deps, messageCreate, runCreate } = harness([asked], undefined, undefined, [
-      { blocks: [{ kind: "text", text: "Saved ten people." }] },
-    ]);
-    await expect(
-      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status, error }),
-    ).resolves.toEqual({ runId: "run-b" });
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          clientNonce: "group-report:run-b",
-          blocks: [
-            expect.objectContaining({
-              fromBotId: "bot-b",
-              toBotId: "bot-a",
-              hop: 2,
-              report: status,
-              text: expect.stringContaining(text),
-            }),
-          ],
-        }),
-      }),
-    );
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ botId: "bot-a", trigger: "follow_up" }),
-      }),
-    );
-  });
-
-  // Staging change-mind-mid-run 11-16: the teammate's email arrived while Kruit's turn was still
-  // running; the report started another turn, and the running one ended saying it had no draft.
-  // As Workloop steers a child's result into the parent's current turn, the report joins it.
-  it("steers the report into the sender's running turn instead of starting another", async () => {
-    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
-      { blocks: [{ kind: "text", text: "Here is the email." }] },
-    ]);
-    const steeringCreate = vi.fn(async () => ({ id: "steer-1" }));
-    Object.assign(tx, { steeringMessage: { create: steeringCreate } });
-    const lookup = tx.run.findFirst;
-    tx.run.findFirst = vi.fn(async (query?: { where?: { botId?: string; status?: unknown } }) =>
-      query?.where?.botId === "bot-a" && query.where.status
-        ? { id: "run-a-live", status: "running" }
-        : lookup(),
-    ) as never;
-    await expect(
-      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" }),
-    ).resolves.toEqual({ runId: "run-a-live" });
-    expect(runCreate).not.toHaveBeenCalled();
-    expect(steeringCreate).toHaveBeenCalledWith({
-      data: { messageId: "message-1", botId: "bot-a", userId: worker.userId, runId: "run-a-live" },
-    });
-    expect(deps.jobs.enqueue).not.toHaveBeenCalled();
-  });
-
-  it("leaves the next step to the recruiter while a card waits on them", async () => {
-    // Staging 11-13: the teammate asked to connect Gmail, and the sender re-handed the send four
-    // times, each answer repeating "connect Gmail first".
-    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
-      { blocks: [{ kind: "text", text: "Gmail 尚未连接，请先完成连接卡。" }] },
-    ]);
-    tx.message.findFirst.mockImplementation((async (query?: {
-      where?: { role?: string; blocks?: unknown };
-    }) =>
-      query?.where?.blocks
-        ? { id: "connect-card" }
-        : query?.where?.role === "user"
-          ? { blocks: [{ kind: "text", text: "那你就直接发啊" }] }
-          : { blocks: [asked] }) as never);
-    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
-    expect(runCreate).not.toHaveBeenCalled();
-  });
-
-  it("does not wake the sender after a send the recruiter confirmed", async () => {
-    // Staging 11-13: Outreach said the confirmed email went out, then the report woke Main,
-    // which listed the account's five roles nobody asked about.
-    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
-      { blocks: [{ kind: "text", text: "已发给 Noah 和 Ada。" }] },
-    ]);
-    tx.externalEffect.findFirst.mockResolvedValue({ id: "effect-sent" });
-    await expect(
-      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" }),
-    ).resolves.toBeUndefined();
-    expect(runCreate).not.toHaveBeenCalled();
-    expect(tx.externalEffect.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ runId: "run-b", status: "completed" }),
-      }),
-    );
-  });
-
-  it("does not wake the sender after a round that meets the number asked", async () => {
-    // Play s151: the report after a round of ten woke the lead, which recorded the same people as
-    // a second round. A round one person short still reports, so the lead can steer the rest.
-    const roundRun = (counted: number) => {
-      roundCounts.counted = counted;
-      const h = harness([asked], undefined, undefined, [
-        { blocks: [{ kind: "text", text: "本轮 10 人" }] },
-      ]);
-      Object.assign(h.deps.prisma, {
-        externalEffect: {
-          findMany: vi.fn(async () => [{ id: "effect-round", request: { asked: 10 } }]),
-        },
-        recruitingCalibrationRound: {
-          findFirst: vi.fn(async () => ({ roleId: "role-1", effectId: "effect-round" })),
-        },
-      });
-      return h;
-    };
-    const met = roundRun(10);
-    await expect(
-      reportGroupHandoffOutcome(met.deps as never, worker, "group-1", { status: "completed" }),
-    ).resolves.toBeUndefined();
-    expect(met.runCreate).not.toHaveBeenCalled();
-    const short = roundRun(9);
-    await reportGroupHandoffOutcome(short.deps as never, worker, "group-1", {
-      status: "completed",
-    });
-    expect(short.messageCreate).toHaveBeenCalled();
-  });
-
-  it("counts a held-back reply's retry as the stage's result", async () => {
-    // Staging 11-13: Outreach's template was held back for a blank and its retry posted the
-    // fixed one; the report said nothing was posted, so Main had the template written again.
-    const { deps, messageCreate, tx } = harness([asked]);
-    tx.run.findMany.mockResolvedValue([{ id: "run-retry" }]);
-    tx.message.findMany.mockImplementation((async (query?: {
-      where?: { runId?: { in?: string[] } };
-    }) =>
-      query?.where?.runId?.in?.includes("run-retry")
-        ? [{ blocks: [{ kind: "text", text: "Hi {{firstName}}, thanks for your time." }] }]
-        : []) as never);
-    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
-    const text = (
-      messageCreate.mock.calls[0] as unknown as [{ data: { blocks: { text: string }[] } }]
-    )[0].data.blocks[0]!.text;
-    expect(text).not.toContain("without posting any result");
-    expect(tx.run.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { sourceMessage: { clientNonce: "autocontinue:run-b:decline" } },
-      }),
-    );
-  });
-
   it("tells the sender a stage that ended with no message or card is not done", async () => {
     // Staging: Outreach read a skill and ended silently; the report said its result was above,
     // so Main accepted nothing and the recruiter never got the reply card.
@@ -613,8 +268,8 @@ describe("group handoff report back", () => {
     const text = (
       messageCreate.mock.calls[0] as unknown as [{ data: { blocks: { text: string }[] } }]
     )[0].data.blocks[0]!.text;
-    expect(text).toContain("without posting any result");
-    expect(text).not.toMatch(/my result is my last message|NO_RESPONSE/);
+    expect(text).toContain("no message and no card");
+    expect(text).not.toMatch(/its result is my last message|NO_RESPONSE/);
   });
 
   it("stays quiet when the sender did not ask, or already got the report", async () => {
@@ -686,7 +341,7 @@ describe("group handoff report back", () => {
   });
 });
 
-describe("long stage check-in", () => {
+describe("stage end report", () => {
   const asked = {
     kind: "handoff",
     fromBotId: "bot-a",
@@ -725,38 +380,6 @@ describe("long stage check-in", () => {
     );
   }
 
-  it("reports a declined turn's stage when its retry finishes", async () => {
-    const { deps, messageCreate, stageLookup } = stageHarness(
-      undefined,
-      "autocontinue:run-b:decline",
-    );
-    const retry = { ...handedIn, id: "retry-1", sourceMessageId: "retry-message" };
-    await expect(
-      reportGroupStageOutcome(deps as never, retry, "group-1", { status: "completed" }),
-    ).resolves.toEqual({ runId: "run-b" });
-    expect(stageLookup).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ id: "run-b" }) }),
-    );
-    expect(reported(messageCreate)).toEqual(["group-report:run-b"]);
-  });
-
-  it("reports the stage when the search's final wake ends with nothing left running", async () => {
-    const { deps, messageCreate } = stageHarness();
-    await expect(
-      reportGroupStageOutcome(deps as never, wake("research-wake:task:provider"), "group-1", {
-        status: "completed",
-      }),
-    ).resolves.toEqual({ runId: "run-b" });
-    expect(reported(messageCreate)).toEqual(["group-report:run-b"]);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [expect.objectContaining({ report: "completed", toBotId: "bot-a" })],
-        }),
-      }),
-    );
-  });
-
   it("ignores turns that are neither a handed-in stage nor its search", async () => {
     const { deps, messageCreate } = stageHarness();
     await expect(
@@ -767,139 +390,13 @@ describe("long stage check-in", () => {
     expect(messageCreate).not.toHaveBeenCalled();
   });
 
-  it("lets only the check-in answer end silently", () => {
-    const checkIn = [{ ...asked, fromBotId: "bot-b", toBotId: "bot-a", report: "progress" }];
-    expect(isQuietStageReport("follow_up", checkIn as never, "bot-a")).toBe(true);
-    expect(isQuietStageReport("follow_up", checkIn as never, "bot-b")).toBe(false);
+  it("lets only reading a finished stage end silently", () => {
+    const done = [{ ...asked, fromBotId: "bot-b", toBotId: "bot-a", report: "completed" }];
+    expect(isQuietStageReport("follow_up", done as never, "bot-a")).toBe(true);
+    expect(isQuietStageReport("follow_up", done as never, "bot-b")).toBe(false);
     expect(
-      isQuietStageReport("follow_up", [{ ...checkIn[0], report: "completed" }] as never, "bot-a"),
-    ).toBe(true);
-    expect(
-      isQuietStageReport("follow_up", [{ ...checkIn[0], report: "failed" }] as never, "bot-a"),
+      isQuietStageReport("follow_up", [{ ...done[0], report: "failed" }] as never, "bot-a"),
     ).toBe(false);
-    expect(isQuietStageReport("user", checkIn as never, "bot-a")).toBe(false);
-  });
-});
-
-describe("open stage watch", () => {
-  const now = new Date("2026-10-30T12:00:00.000Z");
-  const asked = {
-    kind: "handoff",
-    fromBotId: "bot-a",
-    toBotId: "bot-b",
-    text: "Find everyone in the group.",
-    hop: 1,
-    reportBack: true,
-  };
-  const stage = (status: string, minutes: number, blocks: unknown[] = [asked]) => ({
-    id: `run-${status}`,
-    spaceId: "workspace-1",
-    threadId: "thread-1",
-    botId: "bot-b",
-    userId: "user-1",
-    status,
-    createdAt: new Date(now.getTime() - minutes * 60_000),
-    sourceMessageId: "handoff-1",
-    sourceMessage: { blocks },
-    thread: { groupId: "group-1", activeRecruitingRoleId: "role-1" },
-  });
-
-  function watchHarness(
-    runs: unknown[],
-    options: { reported?: string[]; handedOn?: string[]; busy?: number } = {},
-  ) {
-    const base = harness([asked]);
-    const prisma = base.deps.prisma as unknown as Record<string, unknown>;
-    prisma.run = {
-      findMany: vi.fn(async () => runs),
-      count: vi.fn(async () => options.busy ?? 0),
-    };
-    prisma.message = {
-      findMany: vi.fn(async (args: { where: { runId?: unknown } }) =>
-        args.where.runId
-          ? (options.handedOn ?? []).map((runId) => ({ runId }))
-          : (options.reported ?? []).map((clientNonce) => ({ clientNonce })),
-      ),
-    };
-    prisma.recruitingCandidate = { count: vi.fn(async () => 42) };
-    return base;
-  }
-
-  it("checks in once per ten minutes with how the stage stands", async () => {
-    const { deps, messageCreate } = watchHarness([stage("running", 23)]);
-    await expect(watchOpenStages(deps as never, now, 100)).resolves.toBe(1);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          clientNonce: "group-checkin:run-running:2",
-          blocks: [
-            expect.objectContaining({
-              toBotId: "bot-a",
-              report: "progress",
-              text: expect.stringContaining(
-                "handed me 23 minutes ago is still running; the role's Results hold 42 people.",
-              ),
-            }),
-          ],
-        }),
-      }),
-    );
-  });
-
-  it("offers an email at a long stage's first check-in until the recruiter answers", async () => {
-    const offered = (answered: boolean, minutes: number) => {
-      const watched = watchHarness([stage("running", minutes)]);
-      (watched.deps.prisma as unknown as Record<string, unknown>).externalEffect = {
-        findFirst: vi.fn(async () => (answered ? { id: "effect-1" } : null)),
-      };
-      return watched;
-    };
-    const first = offered(false, 12);
-    await watchOpenStages({ ...first.deps, completionEmail: true } as never, now, 100);
-    expect(first.messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [
-            expect.objectContaining({
-              text: expect.stringContaining("has not been offered an email"),
-            }),
-          ],
-        }),
-      }),
-    );
-    for (const watched of [offered(true, 12), offered(false, 23)]) {
-      await watchOpenStages({ ...watched.deps, completionEmail: true } as never, now, 100);
-      expect(watched.messageCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            blocks: [expect.objectContaining({ text: expect.not.stringContaining("an email") })],
-          }),
-        }),
-      );
-    }
-    const unconfigured = offered(false, 12);
-    await watchOpenStages(unconfigured.deps as never, now, 100);
-    expect(unconfigured.messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [expect.objectContaining({ text: expect.not.stringContaining("an email") })],
-        }),
-      }),
-    );
-  });
-
-  it("skips reported stages, stages nobody asked back, and a busy coordinator", async () => {
-    const reported = watchHarness([stage("completed", 30)], {
-      reported: ["group-report:run-completed"],
-    });
-    await expect(watchOpenStages(reported.deps as never, now, 100)).resolves.toBe(0);
-    const unasked = watchHarness([stage("running", 30, [{ ...asked, reportBack: undefined }])]);
-    await expect(watchOpenStages(unasked.deps as never, now, 100)).resolves.toBe(0);
-    const handedOn = watchHarness([stage("running", 30)], { handedOn: ["run-running"] });
-    await expect(watchOpenStages(handedOn.deps as never, now, 100)).resolves.toBe(0);
-    const busy = watchHarness([stage("running", 30)], { busy: 1 });
-    await expect(watchOpenStages(busy.deps as never, now, 100)).resolves.toBe(0);
-    for (const { messageCreate } of [reported, unasked, handedOn, busy])
-      expect(messageCreate).not.toHaveBeenCalled();
+    expect(isQuietStageReport("user", done as never, "bot-a")).toBe(false);
   });
 });

@@ -338,46 +338,6 @@ describe("reconcileStuckWork", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("cancels a day-old queue with a status line and a stopped notice", async () => {
-    const run = candidate("queued", 25);
-    const client = expireClient(run);
-    const { jobs, enqueue } = publisher();
-    const { provider, send } = notifications();
-    const notify = vi.fn(async () => undefined);
-
-    const cursor = await reconcileStuckWork({
-      prisma: client as unknown as PrismaClient,
-      jobs,
-      events: { notify } as unknown as ThreadEvents,
-      notifications: provider,
-      now,
-      batchSize: 100,
-    });
-
-    expect(cursor).toBeUndefined();
-    expect(client.message.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        role: "system",
-        blocks: [{ kind: "meta", text: stuckWorkStatusMessage("queued") }],
-      }),
-    });
-    expect(notify).toHaveBeenCalledWith("thread-1", 8);
-    expect(enqueue).toHaveBeenCalledWith({
-      name: "run.continue",
-      payload: { runId: "run-next" },
-      replaceKey: "run:run-next",
-    });
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "failure",
-        title: "Ada stopped",
-        body: stuckWorkStatusMessage("queued"),
-      }),
-      expect.anything(),
-    );
-  });
-
   it("reports a handed stage that stopped waiting back to the teammate that handed it", async () => {
     const run = {
       ...candidate("waiting_input", 25),

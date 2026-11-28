@@ -1,5 +1,5 @@
 import type { JobPublisher } from "@rakazo/adapter-kit";
-import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
+import { messagingDeliverJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
   botMessageHopExhausted,
@@ -13,13 +13,14 @@ import {
   appendEventInTransaction,
   createThreadMessageInTransaction,
   lockConversationPair,
+  submitConversationInput,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { currentBotMessageHop } from "./bot-messages.js";
 
 export interface AgentConnectionDeps {
   prisma: PrismaClient;
-  events: Pick<ThreadEvents, "sendUserMessage" | "notify">;
+  events: Pick<ThreadEvents, "sendUserMessage" | "notify" | "wakeSessions">;
   jobs: Pick<JobPublisher, "enqueue">;
 }
 
@@ -247,8 +248,7 @@ export async function messageConnectedAgent(
   if (botMessageHopExhausted(hop)) {
     return {
       ok: false,
-      error:
-        "bot-to-bot message limit reached for this chain; report back to the user instead of messaging another bot",
+      error: "bot-to-bot message limit reached for this chain; nothing was sent",
     };
   }
 
@@ -318,36 +318,26 @@ export async function messageConnectedAgent(
         botId: run.botId,
         runId: run.id,
       });
-      const task = await tx.task.create({
-        data: {
+      const submitted = await submitConversationInput(
+        tx,
+        {
           spaceId: targetIdentity.spaceId,
-          botId: target.id,
-          threadId: targetThreadId,
           userId: targetIdentity.userId,
-          prompt: wakePrompt,
-          status: "queued",
+          threadId: targetThreadId,
+          botId: target.id,
         },
-      });
-      const nextRun = await tx.run.create({
-        data: {
-          spaceId: targetIdentity.spaceId,
-          botId: target.id,
-          threadId: targetThreadId,
-          taskId: task.id,
-          userId: targetIdentity.userId,
-          status: "queued",
+        {
+          kind: "message",
           trigger: "bot_message",
-          sourceMessageId: inbound.id,
+          messageId: inbound.id,
+          payload: { text: wakePrompt, internal: true },
         },
-        select: { id: true },
-      });
-      await tx.message.update({ where: { id: inbound.id }, data: { runId: nextRun.id } });
+      );
       const inboundEvent = await appendEventInTransaction(tx, {
         spaceId: targetIdentity.spaceId,
         threadId: targetThreadId,
         botId: target.id,
         type: "thread.message.created",
-        runId: nextRun.id,
         payload: { messageId: inbound.id, role: "user", blocks: [inboundBlock] },
       });
       const outboundEvent = await appendEventInTransaction(tx, {
@@ -359,7 +349,7 @@ export async function messageConnectedAgent(
         payload: { messageId: outbound.id, role: "bot", blocks: [outboundBlock] },
       });
       return {
-        runId: nextRun.id,
+        sessionId: submitted.sessionId,
         targetEventSeq: inboundEvent.seq,
         senderEventSeq: outboundEvent.seq,
       };
@@ -400,9 +390,7 @@ export async function messageConnectedAgent(
 
   await deps.events.notify(targetThreadId, committed.targetEventSeq).catch(() => undefined);
   await deps.events.notify(run.threadId, committed.senderEventSeq).catch(() => undefined);
-  await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
-    getLogger().error("agent connection message enqueue", error);
-  });
+  await deps.events.wakeSessions([committed.sessionId]);
   return {
     ok: true,
     botId: target.id,

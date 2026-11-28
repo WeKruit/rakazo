@@ -230,10 +230,10 @@ async function recordRecruitingFeedback(
       ? {}
       : { roleId: feedback.roleId, expectedRoleRevision: feedback.expectedRoleRevision }),
     ...(feedback.target === "candidate" ? { candidateKeys: feedback.candidateKeys } : {}),
-    ...((feedback.target === "round" && feedback.operation === "scope") ||
-    (feedback.target === "candidate" && feedback.operation === "review")
-      ? { recordKeeping: true }
-      : {}),
+    ...((feedback.target === "round" && feedback.operation === "approve") ||
+    (feedback.target === "candidate" && feedback.operation !== "review")
+      ? {}
+      : { recordKeeping: true }),
   });
   if (runBotId !== botId)
     throw new RecruitingFeedbackValidationError("Recruiting feedback does not belong to this run");

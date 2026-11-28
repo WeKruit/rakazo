@@ -5,12 +5,10 @@ import {
   type JobPublisher,
   type JobWorkerHost,
 } from "@rakazo/adapter-kit";
-import { AUTOMATION_RUN_TRIGGERS } from "@rakazo/core";
 import { isDatabaseUnreachable } from "@rakazo/db";
 import { getLogger, runCorrelatedJob, unwrapJobPayload, wrapJobPayload } from "@rakazo/logging";
 import { makeWorkerUtils, type Runner, run, type WorkerUtils } from "graphile-worker";
 import type { Pool } from "pg";
-import { recordHistoryCompactAttemptsExhausted } from "./history-compaction.js";
 
 /** Automation runs queue behind a recruiter's turn when every worker slot is busy; graphile runs lower priority numbers first. */
 const BACKGROUND_PRIORITY = 10;
@@ -30,7 +28,7 @@ export class GraphileJobPublisher implements JobPublisher {
     // replace resets attempts and run_at. unsafe_dedupe leaves both, so an
     // exhausted row would stay queued forever. Dedupe only while attempts remain.
     const jobKeyMode = await this.keepExistingMode(utils, job);
-    const priority = await this.priority(utils, job);
+    const priority = this.priority(job);
     await utils.addJob(job.name, wrapJobPayload(job.payload), {
       runAt: job.availableAt,
       jobKey: job.replaceKey,
@@ -41,23 +39,10 @@ export class GraphileJobPublisher implements JobPublisher {
     });
   }
 
-  private async priority(utils: WorkerUtils, job: BackgroundJob): Promise<number> {
+  private priority(job: BackgroundJob): number {
     // Staging 11-16: about 20,000 routine wakeups due in one hour queued ahead of recruiters'
     // turns at the same priority, and a first reply waited 12 s to start.
-    if (job.name === "routine.wakeup") return BACKGROUND_PRIORITY;
-    if (job.name !== "run.continue") return 0;
-    const background = await utils.withPgClient(async (client) => {
-      // A role team's turn on work handed over from the recruiter's conversation has them waiting,
-      // as a Claude Code subagent starts at once.
-      const found = await client.query(
-        `select 1 from runs r left join messages m on m.id = r."sourceMessageId"
-          where r.id = $1 and r."trigger" = any($2::text[])
-            and not coalesce(r."trigger" = 'bot_message' and m.blocks->0 ? 'returnThreadId', false)`,
-        [job.payload.runId, [...AUTOMATION_RUN_TRIGGERS]],
-      );
-      return (found.rowCount ?? 0) > 0;
-    });
-    return background ? BACKGROUND_PRIORITY : 0;
+    return job.name === "routine.wakeup" ? BACKGROUND_PRIORITY : 0;
   }
 
   async cancel(key: string): Promise<void> {
@@ -179,11 +164,9 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
       taskList,
     });
     runner.events.on("job:failed", ({ job, error }) => {
-      recordHistoryCompactAttemptsExhausted(job, error);
       // The queue will not try this job again: one error line the deployment owner can alert on.
       // Runs are not lost with it; the reconciler re-queues any run still waiting.
-      // history.compact already logs its own permanent failure above.
-      if (job.attempts >= job.max_attempts && job.task_identifier !== "history.compact")
+      if (job.attempts >= job.max_attempts)
         getLogger().error("job.exhausted", error, {
           "job.type": job.task_identifier,
           "job.attempts": job.attempts,
@@ -263,6 +246,8 @@ interface QueuedJob {
   payload: unknown;
   availableAt?: Date;
   replaceKey?: string;
+  /** Jobs with one serial key run one at a time, like Graphile's named queue. */
+  serialKey?: string;
   attempts: number;
   maxAttempts: number;
 }
@@ -273,6 +258,7 @@ function toQueuedJob(job: BackgroundJob): QueuedJob {
     payload: wrapJobPayload(job.payload),
     availableAt: job.availableAt,
     replaceKey: job.replaceKey,
+    ...(job.serialKey ? { serialKey: job.serialKey } : {}),
     attempts: 0,
     maxAttempts: job.maxAttempts ?? DEFAULT_JOB_MAX_ATTEMPTS,
   };
@@ -284,6 +270,8 @@ export class InMemoryJobQueue implements JobPublisher, JobWorkerHost {
   private readonly scheduled = new Map<ReturnType<typeof setTimeout>, QueuedJob>();
   private readonly keyed = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly active = new Set<Promise<void>>();
+  /** The last started job of each serial key; the next one waits for it. */
+  private readonly serialTails = new Map<string, Promise<void>>();
   private readonly failures = new Map<BackgroundJob["name"], number>();
   private readonly closingJobs: QueuedJob[] = [];
   private draining: Promise<void> | undefined;
@@ -407,14 +395,24 @@ export class InMemoryJobQueue implements JobPublisher, JobWorkerHost {
 
   private dispatch(handlers: BackgroundJobHandlers, job: QueuedJob): Promise<void> {
     const unpacked = unwrapJobPayload(job.payload);
-    const active = runCorrelatedJob({
-      name: job.name,
-      payload: unpacked.payload,
-      correlation: unpacked.correlation,
-      run: () => dispatchBackgroundJob(handlers, job.name, unpacked.payload),
-    }).catch(() => {
-      this.failures.set(job.name, (this.failures.get(job.name) ?? 0) + 1);
-    });
+    const run = () =>
+      runCorrelatedJob({
+        name: job.name,
+        payload: unpacked.payload,
+        correlation: unpacked.correlation,
+        run: () => dispatchBackgroundJob(handlers, job.name, unpacked.payload),
+      }).catch(() => {
+        this.failures.set(job.name, (this.failures.get(job.name) ?? 0) + 1);
+      });
+    const key = job.serialKey;
+    const previous = key ? this.serialTails.get(key) : undefined;
+    const active = previous ? previous.then(run) : run();
+    if (key) {
+      this.serialTails.set(key, active);
+      void active.finally(() => {
+        if (this.serialTails.get(key) === active) this.serialTails.delete(key);
+      });
+    }
     this.active.add(active);
     void active.finally(() => this.active.delete(active));
     return active;

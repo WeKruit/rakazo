@@ -1,24 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
-  completionMarksUnread,
-  completionMessageSegments,
-  completionNotificationBody,
   completionNotificationPreview,
-  DELEGATED_EMPTY_NOTICE,
-  emptyDelegatedToolTurnShouldFail,
-  isExactNoResponse,
+  runSendsFinishNotification,
+} from "./agent-session/run-projection.js";
+import {
   LONG_WORK_PROGRESS_GUIDANCE,
-  mayOpenModelStream,
-  NO_RESPONSE,
   ROUTINE_SILENT_REPLY_GUIDANCE,
   runAllowsSilentEmpty,
   runIdentityInstruction,
-  runPromotesMidTurnNarration,
   runReplyGuidance,
-  runSendsFinishNotification,
+  TICKET_SILENT_REPLY_GUIDANCE,
+} from "./agent-session/system-prompt.js";
+import {
+  completionMarksUnread,
+  completionMessageSegments,
+  completionNotificationBody,
+  DELEGATED_EMPTY_NOTICE,
+  emptyDelegatedToolTurnShouldFail,
+  isExactNoResponse,
+  mayOpenModelStream,
+  NO_RESPONSE,
+  runPromotesMidTurnNarration,
   stripNoResponseReply,
   subagentMarksUnread,
-  TICKET_SILENT_REPLY_GUIDANCE,
 } from "./executor.js";
 import { finalBlocksAfterMidTurnProgress } from "./user-progress.js";
 

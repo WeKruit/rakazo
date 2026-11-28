@@ -1,8 +1,8 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { BUILTIN_TOOL_NAMES } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
+import { selectBuiltinToolsForRun } from "./agent-session/session-tools.js";
 import { agentConnectionTools, builtinAgentTools } from "./builtin-tools.js";
-import { selectBuiltinToolsForRun } from "./executor.js";
 import { FakeSandboxProvider } from "./fake-sandbox.js";
 import { inferScript, ScriptedAgentRuntime } from "./scripted-runtime.js";
 import { EncryptedSecretStore } from "./secrets.js";

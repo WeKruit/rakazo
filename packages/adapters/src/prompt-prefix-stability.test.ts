@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { userTurnInstructions } from "./agent-session/system-prompt.js";
 import { builtinAgentTools } from "./builtin-tools.js";
-import { userTurnInstructions } from "./executor.js";
 
 // The system prompt and tool list are the cached prefix of every request. Anything that changes
 // with the clock or the run (times, ids, counters) belongs in the user turn, not here.
@@ -9,7 +9,6 @@ const parts = () => ({
   groupContext: "Members: Main, Sourcer, Outreach.",
   messagingContext: undefined,
   hasHistoricalContext: true,
-  historyRetrievalEnabled: true,
   computerInstruction: "",
   pageBrowserAllowed: false,
   workspaceInstruction: "Use the workspace files.",

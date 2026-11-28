@@ -58,7 +58,10 @@ describe("roleRequestMessage", () => {
 
   it("keeps the brief alone when no recruiter message started this turn", () => {
     expect(
-      roleRequestMessage({ recruiterWords: "", brief: "Goal: use Ana's profile from the other role" }),
+      roleRequestMessage({
+        recruiterWords: "",
+        brief: "Goal: use Ana's profile from the other role",
+      }),
     ).toBe("Goal: use Ana's profile from the other role");
   });
 });
@@ -70,7 +73,13 @@ describe("delegatedRequestMessage", () => {
     expect(
       delegatedRequestMessage(
         words,
-        [{ candidateKey: "linkedin:ada", name: "Ada Chen", linkedinUrl: "https://linkedin.com/in/ada" }],
+        [
+          {
+            candidateKey: "linkedin:ada",
+            name: "Ada Chen",
+            linkedinUrl: "https://linkedin.com/in/ada",
+          },
+        ],
         1,
       ),
     ).toBe(
@@ -78,6 +87,11 @@ describe("delegatedRequestMessage", () => {
     );
     expect(delegatedRequestMessage("find 20 more", [])).toBe(
       'The recruiter wrote, word for word:\n"find 20 more"',
+    );
+  });
+  it("puts the earlier messages of the request first, verbatim (branch play 11-28)", () => {
+    expect(delegatedRequestMessage("改成英文", [], undefined, [], ["帮我写封邮件给 Wei"])).toBe(
+      'Earlier, the recruiter wrote, word for word:\n"帮我写封邮件给 Wei"\n\nThen the recruiter wrote, word for word:\n"改成英文"',
     );
   });
 });

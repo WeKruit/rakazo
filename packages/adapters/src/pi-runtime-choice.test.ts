@@ -163,54 +163,6 @@ describe("Pi choice asks", () => {
     expect(events.some((event) => event.type === "ask")).toBe(false);
   });
 
-  it("answers a question the conversation already answered instead of asking again", async () => {
-    const runtime = new PiAgentRuntime();
-    const events: AgentRuntimeEvent[] = [];
-    const request = { ...runRequest, beforeAsk: async () => '"Which city?" → "Seoul"' };
-    for await (const event of runtime.run(request, runContext)) events.push(event);
-    expect(events.some((event) => event.type === "ask")).toBe(false);
-    expect(JSON.stringify(fakeAgentState.result)).toContain("already replied after this question");
-  });
-
-  it("returns the run's own reason instead of a card the run may not ask yet", async () => {
-    const runtime = new PiAgentRuntime();
-    const events: AgentRuntimeEvent[] = [];
-    const request = {
-      ...runRequest,
-      beforeAsk: async () => ({ instead: "Not asked: record the ten first." }),
-    };
-    for await (const event of runtime.run(request, runContext)) events.push(event);
-    expect(events.some((event) => event.type === "ask")).toBe(false);
-    expect(JSON.stringify(fakeAgentState.result)).toContain("Not asked: record the ten first.");
-  });
-
-  it("reads a message that arrived while the question was written instead of pausing on it", async () => {
-    fakeAgentState.steered = [];
-    const claims = [
-      [],
-      [{ id: "steer-1", messageId: "message-9", text: "Find 100 more like them." }],
-    ];
-    const claimSteering = vi.fn(async () => claims.shift() ?? []);
-    const runtime = new PiAgentRuntime();
-    const events: AgentRuntimeEvent[] = [];
-    for await (const event of runtime.run({ ...runRequest, claimSteering }, runContext))
-      events.push(event);
-    expect(events.some((event) => event.type === "ask")).toBe(false);
-    expect(JSON.stringify(fakeAgentState.result)).toContain(
-      "Not asked: the user sent a new message",
-    );
-    expect(JSON.stringify(fakeAgentState.steered)).toContain("Find 100 more like them.");
-  });
-
-  it("still asks when nothing new arrived", async () => {
-    const claimSteering = vi.fn(async () => []);
-    const runtime = new PiAgentRuntime();
-    const events: AgentRuntimeEvent[] = [];
-    for await (const event of runtime.run({ ...runRequest, claimSteering }, runContext))
-      events.push(event);
-    expect(events.some((event) => event.type === "ask")).toBe(true);
-  });
-
   it("ends a run stopped before its first step with the stop, not a reply", async () => {
     const controller = new AbortController();
     const shutdown = new Error("worker shutting down");

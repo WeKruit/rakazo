@@ -25,7 +25,10 @@ describe("nextRoleContactBatch", () => {
   it("pages the role itself and skips people a source already looked up", async () => {
     const saved = {
       emails: new Map([
-        ["linkedin:/in/person-0", [{ address: "a@b.co", type: "work", status: null, provider: "fullenrich" }]],
+        [
+          "linkedin:/in/person-0",
+          [{ address: "a@b.co", type: "work", status: null, provider: "fullenrich" }],
+        ],
       ]),
       searched: new Map([["linkedin:/in/person-1", new Set(["fullenrich"])]]),
     } as never;

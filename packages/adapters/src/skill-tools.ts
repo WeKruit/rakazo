@@ -10,6 +10,7 @@ import {
   withoutRecruitingSkillCopies,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
+import { skillNameAtLocation } from "./agent-skills.js";
 import { BUILTIN_AGENT_SKILLS } from "./builtin-skills.js";
 
 export const SKILL_TOOL_NAMES = new Set([
@@ -127,6 +128,17 @@ export async function skillReadFromTool(
   };
 }
 
+/** read_file of the location Pi's skill listing advertises: the stored skill, else undefined. */
+export async function skillFileFromTool(
+  prisma: PrismaClient,
+  owner: SkillOwner,
+  path: string,
+): Promise<{ path: string; content: string } | undefined> {
+  const name = skillNameAtLocation(path);
+  const skill = name ? await findOwnedSkill(prisma, owner, { name }) : undefined;
+  return skill ? { path, content: skill.content } : undefined;
+}
+
 export async function skillCreateFromTool(
   prisma: PrismaClient,
   owner: SkillOwner,
@@ -178,7 +190,6 @@ export async function skillCreateFromTool(
       id: row.id,
       name: row.name,
       description: row.description,
-      hint: `Created skill. Mention /${row.name} so the user can open it.`,
     };
   } catch {
     return { error: "Could not create skill (name may already exist)." };

@@ -38,13 +38,8 @@ export function withLatestThreadRows<T extends object>(fake: T): PrismaClient {
         return run ? [{ threadId: id, id: run.id, status: run.status }] : [];
       });
     const take = values.at(-1) as number;
-    const hideAutocontinue = JSON.stringify(values).includes("autocontinue");
     return ids.flatMap((id) =>
       (known.get(id)?.messages ?? [])
-        .filter(
-          (message) =>
-            !hideAutocontinue || !String(message.clientNonce ?? "").startsWith("autocontinue:"),
-        )
         .slice(0, take)
         .map((message) => ({ runId: null, ...message, threadId: id })),
     );

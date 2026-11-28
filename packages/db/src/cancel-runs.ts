@@ -1,5 +1,6 @@
 import { ACTIVE_RUN_STATUSES, AUTOMATION_RUN_TRIGGERS, ONCE_ROUTINE_CRON } from "@rakazo/core";
 import type { Prisma } from "./client.js";
+import { submitSessionInput } from "./conversation-session.js";
 
 /**
  * A request another conversation sent: its block names the conversation it returns to (a
@@ -40,6 +41,43 @@ export function threadStopRunWhere(
         : {}),
     status: { in: [...ACTIVE_RUN_STATUSES] },
   };
+}
+
+/**
+ * Stop the live runs that are operations of an agent session: each run gets a `stop` input that
+ * names it, which its session's owner turns into an abort of exactly that operation (or ends the
+ * row when no lane runs it); the run ends through its own projection. Returns the sessions to
+ * wake after commit and the runs that belong to no session.
+ */
+export async function submitStopInputsInTransaction(
+  tx: Pick<Prisma.TransactionClient, "conversationSession" | "$queryRaw" | "$executeRaw">,
+  runs: ReadonlyArray<{ id: string; threadId: string; botId: string }>,
+  trigger: string,
+): Promise<{ sessionIds: string[]; unowned: string[] }> {
+  if (runs.length === 0) return { sessionIds: [], unowned: [] };
+  const sessions = await tx.conversationSession.findMany({
+    where: { OR: runs.map((run) => ({ threadId: run.threadId, botId: run.botId })) },
+    select: { id: true, threadId: true, botId: true },
+  });
+  const sessionOf = (run: { threadId: string; botId: string }) =>
+    sessions.find((session) => session.threadId === run.threadId && session.botId === run.botId);
+  const stopped = new Set<string>();
+  const unowned: string[] = [];
+  for (const run of runs) {
+    const session = sessionOf(run);
+    if (!session) {
+      unowned.push(run.id);
+      continue;
+    }
+    stopped.add(session.id);
+    await submitSessionInput(tx, {
+      sessionId: session.id,
+      kind: "stop",
+      trigger,
+      payload: { text: "", runId: run.id },
+    });
+  }
+  return { sessionIds: [...stopped], unowned };
 }
 
 /** The caller selects authorized runs and owns the surrounding transaction and cleanup. */

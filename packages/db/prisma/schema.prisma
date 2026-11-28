@@ -623,9 +623,116 @@ model Thread {
   runs                        Run[]
   routines                    Routine[]
   recruitingInboxMessages     RecruitingInboxMessage[]
+  conversationSessions        ConversationSession[]
 
   @@index([spaceId])
   @@map("threads")
+}
+
+/// One Pi agent session per agent per conversation. One worker at a time owns it through the
+/// lease; every storage commit is fenced on leaseFence.
+model ConversationSession {
+  id             String    @id
+  spaceId        String
+  userId         String
+  threadId       String
+  thread         Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  botId          String
+  storageVersion Int       @default(1)
+  /// Last storage sequence handed out; a commit of n writes takes the next n.
+  nextSeq        Int       @default(0)
+  /// Last input sequence handed out.
+  nextInputSeq   Int       @default(0)
+  /// Session totals kept by each commit: message entries and the usage ledger sum.
+  messageCount   Int       @default(0)
+  usage          Json?
+  leaseOwner     String?
+  leaseFence     Int       @default(0)
+  leaseExpiresAt DateTime?
+  createdAt      DateTime  @default(now())
+  entries        SessionEntry[]
+  values         SessionValue[]
+  listElements   SessionListElement[]
+  usageRows      SessionUsage[]
+  inputs         SessionInput[]
+
+  @@unique([threadId, botId])
+  @@map("conversation_sessions")
+}
+
+model SessionEntry {
+  sessionId  String
+  session    ConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id         String
+  parentId   String?
+  seq        Int
+  timestamp  BigInt
+  type       String
+  customType String?
+  body       Json
+
+  @@id([sessionId, id])
+  @@index([sessionId, seq])
+  @@map("session_entries")
+}
+
+model SessionValue {
+  sessionId String
+  session   ConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  namespace String
+  key       String
+  value     Json
+  seq       Int
+
+  @@id([sessionId, namespace, key])
+  @@map("session_values")
+}
+
+model SessionListElement {
+  sessionId String
+  session   ConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  namespace String
+  key       String
+  seq       Int
+  value     Json
+
+  @@id([sessionId, namespace, key, seq])
+  @@map("session_list_elements")
+}
+
+model SessionUsage {
+  sessionId  String
+  session    ConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id         String
+  seq        Int
+  usage      Json
+  entryId    String?
+  adjustment Boolean
+  details    Json?
+
+  @@id([sessionId, id])
+  @@index([sessionId, seq])
+  @@map("session_usage")
+}
+
+/// Durable outbox of everything addressed to a session; its owner delivers each row to Pi.
+model SessionInput {
+  id          String              @id @default(cuid())
+  sessionId   String
+  session     ConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  seq         Int
+  kind        String
+  messageId   String?
+  payload     Json
+  trigger     String
+  createdAt   DateTime            @default(now())
+  deliveredAt DateTime?
+  piEntryId   String?
+  operationId String?
+
+  @@unique([sessionId, seq])
+  @@index([sessionId, deliveredAt, seq])
+  @@map("session_inputs")
 }
 
 model Message {

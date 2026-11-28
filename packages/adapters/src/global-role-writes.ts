@@ -64,6 +64,9 @@ export function delegatedRequestMessage(
   words: string,
   people: readonly RoleReferent[],
   round?: number,
+  files: readonly string[] = [],
+  /** The recruiter's earlier messages that belong to the request, oldest first, as written. */
+  earlier: readonly string[] = [],
 ): string {
   const named = people.map((person) =>
     [person.name?.trim() || person.candidateKey, person.linkedinUrl].filter(Boolean).join(", "),
@@ -71,8 +74,17 @@ export function delegatedRequestMessage(
   const refers = [
     ...(named.length ? [`People they refer to: ${named.join("; ")}.`] : []),
     ...(round ? [`Round they refer to: round ${round}.`] : []),
+    ...(files.length ? [`Files the recruiter attached: ${files.join(", ")}.`] : []),
   ];
-  return [`The recruiter wrote, word for word:\n"${words}"`, ...refers].join("\n\n");
+  return [
+    ...(earlier.length
+      ? [
+          `Earlier, the recruiter wrote, word for word:\n${earlier.map((text) => `"${text}"`).join("\n\n")}`,
+        ]
+      : []),
+    `${earlier.length ? "Then the" : "The"} recruiter wrote, word for word:\n"${words}"`,
+    ...refers,
+  ].join("\n\n");
 }
 
 /**
@@ -103,16 +115,25 @@ export async function newestRecruiterWords(
   prisma: Pick<PrismaClient, "message">,
   threadId: string,
 ): Promise<string> {
+  return (await newestRecruiterMessage(prisma, threadId))?.text ?? "";
+}
+
+/** The same newest words with the message that holds them (a card's answer: the card's message). */
+export async function newestRecruiterMessage(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<{ messageId: string; text: string } | undefined> {
   const recent = await prisma.message.findMany({
     where: { threadId },
     orderBy: { seq: "desc" },
     take: 30,
-    select: { role: true, blocks: true, createdAt: true, updatedAt: true },
+    select: { id: true, role: true, blocks: true, createdAt: true, updatedAt: true },
   });
-  let newest: { at: number; text: string } | undefined;
-  const consider = (at: Date, text: string | undefined) => {
+  let newest: { at: number; messageId: string; text: string } | undefined;
+  const consider = (message: { id: string }, at: Date, text: string | undefined) => {
     const words = text?.trim();
-    if (words && (!newest || at.getTime() > newest.at)) newest = { at: at.getTime(), text: words };
+    if (words && (!newest || at.getTime() > newest.at))
+      newest = { at: at.getTime(), messageId: message.id, text: words };
   };
   for (const message of recent) {
     const blocks = Array.isArray(message.blocks)
@@ -120,6 +141,7 @@ export async function newestRecruiterWords(
       : [];
     if (message.role === "user")
       consider(
+        message,
         message.createdAt,
         blocks
           .map((block) =>
@@ -140,7 +162,7 @@ export async function newestRecruiterWords(
           block.status === "answered" &&
           typeof block.answer === "string"
         )
-          consider(message.updatedAt, block.answer);
+          consider(message, message.updatedAt, block.answer);
   }
-  return newest?.text ?? "";
+  return newest && { messageId: newest.messageId, text: newest.text };
 }

@@ -784,7 +784,7 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     returnThreadId: Id.optional(),
     /** Links in a bot-started chain; absent when a person started it. */
     hop: z.number().int().nonnegative().optional(),
-    /** The recruiter's own words this hands over, as they wrote them (delegate_to_role). */
+    /** The recruiter's own words this hands over, as they wrote them (delegate_work). */
     recruiterWords: z.string().optional(),
   }),
 ]);

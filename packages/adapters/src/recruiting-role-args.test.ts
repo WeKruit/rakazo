@@ -1,9 +1,6 @@
 import { IsolationError } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
-import {
-  normalizeRecruitingRoleArgs,
-  repairedRoleSave,
-} from "./recruiting-tools.js";
+import { normalizeRecruitingRoleArgs, repairedRoleSave } from "./recruiting-tools.js";
 
 const now = "2026-10-25T20:00:00.000Z";
 const messageRef = (readAt: string | null) => ({
@@ -17,9 +14,7 @@ const messageRef = (readAt: string | null) => ({
 
 describe("normalizeRecruitingRoleArgs", () => {
   it("drops extra keys from a read", () => {
-    expect(
-      normalizeRecruitingRoleArgs({ operation: "read", roleId: "r1" }, now),
-    ).toEqual({
+    expect(normalizeRecruitingRoleArgs({ operation: "read", roleId: "r1" }, now)).toEqual({
       operation: "read",
     });
   });
@@ -49,9 +44,7 @@ describe("normalizeRecruitingRoleArgs", () => {
         operation: "update",
         sourceRefs: [messageRef(null), artifactRef],
         criteria: {
-          upsert: [
-            { id: "c1", sourceRefs: [messageRef("2026-10-25T19:00:00.000Z")] },
-          ],
+          upsert: [{ id: "c1", sourceRefs: [messageRef("2026-10-25T19:00:00.000Z")] }],
         },
       },
       now,
@@ -125,10 +118,7 @@ describe("normalizeRecruitingRoleArgs", () => {
       brief: { fields: [] },
     });
     expect(
-      normalizeRecruitingRoleArgs(
-        { operation: "update", criteria: { expectedRevision: 1 } },
-        now,
-      ),
+      normalizeRecruitingRoleArgs({ operation: "update", criteria: { expectedRevision: 1 } }, now),
     ).toEqual({ operation: "update", expectedRevision: 1 });
   });
 
@@ -151,11 +141,7 @@ describe("normalizeRecruitingRoleArgs", () => {
         roleId: "r1",
         expectedRevision: 6,
         criteria: {
-          upsert: [
-            criterion,
-            JSON.stringify({ ...criterion, id: "plc" }),
-            "plain",
-          ],
+          upsert: [criterion, JSON.stringify({ ...criterion, id: "plc" }), "plain"],
         },
       },
       now,
@@ -169,10 +155,7 @@ describe("normalizeRecruitingRoleArgs", () => {
 
   it("leaves a brief's omitted lists to the schema defaults and operations without a brief alone", () => {
     expect(
-      normalizeRecruitingRoleArgs(
-        { operation: "create", brief: { fields: [] } },
-        now,
-      ),
+      normalizeRecruitingRoleArgs({ operation: "create", brief: { fields: [] } }, now),
     ).toEqual({
       operation: "create",
       brief: { fields: [] },
@@ -227,9 +210,7 @@ describe("source reference repair", () => {
     };
     expect(result.sourceRefs).toEqual([jd]);
     // A criterion whose only citation names nothing keeps the role's first one.
-    expect(result.criteria).toEqual([
-      { id: "c1", sourceRefs: [jd], definitionQuestions: [] },
-    ]);
+    expect(result.criteria).toEqual([{ id: "c1", sourceRefs: [jd], definitionQuestions: [] }]);
   });
 
   it("cites the current message when a pasted JD's criteria come uncited (2026-11-07 staging)", () => {
@@ -256,6 +237,43 @@ describe("source reference repair", () => {
       { ...criterion, sourceRefs: [turnRef], definitionQuestions: [] },
     ]);
     expect(created.sourceRefs).toEqual([]);
+  });
+
+  it("cites the run's own message for a message id that names none (2026-11-28 branch play)", () => {
+    // The session runtime never shows the model message ids, so it wrote "unknown"; the save
+    // records the run's source message instead of being refused.
+    const turnRef = {
+      id: "current-message-source",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "m1", locator: "blocks[0].text" },
+      readState: "read",
+      readAt: now,
+      quote: "Senior Data Engineer, Seattle",
+    };
+    const unknown = {
+      id: "request_msg",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "unknown", locator: "blocks[0].text" },
+      readState: "read",
+      readAt: now,
+    };
+    const kept = { ...unknown, id: "earlier", anchor: { ...unknown.anchor, messageId: "m0" } };
+    const args = {
+      operation: "create",
+      title: "Senior Data Engineer",
+      sourceRefs: [unknown, kept],
+      criteria: [{ id: "c1", sourceRefs: [unknown] }],
+    };
+    const known = new Set(["m0", "m1"]);
+    const created = normalizeRecruitingRoleArgs(args, now, turnRef, known);
+    expect(created.sourceRefs).toEqual([{ ...turnRef, id: "request_msg" }, kept]);
+    expect(created.criteria).toEqual([
+      { id: "c1", sourceRefs: [{ ...turnRef, id: "request_msg" }], definitionQuestions: [] },
+    ]);
+    // With no message of its own the run drops the citation; the criterion keeps the role's.
+    const alone = normalizeRecruitingRoleArgs(args, now, undefined, known);
+    expect(alone.sourceRefs).toEqual([kept]);
+    expect(alone.criteria).toEqual([{ id: "c1", sourceRefs: [kept], definitionQuestions: [] }]);
   });
 
   it("keeps a message citation and drops a quote on unread material", () => {
@@ -304,17 +322,10 @@ describe("repairedRoleSave", () => {
   });
 
   it("does not repeat a conflict, a read or a save it would not change", () => {
+    expect(repairedRoleSave(args, new Error("Recruiting revision changed"))).toBeUndefined();
+    expect(repairedRoleSave({ operation: "read" }, new IsolationError())).toBeUndefined();
     expect(
-      repairedRoleSave(args, new Error("Recruiting revision changed")),
-    ).toBeUndefined();
-    expect(
-      repairedRoleSave({ operation: "read" }, new IsolationError()),
-    ).toBeUndefined();
-    expect(
-      repairedRoleSave(
-        { ...args, sourceRefs: [], criteria: [] },
-        new IsolationError(),
-      ),
+      repairedRoleSave({ ...args, sourceRefs: [], criteria: [] }, new IsolationError()),
     ).toBeUndefined();
   });
 });

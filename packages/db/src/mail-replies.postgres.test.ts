@@ -50,13 +50,25 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
       await close?.();
     }
   });
-  async function fixture(keepRuns = false) {
-    const { userId, spaceId, threadId, botId } = identity;
-    if (!keepRuns)
-      await prisma.run.updateMany({
-        where: { threadId, status: { in: ["waiting_input", "queued"] } },
-        data: { status: "cancelled" },
-      });
+  /** Another agent in the same conversation, with its own live run and card. */
+  async function secondAgent() {
+    const bot = await prisma.bot.create({
+      data: { spaceId: identity.spaceId, userId: identity.userId, name: "Second", color: "blue" },
+    });
+    return bot.id;
+  }
+  async function fixture(keepRuns = false, botId = identity.botId) {
+    const { userId, spaceId, threadId } = identity;
+    // One live run per agent and conversation: this agent's earlier card run has ended (kept:
+    // it completed when the next run started). Otherwise every earlier card is cancelled.
+    await prisma.run.updateMany({
+      where: {
+        threadId,
+        ...(keepRuns ? { botId } : {}),
+        status: { in: ["waiting_input", "queued", "running"] },
+      },
+      data: { status: keepRuns ? "completed" : "cancelled" },
+    });
     const task = await prisma.task.create({
       data: {
         userId,
@@ -351,7 +363,7 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
 
   it("shows one card per email: a second identical draft in the conversation finds the first", async () => {
     const first = await fixture();
-    const second = await fixture(true);
+    const second = await fixture(true, await secondAgent());
     const draft = MessageBlockSchema.array().parse(second.message.blocks)[0];
     if (draft?.kind !== "ask" || !draft.mailReply) throw new Error("no draft");
     const same = (body: string) =>
@@ -519,7 +531,8 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
 
   it("shows one card per campaign send: a second agent sending the same people finds the first", async () => {
     const first = await fixture();
-    const second = await fixture(true);
+    const other = await secondAgent();
+    const second = await fixture(true, other);
     await prisma.externalEffect.updateMany({
       where: { id: { in: [first.effect.id, second.effect.id] } },
       data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },

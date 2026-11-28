@@ -1,17 +1,12 @@
-import {
-  buildSkillMd,
-  expandSkillReferencesInPrompt,
-  formatSkillsCatalogInstruction,
-  memoryTidyRoutinePrompt,
-  parseSkillMd,
-  SKILL_CATALOG_DESCRIPTION_MAX,
-} from "@rakazo/core";
+import { buildSkillMd, memoryTidyRoutinePrompt, parseSkillMd } from "@rakazo/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { expandRoutineSkills, formatAgentSkillsListing } from "./agent-skills.js";
 import { BUILTIN_AGENT_SKILLS } from "./builtin-skills.js";
 import {
   listAgentSkillRecords,
   skillCreateFromTool,
   skillDeleteFromTool,
+  skillFileFromTool,
   skillReadFromTool,
   skillUpdateFromTool,
 } from "./skill-tools.js";
@@ -108,7 +103,6 @@ describe("skill tools", () => {
       body: "1. Summarize yesterday.\n2. List blockers.",
     });
     expect(created).toMatchObject({ ok: true, name: "Daily standup" });
-    expect(String(created.hint)).toContain("/Daily standup");
 
     const read = await skillReadFromTool(prisma as never, owner, { name: "Daily standup" });
     expect(read).toMatchObject({
@@ -193,9 +187,34 @@ describe("skill tools", () => {
     const records = await listAgentSkillRecords(prisma as never, owner);
     expect(records.map((row) => row.name)).toContain("Daily standup");
     expect(records.map((row) => row.name)).not.toContain("Other workspace skill");
-    const catalog = formatSkillsCatalogInstruction(records);
-    expect(catalog).toContain("- Daily standup: Prepare standup notes");
-    expect(catalog).toContain("skill_read");
+    // Pi's agentskills.io listing (pi-agent-core harness/system-prompt.js).
+    const listing = formatAgentSkillsListing(records);
+    expect(listing).toContain("<name>Daily standup</name>");
+    expect(listing).toContain("<description>Prepare standup notes</description>");
+    expect(listing).toContain("<location>skills/Daily standup/SKILL.md</location>");
+    expect(formatAgentSkillsListing([])).toBeUndefined();
+  });
+
+  it("reads a listed skill at the location the listing advertises", async () => {
+    // Branch play 11-28 (step C): read_file of the listed location failed 26 times; Pi's listing
+    // tells the model to read the skill file there.
+    await skillCreateFromTool(prisma as never, owner, {
+      name: "Daily standup",
+      description: "Prepare standup notes",
+      body: "1. Summarize yesterday.",
+    });
+    const read = await skillFileFromTool(prisma as never, owner, "skills/Daily standup/SKILL.md");
+    expect(read).toMatchObject({ path: "skills/Daily standup/SKILL.md" });
+    expect(String(read?.content)).toContain("Summarize yesterday");
+    expect(
+      await skillFileFromTool(prisma as never, owner, "./skills/Daily standup/SKILL.md"),
+    ).toMatchObject({ content: read?.content });
+    expect(
+      await skillFileFromTool(prisma as never, owner, "skills/Missing/SKILL.md"),
+    ).toBeUndefined();
+    expect(
+      await skillFileFromTool(prisma as never, owner, "notes/Daily standup/SKILL.md"),
+    ).toBeUndefined();
   });
 
   it("rejects update/delete for plugin and builtin skills", async () => {
@@ -230,8 +249,8 @@ describe("skill tools", () => {
     for (const skill of BUILTIN_AGENT_SKILLS) {
       const parsed = parseSkillMd(skill.content);
       expect(parsed).toMatchObject({ name: skill.name, description: skill.description });
-      // The catalog cuts a longer description, and the model routes by it.
-      expect(skill.description.length).toBeLessThanOrEqual(SKILL_CATALOG_DESCRIPTION_MAX);
+      // Agent Skills' description limit, which Pi's loader enforces.
+      expect(skill.description.length).toBeLessThanOrEqual(1024);
     }
     // / picker truncates at 72; keep this one short so "review only" stays visible.
     expect(
@@ -245,8 +264,8 @@ describe("skill tools", () => {
       source: "builtin",
       readOnly: true,
     });
-    expect(formatSkillsCatalogInstruction(records)).toContain("- Interrogate:");
-    expect(formatSkillsCatalogInstruction(records)).toContain("Review only");
+    expect(formatAgentSkillsListing(records)).toContain("<name>Interrogate</name>");
+    expect(formatAgentSkillsListing(records)).toContain("Review only");
 
     const read = await skillReadFromTool(prisma as never, owner, { name: "interrogate" });
     expect(read).toMatchObject({ name: "Interrogate", source: "builtin", readOnly: true });
@@ -390,8 +409,12 @@ describe("skill tools", () => {
       userId: "user-1",
     });
     for (const shared of [true, false]) {
-      const prompt = expandSkillReferencesInPrompt(memoryTidyRoutinePrompt(shared), records);
-      expect(prompt).toMatch(/^Use skill: Tidy memory\n/);
+      const prompt = expandRoutineSkills(memoryTidyRoutinePrompt(shared), records);
+      // Pi's explicit invocation (formatSkillInvocation): the body without its frontmatter.
+      expect(prompt).toMatch(
+        /^<skill name="Tidy memory" location="skills\/Tidy memory\/SKILL.md">\n/,
+      );
+      expect(prompt).not.toContain("description:");
       expect(prompt).toContain('"## Forgotten"');
       expect(prompt).toContain("expectedRevision");
       expect(prompt).toMatch(/precondition: (bot_)?memory$/);

@@ -1,13 +1,9 @@
-import { disabledBuiltinToolSet } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
-import { SKILL_CATALOG_DESCRIPTION_MAX } from "./agent-skill.js";
 import {
-  accountWideSkill,
   creditEstimateNote,
-  RECRUITER_LANGUAGE,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
-  RECRUITING_UNUSED_BUILTIN_TOOLS,
+  recruitingAgentScope,
   screenLanguage,
   screenNote,
   unfilledPlaceholder,
@@ -23,9 +19,9 @@ describe("maintained recruiting defaults", () => {
     expect(skill.body.length).toBeLessThanOrEqual(8_000);
   });
 
-  // The catalog cuts a longer description, and the model routes by it.
-  it.each(RECRUITING_DEFAULT_SKILLS)("$name description fits the skill catalog", (skill) => {
-    expect(skill.description.length).toBeLessThanOrEqual(SKILL_CATALOG_DESCRIPTION_MAX);
+  // Agent Skills' description limit, which Pi's loader enforces (pi-agent-core harness/skills.js).
+  it.each(RECRUITING_DEFAULT_SKILLS)("$name description fits the skill listing", (skill) => {
+    expect(skill.description.length).toBeLessThanOrEqual(1024);
   });
 });
 
@@ -47,21 +43,6 @@ describe("creditEstimateNote", () => {
   });
 });
 
-describe("recruiting tool list", () => {
-  it("drops only real built-in tools and keeps every tool the playbook names", () => {
-    expect(disabledBuiltinToolSet(RECRUITING_UNUSED_BUILTIN_TOOLS).size).toBe(
-      RECRUITING_UNUSED_BUILTIN_TOOLS.length,
-    );
-    const playbook = [
-      RECRUITER_LANGUAGE,
-      ...RECRUITING_DEFAULT_BOTS.map((bot) => bot.instructions),
-      ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.body),
-    ].join("\n");
-    for (const name of RECRUITING_UNUSED_BUILTIN_TOOLS)
-      expect(playbook, name).not.toMatch(new RegExp(`\\b${name}\\b`));
-  });
-});
-
 describe("screenLanguage", () => {
   // Staging 11-14: a Chinese chat was told "Sequence" while the screen showed 邮件序列; the
   // screen's own locale decides the menu names, and only the Chinese catalog translates them.
@@ -74,12 +55,39 @@ describe("screenLanguage", () => {
   });
 });
 
-describe("accountWideSkill", () => {
-  it("lists only the user's own skills there", () => {
+describe("recruitingAgentScope", () => {
+  const key = (name: string) => ({ spawnKey: `recruiting:user-1:${name}` });
+
+  it("gives the account-wide conversation reads and the hand-off to a role only", () => {
+    const kruit = recruitingAgentScope(key("main"), "recruiting-global-abc");
     // Staging handoff3: "Write an email or template" listed there had Kruit draft in the main chat.
-    const listed = RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name).filter(accountWideSkill);
-    expect(listed).toEqual([]);
-    expect(accountWideSkill("Progress across roles")).toBe(false);
-    expect(accountWideSkill("My weekly summary")).toBe(true);
+    expect(kruit?.skills).toEqual([]);
+    expect(kruit?.tools).toEqual(expect.arrayContaining(["delegate_work"]));
+    for (const work of [
+      "recruiting_feedback",
+      "recruiting_role",
+      "shell",
+      "write_file",
+      "remember",
+    ])
+      expect(kruit?.tools).not.toContain(work);
+  });
+
+  it("gives each role agent its own list, and every listed skill exists", () => {
+    const skills = new Set([
+      ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name),
+      "Tidy memory",
+      "Work with data using code",
+    ]);
+    for (const bot of RECRUITING_DEFAULT_BOTS) {
+      const scope = recruitingAgentScope(key(bot.key), "role-group");
+      expect(scope).toBe(bot);
+      for (const name of scope?.skills ?? []) expect(skills, name).toContain(name);
+    }
+    expect(recruitingAgentScope(key("scheduling"), "role-group")?.tools).not.toContain(
+      "recruiting_research",
+    );
+    expect(recruitingAgentScope(key("reviewer"), "role-group")?.tools).toContain("ask_user");
+    expect(recruitingAgentScope({ name: "Helper", spawnKey: null }, null)).toBeUndefined();
   });
 });

@@ -168,7 +168,7 @@ function groupPreviews(
   return latestThreadMessages(
     db,
     groups.flatMap((group) => (group.thread ? [group.thread.id] : [])),
-    { take: 1, hideAutocontinue: true },
+    { take: 1 },
   );
 }
 

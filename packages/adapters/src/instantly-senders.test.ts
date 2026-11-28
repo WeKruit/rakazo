@@ -5,10 +5,7 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { InstantlyRest } from "./instantly-native-writes.js";
-import {
-  InstantlyRestError,
-  runInstantlyWrite,
-} from "./instantly-native-writes.js";
+import { InstantlyRestError, runInstantlyWrite } from "./instantly-native-writes.js";
 import {
   adoptAssignedSenders,
   adoptLegacySender,

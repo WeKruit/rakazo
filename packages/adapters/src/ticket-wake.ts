@@ -1,16 +1,20 @@
 import type { JobPublisher } from "@rakazo/adapter-kit";
-import { runContinueJob } from "@rakazo/adapter-kit";
 import { isTicketCompletedStatus, TicketStatusSchema } from "@rakazo/contracts";
-import type { PrismaClient } from "@rakazo/db";
-import { getLogger } from "@rakazo/logging";
+import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { submitConversationInput, wakeSessions } from "@rakazo/db";
 
 /** Assignment wakes only its current owner, without posting a chat message. */
 export async function wakeTicketAssignee(
-  deps: { prisma: PrismaClient; jobs: JobPublisher; ticketBoardEnabled?: boolean },
+  deps: {
+    prisma: PrismaClient;
+    jobs: Pick<JobPublisher, "enqueue">;
+    events?: Partial<Pick<ThreadEvents, "wakeSessions">>;
+    ticketBoardEnabled?: boolean;
+  },
   input: { spaceId: string; ticketId: string; botId: string },
 ): Promise<void> {
   if (!deps.ticketBoardEnabled) return;
-  const run = await deps.prisma.$transaction(async (tx) => {
+  const sessionId = await deps.prisma.$transaction(async (tx) => {
     const ticket = await tx.ticket.findFirst({
       where: { id: input.ticketId, spaceId: input.spaceId, assigneeBotId: input.botId },
       include: { board: { select: { ticketPrefix: true } } },
@@ -23,30 +27,22 @@ export async function wakeTicketAssignee(
       select: { id: true, userId: true, thread: { select: { id: true } } },
     });
     if (!bot?.thread) return null;
-    const task = await tx.task.create({
-      data: {
-        spaceId: input.spaceId,
-        botId: bot.id,
-        threadId: bot.thread.id,
-        userId: bot.userId,
-        prompt: `Work on ticket ${ticket.board.ticketPrefix}-${ticket.number}. Read it with ticket_get. Keep progress in ticket comments and update its status with ticket_update. Use ask or approval cards when user input is needed.`,
-        status: "queued",
-      },
-    });
-    return tx.run.create({
-      data: {
-        spaceId: input.spaceId,
-        botId: bot.id,
-        threadId: bot.thread.id,
-        userId: bot.userId,
-        taskId: task.id,
+    const submitted = await submitConversationInput(
+      tx,
+      { spaceId: input.spaceId, userId: bot.userId, threadId: bot.thread.id, botId: bot.id },
+      {
+        kind: "message",
         trigger: "tickets",
-        status: "queued",
+        payload: {
+          text: `Ticket ${ticket.board.ticketPrefix}-${ticket.number} is assigned to you.`,
+          internal: true,
+        },
       },
-    });
+    );
+    return submitted.sessionId;
   });
-  if (!run) return;
-  await deps.jobs.enqueue(runContinueJob(run.id)).catch((error) => {
-    getLogger().warn("ticket wake deferred to reconciliation", error);
-  });
+  if (!sessionId) return;
+  // Without realtime here the owner finds the input at its next lease renewal.
+  if (deps.events?.wakeSessions) await deps.events.wakeSessions([sessionId]);
+  else await wakeSessions({ jobs: deps.jobs }, [sessionId]);
 }

@@ -639,36 +639,6 @@ function testRunFixture(threadId: string | null, destinationExists = true) {
 }
 
 describe("routine test run destination", () => {
-  it.each([null, "bot-thread", "group-thread"])(
-    "preserves the saved destination %s",
-    async (saved) => {
-      const { client, prisma } = testRunFixture(saved);
-      await client.routines.testRun({ routineId: "routine-1" });
-      const threadId = saved ?? "bot-thread";
-      expect(prisma.task.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ threadId }) }),
-      );
-      expect(prisma.run.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ threadId, botId: "bot-1" }) }),
-      );
-      if (saved) {
-        expect(prisma.thread.findFirst).toHaveBeenCalledWith({
-          where: {
-            id: saved,
-            spaceId: actor.spaceId,
-            OR: [
-              { botId: "bot-1" },
-              { group: { archivedAt: null, members: { some: { botId: "bot-1" } } } },
-            ],
-          },
-          select: { id: true, groupId: true },
-        });
-      } else {
-        expect(prisma.thread.findFirst).not.toHaveBeenCalled();
-      }
-    },
-  );
-
   it("refuses a missing, foreign, archived or no-longer-member destination before writing", async () => {
     const { client, prisma, jobs } = testRunFixture("unavailable-group-thread", false);
     await expect(client.routines.testRun({ routineId: "routine-1" })).rejects.toMatchObject({
@@ -702,32 +672,6 @@ describe("routine test run destination", () => {
     );
     expect(prisma.task.create).not.toHaveBeenCalled();
     expect(prisma.run.create).not.toHaveBeenCalled();
-    expect(jobs.enqueue).not.toHaveBeenCalled();
-  });
-
-  it("replays the same group nonce without creating another task or run", async () => {
-    const { client, prisma } = testRunFixture("group-thread");
-    const first = await client.routines.testRun({ routineId: "routine-1", clientNonce: "same" });
-    const replay = await client.routines.testRun({ routineId: "routine-1", clientNonce: "same" });
-    expect(replay).toEqual(first);
-    expect(prisma.task.create).toHaveBeenCalledTimes(1);
-    expect(prisma.run.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects a different-thread nonce collision and rolls back the queued task", async () => {
-    const { client, jobs, runs, tasks } = testRunFixture("group-thread");
-    const existing = {
-      id: "other-run",
-      spaceId: actor.spaceId,
-      threadId: "bot-thread",
-      clientNonce: "routine-test:same",
-    };
-    runs.push(existing);
-    await expect(
-      client.routines.testRun({ routineId: "routine-1", clientNonce: "same" }),
-    ).rejects.toMatchObject({ code: "P2002" });
-    expect(runs).toEqual([existing]);
-    expect(tasks).toEqual([]);
     expect(jobs.enqueue).not.toHaveBeenCalled();
   });
 

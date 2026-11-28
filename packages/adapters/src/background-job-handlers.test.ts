@@ -1,26 +1,14 @@
-import type {
-  AgentHomeStore,
-  AgentRuntime,
-  JobPublisher,
-  MessagingSurface,
-  SandboxProvider,
-} from "@rakazo/adapter-kit";
-import type { PrismaClient, ThreadEvents } from "@rakazo/db";
-import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
+import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { createBackgroundJobHandlers } from "./background-job-handlers.js";
 import { createRunExecutor } from "./executor.js";
-import { compactHistory } from "./history-compaction.js";
-import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
 import { projectRecruitingCandidateProfiles } from "./recruiting-profiles.js";
 import { projectRecruitingInboxJob } from "./recruiting-reads.js";
-import type { EncryptedSecretStore } from "./secrets.js";
 
 vi.mock("./recruiting-reads.js", async (original) => ({
   ...(await original<typeof import("./recruiting-reads.js")>()),
   projectRecruitingInboxJob: vi.fn(async () => undefined),
 }));
-vi.mock("./history-compaction.js", () => ({ compactHistory: vi.fn(async () => undefined) }));
 vi.mock("./recruiting-profiles.js", () => ({
   projectRecruitingCandidateProfiles: vi.fn(async () => undefined),
 }));
@@ -54,183 +42,6 @@ describe("createBackgroundJobHandlers", () => {
     vi.mocked(projectRecruitingCandidateProfiles).mockRejectedValueOnce(new Error("database busy"));
     await expect(handlers["recruiting_profile.project"](payload)).rejects.toThrow("database busy");
   });
-  it("delivers directly when shutdown rejects a completed run's mirror job", async () => {
-    const enqueueError = new Error("Background job publisher is closing");
-    const jobs = {
-      enqueue: vi.fn(async () => {
-        throw enqueueError;
-      }),
-    } as unknown as JobPublisher;
-    const sink = createTestSink();
-    installLogger(createLogger({ service: "rakazo-worker", sinks: [sink] }));
-    const handlers = createBackgroundJobHandlers({
-      executor: {
-        continueRun: vi.fn(async () => undefined),
-      } as unknown as ReturnType<typeof createRunExecutor>,
-      prisma: {} as unknown as PrismaClient,
-      sandbox: {} as unknown as SandboxProvider,
-      home: {} as unknown as AgentHomeStore,
-      jobs,
-      events: {} as unknown as ThreadEvents,
-      workerId: "worker-1",
-      runtime: {} as unknown as AgentRuntime,
-      secretStore: {} as unknown as EncryptedSecretStore,
-      memoryProviders: { resolve: vi.fn(async () => null) },
-      shutdownSignal: new AbortController().signal,
-      messaging: {} as unknown as MessagingSurface,
-    });
-
-    await handlers["run.continue"]({ runId: "run-1" });
-
-    expect(mirrorMessagingOutbound).toHaveBeenCalledWith(
-      expect.objectContaining({ prisma: expect.anything(), messaging: expect.anything(), jobs }),
-      "run-1",
-    );
-    expect(deliverMessagingOutbound).toHaveBeenCalledWith(
-      expect.objectContaining({ prisma: expect.anything(), messaging: expect.anything(), jobs }),
-      { runId: undefined },
-      expect.objectContaining({ operationId: "messaging.deliver:drain" }),
-    );
-    expect(sink.events.some((event) => event.message === "messaging.deliver enqueue error")).toBe(
-      true,
-    );
-    installLogger(createLogger({ service: "rakazo-worker", level: "off", sinks: [] }));
-  });
-
-  it("defers scheduled runs past their slot limit and never limits conversation runs", async () => {
-    const triggers: Record<string, string> = {
-      "routine-1": "routine",
-      "routine-2": "routine",
-      "chat-1": "user_message",
-    };
-    const prisma = {
-      run: {
-        count: vi.fn(async ({ where }: { where: { id: string; trigger: { in: string[] } } }) =>
-          Number(where.trigger.in.includes(triggers[where.id]!)),
-        ),
-      },
-    } as unknown as PrismaClient;
-    let finishFirst: () => void = () => undefined;
-    const continueRun = vi.fn(async (runId: string) => {
-      if (runId === "routine-1") await new Promise<void>((resolve) => (finishFirst = resolve));
-    });
-    const enqueue = vi.fn(async () => undefined);
-    const handlers = createBackgroundJobHandlers({
-      executor: { continueRun } as unknown as ReturnType<typeof createRunExecutor>,
-      prisma,
-      sandbox: {} as unknown as SandboxProvider,
-      home: {} as unknown as AgentHomeStore,
-      jobs: { enqueue } as unknown as JobPublisher,
-      events: {} as unknown as ThreadEvents,
-      workerId: "worker-1",
-      runtime: {} as unknown as AgentRuntime,
-      secretStore: {} as unknown as EncryptedSecretStore,
-      memoryProviders: { resolve: vi.fn(async () => null) },
-      shutdownSignal: new AbortController().signal,
-      scheduledRunSlots: 1,
-    });
-
-    const first = handlers["run.continue"]({ runId: "routine-1" });
-    await vi.waitFor(() => expect(continueRun).toHaveBeenCalledWith("routine-1", "worker-1"));
-    await handlers["run.continue"]({ runId: "routine-2" });
-    await handlers["run.continue"]({ runId: "chat-1" });
-
-    expect(continueRun).not.toHaveBeenCalledWith("routine-2", "worker-1");
-    expect(continueRun).toHaveBeenCalledWith("chat-1", "worker-1");
-    expect(enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "run.continue",
-        payload: { runId: "routine-2" },
-        availableAt: expect.any(Date),
-      }),
-    );
-
-    finishFirst();
-    await first;
-    await handlers["run.continue"]({ runId: "routine-2" });
-    expect(continueRun).toHaveBeenCalledWith("routine-2", "worker-1");
-  });
-
-  it("compacts the requested thread with the runtime, job publisher, and model key it was given", async () => {
-    const prisma = {} as unknown as PrismaClient;
-    const runtime = {} as unknown as AgentRuntime;
-    const jobs = {} as unknown as JobPublisher;
-    const secretStore = {} as unknown as EncryptedSecretStore;
-    const memoryProviders = { resolve: vi.fn(async () => null) };
-    const resolveModel = vi.fn();
-    const handlers = createBackgroundJobHandlers({
-      executor: { resolveModel, contextStrategy: "current" } as unknown as ReturnType<
-        typeof createRunExecutor
-      >,
-      prisma,
-      sandbox: {} as unknown as SandboxProvider,
-      home: {} as unknown as AgentHomeStore,
-      jobs,
-      events: {} as unknown as ThreadEvents,
-      workerId: "worker-1",
-      runtime,
-      secretStore,
-      memoryProviders,
-      shutdownSignal: new AbortController().signal,
-      deploymentModelKey: "openrouter-key",
-      deploymentModelConfigured: true,
-    });
-
-    await handlers["history.compact"]({ threadId: "thread-1" });
-
-    expect(compactHistory).toHaveBeenCalledWith(
-      {
-        prisma,
-        runtime,
-        jobs,
-        memoryProviders,
-        deploymentModelKey: "openrouter-key",
-        deploymentModelConfigured: true,
-        resolveModel,
-      },
-      "thread-1",
-      undefined,
-    );
-  });
-
-  it.each([undefined, "retrieval", "snapshots", "cache-aware"] as const)(
-    "dispatches automatic summary work without changing the %s context strategy",
-    async (contextStrategy) => {
-      vi.mocked(compactHistory).mockClear();
-      const runtime = { run: vi.fn() } as unknown as AgentRuntime;
-      const handlers = createBackgroundJobHandlers({
-        executor:
-          contextStrategy === undefined
-            ? createRunExecutor({ prisma: {} as PrismaClient } as Parameters<
-                typeof createRunExecutor
-              >[0])
-            : ({ contextStrategy } as ReturnType<typeof createRunExecutor>),
-        prisma: {} as unknown as PrismaClient,
-        sandbox: {} as unknown as SandboxProvider,
-        home: {} as unknown as AgentHomeStore,
-        jobs: {} as unknown as JobPublisher,
-        events: {} as unknown as ThreadEvents,
-        workerId: "worker-fixture",
-        runtime,
-        secretStore: {} as unknown as EncryptedSecretStore,
-        memoryProviders: { resolve: vi.fn(async () => null) },
-        shutdownSignal: new AbortController().signal,
-      });
-
-      await handlers["history.compact"]({ threadId: "thread-fixture", sourceRunId: "origin-run" });
-
-      expect(compactHistory).toHaveBeenCalledWith(
-        expect.any(Object),
-        "thread-fixture",
-        "origin-run",
-      );
-      expect(runtime.run).not.toHaveBeenCalled();
-      vi.mocked(compactHistory).mockClear();
-      await handlers["history.compact"]({ threadId: "legacy-thread-without-origin" });
-      expect(compactHistory).not.toHaveBeenCalled();
-      expect(runtime.run).not.toHaveBeenCalled();
-    },
-  );
 
   it("resolves the deployment model when no user credential is configured", async () => {
     const prisma = {

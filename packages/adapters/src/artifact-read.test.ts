@@ -8,13 +8,13 @@ import * as pdfText from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { selectBuiltinToolsForRun } from "./agent-session/session-tools.js";
 import {
   artifactReadFromTool,
   INTERNAL_ARTIFACT_ERROR,
   readActorArtifact,
 } from "./artifact-read.js";
 import { LocalArtifactStore } from "./artifacts.js";
-import { selectBuiltinToolsForRun } from "./executor.js";
 
 const actor = { spaceId: "space", userId: "owner" };
 afterEach(() => vi.restoreAllMocks());

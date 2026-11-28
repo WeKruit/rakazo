@@ -323,17 +323,6 @@ describe("role work delegated by the global agent", () => {
       );
     },
   );
-  it("acts for it after the global turn waited on a slow tool and resumed", async () => {
-    // Staging 11-16: the global turn's candidate lookup ran past 10 s, so the turn resumed as a
-    // background run; its handoff's feedback save was then refused and never recorded.
-    const f = delegationFixture();
-    f.sender.trigger = "tool_background";
-    Object.assign(f.tx.event, {
-      findFirst: vi.fn(async () => ({ payload: { trigger: "user" } })),
-    });
-    const result = await readRecruitingFeedbackContext(f.prisma, actor, f.input);
-    expect(result.source).toMatchObject({ anchor: { messageId: f.source.id } });
-  });
 });
 
 describe("native recruiting memory admission", () => {
@@ -1526,72 +1515,8 @@ describe("a teammate's report back to the bot that handed it the stage", () => {
   );
 });
 
-describe("a turn-end nudge that reaches a run already working", () => {
-  function steeredFixture() {
-    const f = fixture();
-    const later = {
-      ...f.source,
-      id: "later",
-      seq: 2,
-      blocks: [{ kind: "text", text: "Candidates must speak Mandarin" }] as unknown[],
-    };
-    const nudge = {
-      ...f.source,
-      id: "nudge",
-      seq: 3,
-      role: "system",
-      clientNonce: "autocontinue:previous-run:1",
-      blocks: [{ kind: "text", text: "Continue with the next step." }] as unknown[],
-    };
-    const messages = new Map<string, unknown>([
-      [f.source.id, f.source],
-      [later.id, later],
-      [nudge.id, nudge],
-    ]);
-    let previous: unknown = later;
-    f.tx.message.findFirst.mockImplementation(
-      async ({ where }) => (where.id ? (messages.get(where.id) ?? null) : previous) as never,
-    );
-    Object.assign(f.tx.message, {
-      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => messages.get(where.id)),
-    });
-    const steered = [later, nudge].map((message) => ({ messageId: message.id, message }));
-    f.tx.steeringMessage.findMany.mockImplementation(async () => steered);
-    return {
-      ...f,
-      steered,
-      setPrevious: (message: unknown) => {
-        previous = message;
-      },
-      input: {
-        ...f.input,
-        sourceMessageId: nudge.id,
-        intent: { basis: "direct" as const, quote: "must speak Mandarin" },
-      },
-    };
-  }
-
-  it("acts for the recruiter's latest message before it", async () => {
-    const f = steeredFixture();
-    const result = await readRecruitingFeedbackContext(f.prisma, actor, f.input);
-    expect(result.source).toMatchObject({
-      id: "human-message:later",
-      anchor: { messageId: "later" },
-    });
-  });
-
-  it("rejects it when that message is not one the run acts for", async () => {
-    const f = steeredFixture();
-    f.steered.splice(0, 1);
-    f.setPrevious({ ...f.source, id: "elsewhere", seq: 2 });
-    await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
-      IsolationError,
-    );
-  });
-});
-
-describe("record keeping is never refused over which recruiter message it cites", () => {
-  it("cites the recruiter's latest message when the run's own message can't be traced", async () => {
+describe("record keeping is never refused over who wrote the message it cites", () => {
+  it("cites the message the runtime names, even a report it cannot trace to the recruiter", async () => {
     const f = reportFixture();
     f.asked.clientNonce = "something-else";
     const result = await readRecruitingFeedbackContext(f.prisma, actor, {
@@ -1599,8 +1524,8 @@ describe("record keeping is never refused over which recruiter message it cites"
       recordKeeping: true,
     });
     expect(result.source).toMatchObject({
-      id: "human-message:human",
-      anchor: { messageId: f.source.id },
+      id: `human-message:${f.report.id}`,
+      anchor: { messageId: f.report.id },
     });
   });
 

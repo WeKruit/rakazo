@@ -314,7 +314,9 @@ function sendCard(result: unknown, toolName: string) {
     recipients?: { firstEmail?: { subject?: unknown } }[];
   };
   const subject = card.firstEmail?.subject ?? card.recipients?.[0]?.firstEmail?.subject;
-  return typeof subject === "string" ? `The cancelled card's subject was "${subject.slice(0, 200)}".` : "";
+  return typeof subject === "string"
+    ? `The cancelled card's subject was "${subject.slice(0, 200)}".`
+    : "";
 }
 
 export function resolveDuplicateEffectGate(
@@ -461,8 +463,7 @@ export async function replaceCompletedExternalEffectResult(
 }
 
 export const DENIED_THIS_TURN_RESULT = {
-  error:
-    "The user already denied this kind of action in this turn; nothing was done.",
+  error: "The user already denied this kind of action in this turn; nothing was done.",
   dispatched: false,
 } as const;
 
@@ -486,7 +487,6 @@ export async function deniedEarlierThisTurn(
           threadId: string;
           role: "user";
           createdAt: { gt: Date };
-          OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: string } } }];
         };
         select: { id: true };
       }) => Promise<{ id: string } | null>;
@@ -510,7 +510,6 @@ export async function deniedEarlierThisTurn(
       threadId: input.threadId,
       role: "user",
       createdAt: { gt: denied.updatedAt },
-      OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
     },
     select: { id: true },
   });

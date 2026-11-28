@@ -1,14 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { BackgroundJobHandlers } from "@rakazo/adapter-kit";
-import {
-  HISTORY_COMPACT_MAX_ATTEMPTS,
-  historyCompactJob,
-  historyCompactJobKey,
-  messagingDeliverJob,
-  routineWakeupJob,
-  runContinueJob,
-} from "@rakazo/adapter-kit";
-import { createLogger, createTestSink, installLogger, wrapJobPayload } from "@rakazo/logging";
+import { messagingDeliverJob } from "@rakazo/adapter-kit";
 import type { Runner } from "graphile-worker";
 import { makeWorkerUtils } from "graphile-worker";
 import type { Pool } from "pg";
@@ -30,13 +22,11 @@ import {
 
 function handlers(): BackgroundJobHandlers {
   return {
-    "run.continue": vi.fn(async () => undefined),
     "routine.wakeup": vi.fn(async () => undefined),
     "computer.update": vi.fn(async () => undefined),
     "computer.sleep": vi.fn(async () => undefined),
     "computer.control-expire": vi.fn(async () => undefined),
     "skill.teaching-expire": vi.fn(async () => undefined),
-    "history.compact": vi.fn(async () => undefined),
     "messaging.deliver": vi.fn(async () => undefined),
     "cloud_agent.poll": vi.fn(async () => undefined),
     "recruiting_checkin.start": vi.fn(async () => undefined),
@@ -47,6 +37,8 @@ function handlers(): BackgroundJobHandlers {
     "notification.retry": vi.fn(async () => undefined),
     "poll.close": vi.fn(async () => undefined),
     "discovery.warm": vi.fn(async () => undefined),
+    "session.drive": vi.fn(async () => undefined),
+    "session.cutover": vi.fn(async () => undefined),
   };
 }
 
@@ -100,58 +92,12 @@ describe("GraphileJobPublisher.enqueue", () => {
     return new GraphileJobPublisher({} as Pool);
   }
 
-  it("forwards the job's maxAttempts cap to graphile", async () => {
-    const addJob = vi.fn(async () => undefined);
-    const publisher = publisherWith(addJob);
-    await publisher.enqueue(historyCompactJob("thread-1"));
-    expect(addJob).toHaveBeenCalledWith(
-      "history.compact",
-      expect.anything(),
-      expect.objectContaining({ maxAttempts: HISTORY_COMPACT_MAX_ATTEMPTS }),
-    );
-    await publisher.close();
-  });
-
-  it("runs one thread's compactions one at a time", async () => {
-    const addJob = vi.fn(async () => undefined);
-    const publisher = publisherWith(addJob);
-    await publisher.enqueue(historyCompactJob("thread-1"));
-    expect(addJob).toHaveBeenCalledWith(
-      "history.compact",
-      expect.anything(),
-      expect.objectContaining({ queueName: historyCompactJobKey("thread-1") }),
-    );
-    await publisher.close();
-  });
-
   it("leaves the queue default when the job sets no cap", async () => {
     const addJob = vi.fn(async (..._args: unknown[]) => undefined);
     const publisher = publisherWith(addJob);
     await publisher.enqueue(messagingDeliverJob("run-1"));
     const options = addJob.mock.calls[0]?.[2] as { maxAttempts?: number } | undefined;
     expect(options?.maxAttempts).toBeUndefined();
-    await publisher.close();
-  });
-
-  it("queues a background run behind a recruiter's turn", async () => {
-    const addJob = vi.fn(async (..._args: unknown[]) => undefined);
-    const query = vi.fn(async (_sql: string, params?: readonly unknown[]) => ({
-      rowCount: params?.[0] === "run-routine" ? 1 : 0,
-      rows: [],
-    }));
-    vi.mocked(makeWorkerUtils).mockResolvedValue({
-      addJob,
-      withPgClient: async (callback: (client: { query: typeof query }) => Promise<unknown>) =>
-        callback({ query }),
-      release: vi.fn(async () => undefined),
-    } as never);
-    const publisher = new GraphileJobPublisher({} as Pool);
-    await publisher.enqueue(runContinueJob("run-routine"));
-    await publisher.enqueue(runContinueJob("run-user"));
-    await publisher.enqueue(routineWakeupJob("routine-1", new Date("2026-11-16T08:00:00Z")));
-    const priorities = addJob.mock.calls.map((call) => (call[2] as { priority?: number }).priority);
-    expect(priorities).toEqual([10, undefined, 10]);
-    expect(query.mock.calls[0]?.[1]).toEqual(["run-routine", expect.arrayContaining(["routine"])]);
     await publisher.close();
   });
 
@@ -207,53 +153,6 @@ describe("GraphileJobPublisher.enqueue", () => {
     return { publisher: new GraphileJobPublisher({} as Pool), ...graphile };
   }
 
-  it("keeps attempts and run_at while a keyed job still has attempts left", async () => {
-    const runAt = new Date("2030-01-01T00:00:00.000Z");
-    const jobs = new Map([["run:run-1", { attempts: 2, maxAttempts: 25, runAt }]]);
-    const { publisher, addJob, query } = publisherOver(jobs);
-    const pulledForward = new Date("2030-01-01T00:00:01.000Z");
-    await publisher.enqueue({
-      name: "run.continue",
-      payload: { runId: "pulled-forward" },
-      replaceKey: "run:run-1",
-      availableAt: pulledForward,
-      keepExisting: true,
-    });
-    expect(query).toHaveBeenCalledWith(
-      "select attempts, max_attempts, locked_at from graphile_worker._private_jobs where key = $1",
-      ["run:run-1"],
-    );
-    expect(addJob).toHaveBeenCalledWith(
-      "run.continue",
-      expect.anything(),
-      expect.objectContaining({
-        jobKey: "run:run-1",
-        jobKeyMode: "unsafe_dedupe",
-        runAt: pulledForward,
-      }),
-    );
-    expect(jobs.get("run:run-1")).toEqual({ attempts: 2, maxAttempts: 25, runAt });
-    await publisher.close();
-  });
-
-  it("replaces an exhausted job so it is re-enqueued with fresh attempts", async () => {
-    const runAt = new Date("2030-01-01T00:00:00.000Z");
-    const jobs = new Map([["run:run-1", { attempts: 3, maxAttempts: 3, runAt }]]);
-    const { publisher, addJob } = publisherOver(jobs);
-    const revivedAt = new Date("2030-01-02T00:00:00.000Z");
-    await publisher.enqueue({
-      name: "run.continue",
-      payload: { runId: "revived" },
-      replaceKey: "run:run-1",
-      availableAt: revivedAt,
-      keepExisting: true,
-    });
-    const options = addJob.mock.calls[0]?.[2] as { jobKeyMode?: string } | undefined;
-    expect(options?.jobKeyMode).toBeUndefined();
-    expect(jobs.get("run:run-1")).toEqual({ attempts: 0, maxAttempts: 25, runAt: revivedAt });
-    await publisher.close();
-  });
-
   it("queues a fresh job when the kept one already started, even on a worker that died", async () => {
     const runAt = new Date("2030-01-01T00:00:00.000Z");
     const lockedAt = new Date("2029-12-31T23:59:00.000Z");
@@ -276,23 +175,6 @@ describe("GraphileJobPublisher.enqueue", () => {
       maxAttempts: 25,
       runAt: nextAt,
     });
-    await publisher.close();
-  });
-
-  it("enqueues a keepExisting job when no row has that key", async () => {
-    const jobs = new Map<string, Job>();
-    const { publisher, addJob } = publisherOver(jobs);
-    const runAt = new Date("2030-01-03T00:00:00.000Z");
-    await publisher.enqueue({
-      name: "run.continue",
-      payload: { runId: "fresh" },
-      replaceKey: "run:missing",
-      availableAt: runAt,
-      keepExisting: true,
-    });
-    const options = addJob.mock.calls[0]?.[2] as { jobKeyMode?: string } | undefined;
-    expect(options?.jobKeyMode).toBeUndefined();
-    expect(jobs.get("run:missing")).toEqual({ attempts: 0, maxAttempts: 25, runAt });
     await publisher.close();
   });
 });
@@ -425,75 +307,6 @@ describe("GraphileJobWorkerHost runner lifecycle", () => {
     expect(run).toHaveBeenCalledTimes(1);
 
     await host.stop();
-  });
-
-  it("logs when history compaction fails permanently", async () => {
-    const first = mockRunner();
-    run.mockResolvedValueOnce(first.runner);
-    const sink = createTestSink();
-    installLogger(createLogger({ service: "rakazo-worker", sinks: [sink] }));
-    const host = new GraphileJobWorkerHost({} as Pool, {
-      sleep: async () => undefined,
-    });
-
-    try {
-      await host.start(handlers());
-      const on = first.runner.events.on as ReturnType<typeof vi.fn>;
-      const failed = on.mock.calls.find((call) => call[0] === "job:failed")?.[1] as
-        | ((event: {
-            job: {
-              task_identifier: string;
-              payload: unknown;
-              attempts: number;
-              max_attempts: number;
-            };
-            error: unknown;
-          }) => void)
-        | undefined;
-      expect(failed).toBeTypeOf("function");
-      failed?.({
-        job: {
-          task_identifier: "history.compact",
-          payload: wrapJobPayload({ threadId: "thread-9" }),
-          attempts: HISTORY_COMPACT_MAX_ATTEMPTS,
-          max_attempts: HISTORY_COMPACT_MAX_ATTEMPTS,
-        },
-        error: new Error("The operation was aborted due to timeout"),
-      });
-      failed?.({
-        job: {
-          task_identifier: "run.continue",
-          payload: wrapJobPayload({ runId: "run-1" }),
-          attempts: 25,
-          max_attempts: 25,
-        },
-        error: new Error("handler failed"),
-      });
-    } finally {
-      await host.stop();
-      installLogger(createLogger({ service: "rakazo-worker", level: "off", sinks: [] }));
-    }
-
-    expect(sink.events).toEqual([
-      expect.objectContaining({
-        level: "error",
-        message: "history.compact failed permanently",
-        "thread.id": "thread-9",
-        "history.compact.reason": "attempts_exhausted",
-        "history.compact.retryable": false,
-        "job.attempts": HISTORY_COMPACT_MAX_ATTEMPTS,
-        "job.max_attempts": HISTORY_COMPACT_MAX_ATTEMPTS,
-        error: expect.objectContaining({ message: "The operation was aborted due to timeout" }),
-      }),
-      // Any other job that used its last attempt leaves one line to alert on.
-      expect.objectContaining({
-        level: "error",
-        message: "job.exhausted",
-        "job.type": "run.continue",
-        "job.attempts": 25,
-        error: expect.objectContaining({ message: "handler failed" }),
-      }),
-    ]);
   });
 
   it("wakes a pending restart delay when stop is called", async () => {

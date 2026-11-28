@@ -47,6 +47,19 @@ function fakePrisma(
   } as unknown as PrismaClient;
 }
 
+/** The profile-intent queries among the raw queries, answered in turn from `answers`. */
+function profileQueries(prisma: PrismaClient, answers: unknown[][] = []) {
+  const isProfile = (query: unknown) =>
+    (query as { sql: string }).sql.includes("recruiting_candidate_pages");
+  vi.mocked(prisma.$queryRaw).mockImplementation((async (query: unknown) =>
+    isProfile(query) ? ((answers.length > 1 ? answers.shift() : answers[0]) ?? []) : []) as never);
+  return () =>
+    vi
+      .mocked(prisma.$queryRaw)
+      .mock.calls.map(([query]) => query as unknown as { sql: string; values: unknown[] })
+      .filter(isProfile);
+}
+
 describe("createJobReconciler", () => {
   it("discovers only newly marked profile intents, pages by metadata and recovers them after restart", async () => {
     const prisma = fakePrisma();
@@ -55,10 +68,7 @@ describe("createJobReconciler", () => {
       createdAt: new Date(0),
       pageEffectId: `page-${n}`,
     }));
-    vi.mocked(prisma.$queryRaw)
-      .mockResolvedValueOnce(rows)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(rows);
+    const queries = profileQueries(prisma, [rows, [], rows]);
     const { jobs, enqueue } = publisher();
     const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2 });
     await reconciler.reconcileOnce();
@@ -70,10 +80,7 @@ describe("createJobReconciler", () => {
         keepExisting: true,
       })),
     );
-    const first = vi.mocked(prisma.$queryRaw).mock.calls[0]![0] as {
-      sql: string;
-      values: unknown[];
-    };
+    const first = queries()[0]!;
     expect(first.sql).toContain("saving.result->>'profileFactsVersion'='1'");
     expect(first.sql).toContain("saving.kind='recruiting_research'");
     expect(first.sql).toContain("done.kind='recruiting_profile_projection'");
@@ -82,26 +89,24 @@ describe("createJobReconciler", () => {
     );
     expect(first.sql.split("FROM external_effects")[0]).not.toContain("result");
     await reconciler.reconcileOnce();
-    const second = vi.mocked(prisma.$queryRaw).mock.calls[1]![0] as { values: unknown[] };
+    const second = queries()[1]!;
     expect(second.values).toContain("save-2");
     // Process restarts need no in-memory cursor: the marker and completion proof remain durable.
     await createJobReconciler({ prisma, jobs }, { batchSize: 2 }).reconcileOnce();
-    const restarted = vi.mocked(prisma.$queryRaw).mock.calls[2]![0] as { values: unknown[] };
+    const restarted = queries()[2]!;
     expect(restarted.values).not.toContain("save-2");
     expect(enqueue).toHaveBeenCalledTimes(4);
   });
 
   it("scans only recent saves after a full profile sweep, and everything again after restart", async () => {
     const prisma = fakePrisma();
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
+    const queries = profileQueries(prisma);
     const { jobs } = publisher();
     const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2 });
     await reconciler.reconcileOnce();
     await reconciler.reconcileOnce();
     await createJobReconciler({ prisma, jobs }, { batchSize: 2 }).reconcileOnce();
-    const [full, recent, restarted] = vi
-      .mocked(prisma.$queryRaw)
-      .mock.calls.map(([query]) => query as unknown as { sql: string; values: unknown[] });
+    const [full, recent, restarted] = queries();
     expect(full!.sql).not.toContain('saving."createdAt">');
     expect(recent!.sql).toContain('saving."createdAt">');
     expect(recent!.values.find((value) => value instanceof Date)).toBeDefined();
@@ -110,8 +115,8 @@ describe("createJobReconciler", () => {
 
   it("retries a failed profile enqueue without advancing its cursor or blocking core reconciliation", async () => {
     const prisma = fakePrisma();
-    vi.mocked(prisma.$queryRaw).mockResolvedValue([
-      { id: "save-1", createdAt: new Date(0), pageEffectId: "page-1" },
+    const queries = profileQueries(prisma, [
+      [{ id: "save-1", createdAt: new Date(0), pageEffectId: "page-1" }],
     ]);
     const { jobs, enqueue } = publisher();
     enqueue.mockRejectedValueOnce(new Error("queue busy"));
@@ -119,43 +124,32 @@ describe("createJobReconciler", () => {
     await reconciler.reconcileOnce();
     expect(prisma.run.findMany).toHaveBeenCalled();
     await reconciler.reconcileOnce();
-    const second = vi.mocked(prisma.$queryRaw).mock.calls[1]![0] as { values: unknown[] };
+    const second = queries()[1]!;
     expect(second.values).not.toContain("save-1");
     expect(enqueue).toHaveBeenCalledTimes(2);
   });
-  it.each(["leased", "running"] as const)(
-    "replaces a wakeup blocked by an expired %s owner without preserving its queue lock",
-    async (status) => {
-      const prisma = fakePrisma([{ id: "expired-run", updatedAt: new Date(0), status }]);
-      const { jobs, enqueue } = publisher();
 
-      await createJobReconciler({ prisma, jobs }).reconcileOnce();
-
-      expect(prisma.run.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            AND: [
-              {
-                OR: [
-                  { status: "queued" },
-                  {
-                    status: { in: ["leased", "running"] },
-                    leaseExpiresAt: { lte: expect.any(Date) },
-                  },
-                ],
-              },
-            ],
-          },
-        }),
-      );
-      expect(enqueue).toHaveBeenCalledWith({
-        name: "run.continue",
-        payload: { runId: "expired-run" },
-        replaceKey: "run:expired-run",
-        keepExisting: false,
-      });
-    },
-  );
+  it("drives sessions whose owner is gone and that still have input or a run open", async () => {
+    const prisma = fakePrisma();
+    const before = Date.now();
+    vi.mocked(prisma.$queryRaw).mockImplementation((async (query: { sql: string }) =>
+      query.sql.includes("conversation_sessions") ? [{ id: "thread-1:bot-1" }] : []) as never);
+    const { jobs, enqueue } = publisher();
+    await createJobReconciler({ prisma, jobs }).reconcileOnce();
+    expect(enqueue).toHaveBeenCalledWith({
+      name: "session.drive",
+      payload: { sessionId: "thread-1:bot-1" },
+      replaceKey: "session:thread-1:bot-1",
+      serialKey: "session:thread-1:bot-1",
+    });
+    const sweep = vi
+      .mocked(prisma.$queryRaw)
+      .mock.calls.map(([query]) => query as unknown as { sql: string; values: unknown[] })
+      .find((query) => query.sql.includes("conversation_sessions"))!;
+    expect(sweep.sql).toContain('s."leaseExpiresAt" IS NULL OR s."leaseExpiresAt" <=');
+    expect(sweep.sql).toContain('i."deliveredAt" IS NULL');
+    expect((sweep.values[0] as Date).getTime()).toBeGreaterThanOrEqual(before);
+  });
 
   it("continues the main scans when an auxiliary reconciler fails", async () => {
     const prisma = fakePrisma();
@@ -219,86 +213,6 @@ describe("createJobReconciler", () => {
       payload: {},
       replaceKey: "messaging.deliver:drain",
     });
-  });
-
-  it("restores a completed messaging run that was not durably mirrored", async () => {
-    const prisma = fakePrisma();
-    vi.mocked(prisma.run.findMany)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: "run-unmirrored" }] as never);
-    const { jobs, enqueue } = publisher();
-
-    await createJobReconciler({ prisma, jobs }).reconcileOnce();
-
-    expect(prisma.run.findMany).toHaveBeenCalledWith({
-      where: { trigger: "messaging", status: "completed", messagingMirroredAt: null },
-      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-      take: 100,
-      select: { id: true },
-    });
-    expect(enqueue).toHaveBeenCalledWith({
-      name: "messaging.deliver",
-      payload: { runId: "run-unmirrored" },
-      replaceKey: "messaging.deliver:run-unmirrored",
-    });
-  });
-
-  it("restores queued runs and near-due routines with stable replacement keys", async () => {
-    const scheduledFor = new Date(Date.now() + 30_000);
-    const controlExpiresAt = new Date(Date.now() + 15_000);
-    const prisma = fakePrisma(
-      [{ id: "run-1", updatedAt: new Date() }],
-      [{ id: "routine-1", nextRunAt: scheduledFor }],
-      [
-        {
-          id: "computer-1",
-          controlBotId: "bot-1",
-          controlLeaseId: "lease-1",
-          controlLeaseExpiresAt: controlExpiresAt,
-          updatedAt: new Date(),
-        },
-      ],
-    );
-    const { jobs, enqueue } = publisher();
-    const reconciler = createJobReconciler({ prisma, jobs });
-
-    await reconciler.reconcileOnce();
-
-    expect(enqueue).toHaveBeenCalledWith({
-      name: "run.continue",
-      payload: { runId: "run-1" },
-      replaceKey: "run:run-1",
-      keepExisting: true,
-    });
-    expect(enqueue).toHaveBeenCalledWith({
-      name: "routine.wakeup",
-      payload: { routineId: "routine-1", scheduledFor: scheduledFor.toISOString() },
-      availableAt: scheduledFor,
-      replaceKey: "routine:routine-1",
-    });
-    expect(enqueue).toHaveBeenCalledWith({
-      name: "computer.control-expire",
-      payload: { computerId: "computer-1", leaseId: "lease-1" },
-      availableAt: controlExpiresAt,
-      replaceKey: "computer.control-expire:computer-1:lease-1",
-    });
-    expect(vi.mocked(prisma.computer.findMany)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          AND: [
-            { controlLeaseId: { not: null } },
-            {
-              OR: [
-                { controlLeaseExpiresAt: null },
-                { controlLeaseExpiresAt: { lte: expect.any(Date) } },
-              ],
-            },
-          ],
-        },
-        orderBy: [{ controlLeaseExpiresAt: "asc" }, { id: "asc" }],
-      }),
-    );
   });
 
   it("restores expiry for orphaned user-control leases without a control bot", async () => {
@@ -404,85 +318,6 @@ describe("createJobReconciler", () => {
         payload: { computerId: "computer-0", leaseId: "lease-0" },
       }),
     );
-  });
-
-  it("advances stable cursors so recoverable work beyond one batch is dispatched", async () => {
-    const at = new Date("2026-01-01T00:00:00.000Z");
-    const runs = Array.from({ length: 5 }, (_, index) => ({
-      id: `run-${index + 1}`,
-      updatedAt: at,
-    }));
-    const routines = Array.from({ length: 5 }, (_, index) => ({
-      id: `routine-${index + 1}`,
-      nextRunAt: new Date(at.getTime() + index),
-    }));
-    const runPages = [runs.slice(0, 2), runs.slice(2, 4), runs.slice(4)];
-    let runPage = 0;
-    const runFindMany = vi.fn(async (args: { where?: Record<string, unknown> } = {}) => {
-      if (args.where?.messagingMirroredAt === null) return [];
-      const status = args.where?.status as { in?: string[] } | undefined;
-      if (status?.in?.includes("waiting_takeover")) return [];
-      return runPages[runPage++] ?? [];
-    });
-    const routineFindMany = vi
-      .fn()
-      .mockResolvedValueOnce(routines.slice(0, 2))
-      .mockResolvedValueOnce(routines.slice(2, 4))
-      .mockResolvedValueOnce(routines.slice(4));
-    const prisma = {
-      run: { findMany: runFindMany },
-      routine: { findMany: routineFindMany },
-      computer: { findMany: vi.fn(async () => []) },
-      messagingOutbound: { findFirst: vi.fn(async () => null) },
-    } as unknown as PrismaClient;
-    const { jobs, enqueue } = publisher();
-    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2 });
-
-    await reconciler.reconcileOnce();
-    await reconciler.reconcileOnce();
-    await reconciler.reconcileOnce();
-
-    expect(enqueue).toHaveBeenCalledTimes(10);
-    expect(enqueue.mock.calls.map(([job]) => job.replaceKey)).toEqual([
-      "run:run-1",
-      "run:run-2",
-      "routine:routine-1",
-      "routine:routine-2",
-      "run:run-3",
-      "run:run-4",
-      "routine:routine-3",
-      "routine:routine-4",
-      "run:run-5",
-      "routine:routine-5",
-    ]);
-    expect(runFindMany.mock.calls[4]?.[0]).toMatchObject({
-      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-      where: {
-        AND: [
-          expect.anything(),
-          {
-            OR: [{ updatedAt: { gt: at } }, { updatedAt: at, id: { gt: "run-2" } }],
-          },
-        ],
-      },
-    });
-    expect(routineFindMany.mock.calls[1]?.[0]).toMatchObject({
-      orderBy: [{ nextRunAt: "asc" }, { id: "asc" }],
-      where: {
-        AND: [
-          expect.anything(),
-          {
-            OR: [
-              { nextRunAt: { gt: routines[1]?.nextRunAt } },
-              {
-                nextRunAt: routines[1]?.nextRunAt,
-                id: { gt: "routine-2" },
-              },
-            ],
-          },
-        ],
-      },
-    });
   });
 
   it("does not scan when another replica is the reconciliation leader", async () => {

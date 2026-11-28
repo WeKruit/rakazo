@@ -614,7 +614,6 @@ function toThreadMessage(row: {
     replyPreview,
     runId: row.runId ?? undefined,
     callId: callIdFromClientNonce(row.clientNonce),
-    ...(row.clientNonce?.startsWith("autocontinue:") ? { internal: true } : {}),
     createdAt: row.createdAt.toISOString(),
   };
 }

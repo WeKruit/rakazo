@@ -325,15 +325,3 @@ describe("run history isolation", () => {
     }
   });
 });
-
-it("never treats a synthetic continuation as human approval evidence", () => {
-  const row = {
-    role: "user",
-    botId: null,
-    externalTranscriptFor: null,
-    blocks: [{ kind: "text", text: "Continue" }],
-  };
-  expect(isNativeHumanMessage(row as never)).toBe(true);
-  expect(isNativeHumanMessage({ ...row, clientNonce: "autocontinue:run:1" } as never)).toBe(false);
-  expect(isNativeHumanMessage({ ...row, role: "system" } as never)).toBe(false);
-});

@@ -109,9 +109,6 @@ function campaignSendWork(result: unknown): TurnWork {
     : "send_queued";
 }
 
-/** Work kinds that are a confirmed outside send, whatever came of it. */
-export const SEND_WORK: readonly TurnWork[] = ["sent", "send_queued", "send_held"];
-
 /** Tool operations that only read, by their leading verb. */
 const READ_ACTION =
   /^(?:native_[a-z]+_)?(?:(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview)(?:_|$)|whoami$|me$)/;
@@ -212,11 +209,6 @@ const WORK_DONE: Record<TurnWork, string> = {
   sender: "got the sending email address ready",
   connected: "made changes in a connected app",
 };
-
-export const isTurnWork = (value: string): value is TurnWork => Object.hasOwn(WORK_DONE, value);
-
-/** Past-tense English label of one kind of work, for model-facing state. */
-export const workDoneLabel = (work: TurnWork): string => WORK_DONE[work];
 
 const WORK_DONE_ZH: Record<TurnWork, string> = {
   people_search: "搜索了候选人",
