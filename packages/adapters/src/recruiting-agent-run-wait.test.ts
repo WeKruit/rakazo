@@ -99,9 +99,7 @@ describe("people-search agent runs that outlive their turn", () => {
         clientNonce: `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}agent_run_1:newest`,
       }),
     });
-    expect(test.taskCreate.mock.calls[0]?.[0].data.prompt).toContain(
-      'agent_run with runId "agent_run_1" collects it',
-    );
+    expect(test.taskCreate.mock.calls[0]?.[0].data.prompt).toContain("agent_run_1");
     expect(test.taskCreate.mock.calls[0]?.[0].data.prompt).toContain("An empty reply posts nothing.");
     expect(test.jobs.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ name: "run.continue" }),

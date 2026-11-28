@@ -20,8 +20,5 @@ export function formatCurrentTimeInstruction(now: Date = new Date()): string {
   return [
     `Current date and time: ${weekday(now)}, ${iso} (UTC).`,
     `The next seven days: ${week.join(", ")}.`,
-    "Treat this as the present moment for everything you say and do.",
-    "Use it to judge what is past, upcoming, or overdue, convert it to the user's time zone when one is known, and write absolute dates rather than relative ones; a weekday someone offers without a date is the next one after the day they wrote.",
-    "Never infer today's date from your training data or from timestamps quoted in the conversation.",
   ].join(" ");
 }
