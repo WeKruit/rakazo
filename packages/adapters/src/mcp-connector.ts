@@ -39,6 +39,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
+import { appendToolCompletionAudit } from "./agent-session/run-projection.js";
 import { catalogToolPrefix } from "./approval-effect.js";
 import { calendarEvidenceHash } from "./calendar-approval.js";
 import { readBoundedText } from "./connector-http.js";
@@ -50,7 +51,6 @@ import {
 } from "./connector-safety.js";
 import { FindEmailsInput, findEmails } from "./contact-lookup.js";
 import { credentialDigest } from "./credential-digest.js";
-import { appendToolCompletionAudit } from "./executor.js";
 import {
   InstantlyRestError,
   instantlyRest,
