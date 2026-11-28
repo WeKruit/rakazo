@@ -271,8 +271,16 @@ export async function copyRecruiterMessageToRole(
   // Staging 11-13: "现在开始找候选人" opened the role with only those words, so its team asked
   // for the location the recruiter had given earlier, and that card held every later request.
   const earlier = role.earlier?.trim();
+  // A delegated agent receives only what its request holds (Claude Code subagents: "include any file
+  // paths ... directly in that prompt"), so the files go in by their saved ids.
+  const files = blocks.flatMap((block) =>
+    block.kind === "file" || block.kind === "image"
+      ? [`${block.name} (artifact ${block.artifactId})`]
+      : [],
+  );
   const request = [
     `New role${title ? `: ${title}` : ""}. The recruiter's message above, copied from the main conversation, is the request${title ? "; any other roles it mentions have their own conversations" : ""}.`,
+    ...(files.length ? [`Files the recruiter attached: ${files.join(", ")}.`] : []),
     ...(earlier && !text.includes(earlier)
       ? [`What the recruiter said about this role earlier, in the main conversation:\n${earlier}`]
       : []),

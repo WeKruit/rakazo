@@ -873,42 +873,84 @@ describe("automatic outcome return", () => {
     });
   });
 
-  it("returns work delegated from another conversation there, but not its progress", async () => {
-    // fosp on 96dcd1c9: the role held 10 people while Kruit's chat never heard back.
-    const delegated = () =>
-      deps({
+  describe("work delegated from another conversation", () => {
+    // fosp on 96dcd1c9: the role held 10 people while Kruit's chat never heard back; long-search on
+    // #1897: a role that finished over three rounds never reported back.
+    const delegated = (state: { active?: number; later?: boolean; reply?: string }) => {
+      const harness = deps({
         addressedThread: { id: "thread-global", group: { name: "Payments" } },
         hopBlocks: [
           {
             kind: "bot_message_received",
             fromBotId: "bot-target",
             fromBotName: "Kruit",
-            text: "找10个人",
+            text: "找20个人",
             hop: 1,
             intent: "request",
             returnThreadId: "thread-global",
           },
         ],
       });
-    const done = delegated();
-    await returnBotMessageOutcome(
-      done.deps,
-      { ...run, sourceMessageId: "message-source" },
-      sender,
-      "10 people are in the list.",
-    );
-    expect(JSON.stringify(done.tx.message.create.mock.calls)).toContain("thread-global");
-    expect(done.enqueue).toHaveBeenCalledOnce();
+      const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+      const findUnique = prisma.message!.findUnique as (args: unknown) => Promise<object>;
+      prisma.message!.findUnique = vi.fn(async (args) => ({ seq: 4, ...(await findUnique(args)) }));
+      prisma.run!.count = vi.fn().mockResolvedValue(state.active ?? 0);
+      prisma.message!.findFirst = vi.fn(async (args: { where: { role?: string } }) =>
+        args.where.role === "bot"
+          ? state.reply === undefined
+            ? null
+            : { blocks: [{ kind: "text", text: state.reply }] }
+          : state.later
+            ? { id: "message-later" }
+            : null,
+      );
+      return harness;
+    };
+    const ret = (harness: ReturnType<typeof delegated>, text = "", intent?: "status") =>
+      returnBotMessageOutcome(
+        harness.deps,
+        { ...run, sourceMessageId: "message-source" },
+        sender,
+        text,
+        intent,
+      );
 
-    const progress = delegated();
-    await returnBotMessageOutcome(
-      progress.deps,
-      { ...run, sourceMessageId: "message-source" },
-      sender,
-      "Still searching.",
-      "status",
-    );
-    expect(progress.enqueue).not.toHaveBeenCalled();
+    it("returns the role conversation's newest reply once nobody there is working", async () => {
+      // The run that took the request ended at a hand-off with no text of its own.
+      const done = delegated({ reply: "20 people are in the list." });
+      expect(await ret(done, "", "status")).toBe(true);
+      const sent = JSON.stringify(done.tx.message.create.mock.calls);
+      expect(sent).toContain("thread-global");
+      expect(sent).toContain("20 people are in the list.");
+      expect(sent).toContain('"intent":"result"');
+      expect(done.enqueue).toHaveBeenCalledOnce();
+    });
+
+    it("waits while a teammate or a continuation is still working", async () => {
+      const working = delegated({ active: 1, reply: "Round 1: 10 people." });
+      expect(await ret(working, "Round 1: 10 people.")).toBe(false);
+      expect(working.enqueue).not.toHaveBeenCalled();
+      expect(working.deps.prisma.run.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("leaves the result to a later request with its own turn", async () => {
+      const later = delegated({ later: true, reply: "Done." });
+      expect(await ret(later, "Done.")).toBe(true);
+      expect(later.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("sends a failure back at once", async () => {
+      const failed = delegated({ active: 1 });
+      await returnBotMessageOutcome(
+        failed.deps,
+        { ...run, sourceMessageId: "message-source" },
+        sender,
+        "Could not complete the delegated request: boom",
+        "status",
+        { forceUnread: true },
+      );
+      expect(failed.enqueue).toHaveBeenCalledOnce();
+    });
   });
 
   it("still returns a final result after an interim status update", async () => {

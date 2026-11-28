@@ -1,6 +1,10 @@
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { IsolationError, threadStopRunWhere } from "@rakazo/db";
+import {
+  DELEGATED_FROM_ANOTHER_CONVERSATION,
+  IsolationError,
+  threadStopRunWhere,
+} from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import type { ThreadTarget } from "./thread-target.js";
 import { cancelThreadBackgroundTask, listThreadBackgroundTasks } from "./thread-target.js";
@@ -10,18 +14,23 @@ const target = { kind: "bot", botId: "bot", threadId: "thread" } as ThreadTarget
 const scope = { spaceId: "space", userId: "owner", threadId: "thread" };
 
 describe("stop scopes", () => {
-  it("keeps background tools, automation and handed-off stages out of Stop", () => {
+  it("keeps background tools, automation and handed-off stages out of Stop, not work handed over from another conversation", () => {
     expect(threadStopRunWhere("thread")).toMatchObject({
       threadId: "thread",
-      trigger: {
-        notIn: expect.arrayContaining([
-          "tool_background",
-          "recruiting_research",
-          "recruiting_grade",
-          "routine",
-        ]),
-      },
-      NOT: { sourceMessage: { is: { blocks: { array_contains: [{ kind: "handoff" }] } } } },
+      OR: [
+        {
+          trigger: {
+            notIn: expect.arrayContaining([
+              "tool_background",
+              "recruiting_research",
+              "recruiting_grade",
+              "routine",
+            ]),
+          },
+          NOT: { sourceMessage: { is: { blocks: { array_contains: [{ kind: "handoff" }] } } } },
+        },
+        { trigger: "bot_message", sourceMessage: { is: DELEGATED_FROM_ANOTHER_CONVERSATION } },
+      ],
     });
     expect(threadStopRunWhere("thread", undefined, "all")).not.toHaveProperty("trigger");
     expect(threadStopRunWhere("thread", "stage")).toMatchObject({

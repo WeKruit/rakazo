@@ -354,6 +354,7 @@ import {
   messageBot,
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
+  returnSettledDelegations,
   showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
@@ -13643,6 +13644,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
           }
+          // Work delegated to this role returns once its conversation is idle (bot-messages.ts):
+          // this run may be the teammate's or the continuation that finished it.
+          if (thread.groupId && !thread.groupId.startsWith("recruiting-global-"))
+            await returnSettledDelegations(deps, thread.id).catch((error) =>
+              getLogger().error("settled delegation return", error),
+            );
           const notifyBody = completionNotificationPreview(text);
           if (
             runSendsFinishNotification(run.trigger, Boolean(completed.continuationRunId)) &&

@@ -104,7 +104,10 @@ describe("copyRecruiterMessageToRole", () => {
       artifactId: "a1",
     };
     const { deps: d } = deps({ ...mine, blocks: [file] });
-    expect(await copyRecruiterMessageToRole(d as never, run, role)).toBeDefined();
+    // The role's run receives only its request, so the file goes in by its id.
+    expect(await copyRecruiterMessageToRole(d as never, run, role)).toContain(
+      "Files the recruiter attached: jd.docx (artifact a1).",
+    );
     expect(copiedBlocks()).toEqual([file]);
   });
 

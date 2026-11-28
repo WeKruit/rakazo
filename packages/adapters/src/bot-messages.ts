@@ -1,6 +1,7 @@
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { BotMessageIntent, MessageBlock } from "@rakazo/contracts";
 import {
+  ACTIVE_RUN_STATUSES,
   BACKGROUND_RUN_TRIGGERS,
   BOT_MESSAGE_MAX_LENGTH,
   botMessageContext,
@@ -578,6 +579,87 @@ export async function teamProgress(
   };
 }
 
+/**
+ * The result of work another conversation delegated to this run, once the role's conversation is
+ * idle: "working" while any run there is still active, undefined when a later request with its own
+ * run carries the result or nothing was written, else the newest reply since the request.
+ */
+async function settledTeamResult(
+  prisma: PrismaClient,
+  run: { id: string; threadId: string; sourceMessageId?: string | null },
+): Promise<string | "working" | undefined> {
+  const active = await prisma.run.count({
+    where: {
+      threadId: run.threadId,
+      id: { not: run.id },
+      status: { in: [...ACTIVE_RUN_STATUSES] },
+    },
+  });
+  if (active) return "working";
+  const request = run.sourceMessageId
+    ? await prisma.message.findUnique({ where: { id: run.sourceMessageId }, select: { seq: true } })
+    : null;
+  if (!request) return undefined;
+  const later = await prisma.message.findFirst({
+    where: {
+      threadId: run.threadId,
+      seq: { gt: request.seq },
+      blocks: { array_contains: [{ kind: "bot_message_received" }] },
+      sourceRuns: { some: { trigger: "bot_message" } },
+    },
+    select: { id: true },
+  });
+  if (later) return undefined;
+  const reply = await prisma.message.findFirst({
+    where: {
+      threadId: run.threadId,
+      role: "bot",
+      seq: { gt: request.seq },
+      blocks: { array_contains: [{ kind: "text" }] },
+    },
+    orderBy: { seq: "desc" },
+    select: { blocks: true },
+  });
+  const blocks = Array.isArray(reply?.blocks) ? (reply.blocks as MessageBlock[]) : [];
+  const text = blocks
+    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+    .join("\n\n")
+    .trim();
+  return text || undefined;
+}
+
+/**
+ * When a run in a role's conversation ends, return any delegated request there whose result is
+ * still owed: the run that took the request may have ended earlier, at a hand-off to a teammate or
+ * with work continuing in another run.
+ */
+export async function returnSettledDelegations(
+  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
+  threadId: string,
+): Promise<void> {
+  const owed = await deps.prisma.run.findMany({
+    where: {
+      threadId,
+      trigger: "bot_message",
+      status: "completed",
+      botOutcomeReturnedAt: null,
+    },
+    orderBy: { createdAt: "asc" },
+    take: 5,
+    select: {
+      id: true,
+      spaceId: true,
+      threadId: true,
+      botId: true,
+      userId: true,
+      sourceMessageId: true,
+      bot: { select: { name: true } },
+    },
+  });
+  for (const run of owed)
+    await returnBotMessageOutcome(deps, run, { id: run.botId, name: run.bot.name }, "", "status");
+}
+
 /** Return a delegated run's terminal outcome unless it already sent one explicitly. */
 export async function returnBotMessageOutcome(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -590,10 +672,12 @@ export async function returnBotMessageOutcome(
     sourceMessageId?: string | null;
   },
   sender: { id: string; name: string },
-  text: string,
-  intent: "result" | "status" = "result",
+  runText: string,
+  runIntent: "result" | "status" = "result",
   options?: { forceUnread?: boolean },
 ) {
+  let text = runText;
+  let intent = runIntent;
   const source = await loadBotMessageContext(deps.prisma, run.sourceMessageId);
   if (!source) {
     await markBotOutcomeReturned(deps.prisma, run.id);
@@ -605,13 +689,20 @@ export async function returnBotMessageOutcome(
     await markBotOutcomeReturned(deps.prisma, run.id);
     return true;
   }
-  // Work delegated from another conversation returns its final result there, the way a Claude Code
-  // subagent's final message returns to the agent that started it. A teammate's progress never goes
-  // back (send-at-night 11-16: each one woke Kruit, which posted again and asked the team a second
-  // time); only a failure does.
-  if (source.returnThreadId && intent !== "result" && !options?.forceUnread) {
-    await markBotOutcomeReturned(deps.prisma, run.id);
-    return true;
+  // Work delegated from another conversation returns there once, when the whole job is done: the
+  // role's conversation is idle (no run or search of any teammate still going, as Workloop's IsIdle),
+  // and its newest reply is the result, the way a Claude Code subagent's final message returns to
+  // its parent. Progress never goes back (send-at-night 11-16: each one woke Kruit, which posted
+  // again and asked the team a second time); a failure goes back at once.
+  if (source.returnThreadId && !options?.forceUnread) {
+    const settled = await settledTeamResult(deps.prisma, run);
+    if (settled === "working") return false;
+    if (!settled) {
+      await markBotOutcomeReturned(deps.prisma, run.id);
+      return true;
+    }
+    text = settled;
+    intent = "result";
   }
   const sent = await deps.prisma.message.findMany({
     where: { threadId: run.threadId, runId: run.id },
