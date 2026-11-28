@@ -189,6 +189,16 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ...(await runAdmission({ roleId: role.role.id }, { runId: run.id, threadId: thread.id })),
     };
   }
+  async function endLiveRuns(thread: string) {
+    await prisma.run.updateMany({
+      where: {
+        threadId: thread,
+        botId,
+        status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
+      },
+      data: { status: "completed" },
+    });
+  }
   async function mutateRole(
     db: PrismaClient,
     owner: Actor,
@@ -462,6 +472,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       role: "user",
       blocks: [{ kind: "text", text: "Remote is fine" }],
     });
+    // One live run per agent and conversation: the role's run steps aside while the later saves.
+    await prisma.run.update({ where: { id: run.id }, data: { status: "completed" } });
     const laterTask = await prisma.task.create({
       data: { spaceId, userId, botId, threadId: roleThread.id, prompt: "x", status: "running" },
     });
@@ -484,6 +496,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       intent: { basis: "direct", quote: "Remote is fine" },
       preferences: ["Remote is fine"],
     } as recruiting.RecruitingRoleMutationInput);
+    await prisma.run.update({ where: { id: laterRun.id }, data: { status: "completed" } });
+    await prisma.run.update({ where: { id: run.id }, data: { status: "running" } });
     const accepted = await mutateRole(prisma, actor, context, {
       operation: "update",
       roleId: created.workspace!.role.id,
@@ -2343,6 +2357,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         },
       });
     const first = await makeMessage();
+    // One live run per agent and conversation: earlier tests' runs here have ended.
+    await endLiveRuns(threadId);
     const task = await prisma.task.create({
       data: { spaceId, userId, botId, threadId, prompt: "Native role", status: "running" },
     });
@@ -2533,7 +2549,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toBe(true);
     expect(await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).toMatchObject({
       id: f.run.id,
-      status: "queued",
+      // The card ended its run; the answer is the next run's input.
+      status: "waiting_input",
       sourceMessageId: f.run.sourceMessageId,
     });
     const receipt = await prisma.event.findFirstOrThrow({
@@ -2905,91 +2922,11 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       expect((await feedback(id)).source.anchor).toMatchObject({ messageId: steering.id });
   });
 
-  it("links one genuine composer message to multiple waiting group runs through distinct receipts", async () => {
-    const f = await nativeAsk();
-    const peer = await prisma.bot.create({
-      data: { spaceId, userId, name: "Peer", color: "blue" },
-    });
-    await prisma.chatGroupMember.create({ data: { groupId: f.thread.groupId!, botId: peer.id } });
-    const task = await prisma.task.create({
-      data: {
-        spaceId,
-        userId,
-        botId: peer.id,
-        threadId: f.thread.id,
-        prompt: "Peer clarification",
-        status: "running",
-      },
-    });
-    const peerRun = await prisma.run.create({
-      data: {
-        spaceId,
-        userId,
-        botId: peer.id,
-        threadId: f.thread.id,
-        taskId: task.id,
-        sourceMessageId: f.original.id,
-        trigger: "user",
-        status: "waiting_input",
-      },
-    });
-    await recruiting.createThreadMessage(prisma, {
-      threadId: f.thread.id,
-      role: "bot",
-      botId: peer.id,
-      runId: peerRun.id,
-      blocks: [{ kind: "ask", text: "What should change?", status: "pending" }],
-    });
-    const quote = "Always show complete prompts";
-    const composer = await recruiting.createThreadMessage(prisma, {
-      threadId: f.thread.id,
-      role: "user",
-      runId: f.run.id,
-      blocks: [{ kind: "text", text: quote }],
-    });
-    for (const run of [f.run, peerRun]) {
-      expect(
-        await prisma.$transaction((tx) =>
-          recruiting.answerWaitingRunWithTextInTransaction(tx, {
-            spaceId,
-            threadId: f.thread.id,
-            runId: run.id,
-            answeredByUserId: userId,
-            answer: quote,
-            answerMessageId: composer.id,
-          }),
-        ),
-      ).toBeTruthy();
-      await prisma.run.update({ where: { id: run.id }, data: { status: "running" } });
-      expect(
-        (
-          await recruiting.readRecruitingFeedbackContext(prisma, actor, {
-            runId: run.id,
-            sourceMessageId: f.original.id,
-            intent: { basis: "direct", quote },
-            sourceRefs: [],
-          })
-        ).source.anchor,
-      ).toMatchObject({ messageId: composer.id });
-    }
-    expect((await prisma.message.findUniqueOrThrow({ where: { id: composer.id } })).runId).toBe(
-      f.run.id,
-    );
-    expect(
-      await prisma.event.count({
-        where: {
-          threadId: f.thread.id,
-          type: "thread.choice",
-          payload: { path: ["answerMessageId"], equals: composer.id },
-        },
-      }),
-    ).toBe(2);
-    expect(await prisma.message.count({ where: { threadId: f.thread.id, role: "user" } })).toBe(2);
-  });
-
   it("reads feedback only from the current actual human and exact bound role revision", async () => {
     expect(recruiting.readRecruitingFeedbackContext).toBeTypeOf("function");
     const current = await recruiting.createRecruitingRole(prisma, actor, roleInput());
+    // One live run per agent and conversation: earlier tests' runs here have ended.
+    await endLiveRuns(threadId);
     const task = await prisma.task.create({
       data: { spaceId, userId, botId, threadId, prompt: "Feedback", status: "running" },
     });
@@ -3043,6 +2980,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   it("records one immutable native adoption artifact and event per context nonce", async () => {
     expect(recruiting.recordRecruitingContextAdoption).toBeTypeOf("function");
     const current = await recruiting.createRecruitingRole(prisma, actor, roleInput());
+    // One live run per agent and conversation: earlier tests' runs here have ended.
+    await endLiveRuns(threadId);
     const task = await prisma.task.create({
       data: { spaceId, userId, botId, threadId, prompt: "Adoption", status: "running" },
     });

@@ -177,7 +177,8 @@ describePostgres("calendar approval evidence transactions (PostgreSQL)", () => {
         (await prisma.externalEffect.findUniqueOrThrow({ where: { id: f.effect.id } })).status,
       ).toBe("approved");
       expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
-        "queued",
+        // The card ended its run; the answer is the next run's input.
+        "waiting_input",
       );
       const events = await prisma.event.findMany({
         where: { runId: f.run.id, type: "effect.approval.answered" },
