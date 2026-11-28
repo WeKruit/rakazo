@@ -523,7 +523,8 @@ export function pdf(lines) {
   return Buffer.from(body, "latin1");
 }
 
-export async function send(rpc, groupId, text, file) {
+/** `uiLocale` is the language the recruiter's screen shows, which the web composer sends with each message. */
+export async function send(rpc, groupId, text, file, uiLocale) {
   const busy = await working(rpc, groupId);
   // Same calls the web composer makes for an attachment: upload it, then send it with the text.
   const artifactIds = file
@@ -542,6 +543,7 @@ export async function send(rpc, groupId, text, file) {
     groupId,
     addressing: "coordinator",
     text,
+    ...(uiLocale ? { uiLocale } : {}),
     ...(artifactIds ? { artifactIds } : {}),
     ...(busy ? { interrupt: true } : {}),
   });

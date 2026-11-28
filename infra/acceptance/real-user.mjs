@@ -101,6 +101,10 @@ async function play(scenario, owner, sample) {
   let chats = [];
   let lastSent = Date.now();
   const shown = new Set();
+  // The screen of the recruiter who wrote this conversation, sent with each message as the web
+  // composer does: Chinese when their first message is.
+  const first = scenario.turns.find((turn) => turn.say ?? turn.sayRole);
+  const uiLocale = /\p{Script=Han}/u.test(first?.say ?? first?.sayRole ?? "") ? "zh-CN" : "en";
   // Roles a reused fixture account already had are not this play's.
   const rolesBefore = new Set((await roleChats(user.rpc)).map((group) => group.id));
   try {
@@ -118,7 +122,7 @@ async function play(scenario, owner, sample) {
           `${label}: says "${(turn.say ?? turn.sayRole).slice(0, 40)}"${turn.file ? ` with ${turn.file.name}` : ""}`,
         );
         lastSent = Date.now();
-        await send(user.rpc, target.id, turn.say ?? turn.sayRole, turn.file);
+        await send(user.rpc, target.id, turn.say ?? turn.sayRole, turn.file, uiLocale);
         if (settleAfter) await settle(user.rpc);
       } else if (turn.results) {
         // A round of people, after the recruiter's last message. Feedback rounds must bring new

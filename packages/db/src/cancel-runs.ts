@@ -1,6 +1,14 @@
 import { ACTIVE_RUN_STATUSES, AUTOMATION_RUN_TRIGGERS, ONCE_ROUTINE_CRON } from "@rakazo/core";
 import type { Prisma } from "./client.js";
 
+/**
+ * A request another conversation sent: its block names the conversation it returns to (a
+ * request message holds that one block).
+ */
+export const DELEGATED_FROM_ANOTHER_CONVERSATION = {
+  blocks: { path: ["0", "returnThreadId"], string_starts_with: "" },
+} satisfies Prisma.MessageWhereInput;
+
 /** A cancelled turn may finish registering research that the provider already accepted. */
 export const STOPPED_TURN = "turn_stopped";
 
@@ -15,10 +23,19 @@ export function threadStopRunWhere(
       ? { id: runId }
       : scope === "turn"
         ? {
-            trigger: { notIn: [...AUTOMATION_RUN_TRIGGERS] },
-            NOT: {
-              sourceMessage: { is: { blocks: { array_contains: [{ kind: "handoff" }] } } },
-            },
+            OR: [
+              {
+                trigger: { notIn: [...AUTOMATION_RUN_TRIGGERS] },
+                NOT: {
+                  sourceMessage: { is: { blocks: { array_contains: [{ kind: "handoff" }] } } },
+                },
+              },
+              // Work handed over from the recruiter's own conversation is their turn too.
+              {
+                trigger: "bot_message",
+                sourceMessage: { is: DELEGATED_FROM_ANOTHER_CONVERSATION },
+              },
+            ],
           }
         : {}),
     status: { in: [...ACTIVE_RUN_STATUSES] },

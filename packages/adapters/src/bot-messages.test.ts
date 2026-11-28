@@ -288,7 +288,9 @@ describe("messaging another bot", () => {
     // locks the same rows in that order, so the two cannot deadlock.
     expect(harness.tx.$queryRaw).toHaveBeenCalledTimes(1);
     const [lockSql, ...lockedIds] = harness.tx.$queryRaw.mock.calls[0]!;
-    expect(lockSql.join("?")).toContain(`ORDER BY ("groupId" IS NULL OR "groupId" LIKE 'recruiting-global-%'), id`);
+    expect(lockSql.join("?")).toContain(
+      `ORDER BY ("groupId" IS NULL OR "groupId" LIKE 'recruiting-global-%'), id`,
+    );
     expect(lockedIds).toEqual([run.threadId, expect.any(String)]);
     expect(harness.tx.message.create).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -610,7 +612,6 @@ describe("delegating to a role team in another conversation", () => {
     });
     expect(sent).toEqual({ ok: false, error: "a bot cannot message itself" });
   });
-
 });
 
 describe("hop lookup", () => {
@@ -874,6 +875,98 @@ describe("automatic outcome return", () => {
     });
   });
 
+  describe("work delegated from another conversation", () => {
+    // fosp on 96dcd1c9: the role held 10 people while Kruit's chat never heard back; long-search on
+    // #1897: a role that finished over three rounds never reported back.
+    const delegated = (state: { active?: number; later?: boolean; reply?: string }) => {
+      const harness = deps({
+        addressedThread: { id: "thread-global", group: { name: "Payments" } },
+        hopBlocks: [
+          {
+            kind: "bot_message_received",
+            fromBotId: "bot-target",
+            fromBotName: "Kruit",
+            text: "找20个人",
+            hop: 1,
+            intent: "request",
+            returnThreadId: "thread-global",
+          },
+        ],
+      });
+      const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+      const findUnique = prisma.message!.findUnique as (args: unknown) => Promise<object>;
+      prisma.message!.findUnique = vi.fn(async (args) => ({
+        seq: 4,
+        createdAt: new Date(),
+        ...(await findUnique(args)),
+      }));
+      prisma.run!.count = vi.fn().mockResolvedValue(state.active ?? 0);
+      prisma.message!.findFirst = vi.fn(async (args: { where: { role?: string } }) =>
+        args.where.role === "bot"
+          ? state.reply === undefined
+            ? null
+            : { blocks: [{ kind: "text", text: state.reply }] }
+          : state.later
+            ? { id: "message-later" }
+            : null,
+      );
+      return harness;
+    };
+    const ret = (harness: ReturnType<typeof delegated>, text = "", intent?: "status") =>
+      returnBotMessageOutcome(
+        harness.deps,
+        { ...run, sourceMessageId: "message-source" },
+        sender,
+        text,
+        intent,
+      );
+
+    it("returns the role conversation's newest reply once nobody there is working", async () => {
+      // The run that took the request ended at a hand-off with no text of its own.
+      const done = delegated({ reply: "20 people are in the list." });
+      expect(await ret(done, "", "status")).toBe(true);
+      const sent = JSON.stringify(done.tx.message.create.mock.calls);
+      expect(sent).toContain("thread-global");
+      expect(sent).toContain("20 people are in the list.");
+      expect(sent).toContain('"intent":"result"');
+      expect(done.enqueue).toHaveBeenCalledOnce();
+    });
+
+    it("waits while a teammate or a continuation is still working", async () => {
+      const working = delegated({ active: 1, reply: "Round 1: 10 people." });
+      expect(await ret(working, "Round 1: 10 people.")).toBe(false);
+      expect(working.enqueue).not.toHaveBeenCalled();
+      expect(working.deps.prisma.run.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("says so when the role finished without a written reply", async () => {
+      const silent = delegated({});
+      expect(await ret(silent, "", "status")).toBe(true);
+      expect(JSON.stringify(silent.tx.message.create.mock.calls)).toContain(
+        "finished without a written reply",
+      );
+    });
+
+    it("leaves the result to a later request with its own turn", async () => {
+      const later = delegated({ later: true, reply: "Done." });
+      expect(await ret(later, "Done.")).toBe(true);
+      expect(later.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("sends a failure back at once", async () => {
+      const failed = delegated({ active: 1 });
+      await returnBotMessageOutcome(
+        failed.deps,
+        { ...run, sourceMessageId: "message-source" },
+        sender,
+        "Could not complete the delegated request: boom",
+        "status",
+        { forceUnread: true },
+      );
+      expect(failed.enqueue).toHaveBeenCalledOnce();
+    });
+  });
+
   it("still returns a final result after an interim status update", async () => {
     const harness = deps({
       hopBlocks: [
@@ -976,27 +1069,6 @@ describe("teamProgress", () => {
       roleId: "role",
     });
     expect(progress?.note).toContain("Round 2 is recorded");
-  });
-
-  it("counts the turn of a role opened from Kruit's chat as the team working (staging 2026-11-15)", async () => {
-    // Asked "where are the people?" while a role opened from Kruit's chat ran its first round,
-    // Kruit listed seven unchecked people from Results: only delegated turns counted as working.
-    const startedAt = new Date(Date.now() - 60_000);
-    const prisma = {
-      run: {
-        findFirst: vi.fn(async ({ where }: { where: { OR?: Array<Record<string, unknown>> } }) =>
-          JSON.stringify(where.OR ?? []).includes("start-role:")
-            ? { id: "start", botId: "lead", createdAt: startedAt, startedAt, bot: { name: "Lead" } }
-            : null,
-        ),
-      },
-      thread: { findUnique: vi.fn(async () => null) },
-    } as unknown as PrismaClient;
-    const progress = await teamProgress(prisma, {
-      threadId: "role-thread",
-      returnThreadId: "global",
-    });
-    expect(progress?.name).toBe("Lead");
   });
 
   it("counts a team turn requeued after a follow-up as still working (staging 2026-11-15)", async () => {

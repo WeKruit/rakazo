@@ -11,7 +11,7 @@ import {
   reopenedAskMessageIds,
   retryMessageText,
   threadTailPhase,
-  writesChinese,
+  screenIsChinese,
 } from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
 import {
@@ -951,7 +951,7 @@ export function ShellConversation({
                       onAddRoutine={addSkillRoutine}
                       onContinue={() =>
                         void sendFromComposer(
-                          continueMessageText(writesChinese(transcriptMessages)),
+                          continueMessageText(screenIsChinese(transcriptMessages)),
                           [],
                           crypto.randomUUID(),
                           true,
@@ -1059,7 +1059,7 @@ export function ShellConversation({
                         .reset({ botId: runErrorComputerBotId })
                         .then(() =>
                           sendFromComposer(
-                            retryMessageText(writesChinese(transcriptMessages)),
+                            retryMessageText(screenIsChinese(transcriptMessages)),
                             [],
                             crypto.randomUUID(),
                             true,
@@ -1071,7 +1071,7 @@ export function ShellConversation({
                       return;
                     }
                     void sendFromComposer(
-                      retryMessageText(writesChinese(transcriptMessages)),
+                      retryMessageText(screenIsChinese(transcriptMessages)),
                       [],
                       crypto.randomUUID(),
                       true,

@@ -47,8 +47,12 @@ export class GraphileJobPublisher implements JobPublisher {
     if (job.name === "routine.wakeup") return BACKGROUND_PRIORITY;
     if (job.name !== "run.continue") return 0;
     const background = await utils.withPgClient(async (client) => {
+      // A role team's turn on work handed over from the recruiter's conversation has them waiting,
+      // as a Claude Code subagent starts at once.
       const found = await client.query(
-        'select 1 from runs where id = $1 and "trigger" = any($2::text[])',
+        `select 1 from runs r left join messages m on m.id = r."sourceMessageId"
+          where r.id = $1 and r."trigger" = any($2::text[])
+            and not coalesce(r."trigger" = 'bot_message' and m.blocks->0 ? 'returnThreadId', false)`,
         [job.payload.runId, [...AUTOMATION_RUN_TRIGGERS]],
       );
       return (found.rowCount ?? 0) > 0;

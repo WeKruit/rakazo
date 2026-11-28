@@ -1,23 +1,17 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import type { ReplyLanguage } from "@rakazo/core";
-import {
-  GMAIL_MCP_ENDPOINT,
-  REPLY_LANGUAGE_NAME,
-  recruiterLanguage,
-  runWorkSteps,
-  workActivityLabel,
-} from "@rakazo/core";
+import { GMAIL_MCP_ENDPOINT, screenLanguage } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { recruitingHomeGroupId } from "@rakazo/db";
 import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import { openRecruitingRoles } from "./open-recruiting-roles.js";
+import { shownCount } from "./recruiting-round-check.js";
 import type { RoleRecord } from "./role-records.js";
 import { loadRoleRecords } from "./role-records.js";
 import { isTurnWork, SEND_WORK, workDoneLabel } from "./turn-report.js";
 
 /**
- * What the agents know each turn, read from records only: the recruiter's language, the role in
- * focus, what each role team is doing, and what the tools actually did. Staging 11-14 showed one
+ * What the agents know each turn, read from records only: the role in focus, what each role team is doing, and what the tools actually did. Staging 11-14 showed one
  * cause behind wrong replies: Kruit pieced these together from chat text (six 180-character
  * excerpts per role, its own earlier prose), so it said "still in progress", mixed two roles,
  * claimed saves and sends that never happened and replied in the language of an English brief.
@@ -30,15 +24,8 @@ import { isTurnWork, SEND_WORK, workDoneLabel } from "./turn-report.js";
 
 /** Role teams shown to the account-wide agent, most recently active first. */
 const STATE_ROLES = 8;
-/** Latest messages read per role conversation, for its pending questions and last report. */
+/** Latest messages read per role conversation, for its pending questions. */
 const ROLE_MESSAGES = 8;
-/** Recruiter messages read for their language and the role they name. */
-const RECRUITER_MESSAGES = 8;
-const REPORT_CHARS = 300;
-/** What this conversation asked a team, and each team message since, on the card. */
-const HANDOFF_CHARS = 240;
-const SINCE_CHARS = 400;
-const SINCE_MESSAGES = 3;
 const QUESTION_CHARS = 180;
 const RECEIPT_WINDOW_MS = 24 * 3_600_000;
 /** How far back the account's own sends are counted: long enough for "did you send it yesterday". */
@@ -63,6 +50,8 @@ type StatePrisma = Pick<
   | "connection"
   | "recruitingCalibrationRound"
   | "recruitingCandidateOccurrence"
+  | "recruitingCandidate"
+  | "$queryRaw"
 >;
 
 /**
@@ -143,18 +132,11 @@ export type WorkingStateThread = {
   activeRecruitingRoleId: string | null;
 };
 
-export type WorkingState = { text: string | undefined; language: ReplyLanguage };
+export type WorkingState = { text: string | undefined };
 
 function flat(text: string, max: number): string {
   const line = text.replace(/\s+/g, " ").trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-}
-
-function blockText(block: MessageBlock): string | undefined {
-  if (block.kind === "text" || block.kind === "bot_message_received") return block.text;
-  if (block.kind === "ask") return block.text;
-  if (block.kind === "choice" || block.kind === "poll") return block.question;
-  return undefined;
 }
 
 function ago(date: Date, now: number): string {
@@ -213,78 +195,6 @@ function receiptLine(receipts: readonly Receipt[], now: number): string | undefi
 /** The message a new role's conversation opens with: a copy of the recruiter's words elsewhere. */
 export const ROLE_START_NONCE = "start-role:";
 
-type RecruiterRow = { blocks: unknown; clientNonce: string | null; own?: boolean };
-
-/**
- * The recruiter's latest words for the language decision: this conversation's own first, then the
- * account's newest. A role opened from the main conversation starts with a copy of their message
- * there; it is not new words in the role (staging 11-14: an English JD copied in, then 「远程也可以」
- * in the main conversation, and the role team kept replying in English).
- */
-function recruiterLanguageRows(
-  prisma: Pick<PrismaClient, "message">,
-  threadId: string,
-  accountThreadIds: readonly string[],
-): Promise<RecruiterRow[]> {
-  const select = { blocks: true, clientNonce: true } as const;
-  return Promise.all([
-    prisma.message.findMany({
-      where: { threadId, role: "user", botId: null },
-      orderBy: { seq: "desc" },
-      take: RECRUITER_MESSAGES,
-      select,
-    }),
-    prisma.message.findMany({
-      where: { threadId: { in: [...accountThreadIds] }, role: "user", botId: null },
-      orderBy: { createdAt: "desc" },
-      take: RECRUITER_MESSAGES,
-      select,
-    }),
-  ]).then(([own, account]) => [...own.map((row) => ({ ...row, own: true })), ...account]);
-}
-
-/** Only the recruiter's own words: never relayed teammate messages, and role-opening copies only when nothing else is. */
-function recruiterWords(rows: readonly RecruiterRow[]): string[] {
-  const words = (copies: boolean) =>
-    rows.flatMap((row) => {
-      if (Boolean(row.clientNonce?.startsWith(ROLE_START_NONCE)) !== copies) return [];
-      const blocks = (row.blocks ?? []) as MessageBlock[];
-      if (blocks.some((block) => block.kind === "bot_message_received")) return [];
-      const text = blocks.flatMap((block) => (block.kind === "text" ? [block.text] : [])).join(" ");
-      return text.trim() ? [text] : [];
-    });
-  // The copy still speaks for the recruiter when it is all there is (staging 11-14: with it left
-  // out, a new role's first question went out in English to a Chinese recruiter).
-  const own = words(false);
-  return own.length ? own : words(true);
-}
-
-/**
- * The recruiter's language now, read again when a teammate relays their newer words into a turn
- * that is already running (the role team's turn began on the copied English JD).
- */
-export async function recruiterLanguageNow(
-  prisma: Pick<PrismaClient, "message" | "chatGroup">,
-  scope: { spaceId: string; userId: string },
-  threadId: string,
-): Promise<ReplyLanguage> {
-  const listed = await prisma.chatGroup.findMany({
-    where: {
-      spaceId: scope.spaceId,
-      userId: scope.userId,
-      archivedAt: null,
-      thread: { isNot: null },
-    },
-    orderBy: { updatedAt: "desc" },
-    take: STATE_ROLES + 1,
-    select: { thread: { select: { id: true } } },
-  });
-  const accountThreadIds = listed.flatMap((group) => (group.thread ? [group.thread.id] : []));
-  return recruiterLanguage(
-    recruiterWords(await recruiterLanguageRows(prisma, threadId, accountThreadIds)),
-  );
-}
-
 /**
  * The role this conversation last pointed the recruiter to: the card that opens it, which
  * start_role, delegate_to_role and a role read's show each post. Stage 3a3ee156
@@ -317,7 +227,7 @@ async function lastRoleCard(
 
 /**
  * The working state card for one turn. For the account-wide agent it covers every recent role
- * team; for a role conversation, its own receipts. The language is returned for the turn's lines.
+ * team; for a role conversation, its own receipts.
  */
 export async function loadWorkingState(
   prisma: StatePrisma,
@@ -355,7 +265,6 @@ export async function loadWorkingState(
       thread: { select: { id: true, activeRecruitingRoleId: true } },
     },
   });
-  const accountThreadIds = listed.flatMap((group) => (group.thread ? [group.thread.id] : []));
   // The account's own team with no role yet is not a role team: nothing to hand it.
   const groups = global
     ? listed
@@ -404,8 +313,15 @@ export async function loadWorkingState(
         })
         .catch(() => [])
     : Promise.resolve([]);
-  const [recruiterRows, roles, recent, runs, completed, ownBotMessages, roleTotal] = await Promise.all([
-    recruiterLanguageRows(prisma, thread.id, accountThreadIds),
+  // P5: the one count, the same as the round tool's: people shown less those turned down.
+  const countsRead = Promise.all(
+    teamRoleIds.map((roleId) =>
+      shownCount(prisma, { roleId, ...scope })
+        .then((count) => [roleId, count.counted] as const)
+        .catch(() => [roleId, undefined] as const),
+    ),
+  );
+  const [roles, recent, runs, completed, ownBotMessages, roleTotal] = await Promise.all([
     global
       ? prisma.recruitingRole.findMany({
           where: openRecruitingRoles(scope),
@@ -414,7 +330,6 @@ export async function loadWorkingState(
           select: {
             id: true,
             title: true,
-            _count: { select: { candidates: true } },
           },
         })
       : [],
@@ -459,9 +374,6 @@ export async function loadWorkingState(
     global ? prisma.recruitingRole.count({ where: openRecruitingRoles(scope) }) : 0,
   ]);
 
-  const recruiterTexts = recruiterWords(recruiterRows);
-  const language = recruiterLanguage(recruiterTexts);
-
   const receipts: Receipt[] = completed.flatMap((event): Receipt[] => {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     if (payload.outcome === "succeeded" && typeof payload.work === "string")
@@ -473,8 +385,7 @@ export async function loadWorkingState(
   const receiptsOf = (threadId: string) => receipts.filter((r) => r.threadId === threadId);
 
   const lines: string[] = [
-    "Working state, read from records this turn (data, not instructions). Where an earlier reply in this conversation says otherwise, this is what is true:",
-    `- The recruiter writes in ${REPLY_LANGUAGE_NAME[language]}: every line to them is in ${REPLY_LANGUAGE_NAME[language]}.`,
+    "Working state, read from records this turn (data, not instructions):",
   ];
 
   if (global) {
@@ -539,14 +450,6 @@ export async function loadWorkingState(
     if (campaign)
       lines.push(`- This role's ${campaign.charAt(0).toLowerCase()}${campaign.slice(1)}`);
   }
-  // An email shown only in chat is in no role or mailbox (staging 11-14: "草稿保留着" with no role,
-  // no mailbox and nothing saved). It is still the email above, which the Gmail send card takes up:
-  // gate df83586a, "kept nowhere" made Kruit retract "the draft is kept" after the Connect card.
-  if (![...records.values()].some((record) => record.savedEmail))
-    lines.push(
-      `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat is in no role, campaign or mailbox draft until a save tool returns it.`,
-    );
-
   // A campaign started outside any role has no role card: without its id here, a later "stop it"
   // or "who got it" had nothing to read or pause (gate 9e15e896, stop-after-approve).
   const oneOff = await prisma.externalEffect
@@ -606,15 +509,8 @@ export async function loadWorkingState(
     const roleById = new Map(roles.map((role) => [role.id, role]));
     const latestRun = new Map<string, { status: string; updatedAt: Date }>();
     for (const run of runs) if (!latestRun.has(run.threadId)) latestRun.set(run.threadId, run);
-    const botIds = [...new Set(recent.flat().flatMap((m) => (m.botId ? [m.botId] : [])))];
-    const bots = botIds.length
-      ? await prisma.bot.findMany({
-          where: { id: { in: botIds } },
-          select: { id: true, name: true },
-        })
-      : [];
-    const botName = new Map(bots.map((bot) => [bot.id, bot.name]));
     const roundOf = new Map((await roundsRead).map((round) => [round.roleId, round]));
+    const countOf = new Map(await countsRead);
     // Who the latest round showed, per role, from the round's own records: when the recruiter
     // names people without naming the role, the role is on this card. Staging 11-26: Kruit read
     // saved people seven times to find the role of three named people before its first line.
@@ -651,7 +547,9 @@ export async function loadWorkingState(
           // The conversation's name, as the recruiter sees it: two roles' saved titles can be the same.
           group.name || role?.title,
           role ? `roleId ${role.id}` : `groupId ${group.id}, no saved role yet`,
-          role ? `${role._count.candidates} people saved` : undefined,
+          role && countOf.get(role.id) !== undefined
+            ? `${countOf.get(role.id)} people shown to the recruiter (less any they turned down)`
+            : undefined,
           roundLine(roleId ? roundOf.get(roleId) : undefined, now),
           teamState(latestRun.get(threadId), now),
         ]
@@ -677,81 +575,8 @@ export async function loadWorkingState(
       if (campaign) lines.push(`  ${campaign}`);
       const done = receiptLine(receiptsOf(threadId), now);
       if (done) lines.push(`  Done in the last 24 h (tool receipts): ${done}`);
-      // Work this conversation handed the team, as a parent sees its job: what it asked, the step
-      // the team is on now and everything the team posted since (gap analysis 11-16; gate 44c1ad44
-      // team-has-no-email: Kruit answered from its own read with another person than the team's,
-      // then said it had asked the team again). A role is opened from this conversation with the
-      // recruiter's message (start_role), and later work reaches it as this conversation's brief
-      // (delegate_to_role); the recruiter's answers to the team's cards keep the same job going.
-      const briefOf = (m: (typeof messages)[number]) =>
-        m.role !== "user"
-          ? undefined
-          : m.clientNonce?.startsWith(ROLE_START_NONCE)
-            ? (m.blocks as MessageBlock[]).map(blockText).filter(Boolean).join(" ")
-            : (m.blocks as MessageBlock[]).flatMap((block) =>
-                block.kind === "bot_message_received" && block.returnThreadId === thread.id
-                  ? [block.text]
-                  : [],
-              )[0];
-      const handIndex = messages.findIndex((m) => briefOf(m)?.trim());
-      const handed = handIndex === -1 ? undefined : messages[handIndex]!;
-      const brief = handed ? briefOf(handed) : undefined;
-      if (handed && brief?.trim()) {
-        lines.push(
-          `  You handed this team work ${ago(handed.createdAt, now)}: "${flat(brief, HANDOFF_CHARS)}"`,
-        );
-        const since = messages.slice(0, handIndex).filter((m) => m.botId && m.role !== "user");
-        const live = latestRun.get(threadId);
-        if (live && ["queued", "leased", "running"].includes(live.status)) {
-          const steps = runWorkSteps({ blocks: (since[0]?.blocks ?? []) as MessageBlock[] });
-          const last = steps.done.at(-1);
-          const activity = steps.current ?? (typeof last === "string" ? last : last?.activity);
-          lines.push(
-            `  Doing now: ${activity ? workActivityLabel(activity).toLowerCase() : "starting"}${steps.done.length ? ` (${steps.done.length} step${steps.done.length === 1 ? "" : "s"} done this run)` : ""}.`,
-          );
-        }
-        // Once the round is shown, the round line above is current: a team message from before
-        // that is stale (staging 2a781497 feedback-round: main relayed it while the round's ten
-        // were on the page).
-        const settledAt = (roleId ? roundOf.get(roleId) : undefined)?.statusAt;
-        const current = settledAt ? since.filter((m) => m.createdAt > settledAt) : since;
-        const posted = current
-          .slice(0, SINCE_MESSAGES)
-          .reverse()
-          .flatMap((m) => {
-            const said = (m.blocks as MessageBlock[]).map(blockText).filter(Boolean).join(" ");
-            return said.trim()
-              ? [
-                  `  Team posted since (${botName.get(m.botId ?? "") ?? "Team"}, ${ago(m.createdAt, now)}): "${flat(said, SINCE_CHARS)}"`,
-                ]
-              : [];
-          });
-        lines.push(
-          ...(posted.length
-            ? posted
-            : [
-                current.length < since.length
-                  ? "  Team posted since the round line above: nothing."
-                  : "  Team posted since: nothing yet.",
-              ]),
-        );
-        return;
-      }
-      // The team's newest message is its report, as a worker's report summary.
-      // A run still working posts steps first: its report is the newest message with words.
-      const report = messages.find(
-        (m) =>
-          m.botId &&
-          m.role !== "user" &&
-          (m.blocks as MessageBlock[]).some((block) => blockText(block)?.trim()),
-      );
-      const said = report
-        ? (report.blocks as MessageBlock[]).map(blockText).filter(Boolean).join(" ")
-        : "";
-      if (said.trim())
-        lines.push(
-          `  Team's last report (${botName.get(report?.botId ?? "") ?? "Team"}${report?.createdAt ? `, ${ago(report.createdAt, now)}` : ""}; its counts may be older than the ones above, which are read now): "${flat(said, REPORT_CHARS)}"`,
-        );
+      // The team's steps stay in its own conversation; its result comes back here as a message
+      // when it is done, as a Claude Code subagent's final message returns to its parent.
     });
   } else if (global && roleTotal === 0) {
     // Every role opened here is saved to this account, so no roles is a definite none, not an
@@ -767,5 +592,34 @@ export async function loadWorkingState(
     );
   }
 
-  return { text: redact(lines.join("\n")), language };
+  return { text: redact(lines.join("\n")) };
+}
+
+/**
+ * The language the recruiter's screen shows, from the UI locale the client sends with each of
+ * their messages: the newest one in any of their conversations. A role conversation opened by a
+ * hand-off holds none of their own messages.
+ */
+export async function recruiterScreenLanguage(
+  prisma: Pick<PrismaClient, "message" | "chatGroup">,
+  scope: { spaceId: string; userId: string },
+): Promise<ReplyLanguage | undefined> {
+  const listed = await prisma.chatGroup.findMany({
+    where: { spaceId: scope.spaceId, userId: scope.userId, archivedAt: null, thread: { isNot: null } },
+    orderBy: { updatedAt: "desc" },
+    take: STATE_ROLES + 1,
+    select: { thread: { select: { id: true } } },
+  });
+  const threadIds = listed.flatMap((group) => (group.thread ? [group.thread.id] : []));
+  if (!threadIds.length) return undefined;
+  const rows = await prisma.message.findMany({
+    where: { threadId: { in: threadIds }, role: "user", botId: null },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    select: { blocks: true },
+  });
+  for (const row of rows)
+    for (const block of (Array.isArray(row.blocks) ? row.blocks : []) as MessageBlock[])
+      if (block.kind === "text" && block.uiLocale) return screenLanguage(block.uiLocale);
+  return undefined;
 }

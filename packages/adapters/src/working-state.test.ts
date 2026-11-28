@@ -48,6 +48,9 @@ function fakePrisma(input: {
   archivedCount?: number;
 }) {
   return {
+    // No one was turned down in these fixtures.
+    $queryRaw: vi.fn(async () => []),
+    recruitingCandidate: { findMany: vi.fn(async () => []) },
     recruitingCalibrationRound: {
       findFirst: vi.fn(async () => input.round ?? null),
       findMany: vi.fn(async () =>
@@ -201,27 +204,23 @@ describe("loadWorkingState", () => {
       (t) => t.replace("secret", "[redacted]"),
       now,
     );
-    expect(state.language).toBe("zh");
     const card = state.text ?? "";
-    expect(card).toContain("writes in Chinese");
     expect(card).toContain(
       "Done in this conversation in the last 24 h (tool receipts): FAILED save_template (1 min ago).",
     );
     expect(card).toContain(
-      "12 people saved · team waiting on the recruiter since 5 min ago",
+      "0 people shown to the recruiter (less any they turned down) · team waiting on the recruiter since 5 min ago",
     );
     expect(card).toContain(
       "Role teams: 1175 active roles in all; the 2 most recently active are below",
     );
     expect(card).toContain('  Waiting on the recruiter: "Is USC required?"');
     // The latest run decides, not an older failed one.
-    expect(card).toContain("0 people saved · team working now");
+    expect(card).toContain("0 people shown to the recruiter (less any they turned down) · team working now");
     expect(card).toContain(
       "sent the email (1 min ago), saved people to the role ×2 (latest 2 min ago)",
     );
-    expect(card).toContain(
-      'Team\'s last report (Sourcer; its counts may be older than the ones above, which are read now): "[redacted] draft ready"',
-    );
+    expect(card).not.toContain("draft ready");
   });
 
   it("tells Kruit to hand work on a round waiting for the recruiter to its team first", async () => {
@@ -334,7 +333,7 @@ describe("loadWorkingState", () => {
       )
     ).text;
     expect(own).toContain("- This role's saved email for this role (2 steps");
-    expect(own).not.toContain("Saved emails: none");
+    expect(own).not.toContain("Saved emails");
   });
 
   // Staging 11-14 send-at-night: a role opened from 「…hybrid 每周3天，6年以上…base 180-220k…」 saved
@@ -425,7 +424,6 @@ describe("loadWorkingState", () => {
         now,
       );
     const state = await load([text("Done."), card("g1"), card("g2")]);
-    expect(state.language).toBe("en");
     expect(state.text).toContain(
       'This conversation last opened, or handed work to, "Agent" (roleId role-1).',
     );
@@ -437,87 +435,6 @@ describe("loadWorkingState", () => {
       (await load([{ blocks: [...card("g1").blocks, ...card("g2").blocks] }])).text,
     ).not.toContain("last opened");
     expect(state.text).toContain("nothing saved, sent or changed by a tool");
-    expect(state.text).toContain(
-      "Saved emails: none on record for the roles below. An email written only in chat",
-    );
-  });
-
-  it("gives a role conversation the recruiter's language from anywhere in the account", async () => {
-    const prisma = fakePrisma({ recruiter: [text("候选人要会普通话，西雅图现场办公")] });
-    const state = await loadWorkingState(
-      prisma as never,
-      scope,
-      { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
-      (t) => t,
-      now,
-    );
-    expect(state.language).toBe("zh");
-    expect(state.text).not.toContain("Role teams");
-  });
-
-  it("puts this conversation's own words before the account's newest", async () => {
-    const thread = { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" };
-    const zh = await loadWorkingState(
-      fakePrisma({
-        recruiter: [text("西雅图现场办公，要会普通话")],
-        account: [text("please send the new grads list to my manager now")],
-      }) as never,
-      scope,
-      thread,
-      (t) => t,
-      now,
-    );
-    expect(zh.language).toBe("zh");
-    const handedOff = await loadWorkingState(
-      fakePrisma({ recruiter: [], account: [text("候选人要会普通话")] }) as never,
-      scope,
-      thread,
-      (t) => t,
-      now,
-    );
-    expect(handedOff.language).toBe("zh");
-  });
-
-  it("takes no language from the copy of the recruiter's message a new role opens with", async () => {
-    // Staging 11-14: an English JD opened the role, then 「远程也可以」 in the main conversation,
-    // and the role team kept replying in English.
-    const state = await loadWorkingState(
-      fakePrisma({
-        recruiter: [
-          {
-            ...text("Senior Data Engineer, Seattle, hybrid, 5+ years"),
-            clientNonce: "start-role:k",
-          },
-        ],
-        account: [text("对了，远程也可以，不一定要在西雅图")],
-      }) as never,
-      scope,
-      { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
-      (t) => t,
-      now,
-    );
-    expect(state.language).toBe("zh");
-  });
-
-  it("takes the language from that copy when the recruiter has written nothing else", async () => {
-    // Staging 11-14 2bb9124c: with the copy left out, a new role's first question went out in
-    // English to a Chinese recruiter.
-    const state = await loadWorkingState(
-      fakePrisma({
-        recruiter: [
-          {
-            ...text("新岗位：华东区销售总监，常驻上海，医疗器械行业"),
-            clientNonce: "start-role:k",
-          },
-        ],
-        account: [],
-      }) as never,
-      scope,
-      { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
-      (t) => t,
-      now,
-    );
-    expect(state.language).toBe("zh");
   });
 
   it("never offers the account's own team as a role team before it holds a role", async () => {
@@ -628,8 +545,9 @@ describe("loadWorkingState", () => {
     const none = await card(null, null);
     // Kruit's own conversation hands bookings over; the role's says what its calendar lacks.
     expect(none).not.toContain("calendar");
-    expect(none).toContain("12 people saved · round 2 shown in the role team's chat 5 min ago");
-    expect(none).toContain("(Sourcer, 30 min ago; its counts may be older");
+    expect(none).toContain(
+      "2 people shown to the recruiter (less any they turned down) · round 2 shown in the role team's chat 5 min ago",
+    );
     // Staging 11-26: three people named without their role cost seven reads before the first line.
     expect(none).toContain("People in its latest round: Steven Choi, Wensong Jing");
     expect(await card(null, null, roleThread)).toContain("calendar: none connected");
@@ -640,87 +558,11 @@ describe("loadWorkingState", () => {
   });
   // Gate 44c1ad44 team-has-no-email: Kruit answered from its own read with another person than
   // the team it had handed the email to, then said it had asked the team again.
-  it("shows work this conversation handed a team: the ask, the step it is on and all it posted since", async () => {
-    const handoff = (returnThreadId: string) => ({
-      role: "user",
-      createdAt: new Date(now - 4 * 60_000),
-      blocks: [
-        {
-          kind: "bot_message_received",
-          fromBotId: "bot-kruit",
-          fromBotName: "Kruit",
-          text: "Goal: email one person with no saved email",
-          returnThreadId,
-        },
-      ],
-    });
-    const working = (returnThreadId: string, rounds: Row[] = []) =>
-      loadWorkingState(
-        fakePrisma({
-          groups,
-          roles,
-          rounds,
-          runs: [{ threadId: "t1", status: "running", updatedAt: new Date(now) }],
-          messagesByThread: {
-            t1: [
-              {
-                role: "bot",
-                botId: "bot-sourcer",
-                createdAt: new Date(now - 60_000),
-                blocks: [
-                  { kind: "steps", steps: [{ label: "recruiting_candidates", count: 1 }] },
-                  { kind: "progress", activity: true, text: "", pendingToolNames: ["web_search"] },
-                ],
-              },
-              {
-                role: "bot",
-                botId: "bot-sourcer",
-                createdAt: new Date(now - 2 * 60_000),
-                ...text("Picked Tomas Vale: no saved email"),
-              },
-              {
-                role: "bot",
-                botId: "bot-sourcer",
-                createdAt: new Date(now - 3 * 60_000),
-                ...text("Reading the role's people"),
-              },
-              handoff(returnThreadId),
-              { role: "bot", botId: "bot-sourcer", ...text("Older round report") },
-            ],
-          },
-        }) as never,
-        scope,
-        globalThread,
-        (t) => t,
-        now,
-      ).then((state) => state.text ?? "");
-    const card = await working("tg");
-    expect(card).toContain(
-      'You handed this team work 4 min ago: "Goal: email one person with no saved email"',
-    );
-    expect(card).toContain("Doing now: searching the web (1 step done this run).");
-    expect(card.indexOf('(Sourcer, 3 min ago): "Reading the role')).toBeLessThan(
-      card.indexOf('(Sourcer, 2 min ago): "Picked Tomas Vale: no saved email"'),
-    );
-    expect(card).not.toContain("Older round report");
-    // A hand-off from another conversation is not this one's job: the plain report stays.
-    // A round checked after the team's messages makes them stale: the round line is current.
-    const shown = await working("tg", [
-      {
-        roleId: "role-1",
-        round: 2,
-        status: "shown",
-        statusAt: new Date(now - 90_000),
-        approvedAt: null,
-      },
-    ]);
-    expect(shown).not.toContain("Picked Tomas Vale");
-    expect(shown).toContain("Team posted since the round line above: nothing.");
-    const other = await working("t-other");
-    expect(other).not.toContain("You handed this team work");
-    expect(other).toContain("Team's last report");
-    // A role opened from this conversation carries the recruiter's message, not a brief.
-    const opened = await loadWorkingState(
+  // fosp on 96dcd1c9: Kruit's chat relayed the team's older "timed out, no candidates" line while
+  // the role already held 10. A team's chat never reaches this card; its result comes back as a
+  // message when it is done.
+  it("carries no line of a role team's own chat", async () => {
+    const card = await loadWorkingState(
       fakePrisma({
         groups,
         roles,
@@ -732,8 +574,6 @@ describe("loadWorkingState", () => {
               createdAt: new Date(now - 60_000),
               ...text("8 searches failed, nobody saved yet"),
             },
-            // The recruiter's answer to the team's card keeps the same job going.
-            { role: "user", createdAt: new Date(now - 90_000), ...text("On site in Shanghai") },
             {
               role: "user",
               clientNonce: "start-role:k1",
@@ -748,10 +588,9 @@ describe("loadWorkingState", () => {
       (t) => t,
       now,
     ).then((state) => state.text ?? "");
-    expect(opened).toContain(
-      'You handed this team work 2 min ago: "Senior Go engineer, Shanghai, start searching"',
-    );
-    expect(opened).toContain('(Sourcer, 1 min ago): "8 searches failed, nobody saved yet"');
+    expect(card).toContain("roleId role-1");
+    expect(card).not.toContain("8 searches failed");
+    expect(card).not.toContain("Senior Go engineer, Shanghai");
   });
   // Gate 9e15e896, stop-after-approve: a campaign Kruit started outside any role was confirmed,
   // then "stop until Monday" and "who got it" had no campaign to read or pause.

@@ -7,7 +7,6 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type { InstantlyRest } from "./instantly-native-writes.js";
 import {
   InstantlyRestError,
-  nativeInstantlyWrites,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
@@ -720,7 +719,7 @@ it("does not send a credit account with a hand-assigned mailbox to its own Gmail
   expect(await ownMailboxSendingAllowed(prisma(0) as never, scope)).toBe(true);
 });
 
-it("recognizes a read of the sending email and tells the model to read first", () => {
+it("recognizes a read of the sending email", () => {
   expect(isSenderRead("instantly__mail__ensure_sender", { operation: "read" })).toBe(true);
   expect(
     isSenderRead("connectors_execute_tool", {
@@ -735,11 +734,6 @@ it("recognizes a read of the sending email and tells the model to read first", (
     }),
   ).toBe(true);
   expect(isSenderRead("instantly__mail__ensure_sender", { operation: "propose" })).toBe(false);
-  const description = nativeInstantlyWrites.find(
-    (tool) => tool.name === "ensure_sender",
-  )?.description;
-  expect(description).toContain("Always call read first");
-  expect(description).not.toContain("First ask the company name");
 });
 
 it("records an owner-assigned mailbox as this account's sender on its first read", async () => {

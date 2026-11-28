@@ -12,7 +12,7 @@ import {
 import type { MessageBlock } from "@rakazo/contracts";
 import { stuckWorkStatusMessages } from "@rakazo/core";
 import type { Pool, PrismaClient, ThreadEvents } from "@rakazo/db";
-import { Prisma } from "@rakazo/db";
+import { Prisma, STOPPED_TURN } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { returnBotMessageOutcome } from "./bot-messages.js";
@@ -396,7 +396,7 @@ export function createJobReconciler(
             botOutcomeReturnedAt: null,
             OR: [
               { status: { in: ["completed", "failed"] } },
-              { status: "cancelled", error: { in: [...stuckWorkStatusMessages()] } },
+              { status: "cancelled", error: { in: [...stuckWorkStatusMessages(), STOPPED_TURN] } },
             ],
           },
           orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
@@ -422,7 +422,9 @@ export function createJobReconciler(
                 ? { text: "", progressOnly: false }
                 : await botRunOutcomeText(deps.prisma, run.id);
             const text = stuckCancel
-              ? (run.error ?? "")
+              ? run.error === STOPPED_TURN
+                ? "The recruiter stopped this work in the role's conversation."
+                : (run.error ?? "")
               : run.status === "failed"
                 ? `Could not complete the delegated request: ${run.error ?? "unknown error"}`
                 : transcript.text ||

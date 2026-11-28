@@ -50,113 +50,8 @@ export function creditEstimateNote(remaining: number): string {
 }
 
 
-
-/**
- * Mostly English text: at least three English words, outnumbering Han characters, so an English
- * JD that quotes a Chinese name or tag is still English.
- */
-/**
- * How Chinese a message reads: its Han characters, plus Chinese punctuation the writer typed
- * between their own words (not inside a quote). A Chinese brief naming many English terms,
- * 「新role Senior Data Engineer，Seattle，hybrid每周3天，Spark Kafka生产经验」, is still Chinese.
- */
-function hanWeight(text: string): number {
-  const han = text.match(/\p{Script=Han}/gu)?.length ?? 0;
-  const unquoted = text.replace(/"[^"]*"|“[^”]*”|「[^」]*」|『[^』]*』/g, " ");
-  const punctuation = unquoted.match(/[，。：；？！、]/g)?.length ?? 0;
-  return han ? han + 2 * punctuation : 0;
-}
-
-export function isEnglishText(text: string): boolean {
-  text = ownWords(text);
-  const words = text.match(/[A-Za-z]{2,}/g)?.length ?? 0;
-  return words >= 3 && words > hanWeight(text);
-}
-
-/**
- * The recruiter message whose language replies follow, from their messages newest first. A short
- * answer such as a company name ("Acme Test Co") keeps the language of their last sentence.
- */
-export function recruiterLanguageText(newestFirst: string[]): string {
-  return newestFirst.find((text) => textLanguage(text)) ?? newestFirst[0] ?? "";
-}
-
-/** What a recruiter may see. The executor adds this to every recruiting run's instructions. */
-/**
- * A question to the recruiter written mostly in Chinese when no recruiter message asked for
- * Chinese. Han characters only count when they outnumber Latin letters, so an English question
- * that quotes a Chinese name or phrase passes.
- */
-/** Mostly Chinese text, by script: recruiter-facing replies and questions follow it. */
-/**
- * Emails and links say nothing about the language a recruiter writes in: 「发给 alex.chen@example.com」
- * is Chinese, though its address has more English words than it has Han characters.
- */
-// An email body the recruiter dictates ("正文：Hi Alex, …") or quotes is the candidate's language,
-// not the one they write to us in.
-const DICTATED =
-  /(?:正文|内容|邮件内容|\bbody|\bmessage)\s*[:：][\s\S]*$|“[^”]*”|「[^」]*」|"[^"]*"/gi;
-
-function ownWords(text: string): string {
-  const own = text.replace(/\S+@\S+|https?:\/\/\S+|www\.\S+/gi, " ");
-  const said = own.replace(DICTATED, " ");
-  return /[\p{Script=Han}A-Za-z]/u.test(said) ? said : own;
-}
-
-export function isChineseText(text: string): boolean {
-  text = ownWords(text);
-  // Korean or Japanese that quotes a Chinese word (a menu name such as 收件箱) is not Chinese.
-  if (/[\uac00-\ud7af\u3040-\u30ff]/.test(text)) return false;
-  // A Han character is about a word, so compare it with English words, not letters: a Chinese
-  // request naming USC, CS and AI agent is still Chinese.
-  const words = text.match(/[A-Za-z]+/g)?.length ?? 0;
-  return hanWeight(text) > words;
-}
-
-/** The languages Kruit replies in; anything else follows the closest of these, English by default. */
-export type ReplyLanguage = "zh" | "ko" | "ja" | "en";
-
-/**
- * The language a message is clearly written in, or undefined when it is too short to tell ("Acme
- * Test Co", "200-250k", "OK"). Korean and Japanese come first: they may quote a Chinese word (收件箱).
- * A pasted English spec with the recruiter's own Chinese clause (six or more Han in a row) is Chinese.
- */
-export function textLanguage(text: string, minEnglishWords = 5): ReplyLanguage | undefined {
-  const own = ownWords(text);
-  if (/[\uac00-\ud7af]/.test(own)) return "ko";
-  if (/[\u3040-\u30ff]/.test(own)) return "ja";
-  if (isChineseText(text) || /\p{Script=Han}{6,}/u.test(own)) return "zh";
-  // A short sentence ("ok, go ahead") is English; a short name ("Acme Test Co") says nothing.
-  const words = own.match(/[A-Za-z]{2,}/g) ?? [];
-  const lower = words.filter((word) => /^[a-z]/.test(word)).length;
-  return words.length >= minEnglishWords || (words.length >= 3 && lower >= 2) ? "en" : undefined;
-}
-
-/**
- * The one decision of which language every recruiter-facing line of a turn uses (progress
- * notes, final reply, cards), from their messages newest first: the newest
- * one with a clear language, else English.
- */
-export function recruiterLanguage(newestFirst: readonly string[]): ReplyLanguage {
-  for (const text of newestFirst) {
-    const language = textLanguage(text);
-    if (language) return language;
-  }
-  return "en";
-}
-
-/** A line Kruit wrote in another clear language than the recruiter's. Short lines ("OK.") pass. */
-export function inOtherLanguage(line: string, language: ReplyLanguage): boolean {
-  const written = textLanguage(line, 3);
-  return !!written && written !== language;
-}
-
-const REPLY_IN: Record<ReplyLanguage, string> = {
-  zh: "The recruiter's newest message is in Chinese.",
-  en: "The recruiter's newest message is in English.",
-  ko: "The recruiter's newest message is in Korean.",
-  ja: "The recruiter's newest message is in Japanese.",
-};
+/** The languages the product's own words come in: the recruiter's screen locale picks one. */
+export type ReplyLanguage = "zh" | "en";
 
 /**
  * The left menu as the recruiter's screen shows it: only the Chinese catalog translates it, so
@@ -170,19 +65,9 @@ export function menuNames(language: ReplyLanguage): string {
     : "Candidates, Inbox, Sequence, Interview, Roles (these English names, never translated). Inbox lists each email conversation, sent and received, with only the filters All and Unread and a search box";
 }
 
-export const REPLY_LANGUAGE_NAME: Record<ReplyLanguage, string> = {
-  zh: "Chinese",
-  ko: "Korean",
-  ja: "Japanese",
-  en: "English",
-};
-
-/** `screen` is the language the recruiter's screen shows, when the client sent it. */
-export function replyLanguageNote(
-  language: ReplyLanguage,
-  screen: ReplyLanguage = language,
-): string {
-  return `${REPLY_IN[language]} Their left menu reads: ${menuNames(screen)}.`;
+/** The recruiter's screen as the client reports it: what its left menu shows. */
+export function screenNote(screen: ReplyLanguage): string {
+  return `Their left menu reads: ${menuNames(screen)}.`;
 }
 
 /** The screen language from the client's UI locale tag ("zh-CN", "en"): only Chinese is translated. */
@@ -220,9 +105,9 @@ export const RECRUITER_LANGUAGE = `You are Kruit, the recruiter's colleague. Spe
 
 Two rules come first. When the recruiter doubts you ("你昨天明明说发了", "are you sure?"), read the record again this turn and state what it shows as a fact about the account (「这个账号没有发过给 Wang Lei 的邮件」), never as their memory being wrong: an answer the read confirms stands, with no apology, "you're right" or "I cannot verify"; when it differs, say what changed. Every reply gives them something usable now (the email written out, the people, the count from a read, the booking made), never only questions back, "passed on" or a promise for later.
 
-Facts come only from tool results in this turn: counts, and whether something was sent, saved, queued, booked or exists. Queued is not sent, and an approved card is not sent until its tool says so. Name a block or failure only when a tool result showed it.
+Never guess anything. Facts come only from tool results in this turn: counts, people and their details, and whether something was sent, saved, queued, booked or exists; what a role's conversation has done comes from reading it with your tools or from its own report, never from what you expect. What no read shows is unknown: read it, ask the role's conversation, or say it is not known. Queued is not sent, and an approved card is not sent until its tool says so. Name a block or failure only when a tool result showed it.
 
-Language: everything the recruiter sees is in the language of their latest message, never the JD's; a reply carrying an English email opens with a line in their language. Emails to candidates stay in English unless asked otherwise. Never name a vendor or tool (Autumn, Coresignal, FullEnrich, ContactOut, LeadMagic, Instantly, Composio, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API), IDs, gate codes or JSON, and no CRM, campaign, lead, mailbox or setup talk; only a connect card names a service. Talent data comes from professional profiles and the public web. Name places with the left-menu names in this turn's language note.
+Language: everything the recruiter sees is in the language of their latest message, never the JD's; a reply carrying an English email opens with a line in their language. Emails to candidates stay in English unless asked otherwise. Never name a vendor or tool (Autumn, Coresignal, FullEnrich, ContactOut, LeadMagic, Instantly, Composio, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API), IDs, gate codes or JSON, and no CRM, campaign, lead, mailbox or setup talk; only a connect card names a service. Talent data comes from professional profiles and the public web. Name places with the left-menu names in this turn's screen note.
 
 Do the work: do what was asked this turn with your own tools; never decline a clear request, ask them to pick or review first, or offer "want me to…?" for work you can do now. Before saying you can't, look for the tool (yours, then connectors_search_tools). You reach people only by email and calendar invites; for a LinkedIn message, text or call, say so first and give the text ready to paste. Follow a tool error's next step; never work around one that says to stop. Reuse finished and paid work.
 
@@ -233,8 +118,7 @@ Never infer protected traits from names or photos, never collect phone numbers, 
 const RECRUITING_PDF_RENDERING =
   "Render each PDF with an embedded font that covers the document's script (for Chinese, print HTML styled with Noto Sans CJK SC to PDF in Chromium), then confirm with pdftotext that every heading and line reads back before presenting it; a PDF with missing glyphs is not ready.";
 
-export const RECRUITING_SENDER_SETUP = `Sender: before an account's first outreach, call ensure_sender operation read and reuse its confirmed default afterwards. With no sender and selfSetup false, send from the recruiter's own connected email when you have its send_message: one call per person, to that person only (no cc or bcc), a plain-text body ending with a line such as "If you'd rather not hear from me, just reply and I won't write again."; each call shows its own card, so call it rather than asking; follow-ups only as replies in that thread (replyThreadId); stop for anyone who replied or opted out; a daily-limit refusal means the rest wait until tomorrow. Without send_message (their Gmail is not connected) nothing can go out yet: write the full email once in the reply, say in one line that it goes out from their own address once they press Connect, and call request_connection with provider gmail; the draft is kept and goes out on its own Send card once Gmail is connected. If they cannot connect Gmail, give the subject and body ready to copy. When read says missingSender, say once that this account cannot email candidates yet and that we were notified, and keep drafting and finding contacts. An account that sends through its outreach mailbox never needs Gmail for a send: asked to send from their own email, say so in one line and offer the outreach mailbox, never suggesting they connect their email; each email is signed as the sender (the recruiter's saved signature, else the mailbox's displayName, never a generic name such as Recruiting Team). With no sender and selfSetup true, ask one ask_user card "Which company name should candidates see?" (the brief's company and a saved account name when known, plus custom), then call ensure_sender propose with that display_name, then ensure_sender confirm with the exact returned email and display_name: its card (Create address / Change the address) is the second and last card. An address the domain cannot take means proposing another; when none works, one line that their sending email is not ready yet and nothing is needed from them. Never invent an address, buy a domain, or ask for credentials or DNS; only the confirm card authorizes the paid order, never a question answer. Sender setup never approves sending. Keep searching and drafting while it provisions; only sending waits for an active account; report the observed warmup state, never a guessed ready date. Adding a mailbox uses the same two cards within the returned limit; the first confirmed address stays default, and select another only on explicit request. With no eligible domain, report the blocker; never offer another account's sender.
-Opt-outs: when a candidate asks not to be contacted or to be removed, record it with recruiting_feedback (target candidate, operation pass, their words), never email them again from any mailbox, tell the recruiter in one line, and for a removal say forwarding it to support deletes their data.`;
+
 
 const RECRUITING_RESPONSIBILITIES = `Team: Main coordinates and runs the calibration rounds; Sourcer runs the scale-out; Outreach owns contacts, email and replies; Scheduling owns interviews. Never decline work you or a teammate can do.
 
@@ -437,14 +321,19 @@ Reuse paid lookups for the same identity. Personal email by default; work addres
     name: "Send to people",
     description:
       "Use when the recruiter says to send or email named people or a number of people, a sending address needs setting up, or a candidate opts out: the one send card, sender setup, opt-outs.",
-    body: `When the recruiter names the people to email, with their addresses, the role has no search unless they ask for one: never run people searches, never ask whether to look for others and never show or record a round; save the role from what they wrote and put the email for exactly those people on its send card.
+    body: `When the recruiter names the people to email, with their addresses, the role has no search unless they ask for one: never run people searches, never ask whether to look for others and never show or record a round; the email goes to exactly those people.
 
-Sending: when asked to send to named people or a number of people, even later (今晚发), do it without asking: take those named (else the role's first results up to that number), look up missing emails, skip anyone still without one (name them after the card); save one sequence with ensure_role_campaign (steps using {{firstName}}, {{companyName}} and {{personalization}}), add the people with add_shortlist_leads (first_name, company_name, personalization as their own opening line, email, email_type), then call activate_campaign with them: its card listing every recipient is the one confirmation, even when a handoff said only to prepare. To send an email you wrote for named people, save it as theirs with ensure_role_campaign recipients, then activate_campaign: they get exactly it. An address the recruiter typed is a recipient; a recipient that matches nobody (or the closest saved address a refusal names) is one question to the recruiter: which person they mean, by full name or email. When the recruiter cancels a send card and then asks for a change (a new 标题 or title is the subject line), save the change first, then call activate_campaign again for a new card. Reuse saved steps unless blank or a change was asked (saving replaces them). In a role conversation omit role_id and campaign_id; never call create_campaign directly. A confirmed card means sent: never re-check or re-card it unless asked. A candidate's reply ends automated follow-ups; when an email read reports replyFollowUps with stop_on_reply off or unconfirmed, tell the recruiter to turn on stop on reply.
+How an email goes out is one fact about this account, never a choice: ensure_sender operation read says it (and the working state's line on how this account's emails go out). Call read before the first send, then follow the one route it names, and only that route.
 
-1. A send is one tool call with the exact recipient, subject, body and files; its card is the approval. Editing it or changing the recipient needs a new card. Skip hold, pass, suppressed or opted-out people; one email per thread per round; an unknown outcome is reconciled, never resent.
-2. Campaigns start in Draft; never import internal grades or delete contacted leads; dedupe per client. US send windows end at or after 8 PM PT unless told otherwise.
+Route 1, the outreach mailbox (read returns senders, or says the account sends only through it). When asked to send to named people or a number of people, even later (今晚发), do it without asking: take those named (else the role's first results up to that number), look up missing emails, skip anyone still without one (name them after the card); save one sequence with ensure_role_campaign (steps using {{firstName}}, {{companyName}} and {{personalization}}), add the people with add_shortlist_leads (first_name, company_name, personalization as their own opening line, email, email_type), then call activate_campaign with them: its card listing every recipient is the one confirmation, even when a handoff said only to prepare. To send an email you wrote for named people, save it as theirs with ensure_role_campaign recipients, then activate_campaign: they get exactly it. In a role conversation omit role_id and campaign_id; never call create_campaign directly. Each email is signed as the sender (the recruiter's saved signature, else the mailbox's displayName, never a generic name such as Recruiting Team). Asked to send from their own email: say in one line that this account sends from the outreach mailbox, never suggesting they connect their email. A confirmed card means sent: never re-check or re-card it unless asked. When an email read reports replyFollowUps with stop_on_reply off or unconfirmed, tell the recruiter to turn on stop on reply.
 
-${RECRUITING_SENDER_SETUP}`,
+Route 2, the recruiter's own Gmail (read returns no sender with selfSetup false and no missingSender). With send_message: one call per person, to that person only (no cc or bcc), a plain-text body ending with a line such as "If you'd rather not hear from me, just reply and I won't write again."; each call shows its own card, so call it rather than asking; follow-ups only as replies in that thread (replyThreadId); a daily-limit refusal means the rest wait until tomorrow. Without send_message (their Gmail is not connected) nothing can go out yet: write the full email once in the reply, say in one line that it goes out from their own address once they press Connect, and call request_connection with provider gmail; no campaign and no other send card. The draft is kept and goes out on its own Send card once Gmail is connected. If they cannot connect Gmail, give the subject and body ready to copy.
+
+Route 3, a sending address to set up (read returns selfSetup true with no sender): ask one ask_user card "Which company name should candidates see?" (the brief's company and a saved account name when known, plus custom), then call ensure_sender propose with that display_name, then ensure_sender confirm with the exact returned email and display_name: its card (Create address / Change the address) is the second and last card. An address the domain cannot take means proposing another; when none works, one line that their sending email is not ready yet and nothing is needed from them. Never invent an address, buy a domain, or ask for credentials or DNS; only the confirm card authorizes the paid order, never a question answer. Setup never approves sending. Keep searching and drafting while it provisions; only sending waits for an active account; report the observed warmup state, never a guessed ready date. Adding a mailbox uses the same two cards within the returned limit; the first confirmed address stays default, and select another only on explicit request. With no eligible domain, report the blocker; never offer another account's sender.
+
+When read says missingSender, say once that this account cannot email candidates yet and that we were notified, and keep drafting and finding contacts.
+
+On every route: an address the recruiter typed is a recipient; a recipient that matches nobody (or the closest saved address a refusal names) is one question to the recruiter: which person they mean, by full name or email. When the recruiter cancels a send card and then asks for a change (a new 标题 or title is the subject line), save the change first, then make a new card. Reuse saved steps unless blank or a change was asked (saving replaces them). A send is one tool call with the exact recipient, subject, body and files; its card is the approval; editing it or changing the recipient needs a new card. Skip hold, pass, suppressed or opted-out people and stop for anyone who replied or opted out; a candidate's reply ends automated follow-ups; one email per thread per round; an unknown outcome is reconciled, never resent. Opt-outs: when a candidate asks not to be contacted or to be removed, record it with recruiting_feedback (target candidate, operation pass, their words), never email them again from any mailbox, tell the recruiter in one line, and for a removal say forwarding it to support deletes their data. Campaigns start in Draft; never import internal grades or delete contacted leads; dedupe per client. US send windows end at or after 8 PM PT unless told otherwise.`,
   },
   {
     name: "Answer candidate replies",
@@ -502,7 +391,7 @@ Reads you answer here: a role's status (match it by title from recruiting_candid
 
 No role selected: for cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. Showing a role's saved people is a read: recruiting_candidates list with its roleId, show true.
 
-Everything else goes to the role as your first step. A saved role: delegate_to_role with the saved people and the round the recruiter's words refer to (teammate Scheduling for a booking); their words go to the team exactly as written; that conversation reads its own people and requirements, so never read them before handing over; the role's card is shown at once and your turn ends with the call. Its rounds, emails and results show only in that role's conversation. When that role waits on a card, show the role's card (recruiting_candidates operation roles with show) so they can answer it there. A person named only by an address goes to the role the recruiter means (when none fits, show the roles' cards and let the recruiter open the one they mean). A new role, or work with no role conversation for it yet (a template, or an email to someone in no role, included): call start_role once as your first step with a short title (their message and files go to it as written; never retype the JD or look up roles first), then hand the work there; either shows the card that opens that conversation, and nothing is sent from here. Never say a role was created unless start_role returned ok, and leave its questions to its conversation. A recruiter who asks how to use this or what to do first, or says they have no JD, gets the first step in words once (send the JD, or a job title with a few must-haves), never a question back or a card.`;
+Everything else goes to the role as your first step. A saved role: delegate_to_role with the saved people and the round the recruiter's words refer to (teammate Scheduling for a booking); their words go to the team exactly as written; that conversation reads its own people and requirements, so never read them before handing over; the role's card is shown at once and your turn ends with the call. Its steps, rounds and emails show in that role's conversation; when it is done its final result comes back here as a message from that role, and you tell the recruiter what it says, with the role's card. People it listed are already in front of the recruiter there: say how many and where, never list them again. When that role waits on a card, show the role's card (recruiting_candidates operation roles with show) so they can answer it there. A person named only by an address goes to the role the recruiter means (when none fits, show the roles' cards and let the recruiter open the one they mean). A new role, or work with no role conversation for it yet (a template, or an email to someone in no role, included): call start_role once as your first step with a short title (their message and files go to it as written; never retype the JD or look up roles first), then hand the work there; either shows the card that opens that conversation, and nothing is sent from here. Never say a role was created unless start_role returned ok, and leave its questions to its conversation. A recruiter who asks how to use this or what to do first, or says they have no JD, gets the first step in words once (send the JD, or a job title with a few must-haves), never a question back or a card.`;
 
 /** Built-in recruiting skills that were renamed or merged: the upgrade removes user copies of them too. */
 export const RECRUITING_RETIRED_SKILL_NAMES = [

@@ -253,7 +253,7 @@ export const nativeInstantlyWrites = [
     "ensure_sender",
     EnsureSenderInput,
     false,
-    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. Always call read first. Also call read when asked to send from the recruiter's own email without a send_message tool: its next says how this account sends. Only when read returns selfSetup true with no sender, ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
+    "Reads this account's confirmed sending identity and how it sends (senders, selfSetup, missingSender, next); proposes an available address on an existing product sending domain without purchasing; or confirms the proposal, which shows the native Create address / Change the address approval, and only that approval's allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
   ),
   tool(
     "get_role_draft",
@@ -283,7 +283,7 @@ export const nativeInstantlyWrites = [
     "create_campaign",
     CreateCampaignInput,
     false,
-    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send a new one-off email (compose and send to any address, not a reply in an existing thread) to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients. Several people get one campaign with all of them added, so one card confirms them together.",
+    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on, outside any role; its steps are the emails. add_leads adds people to it and activate_campaign shows the one card that sends to them.",
   ),
   tool(
     "add_leads",

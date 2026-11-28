@@ -99,6 +99,30 @@ export async function withoutShownBefore(
   return { keys: fresh, shownBefore: keys.length - fresh.length };
 }
 
+/** P5's one count for a role: the people shown to the recruiter, less those they turned down. */
+export async function shownCount(
+  prisma: Parameters<typeof readRecruitingResultsMarks>[0],
+  role: { roleId: string; userId: string; spaceId: string },
+) {
+  const [rounds, marks] = await Promise.all([
+    prisma.recruitingCalibrationRound.findMany({
+      where: { roleId: role.roleId, status: "shown" },
+      select: { candidateKeys: true },
+    }),
+    readRecruitingResultsMarks(
+      prisma,
+      { userId: role.userId, spaceId: role.spaceId, email: "", isDeploymentOwner: false },
+      { roleId: role.roleId },
+    ),
+  ]);
+  const shown = new Set(rounds.flatMap((round) => round.candidateKeys));
+  const notAFit = new Set(
+    marks.filter((mark) => mark.mark === "not a fit").map((mark) => mark.candidateKey),
+  );
+  const turnedDown = [...shown].filter((key) => notAFit.has(key)).length;
+  return { shown, notAFit, counted: shown.size - turnedDown, turnedDown };
+}
+
 /**
  * Where a request for N people stands, given with every search, list and round result so the
  * agent never keeps a tally of its own. `counted` is the one count a request is measured by and
@@ -110,27 +134,14 @@ export async function requestCounts(
   role: { roleId: string; userId: string; spaceId: string },
 ) {
   const { roleId } = role;
-  const [people, graded, fit, rounds, marks] = await Promise.all([
+  const [people, graded, fit, { shown, notAFit, counted, turnedDown }] = await Promise.all([
     prisma.recruitingCandidate.count({ where: { roleId } }),
     listRecruitingGradedCandidateKeys(prisma, roleId),
     listRecruitingFitCandidateKeys(prisma, roleId),
-    prisma.recruitingCalibrationRound.findMany({
-      where: { roleId, status: "shown" },
-      select: { candidateKeys: true },
-    }),
-    readRecruitingResultsMarks(
-      prisma,
-      { userId: role.userId, spaceId: role.spaceId, email: "", isDeploymentOwner: false },
-      { roleId },
-    ),
+    shownCount(prisma, role),
   ]);
-  const shown = new Set(rounds.flatMap((round) => round.candidateKeys));
-  const notAFit = new Set(
-    marks.filter((mark) => mark.mark === "not a fit").map((mark) => mark.candidateKey),
-  );
-  const turnedDown = [...shown].filter((key) => notAFit.has(key)).length;
   return {
-    counted: shown.size - turnedDown,
+    counted,
     turnedDown,
     fitNotShownYet: fit.filter((key) => !shown.has(key) && !notAFit.has(key)).length,
     notGradedYet: people - graded.length,
