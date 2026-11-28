@@ -239,6 +239,43 @@ describe("source reference repair", () => {
     expect(created.sourceRefs).toEqual([]);
   });
 
+  it("cites the run's own message for a message id that names none (2026-11-28 branch play)", () => {
+    // The session runtime never shows the model message ids, so it wrote "unknown"; the save
+    // records the run's source message instead of being refused.
+    const turnRef = {
+      id: "current-message-source",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "m1", locator: "blocks[0].text" },
+      readState: "read",
+      readAt: now,
+      quote: "Senior Data Engineer, Seattle",
+    };
+    const unknown = {
+      id: "request_msg",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "unknown", locator: "blocks[0].text" },
+      readState: "read",
+      readAt: now,
+    };
+    const kept = { ...unknown, id: "earlier", anchor: { ...unknown.anchor, messageId: "m0" } };
+    const args = {
+      operation: "create",
+      title: "Senior Data Engineer",
+      sourceRefs: [unknown, kept],
+      criteria: [{ id: "c1", sourceRefs: [unknown] }],
+    };
+    const known = new Set(["m0", "m1"]);
+    const created = normalizeRecruitingRoleArgs(args, now, turnRef, known);
+    expect(created.sourceRefs).toEqual([{ ...turnRef, id: "request_msg" }, kept]);
+    expect(created.criteria).toEqual([
+      { id: "c1", sourceRefs: [{ ...turnRef, id: "request_msg" }], definitionQuestions: [] },
+    ]);
+    // With no message of its own the run drops the citation; the criterion keeps the role's.
+    const alone = normalizeRecruitingRoleArgs(args, now, undefined, known);
+    expect(alone.sourceRefs).toEqual([kept]);
+    expect(alone.criteria).toEqual([{ id: "c1", sourceRefs: [kept], definitionQuestions: [] }]);
+  });
+
   it("keeps a message citation and drops a quote on unread material", () => {
     const result = normalizeRecruitingRoleArgs(
       {
