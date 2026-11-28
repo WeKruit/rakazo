@@ -25,6 +25,11 @@ export interface RunTurnTools {
   showAsk(event: Extract<AgentRuntimeEvent, { type: "ask" }>): Promise<void>;
   /** Facts from the run's setup (approved sends it replayed), read before the first step. */
   notes?: string[];
+  /**
+   * A person's message this operation took in (its prompt, a steer or a card answer): what the
+   * operation's saves cite from then on.
+   */
+  adoptSourceMessage?(messageId: string): Promise<void>;
 }
 
 /** Handed to the executor's per-operation setup (`openRunTurn`). */
@@ -118,6 +123,21 @@ export function createRunTurns(open: OpenRunTurn) {
       if (!turn) return [];
       const tools = await turn.ready.catch(() => undefined);
       return tools?.notes ?? [];
+    },
+
+    /** A person's message the operation took in; its saves cite it from then on. */
+    consumed(runId: string, messageId: string): void {
+      const turn = turns.get(runId);
+      if (!turn) return;
+      const work = turn.ready.then(
+        (tools) => tools.adoptSourceMessage?.(messageId),
+        () => undefined,
+      );
+      turn.pending.add(
+        work.catch((error: unknown) =>
+          getLogger().error("run turn source message failed", error, { runId }),
+        ),
+      );
     },
 
     /** Ends the turn's tools; waits for the card writes it started. */

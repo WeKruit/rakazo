@@ -2558,7 +2558,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           "<recruiting_role>\nCurrent recruiting role and memory exactly match the run instructions. This context supersedes earlier role and memory snapshots.\n</recruiting_role>";
         const retainRecruitingSource = async (source: RecruitingRoleToolResult["source"]) => {
           if (source?.anchor.kind !== "message") return;
-          const nextId = source.anchor.messageId;
+          await adoptSourceMessage(source.anchor.messageId);
+        };
+        // Saves cite the newest person's message this operation took in, never an older one.
+        const adoptSourceMessage = async (nextId: string) => {
           if (nextId === recruitingSourceMessageId) return;
           {
             const messages = await deps.prisma.message.findMany({
@@ -11430,6 +11433,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ),
           },
           showAsk,
+          adoptSourceMessage,
           // What the approved replays above did, read before the model's first step.
           notes: [
             approvedEffectReplays.nextToolName() ? approvalContinuation : undefined,

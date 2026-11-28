@@ -381,14 +381,27 @@ export function sendRunNotification(
   });
 }
 
-const ARGS_SUMMARY_SECRET_KEY = /secret|token|password|credential|authorization|api[_-]?key/i;
+/** Argument names (structured schema keys, never prose) whose values stay out of the audit line. */
+const SECRET_ARGUMENT_KEY_PARTS = [
+  "secret",
+  "token",
+  "password",
+  "credential",
+  "authorization",
+  "apikey",
+];
+
+function isSecretArgumentKey(key: string): boolean {
+  const normalized = key.toLowerCase().replaceAll("_", "").replaceAll("-", "");
+  return SECRET_ARGUMENT_KEY_PARTS.some((part) => normalized.includes(part));
+}
 
 /** One bounded line of top-level scalar arguments for audit; secret-like keys and payloads stay out. */
 export function toolArgsSummary(args: unknown, secrets: string[] = []): string | undefined {
   if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
   const parts: string[] = [];
   for (const [key, value] of Object.entries(args)) {
-    if (ARGS_SUMMARY_SECRET_KEY.test(key)) continue;
+    if (isSecretArgumentKey(key)) continue;
     if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean")
       continue;
     const text = String(value).replace(/\s+/g, " ").trim();
@@ -620,7 +633,7 @@ function assistantText(message: AssistantMessage): string {
     .trim();
 }
 
-function rakazoMessageId(message: AgentMessage): string | undefined {
+export function rakazoMessageId(message: AgentMessage): string | undefined {
   const id = (message as { role?: unknown; rakazoMessageId?: unknown }).rakazoMessageId;
   return (message as { role?: unknown }).role === "user" && typeof id === "string" ? id : undefined;
 }

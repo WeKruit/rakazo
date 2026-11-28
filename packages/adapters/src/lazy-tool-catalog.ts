@@ -36,6 +36,13 @@ export type CatalogSearchResult =
   | { group: string; names: string[]; error?: string }
   | { group: string; count: number; hint: string };
 
+const CATALOG_WRAPPER_SUFFIXES = ["_search_tools", "_load_tool", "_execute_tool"] as const;
+
+/** Whether a tool name is one of the wrappers `lazyCatalogTools` builds. */
+export function isCatalogWrapperTool(name: string): boolean {
+  return CATALOG_WRAPPER_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+
 /**
  * Build the three catalog wrapper tools (`<prefix>_search_tools`, `<prefix>_load_tool`,
  * `<prefix>_execute_tool`). Callers must not pass a prefix that yields names starting with

@@ -29,6 +29,7 @@ import {
   RECORD_TOOLS,
   withinDeadline,
 } from "../deadline.js";
+import { isCatalogWrapperTool } from "../lazy-tool-catalog.js";
 import { selectMemoryTools } from "../memory-tools.js";
 import { filterImageReturningComputerTools } from "../model-vision.js";
 import type { ToolHost } from "../pi-runtime.js";
@@ -399,7 +400,7 @@ export async function assembleRunTools(input: RunToolsInput) {
   const exposedConnectorTools = discovered.filter(
     (tool) =>
       !builtinAgentTools.some((builtin) => builtin.name === tool.name) &&
-      !(hideCatalog && /_(search_tools|load_tool|execute_tool)$/.test(tool.name)),
+      !(hideCatalog && isCatalogWrapperTool(tool.name)),
   );
   const connectorTools = new Map(exposedConnectorTools.map((tool) => [tool.name, tool] as const));
   // The intro turn confirms how a bot read its own role before anyone hands it

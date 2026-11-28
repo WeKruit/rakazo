@@ -15,7 +15,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { PostgresSessionStorage } from "./postgres-session-storage.js";
 import type { RunInput, RunProjectionDeps } from "./run-projection.js";
-import { createRunProjection } from "./run-projection.js";
+import { createRunProjection, rakazoMessageId } from "./run-projection.js";
 import type { OpenRunTurn } from "./run-turns.js";
 import { createRunTurns } from "./run-turns.js";
 import type { SessionConfig } from "./session-config.js";
@@ -281,6 +281,10 @@ export function createSessionDriver(deps: SessionDriverDeps) {
                 );
             }
             return;
+          }
+          if (event.type === "message_end") {
+            const messageId = rakazoMessageId(event.message);
+            if (messageId && event.runId) turns.consumed(event.runId, messageId);
           }
           await projection.onEvent(event);
         },
