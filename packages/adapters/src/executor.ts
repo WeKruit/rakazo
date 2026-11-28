@@ -153,7 +153,6 @@ import {
   RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
-  RECRUITING_GLOBAL_AGENT_NAME,
   RETIRED_APPROVAL_KINDS,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -263,7 +262,6 @@ import {
   remainingUsageCredits,
   resolveRecruitingCampaignLead,
   resolveRecruitingCrmImport,
-  roleReferents,
   resolveRecruitingReply,
   SpaceLimitError,
   saveRecruitingCalibrationRound,
@@ -457,6 +455,7 @@ import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
+import { delegateWork } from "./delegate-work.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
 import { editDistance } from "./edit-distance.js";
 import {
@@ -467,7 +466,6 @@ import {
 import {
   newestRecruiterWords,
   otherRoleWriteRefusal,
-  delegatedRequestMessage,
   roleRequestMessage,
 } from "./global-role-writes.js";
 import {
@@ -642,12 +640,6 @@ import {
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
-import {
-  openRoleGroup,
-  roleOpenedFromLatestMessage,
-  roleAlreadyOpenNote,
-  copyRecruiterMessageToRole,
-} from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
 import {
@@ -761,7 +753,6 @@ import {
 } from "./work-estimate.js";
 import type { WorkingState } from "./working-state.js";
 import {
-  isRolelessHomeTeam,
   loadWorkingState,
   ROLE_START_NONCE,
   recruiterScreenLanguage,
@@ -920,10 +911,8 @@ export function lateNote(pending: Promise<string | undefined>) {
   };
 }
 
-/** Role conversations Kruit opens with start_role. */
+/** Role conversations Kruit opens with delegate_work new_role. */
 const KRUIT_ROLE_GROUP_PREFIX = "role-";
-const ACCOUNT_SETUP_STAYS_HERE =
-  "Not handed off: that team has no role.";
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -2911,7 +2900,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           peerMessage?.intent,
           peerMessage?.repliesToRequest,
         );
-        // Answering a teammate's mid-stage check-in stays quiet unless the user needs to know.
+        // Reading a teammate's finished stage stays quiet unless the user needs to know.
         let quietRun =
           runAllowsSilentEmpty(run.trigger) ||
           isQuietStageReport(
@@ -4145,9 +4134,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let roleCreatedInTurn = false;
         // A role team with no role yet has no question to ask: a greeting or an unrelated question
         // gets a plain answer, never a card, until the recruiter's role is saved.
-        // Role conversations start_role opened this run: handing work to one is not another role.
-        const groupsStartedInTurn = new Set<string>();
-        // Role conversations this run already handed the recruiter's request to: one owner each.
+        // Conversations this run already gave the recruiter's request to: one owner each.
         const rolesDelegatedInTurn = new Set<string>();
         const noRoleYet = () =>
           Boolean(thread.groupId) &&
@@ -10552,259 +10539,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
               note: "Stopped. Searches already sent finish at the provider, but nothing more is collected or shown from them.",
             });
           }
-          if (name === "delegate_to_role") {
-            // A saved role by roleId, or a role conversation not saved yet by its groupId.
-            const role = args.role_id
-              ? await deps.prisma.recruitingRole.findFirst({
-                  where: {
-                    id: String(args.role_id),
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    archivedAt: null,
-                  },
-                  select: {
-                    title: true,
-                    sourceThread: { select: { id: true, groupId: true } },
-                  },
-                })
-              : null;
-            const group = role?.sourceThread.groupId
-              ? null
-              : args.group_id && !String(args.group_id).startsWith("recruiting-global-")
-                ? await deps.prisma.chatGroup.findFirst({
-                    where: {
-                      id: String(args.group_id),
-                      spaceId: run.spaceId,
-                      userId: run.userId,
-                      archivedAt: null,
-                    },
-                    select: {
-                      id: true,
-                      name: true,
-                      thread: {
-                        select: { id: true, activeRecruitingRoleId: true },
-                      },
-                    },
-                  })
-                : null;
-            if (group && isRolelessHomeTeam(run, group))
-              return finish({ error: ACCOUNT_SETUP_STAYS_HERE });
-            const target = role?.sourceThread.groupId
-              ? {
-                  groupId: role.sourceThread.groupId,
-                  threadId: role.sourceThread.id,
-                  title: role.title ?? "",
-                }
-              : group?.thread
-                ? {
-                    groupId: group.id,
-                    threadId: group.thread.id,
-                    title: group.name,
-                  }
-                : null;
-            if (!target)
-              return finish({
-                error:
-                  "No active role team with that roleId or groupId.",
-              });
-            // Work can go straight to a named teammate of that role team; otherwise to its lead.
-            const teammateName = String(args.teammate ?? "")
-              .trim()
-              .toLowerCase();
-            let recipient = bot.id;
-            if (teammateName) {
-              const members = await deps.prisma.chatGroupMember.findMany({
-                where: { groupId: target.groupId },
-                select: {
-                  bot: { select: { id: true, name: true, archivedAt: true } },
-                },
-              });
-              const match = members.find(
-                (member) =>
-                  !member.bot.archivedAt && member.bot.name.toLowerCase() === teammateName,
-              );
-              if (!match)
-                return finish({
-                  error: `No teammate named ${String(args.teammate)} on that role team. Teammates: ${members
-                    .filter((member) => !member.bot.archivedAt)
-                    .map((member) => member.bot.name)
-                    .join(", ")}.`,
-                });
-              recipient = match.bot.id;
-            }
-            if (await roleOpenedFromLatestMessage(deps.prisma, run.threadId, target))
-              return finish({
-                ok: true,
-                team: `${target.title} team`,
-                note: "Already with that team: the role was opened from this same message; nothing more was sent.",
-              });
-            // Staging 426d09b9, stop-after-approve: two hand-offs of one request a second apart
-            // gave the role two runs racing on the same send card.
-            if (rolesDelegatedInTurn.has(target.threadId))
-              return finish({
-                ok: true,
-                team: `${target.title} team`,
-                note: "Already handed to that team in this turn, with the recruiter's own words; nothing more was sent.",
-              });
-            rolesDelegatedInTurn.add(target.threadId);
+          if (name === "delegate_work") {
             // Only the recruiter's own words are handed over: their turn's, or the message they
             // wrote into a running turn. Branch fosp 11-21 (747382b0): 「这三个不要。换掉，再补人」
-            // arrived while Kruit read a team's report, reached the team as Kruit's paraphrase
-            // alone, and the search cap took the role's first "找10个人" as the request.
-            const delegatedWords = (
-              run.trigger === "user" ? lastRecruiterText : (steeredText ?? "")
-            ).trim();
-            if (!delegatedWords) {
-              rolesDelegatedInTurn.delete(target.threadId);
-              return finish({
-                error: "Not handed off: this turn has no recruiter words to hand over.",
-              });
-            }
-            // Only structured referents go with the recruiter's words; Kruit writes no brief
-            // (the user's decision 11-27 08:36: 只传原话加指代). Play s174: a free brief added
-            // 「并继续做下一轮」 and the team searched a round nobody asked for.
-            const delegatedRoleId = role
-              ? String(args.role_id)
-              : (group?.thread?.activeRecruitingRoleId ?? undefined);
-            const refs = Array.isArray(args.people) ? args.people.map(String) : [];
-            const referents =
-              refs.length && delegatedRoleId
-                ? await roleReferents(deps.prisma, delegatedRoleId, refs)
-                : { people: [], unknown: refs };
-            // A referent that matches no saved person is not passed on: the recruiter's own words,
-            // which go with the hand-off, already name them. Play s179: refusing the names the
-            // model wrote left a turn-down unrecorded and the recruiter asked three times.
-            const roundRef = Number.isInteger(args.round) ? Number(args.round) : undefined;
-            const sent = await messageBot(
-              deps,
-              { ...run, sourceMessageId: run.sourceMessageId },
-              { id: bot.id, name: bot.name },
+            // arrived while Kruit read a team's report and reached the team as Kruit's paraphrase.
+            const given = await delegateWork(
               {
-                bot_id: recipient,
-                thread_id: target.threadId,
-                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
-                target_label: `${target.title} team`,
-                message: redactSecrets(
-                  delegatedRequestMessage(delegatedWords, referents.people, roundRef),
-                  runSecrets,
-                ),
-                recruiter_words: redactSecrets(delegatedWords, runSecrets),
-                intent: "request",
+                deps,
+                run: { ...run, sourceMessageId: run.sourceMessageId },
+                bot: { id: bot.id, name: bot.name },
+                groupId: thread.groupId,
+                words: run.trigger === "user" ? lastRecruiterText : (steeredText ?? ""),
                 deliveryKey: effectKey,
+                redact: (text) => redactSecrets(text, runSecrets),
+                visible,
+                showRoleCard: (role) =>
+                  publishMessage(deps, run, "bot", [{ kind: "role_link", ...role }]),
+                given: rolesDelegatedInTurn,
+                overruled: roleReferenceOverruled,
               },
+              args,
             );
-            if (!sent.ok) {
-              rolesDelegatedInTurn.delete(target.threadId);
-              return finish({ error: sent.error });
-            }
-            // The role's card is all the recruiter sees while the team works: a line written before
-            // the work said "I've drafted a reply" though nothing was drafted (handoff8 11-27).
-            await publishMessage(deps, run, "bot", [
-              {
-                kind: "role_link",
-                groupId: target.groupId,
-                title: target.title,
-              },
-            ]);
-            // The work, its rounds and emails are the role's and show only in its conversation; the
-            // recruiter opens it from the card, so Kruit's turn ends here, the way a hand-off passes
-            // control (OpenAI Agents SDK handoffs; Pi's terminate). Replays 11-27 on 49a2a201: told
-            // to answer from the team's returned email, Kruit posted every template a second time.
-            const handed = {
-              ok: true,
-              team: sent.name,
-              ...(referents.unknown.length ? { notSavedPeople: referents.unknown } : {}),
-            };
+            if ("error" in given) return finish(given);
+            // The work and its result are the agent's; Kruit's turn ends here, the way a hand-off
+            // passes control (OpenAI Agents SDK handoffs; Pi's terminate). Replays 11-27 on
+            // 49a2a201: told to answer from the team's returned email, Kruit posted every template
+            // a second time.
             return finish({
               kind: "agent_tool_result",
-              content: [{ type: "text", text: JSON.stringify(handed) }],
-              details: handed,
-              terminate: true,
-            });
-          }
-          if (name === "start_role") {
-            const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
-            const request = redactSecrets(String(args.message ?? ""), runSecrets).trim();
-            if (!title) return finish({ error: "title is required" });
-            if (!request && !run.sourceMessageId)
-              return finish({
-                error: "message is required: the recruiter's requirements.",
-              });
-            if (!thread.groupId?.startsWith("recruiting-global-"))
-              return finish({
-                error: "start_role works only in the global conversation.",
-              });
-            const team = await deps.prisma.chatGroupMember.findMany({
-              where: { groupId: thread.groupId },
-              select: { botId: true },
-              orderBy: { createdAt: "asc" },
-            });
-            const opened = await openRoleGroup(deps.prisma, {
-              spaceId: run.spaceId,
-              userId: run.userId,
-              threadId: run.threadId,
-              title,
-              fallback: effectKey,
-              botIds: team.map((member) => member.botId),
-              overruled: roleReferenceOverruled,
-            });
-            if (opened.openHere) {
-              roleReferenceOverruled.add(opened.openHere.groupId);
-              return finish({ error: roleAlreadyOpenNote(opened.openHere) });
-            }
-            const { roleKey, group, askedMessageId } = opened;
-            if (!group.thread)
-              return finish({
-                error: "The role conversation could not be opened.",
-              });
-            // The role team is asked through message_bot, as delegate_to_role asks it, so its final
-            // result returns here the same way. Its conversation first shows the recruiter's own
-            // message; a request with no recruiter message behind it (a routine) is sent as words.
-            const copied = await copyRecruiterMessageToRole(deps, run, {
-              threadId: group.thread.id,
-              botId: bot.id,
-              deliveryKey: roleKey,
-              title,
-              earlier: request,
-              earlierMessages: Math.min(
-                10,
-                Math.max(0, Math.trunc(Number(args.earlier_messages) || 0)),
-              ),
-              askedMessageId,
-            });
-            if (!copied && !request)
-              return finish({
-                error:
-                  "The recruiter's latest message has no request to hand over: pass message with their requirements in their own words.",
-              });
-            const sent = await messageBot(
-              deps,
-              { ...run, sourceMessageId: run.sourceMessageId },
-              { id: bot.id, name: bot.name },
-              {
-                bot_id: bot.id,
-                thread_id: group.thread.id,
-                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
-                target_label: `${title} team`,
-                message:
-                  copied ??
-                  `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
-                intent: "request",
-                deliveryKey: roleKey,
-              },
-            );
-            if (!sent.ok) return finish({ error: sent.error });
-            groupsStartedInTurn.add(group.id);
-            await publishMessage(deps, run, "bot", [
-              { kind: "role_link", groupId: group.id, title },
-            ]);
-            // The role's card is up and its conversation does the work, so Kruit's turn ends here,
-            // as delegate_to_role's does (Pi's terminate).
-            const roleOpened = { ok: true, team: `${title} team` };
-            return finish({
-              kind: "agent_tool_result",
-              content: [{ type: "text", text: JSON.stringify(roleOpened) }],
-              details: roleOpened,
+              content: [{ type: "text", text: JSON.stringify(given) }],
+              details: given,
               terminate: true,
             });
           }
@@ -13644,9 +13408,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
           }
-          // Work delegated to this role returns once its conversation is idle (bot-messages.ts):
-          // this run may be the teammate's or the continuation that finished it.
-          if (thread.groupId && !thread.groupId.startsWith("recruiting-global-"))
+          // Work delegated to this conversation (a role's, or an agent's own) returns once it is
+          // idle (bot-messages.ts): this run may be the teammate's or the continuation that ended it.
+          if (!thread.groupId?.startsWith("recruiting-global-"))
             await returnSettledDelegations(deps, thread.id).catch((error) =>
               getLogger().error("settled delegation return", error),
             );
@@ -14289,8 +14053,7 @@ export function selectBuiltinToolsForRun(options: {
         ![
           "message_user",
           "message_bot",
-          "delegate_to_role",
-          "start_role",
+          "delegate_work",
           "stop_work",
           "handoff_to_bot",
           "message_agent",

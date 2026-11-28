@@ -471,7 +471,11 @@ describe("delegating to a role team in another conversation", () => {
         id: "thread-role",
         spaceId: run.spaceId,
         userId: run.userId,
-        group: { archivedAt: null, members: { some: { botId: "bot-main" } } },
+        // A role team's conversation, or the agent's own one for a child job in no role.
+        OR: [
+          { group: { archivedAt: null, members: { some: { botId: "bot-main" } } } },
+          { botId: "bot-main" },
+        ],
       },
       select: { id: true },
     });

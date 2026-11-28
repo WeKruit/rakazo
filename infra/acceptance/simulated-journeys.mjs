@@ -245,6 +245,22 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "template-no-role",
+    mechanisms: ["email-content", "state-claims"],
+    gate: true,
+    title: "新账号要一封面试后跟进邮件模板",
+    area: "first message",
+    source:
+      "nightly 2026-11-28: on a new account 「帮我写一封面试后跟进邮件的模板」 opened a role titled 「面试后跟进邮件模板」 and showed only its Open role card, no template",
+    chinese: true,
+    maxTurns: 4,
+    persona: `${AGENCY_RECRUITER} You signed up today and have no roles. You only want a reusable email template.`,
+    goals: [
+      "Ask for a post-interview follow-up email template (帮我写一封面试后跟进邮件的模板): met when the template itself is in Kruit's reply in this conversation; an Open role card, a new role in the sidebar or a question about which role instead of the template is a fail.",
+      "Ask for one change to it (shorter), and get the changed template back here, still with no role opened.",
+    ],
+  },
+  {
     name: "us-recruiter-feedback-round",
     mechanisms: ["reference", "long-task"],
     title: "English recruiter: first ten, then feedback on some of them",

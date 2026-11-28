@@ -680,12 +680,12 @@ describe("handed-in stage", () => {
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("600,000");
   });
 
-  it("posts nothing when the answer to a teammate's check-in is NO_RESPONSE", async () => {
-    const checkIn = handoff("bot-1");
-    checkIn.blocks[0] = { ...checkIn.blocks[0], report: "progress" } as never;
+  it("posts nothing when the answer to a teammate's finished stage is NO_RESPONSE", async () => {
+    const ended = handoff("bot-1");
+    ended.blocks[0] = { ...ended.blocks[0], report: "completed" } as never;
     const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       trigger: "follow_up",
-      sourceMessage: checkIn,
+      sourceMessage: ended,
       finalText: "NO_RESPONSE",
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("NO_RESPONSE");

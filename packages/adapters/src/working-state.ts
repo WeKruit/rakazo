@@ -197,7 +197,7 @@ export const ROLE_START_NONCE = "start-role:";
 
 /**
  * The role this conversation last pointed the recruiter to: the card that opens it, which
- * start_role, delegate_to_role and a role read's show each post. Stage 3a3ee156
+ * delegate_work and a role read's show each post. Stage 3a3ee156
  * (stressed-point-few-meet): with no record of the role just opened, Kruit handed "3 more" to an
  * older role of the same title. A message that shows several roles' cards names no one role.
  */

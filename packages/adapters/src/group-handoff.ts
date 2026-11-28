@@ -20,11 +20,8 @@ import {
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { COMPLETION_EMAIL_OFFER, completionEmailAnswered } from "./completion-email.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { requestCounts, requestTarget, roundStillMissing } from "./recruiting-round-check.js";
-import { NO_RESPONSE } from "./silent-reply.js";
 import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
 export const NO_ROLE_HANDOFF =
@@ -270,74 +267,12 @@ async function postedResult(
   );
 }
 
-/** Whether the stage sent an email or reply the recruiter confirmed on its card. */
-async function confirmedSend(
-  tx: Pick<PrismaClient, "externalEffect">,
-  runId: string,
-): Promise<boolean> {
-  const sent = await tx.externalEffect.findFirst({
-    where: {
-      runId,
-      status: "completed",
-      OR: [{ kind: { endsWith: "activate_campaign" } }, { kind: { endsWith: "reply_to_email" } }],
-    },
-    select: { id: true },
-  });
-  return sent !== null;
-}
-
 /**
- * Whether the stage recorded a round of people and the request for a number it served is met, by
- * the same counts the round's own result gives. The round's list is what the user sees, so there
- * is nothing left to check: play s151 woke the lead after a round and it recorded the same people
- * again. A round with no request for a number open is not short.
- */
-async function roundDelivered(
-  prisma: PrismaClient,
-  run: { id: string; threadId: string; userId: string; spaceId: string },
-): Promise<boolean> {
-  const effects = await prisma.externalEffect.findMany({
-    where: { runId: run.id, status: "completed" },
-    select: { id: true },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
-  const ids = effects.map((effect) => effect.id);
-  const round = ids.length
-    ? await prisma.recruitingCalibrationRound.findFirst({
-        where: { effectId: { in: ids }, status: "shown" },
-        orderBy: { createdAt: "desc" },
-        select: { roleId: true },
-      })
-    : null;
-  if (!round) return false;
-  const role = { roleId: round.roleId, userId: run.userId, spaceId: run.spaceId };
-  const { counted } = await requestCounts(prisma, role);
-  const target = await requestTarget(prisma, role, counted);
-  return !roundStillMissing(counted, target).stillMissing;
-}
-
-/** Whether a card in the thread is still waiting for the recruiter's answer. */
-async function cardWaitsOnRecruiter(
-  tx: Pick<PrismaClient, "message">,
-  threadId: string,
-): Promise<boolean> {
-  const waiting = await tx.message.findFirst({
-    where: {
-      threadId,
-      role: "bot",
-      blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
-    },
-    select: { id: true },
-  });
-  return Boolean(waiting);
-}
-
-/**
- * Returns a stage handed over with report_back to the member that asked for it, once the stage
- * ends either way, so it can check the result against its brief. Idempotent per run; the result
- * itself is already in the shared thread, so the report only points at it. A `progress` report is
- * the one mid-stage check-in: it never follows the stage's final report.
+ * Returns a stage handed over with report_back to the member that asked for it, once, when the
+ * stage ends either way: a child job's one end, as Workloop delivers "Job X ended (status)." with
+ * the child's last text (PRD §1.6, deliver.go) and a Claude Code teammate notifies its lead once
+ * when it goes idle. The text states facts only; the result itself is already in the shared thread.
+ * Idempotent per run.
  */
 export async function reportGroupHandoffOutcome(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -350,29 +285,10 @@ export async function reportGroupHandoffOutcome(
     sourceMessageId: string | null;
   },
   groupId: string,
-  outcome: {
-    status: "completed" | "failed" | "progress";
-    error?: string;
-    /** A periodic check-in: its ten-minute slot and what the stage looks like now. */
-    watch?: { slot: number; state: string };
-  },
+  outcome: { status: "completed" | "failed"; error?: string },
 ): Promise<{ runId: string } | undefined> {
   if (!run.sourceMessageId) return undefined;
-  if (
-    outcome.status === "completed" &&
-    (await roundDelivered(deps.prisma, run).catch((error) => {
-      getLogger().warn("round delivery not read", { error: String(error) });
-      return false;
-    }))
-  )
-    return undefined;
-  const finalKey = `group-report:${run.id}`;
-  const deliveryKey =
-    outcome.status !== "progress"
-      ? finalKey
-      : outcome.watch
-        ? `group-checkin:${run.id}:${outcome.watch.slot}`
-        : `group-checkin:${run.id}`;
+  const deliveryKey = `group-report:${run.id}`;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
       try {
@@ -393,13 +309,11 @@ export async function reportGroupHandoffOutcome(
           )
         : undefined;
       if (!asked || asked.fromBotId === run.botId) return undefined;
-      for (const clientNonce of new Set([deliveryKey, finalKey])) {
-        const existing = await tx.message.findUnique({
-          where: { threadId_clientNonce: { threadId: run.threadId, clientNonce } },
-          select: { id: true },
-        });
-        if (existing) return undefined;
-      }
+      const existing = await tx.message.findUnique({
+        where: { threadId_clientNonce: { threadId: run.threadId, clientNonce: deliveryKey } },
+        select: { id: true },
+      });
+      if (existing) return undefined;
       const member = await tx.chatGroupMember.findFirst({
         where: { groupId, botId: asked.fromBotId, bot: { archivedAt: null } },
         select: { botId: true },
@@ -409,31 +323,33 @@ export async function reportGroupHandoffOutcome(
       if (botMessageHopExhausted(hop)) return undefined;
       const mail = await readMailReplyOutcomeReport(tx, run);
       const posted = outcome.status === "completed" && !mail && (await postedResult(tx, run.id));
-      // Staging 11-13: after the recruiter confirmed a send and Outreach said it went out, the
-      // report woke Main, which listed the account's roles unasked. A confirmed send is done.
-      if (posted && (await confirmedSend(tx, run.id))) return undefined;
-      // Staging 11-13: the teammate asked to connect Gmail, the sender re-handed the send four
-      // times and each answer repeated "connect Gmail first". A card waiting on the recruiter
-      // means the next step is theirs, not the sender's.
-      if (posted && (await cardWaitsOnRecruiter(tx, run.threadId))) return undefined;
-      const report = mail
-        ? `Stage status: ${outcome.status}. Verified reply-card outcome:\n${mail.text}`
-        : outcome.status === "completed" && !posted
-          ? `Ended the stage you handed me without posting any result: no message and no card.`
-          : outcome.status === "completed"
-            ? `Finished the stage you handed me; my result is my last message above, which the user already sees. A reply of exactly ${NO_RESPONSE} posts nothing.`
-            : outcome.watch
-              ? `Check-in: ${outcome.watch.state} The final result comes back to you when the stage ends. A reply of exactly ${NO_RESPONSE} posts nothing.`
-              : outcome.status === "progress"
-                ? `Check-in: the stage you handed me is still running, and the first results are saved above. The final result comes back to you when the stage ends. A reply of exactly ${NO_RESPONSE} posts nothing.`
-                : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}.`;
-      const reask =
-        outcome.status === "progress"
-          ? undefined
-          : await questionClosedByChat(tx, { threadId: run.threadId, botId: asked.fromBotId });
-      const text = reask
-        ? `${report}\n\nYour question "${reask.question}" was closed when the recruiter typed "${reask.reply.slice(0, 300)}" in the chat.`
-        : report;
+      // Facts from records: how the stage ended, the verified mail outcome, the cards still
+      // waiting on the recruiter and a question the recruiter answered by typing instead.
+      const ended =
+        outcome.status === "failed"
+          ? `Ended the stage you handed me: failed (${(outcome.error ?? "the run failed").slice(0, 300)}).`
+          : mail
+            ? "Ended the stage you handed me: completed."
+            : posted
+              ? "Ended the stage you handed me: completed; its result is my last message above."
+              : "Ended the stage you handed me: completed, with no message and no card posted.";
+      const cards = waitingApprovalNote(
+        waitingApprovalCards(await waitingCardBlocks(tx, run.threadId)),
+      );
+      const reask = await questionClosedByChat(tx, {
+        threadId: run.threadId,
+        botId: asked.fromBotId,
+      });
+      const text = [
+        ended,
+        ...(mail ? [`Verified reply-card outcome:\n${mail.text}`] : []),
+        ...(cards ? [cards] : []),
+        ...(reask
+          ? [
+              `Your question "${reask.question}" was closed when the recruiter typed "${reask.reply.slice(0, 300)}" in the chat.`,
+            ]
+          : []),
+      ].join("\n\n");
       const message = await createThreadMessageInTransaction(tx, {
         threadId: run.threadId,
         role: "bot",
@@ -606,7 +522,7 @@ export async function reportGroupStageOutcome(
   return reportGroupHandoffOutcome(deps, stage, groupId, outcome);
 }
 
-/** A delegator's turn that reads a teammate's check-in or finished stage may end silently. */
+/** A delegator's turn that reads a teammate's finished stage may end silently. */
 export function isQuietStageReport(
   trigger: string,
   blocks: readonly MessageBlock[] | undefined,
@@ -617,9 +533,7 @@ export function isQuietStageReport(
     Boolean(
       blocks?.some(
         (block) =>
-          block.kind === "handoff" &&
-          block.toBotId === botId &&
-          (block.report === "progress" || block.report === "completed"),
+          block.kind === "handoff" && block.toBotId === botId && block.report === "completed",
       ),
     )
   );
@@ -680,116 +594,3 @@ export async function loadGroupContext(
     self,
   );
 }
-
-/** How often an open handed stage checks in with the teammate that handed it over. */
-export const STAGE_WATCH_MS = 10 * 60_000;
-/** Stages older than this are left to the stuck-work report. */
-const STAGE_WATCH_WINDOW_MS = 24 * 60 * 60_000;
-
-/**
- * The coordinator's watch over the stages it handed out, like a supervisor checking each open
- * job every ten minutes: every stage asked to report back that has not reported yet gets one
- * check-in per ten-minute slot, saying how it stands. A stage waiting on the user's answer is
- * skipped, and so is a slot while the coordinator is already busy in that conversation.
- */
-export async function watchOpenStages(
-  deps: StageDeps & { completionEmail?: boolean },
-  now: Date,
-  batchSize: number,
-): Promise<number> {
-  const runs = await deps.prisma.run.findMany({
-    where: {
-      trigger: "follow_up",
-      status: { in: ["queued", "leased", "running"] },
-      sourceMessageId: { not: null },
-      createdAt: {
-        gte: new Date(now.getTime() - STAGE_WATCH_WINDOW_MS),
-        lte: new Date(now.getTime() - STAGE_WATCH_MS),
-      },
-      thread: { groupId: { not: null } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: batchSize,
-    select: {
-      id: true,
-      spaceId: true,
-      threadId: true,
-      botId: true,
-      userId: true,
-      status: true,
-      createdAt: true,
-      sourceMessageId: true,
-      sourceMessage: { select: { blocks: true } },
-      thread: { select: { groupId: true, activeRecruitingRoleId: true } },
-    },
-  });
-  const stages = runs.flatMap((run) => {
-    const parsed = MessageBlock.array().safeParse(run.sourceMessage?.blocks ?? []);
-    const asked = parsed.success
-      ? parsed.data.find(
-          (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
-            block.kind === "handoff" && block.toBotId === run.botId && block.reportBack === true,
-        )
-      : undefined;
-    return asked && run.thread.groupId ? [{ run, asked, groupId: run.thread.groupId }] : [];
-  });
-  if (!stages.length) return 0;
-  const reported = new Set(
-    (
-      await deps.prisma.message.findMany({
-        where: {
-          threadId: { in: [...new Set(stages.map(({ run }) => run.threadId))] },
-          clientNonce: { in: stages.map(({ run }) => `group-report:${run.id}`) },
-        },
-        select: { clientNonce: true },
-      })
-    ).map((message) => message.clientNonce),
-  );
-  // A stage that handed its work on has ended; the next member's stage carries it.
-  for (const message of await deps.prisma.message.findMany({
-    where: {
-      runId: { in: stages.map(({ run }) => run.id) },
-      clientNonce: { startsWith: "group-handoff:" },
-    },
-    select: { runId: true },
-  }))
-    if (message.runId) reported.add(`group-report:${message.runId}`);
-  let sent = 0;
-  for (const { run, asked, groupId } of stages) {
-    if (reported.has(`group-report:${run.id}`)) continue;
-    const busy = await deps.prisma.run.count({
-      where: {
-        threadId: run.threadId,
-        botId: asked.fromBotId,
-        status: { in: ["queued", "leased", "running"] },
-      },
-    });
-    if (busy) continue;
-    const minutes = Math.floor((now.getTime() - run.createdAt.getTime()) / 60_000);
-    const people = run.thread.activeRecruitingRoleId
-      ? await deps.prisma.recruitingCandidate.count({
-          where: { roleId: run.thread.activeRecruitingRoleId },
-        })
-      : undefined;
-    const doing = run.status === "queued" ? "has not started yet" : "is still running";
-    const slot = Math.floor(minutes / (STAGE_WATCH_MS / 60_000));
-    // The first check-in of a long stage is where the recruiter is offered an email at the end.
-    const offerEmail =
-      deps.completionEmail &&
-      slot === 1 &&
-      !(await completionEmailAnswered(deps.prisma, run).catch(() => true));
-    const state = `the stage you handed me ${minutes} minutes ago ${doing}${
-      people === undefined ? "." : `; the role's Results hold ${people} people.`
-    }${offerEmail ? ` ${COMPLETION_EMAIL_OFFER}` : ""}`;
-    const report = await reportGroupHandoffOutcome(deps, run, groupId, {
-      status: "progress",
-      watch: { slot, state },
-    }).catch((error) => {
-      getLogger().error("stage watch report", error);
-      return undefined;
-    });
-    if (report) sent += 1;
-  }
-  return sent;
-}
-

@@ -50,8 +50,7 @@ export function filterBuiltinToolsForRun<T extends { name: string }>(
 const ACCOUNT_WIDE_TOOLS: ReadonlySet<string> = new Set([
   "recruiting_candidates",
   "recruiting_feedback",
-  "start_role",
-  "delegate_to_role",
+  "delegate_work",
   "stop_work",
   "message_user",
   "artifact_read",
@@ -93,13 +92,12 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
       // rather than starting a private thread off to one side.
       (!groupId || tool.name !== "message_bot") &&
       // Only the account-wide conversation sits above the role teams.
-      tool.name !== "delegate_to_role" &&
-      tool.name !== "start_role",
+      tool.name !== "delegate_work",
   );
 }
 
 const PREFERENCES_ONLY_LEAD =
-  "Save the recruiter's explicit reusable recruiting preferences, which hold across all their roles. Feedback on a role's people or rounds, and its requirements, are given in that role's conversation (delegate_to_role). Use direct human wording; for inferred or ambiguous intent, ask in your reply first. ";
+  "Save the recruiter's explicit reusable recruiting preferences, which hold across all their roles. Feedback on a role's people or rounds, and its requirements, are given in that role's conversation (delegate_work). Use direct human wording; for inferred or ambiguous intent, ask in your reply first. ";
 
 /** The main chat's recruiting_feedback: a preference across roles, never a role's feedback. */
 function preferencesOnly<T extends { name: string }>(tool: T): T {

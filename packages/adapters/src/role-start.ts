@@ -67,6 +67,21 @@ async function latestRecruiterMessage(
   return (await recruiterMessages(prisma, threadId, 1))[0];
 }
 
+/**
+ * The files of the recruiter's latest own message, by saved id: a child job receives only what its
+ * request holds (Claude Code subagents: "include any file paths ... directly in that prompt").
+ */
+export async function latestRecruiterFiles(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<string[]> {
+  return ((await latestRecruiterMessage(prisma, threadId))?.blocks ?? []).flatMap((block) =>
+    block.kind === "file" || block.kind === "image"
+      ? [`${block.name} (artifact ${block.artifactId})`]
+      : [],
+  );
+}
+
 /** The id of the role conversation opened under a key. */
 export function roleGroupId(key: string): string {
   return `role-${createHash("sha256").update(key).digest("hex").slice(0, 24)}`;
@@ -153,12 +168,12 @@ export async function roleAlreadyOpenedHere(
   return same ? { groupId: same.id, title: same.name } : undefined;
 }
 
-/** Model-facing: start_role refused because this role is already open. */
+/** Model-facing: a new role refused because this role is already open. */
 export const roleAlreadyOpenNote = (role: { groupId: string; title: string }) =>
   `Not opened: "${role.title}" is already open (group_id "${role.groupId}"), with its people and the recruiter's earlier requirements. A second call opens a second role with the same title.`;
 
 /**
- * Open (or find) the role conversation for one start_role call. The key is chosen under the
+ * Open (or find) the role conversation for one new role (delegate_work new_role). The key is chosen under the
  * space's content lock, so roles asked for in parallel see each other. Staging 11-16: three
  * parallel calls for Java, Android and Data Engineer each found no role yet, all took the
  * message's first-role key, and only "Java" was opened while Kruit said all three were.
@@ -230,8 +245,6 @@ export async function copyRecruiterMessageToRole(
     deliveryKey: string;
     /** The role this conversation is for, named when the recruiter's words don't. */
     title?: string;
-    /** Requirements Kruit gathered from earlier messages, when the latest one alone lacks them. */
-    earlier?: string;
     /**
      * How many of the recruiter's messages before the latest also belong to this role, as Kruit
      * counted them. They are copied with the latest one, oldest first. Staging 11-26: after
@@ -268,9 +281,6 @@ export async function copyRecruiterMessageToRole(
   // Java team asked what the other two are called and Data Engineer asked what 「三个」 means;
   // 「Java、Android、data engineer 三个」 names them all, and Java still set up all three.
   const title = role.title?.trim();
-  // Staging 11-13: "现在开始找候选人" opened the role with only those words, so its team asked
-  // for the location the recruiter had given earlier, and that card held every later request.
-  const earlier = role.earlier?.trim();
   // A delegated agent receives only what its request holds (Claude Code subagents: "include any file
   // paths ... directly in that prompt"), so the files go in by their saved ids.
   const files = blocks.flatMap((block) =>
@@ -281,9 +291,6 @@ export async function copyRecruiterMessageToRole(
   const request = [
     `New role${title ? `: ${title}` : ""}. The recruiter's message above, copied from the main conversation, is the request${title ? "; any other roles it mentions have their own conversations" : ""}.`,
     ...(files.length ? [`Files the recruiter attached: ${files.join(", ")}.`] : []),
-    ...(earlier && !text.includes(earlier)
-      ? [`What the recruiter said about this role earlier, in the main conversation:\n${earlier}`]
-      : []),
   ].join("\n\n");
   const clientNonce = `${ROLE_START_NONCE}${role.deliveryKey}`;
   const committed = await withTransactionRetry(() =>

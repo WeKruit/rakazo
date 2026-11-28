@@ -393,13 +393,12 @@ describe("resolveScheduleTiming", () => {
 });
 
 describe("filterBuiltinToolsForThread", () => {
-  it("offers the account-wide conversation only reads, opening a role and handing work to it", () => {
+  it("offers the account-wide conversation only reads and giving work to its owner", () => {
     // The user's rule 11-27: the main chat does no operations; branch play s158 spent its turn on
     // feedback and a search that were refused there before it handed the work over.
     const all = [
       "recruiting_candidates",
-      "start_role",
-      "delegate_to_role",
+      "delegate_work",
       "stop_work",
       "read_memory",
       "recruiting_role",
@@ -422,14 +421,12 @@ describe("filterBuiltinToolsForThread", () => {
       filterBuiltinToolsForThread(all, groupId).map((t) => t.name);
     expect(names("recruiting-global-abc")).toEqual([
       "recruiting_candidates",
-      "start_role",
-      "delegate_to_role",
+      "delegate_work",
       "stop_work",
       "read_memory",
       "recruiting_feedback",
     ]);
-    expect(names("role-group")).not.toContain("delegate_to_role");
-    expect(names("role-group")).not.toContain("start_role");
+    expect(names("role-group")).not.toContain("delegate_work");
     expect(names("role-group")).toContain("recruiting_scheduling");
     expect(names("role-group")).toContain("handoff_to_bot");
     expect(names(null)).not.toContain("handoff_to_bot");

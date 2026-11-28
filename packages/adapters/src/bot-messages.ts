@@ -89,7 +89,10 @@ export async function messageBot(
     message: string;
     intent?: BotMessageIntent;
     deliveryKey?: string;
-    /** Another conversation of this user that the target bot belongs to (a role team's chat). */
+    /**
+     * Another conversation of this user that the target bot works in: a role team's chat, or the
+     * target's own conversation (a child job in no role).
+     */
     thread_id?: string;
     /** Names shown for each side when they differ from the bots' own names. */
     sender_label?: string;
@@ -133,7 +136,10 @@ export async function messageBot(
           id: input.thread_id,
           spaceId: run.spaceId,
           userId: run.userId,
-          group: { archivedAt: null, members: { some: { botId: target.id } } },
+          OR: [
+            { group: { archivedAt: null, members: { some: { botId: target.id } } } },
+            { botId: target.id },
+          ],
         },
         select: { id: true },
       })
@@ -150,8 +156,7 @@ export async function messageBot(
   if (botMessageHopExhausted(hop) && !returnsToSender) {
     return {
       ok: false as const,
-      error:
-        "bot-to-bot message limit reached for this chain; report back to the user instead of messaging another bot",
+      error: "Not sent: this chain reached its bot-to-bot message limit.",
     };
   }
 
@@ -841,7 +846,7 @@ async function openDelegation(prisma: PrismaClient, threadId: string) {
 }
 
 /**
- * A role team working on delegated work failed: tell the conversation that delegated it right
+ * A role team (or an agent in its own conversation) working on delegated work failed: tell the conversation that delegated it right
  * away, once per turn, so it never waits silently.
  */
 export async function reportDelegatedTeamBlocked(
@@ -857,23 +862,25 @@ export async function reportDelegatedTeamBlocked(
   blocked: { kind: "failed"; text: string },
 ): Promise<"later" | undefined> {
   const thread = await deps.prisma.thread.findFirst({
-    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
-    select: { group: { select: { name: true } } },
+    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId },
+    select: { group: { select: { name: true } }, bot: { select: { name: true } } },
   });
-  if (!thread?.group) return;
+  // A role team, or an agent working in its own conversation (a child job in no role).
+  const name = thread?.group ? `${thread.group.name} team` : thread?.bot?.name;
+  if (!name) return;
   const found = await openDelegation(deps.prisma, run.threadId);
   if (!found) return;
   const detail = blocked.text.trim().slice(0, 600);
   const sent = await messageBot(
     deps,
     run,
-    { id: run.botId, name: thread.group.name },
+    { id: run.botId, name },
     {
       bot_id: found.root.fromBotId,
       thread_id: found.root.returnThreadId,
-      sender_label: `${thread.group.name} team`,
+      sender_label: name,
       target_label: found.root.fromBotName,
-      message: clampBotMessage(`The ${thread.group.name} team could not finish: ${detail}`),
+      message: clampBotMessage(`${name} could not finish: ${detail}`),
       intent: "status",
       deliveryKey: `delegation-${blocked.kind}:${run.id}`,
     },
@@ -884,7 +891,7 @@ export async function reportDelegatedTeamBlocked(
 }
 
 /**
- * A role team working on delegated work stopped on a card (a question, form or approval): show
+ * A role team (or an agent in its own conversation) working on delegated work stopped on a card (a question, form or approval): show
  * that card in the conversation that delegated the work, where the recruiter is, and route the
  * answer back to the waiting run. Workloop does the same for a child agent waiting on a person;
  * the delegating agent is not woken. Staging 11-16: the old "waiting on its card" message was
@@ -894,11 +901,6 @@ export async function showDelegatedTeamCard(
   deps: Pick<ExecutorDeps, "prisma" | "events">,
   run: { id: string; spaceId: string; threadId: string; userId: string },
 ): Promise<"later" | undefined> {
-  const thread = await deps.prisma.thread.findFirst({
-    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
-    select: { id: true },
-  });
-  if (!thread) return;
   const found = await openDelegation(deps.prisma, run.threadId);
   if (!found) return;
   const card = await deps.prisma.message.findFirst({

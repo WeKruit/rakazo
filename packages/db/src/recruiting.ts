@@ -622,7 +622,7 @@ async function createRoleInTransaction(
   const thread = await requireThread(tx, actor, input.sourceThreadId);
   if (thread.groupId?.startsWith("recruiting-global-"))
     throw new IsolationError(
-      "The global conversation stays across all roles; open a new role with start_role",
+      "The global conversation stays across all roles; open a new role with delegate_work",
     );
   if (input.brief) validateRecruitingBrief(input.brief, input);
   const messages = await validateReadSources(tx, actor, definitionSources(input), artifacts);
@@ -667,7 +667,7 @@ async function bindRoleInTransaction(
   const thread = await requireThread(tx, actor, input.threadId);
   if (input.roleId && thread.groupId?.startsWith("recruiting-global-"))
     throw new IsolationError(
-      "The global conversation stays across all roles; hand one role's work to its team with delegate_to_role",
+      "The global conversation stays across all roles; hand one role's work to its team with delegate_work",
     );
   const role = input.roleId ? await requireRole(tx, actor, input.roleId) : null;
   if ((thread.activeRecruitingRoleId ?? null) === (role?.id ?? null))

@@ -122,7 +122,7 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   message_bot: "specialist",
   handoff_to_bot: "specialist",
   message_agent: "specialist",
-  delegate_to_role: "delegating",
+  delegate_work: "delegating",
   message_user: "writing",
   request_connection: "connections",
   schedule_create: "routine",
