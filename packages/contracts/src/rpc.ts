@@ -618,8 +618,9 @@ export const appContract = {
       .output(eventIterator(ProductEventSchema)),
     send: oc.input(threadSendInput).output(
       z.object({
-        taskId: Id,
-        runId: Id,
+        /** Null when the message went to the agent's session: its run starts when the lane takes it. */
+        taskId: Id.nullable(),
+        runId: Id.nullable(),
         seq: z.number().int(),
         runIds: z.array(Id).optional(),
       }),

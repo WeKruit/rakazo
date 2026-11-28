@@ -32,6 +32,24 @@ import { UnavailableModelForAuthError } from "./model-selection.js";
 import { RetiredModelCredentialError, serializeModelSecret } from "./pi-oauth.js";
 import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
 
+// The input storage has its own tests in @rakazo/db; a routine fire is recorded here.
+const routineInputs = vi.hoisted(
+  () =>
+    [] as Array<{
+      routineId: string;
+      threadId: string;
+      botId: string;
+      prompt: string;
+      model: { modelProvider: string | null; modelId: string | null; thinkingLevel: string | null };
+    }>,
+);
+vi.mock("./agent-session/routine-input.js", () => ({
+  submitRoutineInput: vi.fn(async (_tx: unknown, input: (typeof routineInputs)[number]) => {
+    routineInputs.push(input);
+    return { sessionId: `${input.threadId}:${input.botId}` };
+  }),
+}));
+
 describe("bot tool permissions", () => {
   it("offers feedback with native and semantic memory while respecting channel and tool permissions", () => {
     const options = {
@@ -1832,11 +1850,13 @@ describe("createRunExecutor", () => {
         }),
       ),
     } as unknown as PrismaClient;
+    const wakeSessions = vi.fn(async () => undefined);
     const executor = createRunExecutor({
       prisma,
       jobs: { enqueue, cancel, close: vi.fn(async () => undefined) },
-      events: { append },
+      events: { append, wakeSessions },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
+    routineInputs.length = 0;
 
     await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
 
@@ -1847,20 +1867,15 @@ describe("createRunExecutor", () => {
       }),
     );
     expect(cancel).toHaveBeenCalledWith("routine:routine-1");
-    expect(enqueue).toHaveBeenCalledTimes(1);
-    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
-    expect(taskCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ threadId: "group-thread-1" }) }),
-    );
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ threadId: "group-thread-1" }) }),
-    );
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(routineInputs).toEqual([
+      expect.objectContaining({ routineId: "routine-1", threadId: "group-thread-1" }),
+    ]);
+    expect(wakeSessions).toHaveBeenCalledWith(["group-thread-1:bot-1"]);
     expect(append).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "routine.fired",
-        runId: "run-1",
-        threadId: "group-thread-1",
-      }),
+      expect.objectContaining({ type: "routine.fired", threadId: "group-thread-1" }),
     );
   });
 
@@ -1916,55 +1931,27 @@ describe("createRunExecutor", () => {
           cancel: vi.fn(async () => undefined),
           close: vi.fn(async () => undefined),
         },
-        events: { append: vi.fn(async () => undefined) },
+        events: {
+          append: vi.fn(async () => undefined),
+          wakeSessions: vi.fn(async () => undefined),
+        },
       } as unknown as Parameters<typeof createRunExecutor>[0]);
     }
+    routineInputs.length = 0;
 
-    await executorFor(
-      fixture({
-        modelProvider: "routine-provider",
-        modelId: "routine-model",
-        thinkingLevel: "low",
-      }),
-    ).wakeRoutine("routine-1", scheduledAt.toISOString());
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          routineId: "routine-1",
-          modelProvider: "routine-provider",
-          modelId: "routine-model",
-          thinkingLevel: "low",
-          modelPinned: true,
-        }),
-      }),
-    );
-
-    runCreate.mockClear();
-    await executorFor(
-      fixture({ modelProvider: null, modelId: null, thinkingLevel: null }),
-    ).wakeRoutine("routine-1", scheduledAt.toISOString());
-    const [unpinned] = runCreate.mock.calls.at(0) as unknown as [{ data: Record<string, unknown> }];
-    expect(unpinned.data).not.toHaveProperty("modelProvider");
-    expect(unpinned.data).not.toHaveProperty("modelId");
-    expect(unpinned.data).not.toHaveProperty("modelPinned");
-
-    runCreate.mockClear();
+    // The model read at claim time travels with the input (stale fields on the first read lose).
     await executorFor(
       fixture(
         { modelProvider: "stale-provider", modelId: "stale-model", thinkingLevel: "low" },
         { modelProvider: "current-provider", modelId: "current-model", thinkingLevel: "high" },
       ),
     ).wakeRoutine("routine-1", scheduledAt.toISOString());
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          modelProvider: "current-provider",
-          modelId: "current-model",
-          thinkingLevel: "high",
-          modelPinned: true,
-        }),
-      }),
-    );
+    expect(routineInputs.at(-1)?.model).toMatchObject({
+      modelProvider: "current-provider",
+      modelId: "current-model",
+      thinkingLevel: "high",
+    });
+    expect(runCreate).not.toHaveBeenCalled();
   });
 
   it("re-pauses a due routine whose bot is archived instead of queueing a run", async () => {
@@ -2000,7 +1987,7 @@ describe("createRunExecutor", () => {
     const executor = createRunExecutor({
       prisma,
       jobs: { enqueue, cancel: vi.fn(async () => undefined), close: vi.fn(async () => undefined) },
-      events: { append: vi.fn(async () => undefined) },
+      events: { append: vi.fn(async () => undefined), wakeSessions: vi.fn(async () => undefined) },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
@@ -2065,7 +2052,7 @@ describe("createRunExecutor", () => {
         cancel: vi.fn(async () => undefined),
         close: vi.fn(async () => undefined),
       },
-      events: { append },
+      events: { append, wakeSessions: vi.fn(async () => undefined) },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
@@ -2075,12 +2062,9 @@ describe("createRunExecutor", () => {
         where: expect.objectContaining({ id: "group-thread-1", spaceId: "ws-1" }),
       }),
     );
-    expect(taskCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ threadId: "group-thread-1" }) }),
-    );
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ threadId: "group-thread-1" }) }),
-    );
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(routineInputs.at(-1)).toMatchObject({ threadId: "group-thread-1", botId: "bot-1" });
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({ type: "routine.fired", threadId: "group-thread-1" }),
     );
@@ -2131,7 +2115,7 @@ describe("createRunExecutor", () => {
     const executor = createRunExecutor({
       prisma,
       jobs: { enqueue, cancel: vi.fn(async () => undefined), close: vi.fn(async () => undefined) },
-      events: { append },
+      events: { append, wakeSessions: vi.fn(async () => undefined) },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
@@ -2199,7 +2183,7 @@ describe("createRunExecutor", () => {
         cancel: vi.fn(async () => undefined),
         close: vi.fn(async () => undefined),
       },
-      events: { append },
+      events: { append, wakeSessions: vi.fn(async () => undefined) },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
@@ -2209,12 +2193,9 @@ describe("createRunExecutor", () => {
         where: expect.objectContaining({ id: "dm-thread-1", spaceId: "ws-1" }),
       }),
     );
-    expect(taskCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ threadId: "dm-thread-1" }) }),
-    );
-    expect(runCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ threadId: "dm-thread-1" }) }),
-    );
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(routineInputs.at(-1)).toMatchObject({ threadId: "dm-thread-1", botId: "bot-1" });
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({ type: "routine.fired", threadId: "dm-thread-1" }),
     );
@@ -2223,11 +2204,8 @@ describe("createRunExecutor", () => {
   it("expands skills from the prompt committed at claim time after a prompt-only edit", async () => {
     const scheduledAt = new Date(Date.now() - 1_000);
     const enqueue = vi.fn(async () => undefined);
-    let createdPrompt = "";
-    const taskCreate = vi.fn(async (args: { data: { prompt: string } }) => {
-      createdPrompt = args.data.prompt;
-      return { id: "task-1" };
-    });
+    const taskCreate = vi.fn(async () => ({ id: "task-1" }));
+    routineInputs.length = 0;
     const skillContent = `---
 name: Daily standup
 description: Prepare standup notes
@@ -2285,19 +2263,19 @@ description: Prepare standup notes
     const executor = createRunExecutor({
       prisma,
       jobs: { enqueue, cancel: vi.fn(async () => undefined), close: vi.fn(async () => undefined) },
-      events: { append: vi.fn(async () => undefined) },
+      events: { append: vi.fn(async () => undefined), wakeSessions: vi.fn(async () => undefined) },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
 
-    expect(createdPrompt).toContain("Use skill: Daily standup");
-    expect(createdPrompt).toContain("Summarize wins");
-    expect(createdPrompt).toContain("keep the report local");
-    expect(createdPrompt).not.toContain("email me");
-    expect(createdPrompt).not.toMatch(/@Daily standup/);
+    expect(routineInputs.at(-1)?.prompt).toContain("Use skill: Daily standup");
+    expect(routineInputs.at(-1)?.prompt).toContain("Summarize wins");
+    expect(routineInputs.at(-1)?.prompt).toContain("keep the report local");
+    expect(routineInputs.at(-1)?.prompt).not.toContain("email me");
+    expect(routineInputs.at(-1)?.prompt).not.toMatch(/@Daily standup/);
   });
 
-  it("still continues the run when routine.fired append fails", async () => {
+  it("still wakes the session when routine.fired append fails", async () => {
     const scheduledAt = new Date(Date.now() - 1_000);
     const enqueue = vi.fn(async () => undefined);
     const cancel = vi.fn(async () => undefined);
@@ -2345,30 +2323,25 @@ description: Prepare standup notes
         }),
       ),
     } as unknown as PrismaClient;
+    const wakeSessions = vi.fn(async () => undefined);
     const executor = createRunExecutor({
       prisma,
       jobs: { enqueue, cancel, close: vi.fn(async () => undefined) },
-      events: { append },
+      events: { append, wakeSessions },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
     await expect(
       executor.wakeRoutine("routine-1", scheduledAt.toISOString()),
     ).resolves.toBeUndefined();
-    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
+    expect(wakeSessions).toHaveBeenCalledWith(["thread-1:bot-1"]);
     expect(cancel).toHaveBeenCalledWith("routine:routine-1");
   });
 
-  it("restores the routine claim when run.continue enqueue fails", async () => {
+  it("routine fire is an input into the bound session", async () => {
     const scheduledAt = new Date(Date.now() - 1_000);
-    const previousLastRunAt = new Date(Date.now() - 60_000);
-    const enqueue = vi.fn(async () => {
-      throw new Error("enqueue failed");
-    });
-    const claimUpdateMany = vi.fn(async () => ({ count: 1 }));
-    const restoreUpdateMany = vi.fn(async () => ({ count: 1 }));
-    const deleteRunMany = vi.fn(async () => ({ count: 1 }));
-    const deleteTaskMany = vi.fn(async () => ({ count: 1 }));
-    let transactionCalls = 0;
+    const enqueue = vi.fn(async () => undefined);
+    const claim = vi.fn(async () => ({ count: 1 }));
+    const runCreate = vi.fn(async () => ({ id: "run-1" }));
     const prisma = {
       routine: {
         findUnique: vi.fn(async () => ({
@@ -2376,67 +2349,57 @@ description: Prepare standup notes
           spaceId: "ws-1",
           botId: "bot-1",
           userId: "user-1",
-          prompt: "say hi",
-          crons: [ONCE_ROUTINE_CRON],
+          prompt: "check the inbox",
+          crons: ["0 9 * * *"],
           timezone: "UTC",
           active: true,
           nextRunAt: scheduledAt,
-          lastRunAt: previousLastRunAt,
+          threadId: "role-thread-1",
         })),
       },
-      bot: {
-        findUnique: vi.fn(async () => ({
-          id: "bot-1",
-          thread: { id: "thread-1" },
-        })),
-      },
-      agentSkill: {
-        findMany: vi.fn(async () => []),
-      },
-      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
-        transactionCalls += 1;
-        if (transactionCalls === 1) {
-          return callback({
-            routine: {
-              updateMany: claimUpdateMany,
-              findUnique: vi.fn(async () => ({
-                prompt: "say hi",
-                modelProvider: null,
-                modelId: null,
-                thinkingLevel: null,
-              })),
-            },
-            task: { create: vi.fn(async () => ({ id: "task-1" })) },
-            run: { create: vi.fn(async () => ({ id: "run-1", taskId: "task-1" })) },
-          });
-        }
-        return callback({
-          routine: { updateMany: restoreUpdateMany },
-          task: { deleteMany: deleteTaskMany },
-          run: { deleteMany: deleteRunMany },
-        });
-      }),
+      bot: { findUnique: vi.fn(async () => ({ id: "bot-1", thread: { id: "dm-thread-1" } })) },
+      thread: { findFirst: vi.fn(async () => ({ id: "role-thread-1" })) },
+      agentSkill: { findMany: vi.fn(async () => []) },
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          routine: {
+            updateMany: claim,
+            findUnique: vi.fn(async () => ({
+              prompt: "check the inbox",
+              modelProvider: null,
+              modelId: null,
+              thinkingLevel: null,
+            })),
+          },
+          run: { create: runCreate },
+        }),
+      ),
     } as unknown as PrismaClient;
+    const wakeSessions = vi.fn(async () => undefined);
     const executor = createRunExecutor({
       prisma,
       jobs: { enqueue, cancel: vi.fn(async () => undefined), close: vi.fn(async () => undefined) },
-      events: { append: vi.fn(async () => undefined) },
+      events: { append: vi.fn(async () => undefined), wakeSessions },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
+    routineInputs.length = 0;
 
-    await expect(executor.wakeRoutine("routine-1", scheduledAt.toISOString())).rejects.toThrow(
-      "enqueue failed",
-    );
-    expect(deleteRunMany).toHaveBeenCalledWith({ where: { id: "run-1", status: "queued" } });
-    expect(deleteTaskMany).toHaveBeenCalledWith({ where: { id: "task-1", status: "queued" } });
-    expect(restoreUpdateMany).toHaveBeenCalledWith(
+    await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
+
+    // One input into the agent's session of the routine's conversation, in the claim's commit;
+    // the session runs it when idle or steers it into its live turn. No run, no run job.
+    expect(routineInputs).toEqual([
       expect.objectContaining({
-        where: expect.objectContaining({ id: "routine-1", active: false, nextRunAt: null }),
-        data: expect.objectContaining({
-          nextRunAt: scheduledAt,
-          active: true,
-          lastRunAt: previousLastRunAt,
-        }),
+        routineId: "routine-1",
+        threadId: "role-thread-1",
+        botId: "bot-1",
+        prompt: "check the inbox",
       }),
+    ]);
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(wakeSessions).toHaveBeenCalledExactlyOnceWith(["role-thread-1:bot-1"]);
+    // The repeating routine re-arms its next wake; nothing else is enqueued.
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ name: "routine.wakeup" }),
     );
   });
 

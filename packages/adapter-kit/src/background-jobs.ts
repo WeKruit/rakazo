@@ -62,6 +62,8 @@ const payloadSchemas = {
   }),
   "poll.close": z.object({ messageId: z.string().min(1), pollId: z.string().min(1) }),
   "discovery.warm": z.object({ botId: z.string().min(1) }),
+  "session.drive": z.object({ sessionId: z.string().min(1) }),
+  "session.cutover": z.strictObject({}),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -120,6 +122,16 @@ export function computerControlExpireJobKey(computerId: string, leaseId?: string
 
 export function skillTeachingExpireJobKey(skillId: string): string {
   return `skill.teaching-expire:${skillId}`;
+}
+
+/** One owner per session: a newer request replaces a queued one and waits behind a running one. */
+export function sessionDriveJob(sessionId: string): BackgroundJob {
+  const key = `session:${sessionId}`;
+  return { name: "session.drive", payload: { sessionId }, replaceKey: key, serialKey: key };
+}
+
+export function sessionCutoverJob(): BackgroundJob {
+  return { name: "session.cutover", payload: {}, replaceKey: "session.cutover" };
 }
 
 export function runContinueJob(runId: string): BackgroundJob {

@@ -487,15 +487,12 @@ export function useShellMessages({
           );
           accepted = true;
           if (echoed) turnTimer.accepted(clientNonce, sent.runId);
-          if (activeBotId.current === botTarget) {
+          const { runId, taskId } = sent;
+          if (activeBotId.current === botTarget && runId && taskId) {
             updateSnapshot((current) =>
               applyThreadSendReceipt(
                 current,
-                {
-                  botId: botTarget,
-                  runId: sent.runId,
-                  taskId: sent.taskId,
-                },
+                { botId: botTarget, runId, taskId },
                 terminalRunReceipts.current,
               ),
             );

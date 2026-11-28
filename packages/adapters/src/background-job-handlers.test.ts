@@ -77,6 +77,8 @@ describe("createBackgroundJobHandlers", () => {
       secretStore: {} as unknown as EncryptedSecretStore,
       memoryProviders: { resolve: vi.fn(async () => null) },
       shutdownSignal: new AbortController().signal,
+      driveSession: vi.fn(async () => "released" as const),
+      sessionHostSignal: new AbortController().signal,
       messaging: {} as unknown as MessagingSurface,
     });
 
@@ -127,6 +129,8 @@ describe("createBackgroundJobHandlers", () => {
       secretStore: {} as unknown as EncryptedSecretStore,
       memoryProviders: { resolve: vi.fn(async () => null) },
       shutdownSignal: new AbortController().signal,
+      driveSession: vi.fn(async () => "released" as const),
+      sessionHostSignal: new AbortController().signal,
       scheduledRunSlots: 1,
     });
 
@@ -172,6 +176,8 @@ describe("createBackgroundJobHandlers", () => {
       secretStore,
       memoryProviders,
       shutdownSignal: new AbortController().signal,
+      driveSession: vi.fn(async () => "released" as const),
+      sessionHostSignal: new AbortController().signal,
       deploymentModelKey: "openrouter-key",
       deploymentModelConfigured: true,
     });
@@ -215,6 +221,8 @@ describe("createBackgroundJobHandlers", () => {
         secretStore: {} as unknown as EncryptedSecretStore,
         memoryProviders: { resolve: vi.fn(async () => null) },
         shutdownSignal: new AbortController().signal,
+        driveSession: vi.fn(async () => "released" as const),
+        sessionHostSignal: new AbortController().signal,
       });
 
       await handlers["history.compact"]({ threadId: "thread-fixture", sourceRunId: "origin-run" });

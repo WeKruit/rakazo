@@ -287,6 +287,7 @@ import {
   formatAgentEnvironmentInstruction,
   redactShellStreams,
 } from "./agent-environment.js";
+import { submitRoutineInput } from "./agent-session/routine-input.js";
 import {
   desktopProtectionGuardMessage,
   protectedComputerLifecycleRefusal,
@@ -530,7 +531,6 @@ import {
   isCatalogModelChoice,
   isDeploymentModelChoice,
   pinnedModelCredentialError,
-  routineRunModelPin,
   runModelChoice,
   selectConfiguredModel,
   UnavailableModelForAuthError,
@@ -2047,7 +2047,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
       );
       // Event-only routines have no next wake but stay armed for their events.
       const keepsActive = Boolean(nextRunAt) || routine.crons.length === 0;
-      const previousLastRunAt = routine.lastRunAt;
       const skillRecords = await listAgentSkillRecords(deps.prisma, {
         spaceId: routine.spaceId,
         userId: routine.userId,
@@ -2078,75 +2077,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
           },
         });
         if (!currentRoutine) return null;
-        const task = await tx.task.create({
-          data: {
-            spaceId: routine.spaceId,
-            botId: bot.id,
-            threadId: thread.id,
-            userId: routine.userId,
-            prompt: expandSkillReferencesInPrompt(currentRoutine.prompt, skillRecords),
-            status: "queued",
-          },
-        });
-        return tx.run.create({
-          data: {
-            spaceId: routine.spaceId,
-            botId: bot.id,
-            threadId: thread.id,
-            taskId: task.id,
-            userId: routine.userId,
-            status: "queued",
-            trigger: "routine",
-            routineId: routine.id,
-            ...routineRunModelPin(currentRoutine),
-          },
+        return submitRoutineInput(tx, {
+          routineId: routine.id,
+          spaceId: routine.spaceId,
+          userId: routine.userId,
+          threadId: thread.id,
+          botId: bot.id,
+          prompt: expandSkillReferencesInPrompt(currentRoutine.prompt, skillRecords),
+          model: currentRoutine,
         });
       });
       if (!claimed) return;
-      // Enqueue continuation first so a thread-signal failure cannot strand the run.
-      try {
-        await deps.jobs.enqueue(runContinueJob(claimed.id));
-      } catch (error) {
-        // Restore the claim so wakeup retry / routine reconciliation can fire again.
-        await deps.prisma.$transaction(async (tx) => {
-          await tx.run.deleteMany({
-            where: { id: claimed.id, status: "queued" },
-          });
-          await tx.task.deleteMany({
-            where: { id: claimed.taskId, status: "queued" },
-          });
-          await tx.routine.updateMany({
-            where: {
-              id: routine.id,
-              nextRunAt,
-              ...(keepsActive ? {} : { active: false }),
-            },
-            data: {
-              nextRunAt: scheduledAt,
-              active: true,
-              lastRunAt: previousLastRunAt,
-            },
-          });
-        });
-        throw error;
-      }
+      // The input is durable; a lost wake is repaired by the session sweep.
+      await deps.events.wakeSessions([claimed.sessionId]);
       try {
         await deps.events.append({
           spaceId: routine.spaceId,
           threadId: thread.id,
           botId: bot.id,
           type: "routine.fired",
-          runId: claimed.id,
           payload: { routineId: routine.id, scheduledFor },
         });
       } catch {
-        // Best effort: the run is already queued.
+        // Best effort: the input is already queued.
       }
       if (isOneShotRoutineCrons(routine.crons)) {
         try {
           await deps.jobs.cancel(routineJobKey(routine.id));
         } catch {
-          // Best effort: the run is already queued for continuation.
+          // Best effort: the input is already queued.
         }
       } else if (nextRunAt) {
         await deps.jobs.enqueue(routineWakeupJob(routine.id, nextRunAt));

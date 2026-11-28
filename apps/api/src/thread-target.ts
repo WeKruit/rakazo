@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import type { JobPublisher, SandboxProvider } from "@rakazo/adapter-kit";
-import { recruitingAgentRunWaitJob, runContinueJob } from "@rakazo/adapter-kit";
+import { runContinueJob } from "@rakazo/adapter-kit";
 import {
   agentRunWaitTarget,
   cancelComputerRunWork,
@@ -35,13 +35,12 @@ import {
   resolveGroupTargetBotIds,
   runFailureError,
   runsBesidePerson,
-  takesPersonMessages,
   screenIsChinese,
+  takesPersonMessages,
 } from "@rakazo/core";
 import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-quote";
 import type { PrismaClient, QueuedMessageChange, ThreadEvents } from "@rakazo/db";
 import {
-  answerWaitingRunWithTextInTransaction,
   appendEventInTransaction,
   cancelFormAskInTransaction,
   cancelRunsInTransaction,
@@ -59,6 +58,8 @@ import {
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
   STOPPED_TURN,
   seesOperatorSpend,
+  submitConversationInput,
+  submitStopInputsInTransaction,
   threadStopRunWhere,
   touchGroupUpdatedAt,
   updateQueuedMessage,
@@ -321,7 +322,15 @@ async function replayExistingSend(
   const linkedRun =
     message.sourceRuns[0] ??
     (message.runId ? await deps.prisma.run.findUnique({ where: { id: message.runId } }) : null);
-  if (!linkedRun && orderedReceiptRuns.length === 0) return null;
+  if (!linkedRun && orderedReceiptRuns.length === 0) {
+    // Admitted as session input: wake those sessions again in case the first wake was lost.
+    const inputs = await deps.prisma.sessionInput.findMany({
+      where: { messageId: message.id },
+      select: { sessionId: true },
+    });
+    await deps.events.wakeSessions(inputs.map((row) => row.sessionId));
+    return { taskId: null, runId: null, seq: message.seq };
+  }
   const runs = orderedReceiptRuns.length
     ? orderedReceiptRuns
     : message.sourceRuns.length
@@ -904,11 +913,9 @@ export async function sendThreadMessage(
     throw new ORPCError("BAD_REQUEST", { message: "replyQuote requires replyToMessageId." });
   }
 
-  const yielded: YieldedWake[] = [];
   const commit = () =>
     deps.prisma.$transaction(
       async (tx) => {
-        yielded.length = 0;
         const assertCorrespondenceScope = async () => {
           if (!input.correspondenceReference) return;
           // The native message counter already locks this thread. A role switch cannot race this check.
@@ -1001,175 +1008,47 @@ export async function sendThreadMessage(
             clientNonce: input.clientNonce,
           });
           await assertCorrespondenceScope();
-          const live = await tx.run.findMany({
-            where: {
-              threadId: target.threadId,
-              botId: target.botId,
-              status: { in: [...ACTIVE_RUN_STATUSES] },
-            },
-            select: { id: true, taskId: true, status: true, trigger: true, clientNonce: true },
-          });
-          const unheld = await yieldBackgroundWakes(
+          // The agent's session takes the message: steered into its live run, or the start of
+          // the next one. A card no longer holds a run, so text typed beside one is a message too.
+          const submitted = await submitConversationInput(
             tx,
-            actor,
-            target.threadId,
-            live,
-            yielded,
-            target.botId,
-          );
-          if (input.queueMode !== "follow_up")
-            await cancelFormAsks(tx, actor, target.threadId, unheld);
-          const activeRuns = await withoutCardHeldRuns(
-            tx,
-            target.threadId,
-            unheld,
-            input.queueMode,
-          );
-          const queueMode = input.queueMode;
-          const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
-          if (
-            queueMode !== "follow_up" &&
-            waitingRuns.length &&
-            !activeRuns.some(steersUserMessage)
-          ) {
-            const answerText = input.text;
-            if (!answerText?.trim()) {
-              throw new ORPCError("CONFLICT", {
-                message: "Answer the pending ask first.",
-              });
-            }
-            for (const run of waitingRuns) {
-              const answered = await answerWaitingRunWithTextInTransaction(tx, {
-                spaceId: actor.spaceId,
-                threadId: target.threadId,
-                runId: run.id,
-                answeredByUserId: actor.userId,
-                answer: answerText,
-                answerMessageId: message.id,
-              });
-              if (!answered) {
-                throw new ORPCError("CONFLICT", {
-                  message: "Answer the pending ask first.",
-                });
-              }
-            }
-            const answered = waitingRuns.map((run) => ({ ...run, status: "queued" }));
-            const primary = answered[0];
-            if (!primary) throw new IsolationError();
-            await tx.message.update({ where: { id: message.id }, data: { runId: primary.id } });
-            const event = await appendEventInTransaction(tx, {
+            {
               spaceId: actor.spaceId,
-              threadId: target.threadId,
-              botId: target.botId,
-              type: "thread.message.created",
-              runId: primary.id,
-              payload: {
-                messageId: message.id,
-                role: "user",
-                blocks,
-                callId,
-                runIds: answered.map((run) => run.id),
-                replyToMessageId,
-                replyQuote,
-                replyPreview,
-              },
-            });
-            return { message, runs: answered, eventSeq: event.seq };
-          }
-          if (
-            activeRuns.some(
-              (run) => run.status !== "waiting_input" && !STEERABLE_RUN_STATUSES.has(run.status),
-            )
-          ) {
-            throw new ORPCError("CONFLICT", {
-              message: "Answer the pending ask first.",
-            });
-          }
-          const active = activeRuns.find(steersUserMessage) ?? activeRuns[0];
-          if (active) {
-            const steers = steersUserMessage(active);
-            await tx.steeringMessage.create({
-              data: {
-                messageId: message.id,
-                botId: target.botId,
-                userId: actor.userId,
-                runId: steers ? active.id : null,
-                ...(queueMode === "follow_up"
-                  ? { originTrigger: "follow_up" }
-                  : steers && input.interrupt
-                    ? { originTrigger: "interrupt" }
-                    : {}),
-              },
-            });
-            await tx.message.update({ where: { id: message.id }, data: { runId: active.id } });
-            const event = await appendEventInTransaction(tx, {
-              spaceId: actor.spaceId,
-              threadId: target.threadId,
-              botId: target.botId,
-              type: "thread.message.created",
-              runId: active.id,
-              payload: {
-                messageId: message.id,
-                role: "user",
-                blocks,
-                callId,
-                replyToMessageId,
-                replyQuote,
-                replyPreview,
-                queued: true,
-              },
-            });
-            return { message, runs: [active], eventSeq: event.seq };
-          }
-          const task = await tx.task.create({
-            data: {
-              spaceId: actor.spaceId,
-              botId: target.botId,
-              threadId: target.threadId,
               userId: actor.userId,
-              prompt: buildSendPrompt(
-                input.text,
-                artifacts,
-                [...connectorNames, ...(input.connectorNames ?? [])],
-                input.correspondenceReference,
-                input.recruitingContext,
-              ),
-              status: "queued",
+              threadId: target.threadId,
+              botId: target.botId,
             },
-          });
-          const run = await tx.run.create({
-            data: {
-              spaceId: actor.spaceId,
-              botId: target.botId,
-              threadId: target.threadId,
-              taskId: task.id,
-              userId: actor.userId,
-              status: "queued",
+            {
+              kind: input.queueMode === "follow_up" ? "followUp" : "message",
               trigger: "user",
-              clientNonce: sendRunClientNonce(input.clientNonce, message.id),
-              sourceMessageId: message.id,
+              messageId: message.id,
+              payload: {
+                text: buildSendPrompt(
+                  input.text,
+                  artifacts,
+                  [...connectorNames, ...(input.connectorNames ?? [])],
+                  input.correspondenceReference,
+                  input.recruitingContext,
+                ),
+              },
             },
-          });
-          await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
-          // No queued run can exist here: activeRuns (which include queued) was empty.
+          );
           const event = await appendEventInTransaction(tx, {
             spaceId: actor.spaceId,
             threadId: target.threadId,
             botId: target.botId,
             type: "thread.message.created",
-            runId: run.id,
             payload: {
               messageId: message.id,
               role: "user",
               blocks,
               callId,
-              runIds: [run.id],
               replyToMessageId,
               replyQuote,
               replyPreview,
             },
           });
-          return { message, runs: [run], eventSeq: event.seq };
+          return { message, sessionIds: [submitted.sessionId], eventSeq: event.seq };
         }
 
         const members = await lockAndLoadGroupMembers(tx, actor, target);
@@ -1210,81 +1089,21 @@ export async function sendThreadMessage(
           clientNonce: input.clientNonce,
         });
         await assertCorrespondenceScope();
-        const live = await tx.run.findMany({
-          where: {
-            threadId: target.threadId,
-            botId: { in: targetBotIds },
-            status: { in: [...ACTIVE_RUN_STATUSES] },
-          },
-          select: {
-            id: true,
-            taskId: true,
-            botId: true,
-            status: true,
-            trigger: true,
-            clientNonce: true,
-          },
-        });
-        const unheld = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
-        if (input.queueMode !== "follow_up")
-          await cancelFormAsks(tx, actor, target.threadId, unheld);
-        const activeRuns = await withoutCardHeldRuns(tx, target.threadId, unheld, input.queueMode);
         const queueMode = input.queueMode;
-        const activeByBotId = new Map<string, (typeof activeRuns)[number]>();
-        const answeredByBotId = new Map<string, Array<(typeof activeRuns)[number]>>();
-        const conversationalBotIds = new Set(
-          activeRuns.filter(steersUserMessage).map((run) => run.botId),
-        );
-        for (const run of activeRuns) {
-          if (run.status === "waiting_input") {
-            if (conversationalBotIds.has(run.botId)) continue;
-            if (queueMode === "follow_up") {
-              activeByBotId.set(run.botId, run);
-              continue;
-            }
-            const answerText = input.text;
-            if (!answerText?.trim()) {
-              throw new ORPCError("CONFLICT", {
-                message: "Answer the pending ask first.",
-              });
-            }
-            const answered = await answerWaitingRunWithTextInTransaction(tx, {
-              spaceId: actor.spaceId,
-              threadId: target.threadId,
-              runId: run.id,
-              answeredByUserId: actor.userId,
-              answer: answerText,
-              answerMessageId: message.id,
-            });
-            if (!answered) {
-              throw new ORPCError("CONFLICT", {
-                message: "Answer the pending ask first.",
-              });
-            }
-            const queuedRun = { ...run, status: "queued" };
-            const queuedForBot = answeredByBotId.get(run.botId);
-            if (queuedForBot) queuedForBot.push(queuedRun);
-            else answeredByBotId.set(run.botId, [queuedRun]);
-            continue;
-          }
-          if (!STEERABLE_RUN_STATUSES.has(run.status)) {
-            throw new ORPCError("CONFLICT", {
-              message: "Answer the pending ask first.",
-            });
-          }
-          const current = activeByBotId.get(run.botId);
-          if (!current || (!steersUserMessage(current) && steersUserMessage(run))) {
-            activeByBotId.set(run.botId, run);
-          }
-        }
-        const runs: Array<{ id: string; taskId: string; botId: string; status: string }> = [];
-        // Queued only while every addressed bot holds it as unread steering.
-        let steeredCount = 0;
-        // "After you finish" sent while only a teammate is still working waits for that
-        // teammate's answer instead of starting a second, parallel turn.
+        // "After you finish" sent while only a teammate is working waits for that teammate's
+        // answer instead of starting a second, parallel turn.
+        const targetsWorking =
+          queueMode === "follow_up"
+            ? await tx.run.count({
+                where: {
+                  threadId: target.threadId,
+                  botId: { in: targetBotIds },
+                  status: { in: [...STEERABLE_RUN_STATUSES] },
+                },
+              })
+            : 0;
         const teammateRun =
-          queueMode === "follow_up" &&
-          !targetBotIds.some((botId) => activeByBotId.has(botId) || answeredByBotId.has(botId))
+          queueMode === "follow_up" && targetsWorking === 0
             ? (
                 await tx.run.findMany({
                   where: {
@@ -1293,107 +1112,51 @@ export async function sendThreadMessage(
                     status: { in: [...STEERABLE_RUN_STATUSES] },
                   },
                   orderBy: { createdAt: "desc" },
-                  select: { id: true, taskId: true, botId: true, status: true, trigger: true },
+                  select: { id: true, botId: true, status: true, trigger: true },
                 })
               ).find(steersUserMessage)
             : undefined;
-        if (teammateRun) {
-          await tx.steeringMessage.create({
-            data: {
-              messageId: message.id,
-              botId: teammateRun.botId,
-              userId: actor.userId,
-              runId: teammateRun.id,
-              originTrigger: "follow_up",
-            },
-          });
-          runs.push(teammateRun);
-          steeredCount = targetBotIds.length;
-        }
-        for (const botId of teammateRun ? [] : targetBotIds) {
-          const answered = answeredByBotId.get(botId);
-          if (answered) {
-            runs.push(...answered);
-            continue;
-          }
-          const active = activeByBotId.get(botId);
-          if (active) {
-            const steers = steersUserMessage(active);
-            steeredCount += 1;
-            await tx.steeringMessage.create({
-              data: {
-                messageId: message.id,
-                botId,
-                userId: actor.userId,
-                runId: steers ? active.id : null,
-                ...(queueMode === "follow_up"
-                  ? { originTrigger: "follow_up" }
-                  : steers && input.interrupt
-                    ? { originTrigger: "interrupt" }
-                    : {}),
-              },
-            });
-            runs.push(active);
-            continue;
-          }
-          const task = await tx.task.create({
-            data: {
-              spaceId: actor.spaceId,
-              botId,
-              threadId: target.threadId,
-              userId: actor.userId,
-              prompt: buildSendPrompt(
-                input.text,
-                artifacts,
-                [...connectorNames, ...(input.connectorNames ?? [])],
-                input.correspondenceReference,
-                input.recruitingContext,
-              ),
-              status: "queued",
-            },
-          });
-          const run = await tx.run.create({
-            data: {
-              spaceId: actor.spaceId,
-              botId,
-              threadId: target.threadId,
-              taskId: task.id,
-              userId: actor.userId,
-              status: "queued",
+        const prompt = buildSendPrompt(
+          input.text,
+          artifacts,
+          [...connectorNames, ...(input.connectorNames ?? [])],
+          input.correspondenceReference,
+          input.recruitingContext,
+        );
+        const sessionIds: string[] = [];
+        // Each addressed agent's session takes the message, like a one-to-one chat.
+        for (const botId of teammateRun ? [teammateRun.botId] : targetBotIds) {
+          const submitted = await submitConversationInput(
+            tx,
+            { spaceId: actor.spaceId, userId: actor.userId, threadId: target.threadId, botId },
+            {
+              kind: queueMode === "follow_up" ? "followUp" : "message",
               trigger: "user",
-              clientNonce: sendRunClientNonce(input.clientNonce, message.id, botId),
-              sourceMessageId: message.id,
+              messageId: message.id,
+              payload: { text: prompt },
             },
-          });
-          runs.push(run);
+          );
+          sessionIds.push(submitted.sessionId);
         }
-        const firstRun = runs[0];
-        const eventBotId = firstRun?.botId ?? targetBotIds[0];
+        const eventBotId = teammateRun?.botId ?? targetBotIds[0];
         if (!eventBotId) throw new IsolationError("Group send did not resolve a target");
-        // Bots that received a new run had no active (hence no queued) run to supersede.
-        if (firstRun) {
-          await tx.message.update({ where: { id: message.id }, data: { runId: firstRun.id } });
-        }
         await touchGroupUpdatedAt(tx, target.groupId);
         const event = await appendEventInTransaction(tx, {
           spaceId: actor.spaceId,
           threadId: target.threadId,
           botId: eventBotId,
           type: "thread.message.created",
-          runId: firstRun?.id ?? activeRuns[0]?.id,
           payload: {
             messageId: message.id,
             role: "user",
             blocks,
             callId,
-            runIds: runs.map((run) => run.id),
             replyToMessageId,
             replyQuote,
             replyPreview,
-            ...(steeredCount > 0 && steeredCount === targetBotIds.length ? { queued: true } : {}),
           },
         });
-        return { message, runs, eventSeq: event.seq };
+        return { message, sessionIds, eventSeq: event.seq };
       },
       { timeout: 15_000, maxWait: 5_000 },
     );
@@ -1409,26 +1172,27 @@ export async function sendThreadMessage(
     throw error;
   });
   if ("replay" in committed) return committed.replay;
-  // The run row is already durable; the realtime wake and the worker wake are independent.
+  // The input is already durable; the realtime wake and the session wake are independent.
   await Promise.all([
     deps.events.notify(target.threadId, committed.eventSeq).catch((error) => {
       // Subscribers catch up from the durable event cursor after a missed realtime wake.
       getLogger().error("thread send realtime notification", error);
     }),
-    enqueueRunsNeedingContinue(deps.jobs, committed.runs),
-    // A search follow-up that gave way picks the search up again once the recruiter is done.
-    ...yielded.map((wake) =>
-      deps.jobs
-        .enqueue(recruitingAgentRunWaitJob(wake, new Date(Date.now() + 60_000)))
-        .catch((error) => getLogger().error("search follow-up reschedule", error)),
-    ),
+    deps.events.wakeSessions(committed.sessionIds),
   ]);
-  if (releaseTakeover) {
-    for (const run of committed.runs) {
-      if (steersUserMessage(run)) await releaseTakeover(run.id);
-    }
+  if (releaseTakeover && target.kind === "bot") {
+    // The person writing takes the computer back from the live run they were watching.
+    const live = await deps.prisma.run.findMany({
+      where: {
+        threadId: target.threadId,
+        botId: target.botId,
+        status: { in: [...STEERABLE_RUN_STATUSES] },
+      },
+      select: { id: true },
+    });
+    for (const run of live) await releaseTakeover(run.id);
   }
-  return sendResult(committed.message, committed.runs);
+  return { taskId: null, runId: null, seq: committed.message.seq };
 }
 
 /** Edit, remove, or send now a message the working reply has not read yet. */
@@ -1624,10 +1388,23 @@ export async function stopThreadRuns(
   scope: "turn" | "all" = "turn",
   announce = false,
 ) {
-  const { runIds, computers, leases, eventSeq } = await deps.prisma.$transaction(async (tx) => {
+  const stopped = await deps.prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR UPDATE`;
-    const cancelled = await tx.run.updateManyAndReturn({
+    // A started run of an agent's session is stopped by its owner: Stop is one input to that
+    // session. A run not yet started, or one no session owns, is cancelled here. With nothing
+    // running, Stop changes nothing.
+    const live = await tx.run.findMany({
       where: threadStopRunWhere(target.threadId, runId, scope),
+      select: { id: true, threadId: true, botId: true, status: true },
+    });
+    const started = live.filter((run) => run.status !== "queued");
+    const stops = await submitStopInputsInTransaction(tx, started, "stop");
+    const owned = new Set(started.map((run) => run.id).filter((id) => !stops.unowned.includes(id)));
+    const cancelled = await tx.run.updateManyAndReturn({
+      where: {
+        ...threadStopRunWhere(target.threadId, runId, scope),
+        id: { in: live.filter((run) => !owned.has(run.id)).map((run) => run.id) },
+      },
       data: {
         status: "cancelled",
         completedAt: new Date(),
@@ -1702,7 +1479,9 @@ export async function stopThreadRuns(
       });
       eventSeq = event.seq;
     }
-    if (announce && cancelled[0]) {
+    const stoppedBotId =
+      cancelled[0]?.botId ?? started.find((run) => owned.has(run.id))?.botId ?? null;
+    if (announce && stoppedBotId) {
       // Everyone in the conversation sees who stopped the work, as a line in the transcript.
       const user = await tx.user.findUnique({
         where: { id: actor.userId },
@@ -1730,13 +1509,13 @@ export async function stopThreadRuns(
       const message = await createThreadMessageInTransaction(tx, {
         threadId: target.threadId,
         role: "system",
-        botId: cancelled[0].botId,
+        botId: stoppedBotId,
         blocks,
       });
       const event = await appendEventInTransaction(tx, {
         spaceId: actor.spaceId,
         threadId: target.threadId,
-        botId: cancelled[0].botId,
+        botId: stoppedBotId,
         type: "thread.message.created",
         payload: { messageId: message.id, role: "system", blocks },
       });
@@ -1750,14 +1529,16 @@ export async function stopThreadRuns(
         },
       });
     }
-    return { runIds: ids, computers, leases, eventSeq };
+    return { runIds: ids, computers, leases, eventSeq, sessionIds: stops.sessionIds };
   });
+  const { runIds, computers, leases, eventSeq, sessionIds } = stopped;
   if (eventSeq !== null) {
     // The events are durable; subscribers refetch from their persisted cursor.
     await deps.events.notify(target.threadId, eventSeq).catch((error) => {
       getLogger().error("thread stop realtime notification", error);
     });
   }
+  await deps.events.wakeSessions(sessionIds);
   // Keep the DB lease until after teardown so a replacement run cannot claim the
   // screen while we still need the cancelled run's screenLeaseId to release it.
   const computerById = new Map(computers.map((computer) => [computer.id, computer]));

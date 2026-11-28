@@ -62,6 +62,7 @@ import {
   SmtpEmailProvider,
   SpaceMemoryProviderResolver,
   sandboxProviderOptionsFromEnv,
+  sessionHostNotIntegrated,
   startJobQueueReporter,
   withSecretPersistence,
 } from "@rakazo/adapters";
@@ -117,6 +118,8 @@ async function main() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
   const shutdown = new AbortController();
+  // Aborted by the drain: each owned agent session lets its live turn finish, then releases.
+  const sessionHosts = new AbortController();
   // Prisma and job publishing hold a connection only per query or transaction, so DATABASE_URL
   // may be a transaction-mode pooler. graphile's runner (LISTEN, prepared statements) and the
   // reconciler's lock keep a session for the process lifetime, so they use the session URL,
@@ -153,6 +156,8 @@ async function main() {
   prisma = withSecretPersistence(prisma, secrets);
   const events = createThreadEvents(prisma, realtime, {
     runSecretWriter: createRunSecretWriter(secrets),
+    // The publisher is made below; sessions are only woken once jobs run.
+    jobs: { enqueue: (job) => jobs.enqueue(job) },
   });
   const ticketBoardEnabled = process.env.TICKET_BOARD_ENABLED === "true";
   const boardEvents = createBoardEvents(realtime);
@@ -362,6 +367,9 @@ async function main() {
     shutdownSignal: shutdown.signal,
     // Keep at least two in five slots for conversations.
     scheduledRunSlots: Math.max(1, Math.floor((workerConcurrency * 3) / 5)),
+    // TEMPORARY (plan Task 8): bind runSessionHost(deps, sessionId, signal) here at integration.
+    driveSession: sessionHostNotIntegrated,
+    sessionHostSignal: sessionHosts.signal,
   });
   // graphile-worker run() connects through the shared pool. createPool already
   // retries connect() on 53300 a finite number of times. Keep retrying start
@@ -425,6 +433,7 @@ async function main() {
   const drain = createWorkerDrain({
     stopJobs: () => jobHost.stop(),
     stopReconciler: () => reconciler.stop(),
+    quiesceSessions: () => sessionHosts.abort(),
     afterDrain: sessionAdmission ? () => sessionAdmission.beginShutdown() : undefined,
   });
   // Active runs retain leases/heartbeats until job drain completes; only then close slot sessions.

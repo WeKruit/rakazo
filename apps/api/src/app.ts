@@ -71,6 +71,7 @@ import {
   SpaceMemoryProviderResolver,
   StripeBillingProvider,
   sandboxProviderOptionsFromEnv,
+  sessionHostNotIntegrated,
   stripeBillingConfigFromEnv,
   toTeamChatInbound,
   withSecretPersistence,
@@ -247,6 +248,8 @@ export async function createApp(
   prisma = withSecretPersistence(prisma, secrets);
   const events = createThreadEvents(prisma, realtime, {
     runSecretWriter: createRunSecretWriter(secrets),
+    // The publisher is made below; sessions are only woken once requests arrive.
+    jobs: { enqueue: (job) => jobs.enqueue(job) },
   });
   const ticketBoardEnabled = env.ticketBoardEnabled;
   const boardEvents = createBoardEvents(realtime);
@@ -617,6 +620,9 @@ export async function createApp(
     connector: stack.connector,
     artifacts,
     shutdownSignal: shutdown.signal,
+    // TEMPORARY (plan Task 8): bind runSessionHost(deps, sessionId, signal) here at integration.
+    driveSession: sessionHostNotIntegrated,
+    sessionHostSignal: shutdown.signal,
   });
   if (inMemoryJobs) {
     await inMemoryJobs.start(jobHandlers);
@@ -653,6 +659,8 @@ export async function createApp(
   const actorEvents = actorDb
     ? createThreadEvents(actorPrisma, realtime, {
         runSecretWriter: createRunSecretWriter(secrets),
+        // The publisher is made below; sessions are only woken once requests arrive.
+        jobs: { enqueue: (job) => jobs.enqueue(job) },
       })
     : events;
   const router = createRouter({

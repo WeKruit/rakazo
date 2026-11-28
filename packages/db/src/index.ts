@@ -53,6 +53,7 @@ export * from "./repos.js";
 export * from "./routines-read.js";
 export * from "./scope.js";
 export * from "./session-admission.js";
+export * from "./session-inputs.js";
 export * from "./sessions.js";
 export * from "./spaces.js";
 export * from "./transaction-retry.js";

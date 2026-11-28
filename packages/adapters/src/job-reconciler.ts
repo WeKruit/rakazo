@@ -8,6 +8,7 @@ import {
   recruitingCandidateProfilesJob,
   routineWakeupJob,
   runContinueJob,
+  sessionDriveJob,
 } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { stuckWorkStatusMessages } from "@rakazo/core";
@@ -461,6 +462,16 @@ export function createJobReconciler(
         );
       }
 
+      if (stopped) return;
+      try {
+        // A session with no live owner and input it has not taken, or a run it was in the middle
+        // of (its owner died), is driven again; the new owner resumes the run from storage.
+        const sessions = await sessionsWithoutOwner(deps.prisma, now, batchSize);
+        await Promise.all(sessions.map((id) => deps.jobs.enqueue(sessionDriveJob(id))));
+      } catch (error) {
+        getLogger().error("session lease reconciliation", error);
+      }
+
       // Preserve queued-run backoff, but replace expired owners' wakeups: deduping
       // a dead worker's locked job would block native lease recovery for four hours.
       // Graphile replacement leaves that handler locked; the run fence guards takeover.
@@ -533,6 +544,31 @@ export function createJobReconciler(
       await deps.leadership?.release();
     },
   };
+}
+
+/**
+ * Sessions whose lease has lapsed (or was never taken) that still have undelivered input or a
+ * projected run that never ended. Projected runs carry no run lease; run-harness runs do.
+ */
+export async function sessionsWithoutOwner(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  now: Date,
+  limit: number,
+): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+    SELECT s.id FROM conversation_sessions s
+    WHERE (s."leaseExpiresAt" IS NULL OR s."leaseExpiresAt" <= ${now})
+      AND (
+        EXISTS (SELECT 1 FROM session_inputs i
+          WHERE i."sessionId" = s.id AND i."deliveredAt" IS NULL)
+        OR EXISTS (SELECT 1 FROM runs r
+          WHERE r."threadId" = s."threadId" AND r."botId" = s."botId"
+            AND r.status = 'running' AND r."leaseExpiresAt" IS NULL)
+      )
+    ORDER BY s."leaseExpiresAt" ASC NULLS FIRST, s.id
+    LIMIT ${limit}
+  `);
+  return rows.map((row) => row.id);
 }
 
 /** Prefer the full bot transcript for a run so interim progress is not mistaken for the sole result. */

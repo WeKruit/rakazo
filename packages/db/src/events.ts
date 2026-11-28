@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { RealtimeFanout } from "@rakazo/adapter-kit";
+import type { JobPublisher, RealtimeFanout } from "@rakazo/adapter-kit";
 import type {
   AskAnswer,
   AskFormResponse,
@@ -27,11 +27,9 @@ import {
   isSecretAskBlock,
   isWorkActivity,
   messagingChannelId,
-  resolveAskChoice,
   RETIRED_APPROVAL_KINDS,
-  runsBesidePerson,
+  resolveAskChoice,
   sanitizeJsonValue,
-  takesPersonMessages,
   type WorkActivity,
   workActivityForTool,
 } from "@rakazo/core";
@@ -52,6 +50,7 @@ import { syncMirroredAsksInTransaction } from "./mirrored-asks.js";
 import { authorizeRecruitingFeedbackMessage } from "./recruiting.js";
 import { retriedReplyInTransaction } from "./retried-reply.js";
 import { IsolationError } from "./scope.js";
+import { submitConversationInput, wakeSessions } from "./session-inputs.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 const EVENT_BATCH_SIZE = 200;
@@ -112,6 +111,8 @@ export interface ThreadEvents {
   pauseRunForInput(input: PauseRunForInput): Promise<boolean>;
   pauseRunForTakeover(input: PauseRunForTakeover): Promise<boolean>;
   sendUserMessage(input: SendUserMessageInput): Promise<SendUserMessageResult>;
+  /** After an input commits: wake each session's owner, or queue one to take it. */
+  wakeSessions(sessionIds: Iterable<string>): Promise<void>;
   follow(threadId: string, cursor: number, signal?: AbortSignal): AsyncGenerator<ProductEvent>;
   /** Wake once per sidebar-relevant change to the actor's own bots (see SIDEBAR_EVENT_TYPES). */
   followSidebar(
@@ -406,7 +407,12 @@ export interface RunSecretWriter {
 export function createThreadEvents(
   prisma: PrismaClient,
   realtime?: RealtimeFanout,
-  options: { catchUpMs?: number; runSecretWriter?: RunSecretWriter } = {},
+  options: {
+    catchUpMs?: number;
+    runSecretWriter?: RunSecretWriter;
+    /** Queues `session.drive` for sessions that get input. */
+    jobs?: Pick<JobPublisher, "enqueue">;
+  } = {},
 ): ThreadEvents {
   return {
     answerRunInput: (input) => answerRunInput(prisma, input, realtime, options.runSecretWriter),
@@ -420,7 +426,8 @@ export function createThreadEvents(
     publishTransient: (input) => publishTransientThreadEvent(prisma, input, realtime),
     pauseRunForInput: (input) => pauseRunForInput(prisma, input, realtime),
     pauseRunForTakeover: (input) => pauseRunForTakeover(prisma, input, realtime),
-    sendUserMessage: (input) => sendUserMessage(prisma, input, realtime),
+    sendUserMessage: (input) => sendUserMessage(prisma, input, realtime, options.jobs),
+    wakeSessions: (sessionIds) => wakeSessions({ realtime, jobs: options.jobs }, sessionIds),
     follow: (threadId, cursor, signal) =>
       followThreadEvents(prisma, threadId, cursor, realtime, signal, options.catchUpMs),
     followSidebar: (actor, signal) => followSidebar(actor, realtime, signal, options.catchUpMs),
@@ -454,6 +461,11 @@ export async function clearThread(
     const now = new Date();
     const runIds = activeRuns.map((run) => run.id);
     await cancelRunsInTransaction(tx, activeRuns, now);
+    // The agents' sessions hold the cleared transcript and its queued inputs. A live owner loses
+    // its fence with the row and stops; the next message starts a fresh session.
+    await tx.conversationSession.deleteMany({
+      where: { threadId: input.threadId, ...(input.groupId ? {} : { botId: input.botId }) },
+    });
     // Expire as tombstones so a still-open provider screen claim cannot reset fencing to 1.
     await expireComputerExecutionLeases(tx, { runId: { in: runIds } });
     await tx.computer.updateMany({
@@ -518,14 +530,15 @@ export async function sendUserMessage(
   prisma: PrismaClient,
   input: SendUserMessageInput,
   realtime?: RealtimeFanout,
+  jobs?: Pick<JobPublisher, "enqueue">,
 ): Promise<SendUserMessageResult> {
   const replay = async (
-    db: Pick<PrismaClient, "message" | "run"> = prisma,
+    db: Pick<PrismaClient, "message" | "run" | "sessionInput"> = prisma,
   ): Promise<SendUserMessageResult | null> => {
     if (!input.clientNonce) return null;
     const include = { sourceRuns: { orderBy: { createdAt: "asc" as const }, take: 1 } };
     const message = input.routineEvent
-      ? await db.message.findFirst({
+      ? ((await db.message.findFirst({
           where: {
             clientNonce: input.clientNonce,
             sourceRuns: {
@@ -538,7 +551,7 @@ export async function sendUserMessage(
             },
           },
           include,
-        })
+        })) ?? (await routineInputReceipt(db, input, input.routineEvent.routineId)))
       : await db.message.findUnique({
           where: {
             threadId_clientNonce: { threadId: input.threadId, clientNonce: input.clientNonce },
@@ -668,110 +681,37 @@ export async function sendUserMessage(
           message.id,
         );
       }
-      const createRun = input.createRun !== false;
-      // Include the creation intro. It has no tools, so it must not absorb the message, and a
-      // second run would overlap it on a dedicated computer. Pending steering waits for the
-      // continuation that starts when the intro finishes.
-      const activeRuns =
-        createRun && !input.allowParallelRun && !input.routineEvent
-          ? await tx.run.findMany({
-              where: {
+      // The agent's session takes the message: its lane answers it now when idle, steers it into
+      // the live run otherwise, and keeps a follow-up until that run ends. No run is made here;
+      // the run row is the projection of the lane's next operation.
+      const submitted =
+        input.createRun === false
+          ? null
+          : await submitConversationInput(
+              tx,
+              {
+                spaceId: input.spaceId,
+                userId: input.userId,
                 threadId: input.threadId,
                 botId: input.botId,
-                status: {
-                  in: input.skipWaitingRuns
-                    ? ["running", "queued", "leased"]
-                    : ["running", "queued", "leased", "waiting_input", "waiting_takeover"],
+              },
+              {
+                kind: input.queueMode === "follow_up" ? "followUp" : "message",
+                trigger: input.trigger,
+                messageId: message.id,
+                payload: {
+                  text: input.prompt,
+                  ...(input.internal ? { internal: true as const } : {}),
+                  ...(input.routineEvent ? { routineId: input.routineEvent.routineId } : {}),
+                  ...(modelPin ? { modelPin } : {}),
                 },
               },
-              select: { id: true, taskId: true, status: true, trigger: true, clientNonce: true },
-            })
-          : [];
-      // A person's message is steered into the work already running for them (their own turn,
-      // a teammate's report, a check-in, a routine), never queued as a second turn. Only internal
-      // grading and background waits run beside it. Server input and inbound apps still wait
-      // their turn behind conversational work.
-      const person = !input.internal && (input.trigger === "user" || input.trigger === "follow_up");
-      const holding = activeRuns.filter(
-        (run) => !person || !runsBesidePerson(run.trigger) || run.status === "waiting_input",
-      );
-      const steers = (run: (typeof activeRuns)[number]) =>
-        takesMessages(run) ||
-        (person &&
-          takesPersonMessages(run.trigger) &&
-          !run.clientNonce?.startsWith(RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX));
-      const busy = holding.find(steers) ?? holding[0] ?? null;
-      let task = null;
-      let run = null;
-      if (createRun && !busy) {
-        task = await tx.task.create({
-          data: {
-            spaceId: input.spaceId,
-            botId: input.botId,
-            threadId: input.threadId,
-            userId: input.userId,
-            prompt: input.prompt,
-            status: "queued",
-          },
-        });
-        run = await tx.run.create({
-          data: {
-            spaceId: input.spaceId,
-            botId: input.botId,
-            threadId: input.threadId,
-            taskId: task.id,
-            userId: input.userId,
-            status: "queued",
-            trigger: input.trigger,
-            clientNonce: input.clientNonce ? `send:${message.id}` : undefined,
-            sourceMessageId: message.id,
-            routineId: input.routineEvent?.routineId,
-            ...(modelPin
-              ? {
-                  modelProvider: modelPin.modelProvider,
-                  modelId: modelPin.modelId,
-                  thinkingLevel: modelPin.thinkingLevel,
-                  modelPinned: true,
-                }
-              : {}),
-          },
-        });
-        if (input.linkMessageToRun) {
-          await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
-        }
-      } else if (createRun && busy) {
-        const held = !steers(busy);
-        await tx.steeringMessage.create({
-          data: {
-            messageId: message.id,
-            botId: input.botId,
-            userId: input.userId,
-            // Keep messaging on the hold so the later run is mirrored back to that app.
-            runId: held ? null : busy.id,
-            ...(held && input.trigger === "messaging"
-              ? { originTrigger: "messaging" }
-              : input.queueMode === "follow_up"
-                ? { originTrigger: FOLLOW_UP_ORIGIN }
-                : !held && input.interrupt
-                  ? { originTrigger: INTERRUPT_ORIGIN }
-                  : {}),
-            ...(input.modelPin
-              ? {
-                  modelProvider: input.modelPin.modelProvider,
-                  modelId: input.modelPin.modelId,
-                  thinkingLevel: input.modelPin.thinkingLevel,
-                }
-              : {}),
-          },
-        });
-        await tx.message.update({ where: { id: message.id }, data: { runId: busy.id } });
-      }
+            );
       const event = await appendEventInTransaction(tx, {
         spaceId: input.spaceId,
         threadId: input.threadId,
         botId: input.botId,
         type: "thread.message.created",
-        runId: run?.id ?? busy?.id,
         payload: {
           messageId: message.id,
           role: input.internal ? "system" : "user",
@@ -782,7 +722,7 @@ export async function sendUserMessage(
           ...(message.clientNonce?.startsWith("autocontinue:") ? { internal: true } : {}),
         },
       });
-      return { message, task, run, busy, event };
+      return { message, sessionId: submitted?.sessionId ?? null, event };
     });
   const committed = await commit().catch(async (error) => {
     const winner = await replay();
@@ -794,12 +734,39 @@ export async function sendUserMessage(
     // The event is durable; subscribers recover it from their persisted cursor.
     getLogger().error("user message realtime notification", error);
   });
+  if (committed.sessionId) await wakeSessions({ realtime, jobs }, [committed.sessionId]);
   return {
     messageId: committed.message.id,
     seq: committed.message.seq,
-    taskId: committed.task?.id ?? null,
-    runId: committed.run?.id ?? committed.busy?.id ?? null,
+    taskId: null,
+    runId: null,
   };
+}
+
+/** An event routine's message admitted as a session input: the receipt a retried event replays. */
+async function routineInputReceipt(
+  db: Pick<PrismaClient, "message" | "sessionInput">,
+  input: SendUserMessageInput,
+  routineId: string,
+) {
+  const messages = await db.message.findMany({
+    where: { clientNonce: input.clientNonce },
+    select: { id: true },
+  });
+  if (!messages.length) return null;
+  const admitted = await db.sessionInput.findFirst({
+    where: {
+      messageId: { in: messages.map((message) => message.id) },
+      payload: { path: ["routineId"], equals: routineId },
+      session: { spaceId: input.spaceId, botId: input.botId, userId: input.userId },
+    },
+    select: { messageId: true },
+  });
+  if (!admitted?.messageId) return null;
+  return db.message.findUnique({
+    where: { id: admitted.messageId },
+    include: { sourceRuns: { orderBy: { createdAt: "asc" as const }, take: 1 } },
+  });
 }
 
 /** The steering rows a run takes: the same filter for claiming them and for noticing them. */

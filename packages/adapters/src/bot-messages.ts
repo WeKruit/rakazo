@@ -1,8 +1,6 @@
-import { runContinueJob } from "@rakazo/adapter-kit";
 import type { BotMessageIntent, MessageBlock } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
-  BACKGROUND_RUN_TRIGGERS,
   BOT_MESSAGE_MAX_LENGTH,
   botMessageContext,
   botMessageHopExhausted,
@@ -19,10 +17,10 @@ import {
   lockConversationPair,
   mirrorAskInTransaction,
   type PrismaClient,
+  submitConversationInput,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { sleep } from "./background-wait.js";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { roundListedNotRecorded } from "./recruiting-round-check.js";
@@ -186,7 +184,7 @@ export async function messageBot(
   let committed:
     | {
         ok: true;
-        runId: string;
+        sessionId: string;
         targetEventSeq: number;
         senderEventSeq: number;
         working: boolean;
@@ -327,51 +325,29 @@ export async function messageBot(
             : null;
         // Staging 11-15: "where are the new ones?" queued behind the round it asked about, then
         // ran a second paid search after that round was shown. A request from the same
-        // conversation is steered into the team's running turn instead, like a person's message.
-        let targetRunId: string;
-        if (working) {
-          await tx.steeringMessage.create({
-            data: {
-              messageId: inbound.id,
-              botId: working.botId,
-              userId: run.userId,
-              runId: working.id,
-            },
-          });
-          targetRunId = working.id;
-        } else {
-          const task = await tx.task.create({
-            data: {
-              spaceId: run.spaceId,
-              botId: target.id,
-              threadId: targetThreadId,
-              userId: run.userId,
-              prompt: wakePrompt,
-              status: "queued",
-            },
-          });
-          const nextRun = await tx.run.create({
-            data: {
-              spaceId: run.spaceId,
-              botId: target.id,
-              threadId: targetThreadId,
-              taskId: task.id,
-              userId: run.userId,
-              status: "queued",
-              trigger: "bot_message",
-              sourceMessageId: inbound.id,
-            },
-            select: { id: true },
-          });
-          targetRunId = nextRun.id;
-        }
-        await tx.message.update({ where: { id: inbound.id }, data: { runId: targetRunId } });
+        // conversation goes to the session of the agent doing that work, like a person's message:
+        // its lane steers it into the running turn, or starts the next turn with it.
+        const recipientBotId = working?.botId ?? target.id;
+        const submitted = await submitConversationInput(
+          tx,
+          {
+            spaceId: run.spaceId,
+            userId: run.userId,
+            threadId: targetThreadId,
+            botId: recipientBotId,
+          },
+          {
+            kind: "message",
+            trigger: "bot_message",
+            messageId: inbound.id,
+            payload: { text: wakePrompt, internal: true },
+          },
+        );
         const inboundEvent = await appendEventInTransaction(tx, {
           spaceId: run.spaceId,
           threadId: targetThreadId,
-          botId: working?.botId ?? target.id,
+          botId: recipientBotId,
           type: "thread.message.created",
-          runId: targetRunId,
           payload: { messageId: inbound.id, role: "user", blocks: [inboundBlock] },
         });
         const outboundEvent = await appendEventInTransaction(tx, {
@@ -385,7 +361,7 @@ export async function messageBot(
         });
         return {
           ok: true as const,
-          runId: targetRunId,
+          sessionId: submitted.sessionId,
           targetEventSeq: inboundEvent.seq,
           senderEventSeq: outboundEvent.seq,
           working: Boolean(working),
@@ -413,12 +389,7 @@ export async function messageBot(
   await deps.events.notify(run.threadId, committed.senderEventSeq).catch((error) => {
     getLogger().error("bot message sender echo notification", error);
   });
-  // A request steered into the team's running turn has no turn of its own to start.
-  if (!committed.working)
-    await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
-      // The queued run is durable; the job reconciler repairs a missed wake.
-      getLogger().error("bot message enqueue", error);
-    });
+  await deps.events.wakeSessions([committed.sessionId]);
   const progress = committed.working
     ? await teamProgress(deps.prisma, {
         threadId: targetThreadId,

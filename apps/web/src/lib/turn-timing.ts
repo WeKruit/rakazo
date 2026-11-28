@@ -41,11 +41,11 @@ export function createTurnTimer(options: {
       const turn = turns.get(clientNonce);
       if (turn && turn.timing.echoMs === undefined) turn.timing.echoMs = since(turn);
     },
-    accepted(clientNonce: string, runId: string) {
+    accepted(clientNonce: string, runId: string | null) {
       const turn = turns.get(clientNonce);
       if (!turn) return;
       turn.timing.acceptedMs = since(turn);
-      turn.timing.runId = runId;
+      if (runId) turn.timing.runId = runId;
     },
     failed(clientNonce: string) {
       turns.delete(clientNonce);
