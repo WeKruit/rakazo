@@ -5,6 +5,7 @@ import type { ExecutorDeps } from "./executor.js";
 import { delegatedRequestMessage } from "./global-role-writes.js";
 import {
   copyRecruiterMessageToRole,
+  earlierRecruiterWords,
   latestRecruiterFiles,
   openRoleGroup,
   roleAlreadyOpenNote,
@@ -117,13 +118,18 @@ export async function delegateWork(
       : { people: [], unknown: refs };
   const round = Number.isInteger(args.round) ? Number(args.round) : undefined;
   const files = target.opening ? [] : await latestRecruiterFiles(ctx.deps.prisma, ctx.run.threadId);
+  // Branch play 11-28 (step D): work in no role got only the recruiter's newest words, without the
+  // email they referred to; the earlier messages go verbatim, counted as new_role counts them.
+  const earlier = target.opening
+    ? []
+    : await earlierRecruiterWords(ctx.deps.prisma, ctx.run.threadId, earlierCount(args));
   const sent = await messageBot(ctx.deps, ctx.run, ctx.bot, {
     bot_id: target.recipient.id,
     thread_id: target.threadId,
     sender_label: RECRUITING_GLOBAL_AGENT_NAME,
     target_label: target.groupId ? `${target.title} team` : target.recipient.name,
     message: ctx.redact(
-      target.opening ?? delegatedRequestMessage(words, referents.people, round, files),
+      target.opening ?? delegatedRequestMessage(words, referents.people, round, files, earlier),
     ),
     ...(words ? { recruiter_words: ctx.redact(words) } : {}),
     intent: "request",
@@ -143,6 +149,9 @@ export async function delegateWork(
     ...(referents.unknown.length ? { notSavedPeople: referents.unknown } : {}),
   };
 }
+
+const earlierCount = (args: DelegateWorkArgs) =>
+  Math.min(10, Math.max(0, Math.trunc(Number(args.earlier_messages) || 0)));
 
 type Resolved = (Target & { opening?: string; deliveryKey?: string }) | { error: string };
 
@@ -265,7 +274,7 @@ async function newRoleTarget(
     botId: ctx.bot.id,
     deliveryKey: roleKey,
     title,
-    earlierMessages: Math.min(10, Math.max(0, Math.trunc(Number(args.earlier_messages) || 0))),
+    earlierMessages: earlierCount(args),
     askedMessageId,
   });
   if (!opening)

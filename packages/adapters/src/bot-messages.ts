@@ -1,6 +1,5 @@
 import type { BotMessageIntent, MessageBlock } from "@rakazo/contracts";
 import {
-  ACTIVE_RUN_STATUSES,
   BOT_MESSAGE_MAX_LENGTH,
   botMessageContext,
   botMessageHopExhausted,
@@ -557,8 +556,9 @@ export async function teamProgress(
 
 /**
  * The result of work another conversation delegated to this run, once the role's conversation is
- * idle: "working" while any run there is still active (up to the delegation window, Workloop's
- * deadlock bound), "later" when a later request from the same conversation, with a live turn of its
+ * idle: "working" while any run there is queued or running (up to the delegation window, Workloop's
+ * deadlock bound; a run waiting on a card is not working, its card is shown in the asking
+ * conversation), "later" when a later request from the same conversation, with a live turn of its
  * own, carries the result, else the newest reply since the request.
  */
 async function settledTeamResult(
@@ -577,7 +577,8 @@ async function settledTeamResult(
     where: {
       threadId: run.threadId,
       id: { not: run.id },
-      status: { in: [...ACTIVE_RUN_STATUSES] },
+      // Branch play 11-28: a send card left waiting held every later answer here for 24 h.
+      status: { in: ["queued", "leased", "running"] },
     },
   });
   if (active && Date.now() - request.createdAt.getTime() < DELEGATION_RETURN_WINDOW_MS)

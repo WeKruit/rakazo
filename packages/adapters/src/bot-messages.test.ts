@@ -961,6 +961,21 @@ describe("automatic outcome return", () => {
       expect(working.deps.prisma.run.updateMany).not.toHaveBeenCalled();
     });
 
+    it("a later child reply returns while an earlier run waits on a card", async () => {
+      // Branch play 11-28 (step D): a send card left waiting in Outreach's conversation held every
+      // later answer there as "working" for the whole window.
+      const waiting = delegated({ reply: "Here is the template." });
+      const runs = [{ status: "waiting_input" }, { status: "waiting_takeover" }];
+      (waiting.deps.prisma.run as unknown as { count: unknown }).count = vi.fn(
+        async (args: { where: { status: { in: string[] } } }) =>
+          runs.filter((row) => args.where.status.in.includes(row.status)).length,
+      );
+      expect(await ret(waiting, "Here is the template.")).toBe(true);
+      expect(JSON.stringify(waiting.tx.message.create.mock.calls)).toContain(
+        "Here is the template.",
+      );
+    });
+
     it("says so when the role finished without a written reply", async () => {
       const silent = delegated({});
       expect(await ret(silent, "", "status")).toBe(true);

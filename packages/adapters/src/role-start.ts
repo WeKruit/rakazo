@@ -67,6 +67,28 @@ async function latestRecruiterMessage(
 }
 
 /**
+ * The text of the recruiter's own messages before their latest one, oldest first, as written: the
+ * earlier part of a request given to work in no role, counted the way new_role counts them.
+ */
+export async function earlierRecruiterWords(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+  count: number,
+): Promise<string[]> {
+  if (count < 1) return [];
+  return (await recruiterMessages(prisma, threadId, 1 + count))
+    .slice(1)
+    .reverse()
+    .map((message) =>
+      message.blocks
+        .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+        .join("\n")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
+/**
  * The files of the recruiter's latest own message, by saved id: a child job receives only what its
  * request holds (Claude Code subagents: "include any file paths ... directly in that prompt").
  */

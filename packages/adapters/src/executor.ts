@@ -397,6 +397,7 @@ import {
   saveEmailAttachments,
 } from "./email-attachments.js";
 import {
+  newestRecruiterMessage,
   newestRecruiterWords,
   otherRoleWriteRefusal,
   roleRequestMessage,
@@ -580,6 +581,7 @@ import {
   listAgentSkillRecords,
   skillCreateFromTool,
   skillDeleteFromTool,
+  skillFileFromTool,
   skillReadFromTool,
   skillUpdateFromTool,
 } from "./skill-tools.js";
@@ -5451,8 +5453,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 operation: args.operation,
                 error: error.name,
                 // The server's own wording of the failed check (a place in the definition and a
-                // source id), and a schema refusal's place and code; never the model's values.
-                ...(error instanceof RecruitingPlaybookValidationError
+                // source id), an isolation refusal's own check, and a schema refusal's place and
+                // code; never the model's values.
+                ...(error instanceof RecruitingPlaybookValidationError ||
+                error instanceof IsolationError
                   ? { check: error.message }
                   : {}),
                 ...(error.name === "ZodError"
@@ -6778,6 +6782,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (name === "read_file") {
             const filePath = String(args.path ?? "");
+            const listedSkill = await skillFileFromTool(
+              deps.prisma,
+              { spaceId: run.spaceId, userId: run.userId },
+              filePath,
+            );
+            if (listedSkill) return listedSkill;
             const storedPath = resolveBotWorkspacePath(computerMode, bot.id, filePath);
             let bytes: Uint8Array;
             try {
@@ -8995,14 +9005,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Only the recruiter's own words are handed over: their turn's, or the message they
             // wrote into a running turn. Branch fosp 11-21 (747382b0): 「这三个不要。换掉，再补人」
             // arrived while Kruit read a team's report and reached the team as Kruit's paraphrase.
+            // A turn woken by a returned result hands over the recruiter's newest message here,
+            // once per conversation it goes to (branch play 11-28: "this turn has no recruiter words").
+            const woken =
+              run.trigger === "bot_message" && !steeredText
+                ? await newestRecruiterMessage(deps.prisma, thread.id)
+                : undefined;
             const given = await delegateWork(
               {
                 deps,
                 run: { ...run, sourceMessageId: run.sourceMessageId },
                 bot: { id: bot.id, name: bot.name },
                 groupId: thread.groupId,
-                words: run.trigger === "user" ? lastRecruiterText : (steeredText ?? ""),
-                deliveryKey: effectKey,
+                words:
+                  run.trigger === "user" ? lastRecruiterText : (steeredText ?? woken?.text ?? ""),
+                deliveryKey: woken ? `recruiter-words:${woken.messageId}` : effectKey,
                 redact: (text) => redactSecrets(text, runSecrets),
                 visible,
                 showRoleCard: (role) =>

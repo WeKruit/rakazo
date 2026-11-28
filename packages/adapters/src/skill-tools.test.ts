@@ -6,6 +6,7 @@ import {
   listAgentSkillRecords,
   skillCreateFromTool,
   skillDeleteFromTool,
+  skillFileFromTool,
   skillReadFromTool,
   skillUpdateFromTool,
 } from "./skill-tools.js";
@@ -192,6 +193,28 @@ describe("skill tools", () => {
     expect(listing).toContain("<description>Prepare standup notes</description>");
     expect(listing).toContain("<location>skills/Daily standup/SKILL.md</location>");
     expect(formatAgentSkillsListing([])).toBeUndefined();
+  });
+
+  it("reads a listed skill at the location the listing advertises", async () => {
+    // Branch play 11-28 (step C): read_file of the listed location failed 26 times; Pi's listing
+    // tells the model to read the skill file there.
+    await skillCreateFromTool(prisma as never, owner, {
+      name: "Daily standup",
+      description: "Prepare standup notes",
+      body: "1. Summarize yesterday.",
+    });
+    const read = await skillFileFromTool(prisma as never, owner, "skills/Daily standup/SKILL.md");
+    expect(read).toMatchObject({ path: "skills/Daily standup/SKILL.md" });
+    expect(String(read?.content)).toContain("Summarize yesterday");
+    expect(
+      await skillFileFromTool(prisma as never, owner, "./skills/Daily standup/SKILL.md"),
+    ).toMatchObject({ content: read?.content });
+    expect(
+      await skillFileFromTool(prisma as never, owner, "skills/Missing/SKILL.md"),
+    ).toBeUndefined();
+    expect(
+      await skillFileFromTool(prisma as never, owner, "notes/Daily standup/SKILL.md"),
+    ).toBeUndefined();
   });
 
   it("rejects update/delete for plugin and builtin skills", async () => {

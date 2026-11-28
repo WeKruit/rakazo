@@ -1525,14 +1525,14 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "delegate_work",
     description:
-      "Account-wide conversation only. Give the recruiter's request to the agent that owns it, as a job that runs in that agent's own conversation: the agent receives the recruiter's newest words exactly as written, the files of their latest message, and the people and round you pass; nothing else is passed. For work on a role pass its roleId (or groupId for a role conversation with no saved role yet), and agent to give it to that role's teammate instead of its lead. For a new role pass new_role with its title (it opens the role's conversation, copies the recruiter's message there, and shows its card). For work that belongs to no role pass only agent. The job's final answer comes back here once, when its conversation is idle; a card it waits on is shown here. The turn ends with the call.",
+      "Account-wide conversation only. Give the recruiter's request to the agent that owns it, as a job that runs in that agent's own conversation: the agent receives the recruiter's newest words exactly as written, their earlier messages you count in earlier_messages, the files of their latest message, and the people and round you pass; nothing else is passed. For work on a role pass its roleId (or groupId for a role conversation with no saved role yet), and agent to give it to that role's teammate instead of its lead. For a new role pass new_role with its title (it opens the role's conversation, copies the recruiter's message there, and shows its card). An email to send always belongs to a role (its roleId, else new_role); for a template or a draft that is not sent pass only agent. The job's final answer comes back here once, when its conversation is idle; a card it waits on is shown here. The turn ends with the call.",
     inputSchema: {
       type: "object",
       properties: {
         agent: {
           type: "string",
           description:
-            "The agent that owns the work, by name: Main (a role's people, feedback and requirements), Sourcer, Outreach (contacts, any email, template or reply, the sending mailbox) or Scheduling (interviews and the calendar). Required for work in no role; left out on a role, its lead.",
+            "The agent that owns the work, by name: Main (a role's people, feedback and requirements), Sourcer, Outreach (contacts, templates and drafts that are not sent, the sending mailbox) or Scheduling (interviews and the calendar). Required for work in no role; left out on a role, its lead.",
         },
         role_id: {
           type: "string",
@@ -1553,7 +1553,7 @@ export const builtinAgentTools: ConnectorTool[] = [
           minimum: 0,
           maximum: 10,
           description:
-            "With new_role: how many of the recruiter's messages before their latest one hold this role's JD or requirements and are copied with it (0 when the latest holds them).",
+            "How many of the recruiter's messages before their latest one belong to this request and go with it, word for word (with new_role: those holding its JD or requirements; 0 when the latest holds it all).",
         },
         people: {
           type: "array",
