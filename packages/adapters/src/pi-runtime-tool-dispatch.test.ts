@@ -402,8 +402,8 @@ vi.mock("./pi-openai-compatible-provider.js", () => ({
   registerOpenAiCompatibleRuntime: (models: unknown) => models,
 }));
 
+import { toolCompletionAuditPayload } from "./agent-session/run-projection.js";
 import { builtinAgentTools } from "./builtin-tools.js";
-import { toolCompletionAuditPayload } from "./executor.js";
 import {
   MISSING_TOOL_FINAL_RESPONSE_ERROR,
   maxToolCallsPerTurn,

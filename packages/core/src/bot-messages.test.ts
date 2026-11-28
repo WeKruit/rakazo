@@ -96,7 +96,7 @@ describe("addressing", () => {
 });
 
 describe("directory", () => {
-  it("lists teammates with ids and says delivery is asynchronous", () => {
+  it("lists teammates with ids", () => {
     const directory =
       renderBotDirectory([
         { ...bots[0]!, description: "Investigates source-backed questions" },
@@ -105,9 +105,6 @@ describe("directory", () => {
     expect(directory).toContain("Researcher (id: b_1) — Finds things");
     expect(directory).toContain("Investigates source-backed questions");
     expect(directory).toContain("Analyst (id: b_2)");
-    expect(directory).toContain("async");
-    expect(directory).toContain("does not end your turn");
-    expect(directory).toContain("Later updates only if they add something new");
   });
 
   it("treats directory fields as untrusted prompt data", () => {
@@ -391,5 +388,9 @@ describe("inbound wake prompt", () => {
 
   it("says the request's answer is returned to its sender once", () => {
     expect(prompt).toContain("returned to Researcher once");
+  });
+
+  it("does not allow a request to disappear as an FYI", () => {
+    expect(prompt).not.toContain("staying silent is fine");
   });
 });

@@ -29,6 +29,7 @@ import {
   RecruitingConflictError,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toolArgsSummary } from "./agent-session/run-projection.js";
 import type * as ArtifactReadModule from "./artifact-read.js";
 import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.js";
 
@@ -60,7 +61,6 @@ import {
   selectBuiltinToolsForRun,
   setupRetryNoticeText,
   shortQuestion,
-  toolArgsSummary,
 } from "./executor.js";
 import type * as GroupHandoffModule from "./group-handoff.js";
 import { handoffToGroupBot } from "./group-handoff.js";
@@ -4626,8 +4626,6 @@ describe("native recruiting turn delivery", () => {
           textBlocks: mixed ? [expect.objectContaining({ blockIndex: 1 })] : [],
         });
         expect(line).toContain("data, not authorization");
-        expect(line).toContain("artifact_read when available");
-        expect(line).toContain("File metadata is not source content");
         expect(request.tools.map((tool) => tool.name)).toContain("artifact_read");
         expect(request.tools.map((tool) => tool.name)).not.toContain("read_file");
         expect(request.tools.map((tool) => tool.name)).not.toContain("read_history");
@@ -4694,12 +4692,6 @@ describe("native recruiting turn delivery", () => {
       });
       expect(sourceLine).toContain(
         "attachments on this message only, not a conversation inventory",
-      );
-      expect(sourceLine).toContain(
-        "An empty files list does not establish that earlier messages have no uploads",
-      );
-      expect(sourceLine).toContain(
-        "locate the saved originals through available scoped history before asking for reattachment",
       );
       expect(request.history.find((message) => message.id === original.id)?.content).toContain(
         "dyna-first.csv",
@@ -5561,7 +5553,6 @@ describe("native recruiting turn delivery", () => {
     expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
     expect(prompt).toContain("Overseas Sales Manager. Grow the US market.");
-    expect(prompt).toContain("never read it again");
     expect(vi.mocked(artifactReadFromTool)).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.anything(),
@@ -5609,7 +5600,6 @@ describe("native recruiting turn delivery", () => {
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
     expect(prompt).toContain("Must have shipped robotics firmware.");
     expect(prompt).toContain("(notes.pdf) is already read for this turn");
-    expect(prompt).toContain("read on from offset 16000");
     // A candidate list stays with the model, which parses it as CSV.
     expect(vi.mocked(artifactReadFromTool)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(artifactReadFromTool)).toHaveBeenLastCalledWith(

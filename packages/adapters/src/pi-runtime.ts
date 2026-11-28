@@ -105,7 +105,6 @@ import {
 import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { observedPiStream } from "./pi-usage.js";
-import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
 import { normalizeRecruitingRoleArgs, repairSourceRefs } from "./recruiting-tools.js";
 import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
@@ -1979,7 +1978,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                     type: "text",
                     text:
                       typeof known === "string"
-                        ? `The recruiter already replied after this question: ${known}\nIf that reply answers it, use it and continue without asking again. If it was about something else, ask the question again now.`
+                        ? `Not asked: the recruiter already replied after this question: ${known}`
                         : known.instead,
                   },
                 ],
@@ -2436,7 +2435,6 @@ async function createSubagent(
     initialState: {
       systemPrompt: [
         `You are a Rakazo subagent named "${name}".`,
-        RECRUITING_PRESENTATION_INSTRUCTION,
         "You run inside the parent bot's turn — you are not a separate bot chat.",
         "Complete the task and return a concise result. Do not spawn bots or further subagents.",
         extra,
@@ -3325,7 +3323,7 @@ interface EventQueue {
 }
 
 const ASK_SUPERSEDED_BY_MESSAGE =
-  "Not asked: the user sent a new message while this question was being written. It comes next; act on it, and ask this question again only if that message leaves it open.";
+  "Not asked: the user sent a new message while this question was being written. It comes next.";
 
 interface ToolHost {
   context?: Partial<AdapterContext>;
@@ -3423,7 +3421,7 @@ function endToolCall(host: ToolHost) {
   maybeAbortToolCallBudget(host);
 }
 
-function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Model<Api> {
+export function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Model<Api> {
   const maxTokens = resolveCompletionMaxTokens(
     model.maxTokens,
     configuredMaxTokens,
@@ -3434,7 +3432,7 @@ function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Mo
   return { ...model, maxTokens };
 }
 
-interface RuntimeModelTarget {
+export interface RuntimeModelTarget {
   config: AgentRunRequest["model"];
   models: Models;
   model: Model<Api>;
@@ -3442,8 +3440,8 @@ interface RuntimeModelTarget {
   credentials?: PiRuntimeCredentialStore;
 }
 
-interface FallbackStreamState {
-  request: AgentRunRequest;
+export interface FallbackStreamState {
+  request: Pick<AgentRunRequest, "model" | "fallbackModels" | "resolveFallbackModel" | "tools">;
   getActive(): RuntimeModelTarget;
   signal: AbortSignal;
   attempted: Set<string>;
@@ -3679,7 +3677,7 @@ function fallbackSupportsContext(
   return !requiresReasoning || candidate.model.reasoning;
 }
 
-function fallbackAwareModelStream(
+export function fallbackAwareModelStream(
   state: FallbackStreamState,
   context: TranscriptContext,
   options: ModelsSimpleStreamOptions | undefined,

@@ -59,12 +59,12 @@ vi.mock("./pi-openai-compatible-provider.js", () => ({
   registerOpenAiCompatibleRuntime: (models: unknown) => models,
 }));
 
+import { toolCompletionAuditPayload } from "./agent-session/run-projection.js";
 import {
   estimateContextTokens,
   providerContextPrefix,
   selectContext,
 } from "./context-selection.js";
-import { toolCompletionAuditPayload } from "./executor.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
 import {

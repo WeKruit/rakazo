@@ -319,13 +319,13 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     ActivateCampaignInput,
     false,
-    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued (for later sending hours, or behind the gap between emails) and the recruiter wants them sent now, pass send_now: its card lists who is queued, and on confirm they go out as soon as the mail service picks them up (usually a few minutes, at most about 15), one a minute. Never tell the recruiter a queue cannot be sped up; offer send_now. When the recruiter cancels this card, their next words are about the email it showed: a new 标题 or title is its subject line, not the role name (save it with ensure_role_campaign, then call this again for a new card) unless they name the role.",
+    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued (for later sending hours, or behind the gap between emails) and the recruiter wants them sent now, pass send_now: its card lists who is queued, and on confirm they go out as soon as the mail service picks them up (usually a few minutes, at most about 15), one a minute.",
   ),
   tool(
     "pause_campaign",
     PauseCampaignInput,
     false,
-    "Pauses a campaign; stops further sends. Only when the recruiter asks to stop or hold sending: a send they confirmed is their decision, so never pause it on your own, for example to change when it goes out; tell them when it goes out instead and offer send_now. With email instead, stops only that person: no follow-up or later email from this account reaches them, everyone else keeps going. Use it when the recruiter says not to contact someone again, or when a person who replied would otherwise keep getting follow-ups; it records that they are not contacted again, so later sends to them are refused, sends nothing and needs no confirmation. allow_again lifts that stop only when the recruiter says to contact them again.",
+    "Pauses a campaign; stops further sends. With email instead, stops only that person: no follow-up or later email from this account reaches them, everyone else keeps going. Use it when the recruiter says not to contact someone again, or when a person who replied would otherwise keep getting follow-ups; it records that they are not contacted again, so later sends to them are refused, sends nothing and needs no confirmation. allow_again lifts that stop only when the recruiter says to contact them again.",
   ),
   tool(
     "get_email",
@@ -337,7 +337,7 @@ export const nativeInstantlyWrites = [
     "reply_to_email",
     ReplyToEmailInput,
     false,
-    "Sends a reply in the existing thread of one received email from your connected mailbox. This is the only way to answer a candidate's email; it shows the native confirmation card and nothing is sent until the human confirms — call it, never refuse or say there is no approval flow. Every new request to reply gets its own call and card, whatever happened to earlier cards for that email (sent, discarded or still open): never skip the call because of them.",
+    "Sends a reply in the existing thread of one received email from your connected mailbox. This is the only way to answer a candidate's email; it shows the native confirmation card and nothing is sent until the human confirms. Every new request to reply gets its own call and card, whatever happened to earlier cards for that email (sent, discarded or still open): never skip the call because of them.",
   ),
   tool(
     "ensure_role_campaign",
@@ -1869,10 +1869,6 @@ async function readBinding(prisma: PrismaClient, context: AdapterContext, key: s
   return { effect, binding: effect.result as RoleBinding };
 }
 
-/** The recruiter reviews the emails in chat, never only as a saved sequence. */
-const SHOW_SAVED_STEPS =
-  "In your reply, show the recruiter every saved email as Subject: and its full body, written out for the first person (their name and company in place of the variables); the saved sequence keeps its variables.";
-
 async function ensureRoleCampaign(
   prisma: PrismaClient,
   rest: InstantlyRest,
@@ -2002,7 +1998,6 @@ async function ensureRoleCampaign(
         ...(input.send_hours ? { sendHours: input.send_hours } : {}),
         ...(pausedForHours ? { resumed: "Still sending, now in the new hours" } : {}),
         hasEmail: writeSteps || shown !== null,
-        ...(writeSteps ? { next: SHOW_SAVED_STEPS } : {}),
         ...(input.steps && !writeSteps
           ? {
               currentEmail: shown,
@@ -2067,7 +2062,6 @@ async function ensureRoleCampaign(
     created: !adopt,
     adopted: Boolean(adopt),
     ...binding,
-    ...(!adopt && input.steps ? { next: SHOW_SAVED_STEPS } : {}),
   };
 }
 

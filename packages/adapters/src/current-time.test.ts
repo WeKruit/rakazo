@@ -15,12 +15,6 @@ describe("formatCurrentTimeInstruction", () => {
     );
   });
 
-  it("tells the model not to guess the date from training data or quoted timestamps", () => {
-    const line = formatCurrentTimeInstruction(new Date("2026-01-01T00:00:00Z"));
-    expect(line).toContain("Never infer today's date from your training data");
-    expect(line).toContain("write absolute dates");
-  });
-
   it("defaults to the real clock", () => {
     const before = Date.now();
     const line = formatCurrentTimeInstruction();

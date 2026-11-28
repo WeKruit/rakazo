@@ -17,7 +17,6 @@ import {
 } from "@rakazo/core";
 import type { PrismaClient, Routine, ThreadEvents } from "@rakazo/db";
 import { IsolationError, Prisma, scoped } from "@rakazo/db";
-import { RECRUITING_PREFERENCE_TEXT } from "./builtin-tools.js";
 
 export { isOneShotRoutineCron, ONCE_ROUTINE_CRON };
 
@@ -35,56 +34,12 @@ export function filterBuiltinToolsForRun<T extends { name: string }>(
   return runTrigger === "routine" ? tools.filter((tool) => tool.name !== "schedule_create") : tools;
 }
 
-/**
- * What the account-wide conversation offers: reading across roles, opening a role, handing work to
- * a role's own conversation, and the conversation's own memory and replies. Every operation on a
- * role (finding people, feedback on them, mail, bookings, reminders, notes) runs in that role's
- * conversation, so it is not listed here at all: an option the code would refuse is never shown
- * (Anthropic, "Writing effective tools for agents"; Claude Code subagents get only their own tool
- * list). Staging bee1b309 11-27: offered a Connect card here, Kruit asked to connect the calendar
- * instead of handing the booking over. Branch play s158 11-27: offered here, Kruit spent the turn on feedback and a search that
- * were refused before it handed the work to the role. Branch play handoff8 11-27: offered here, a
- * question card asked the recruiter for the interview slot before the booking was handed over; a
- * role the recruiter means is chosen from its cards (recruiting_candidates roles with show).
- */
-const ACCOUNT_WIDE_TOOLS: ReadonlySet<string> = new Set([
-  "recruiting_candidates",
-  "recruiting_feedback",
-  "delegate_work",
-  "stop_work",
-  "message_user",
-  "artifact_read",
-  "attach_file",
-  "render_view",
-  "render_plot",
-  "read_history",
-  "search_history",
-  "read_memory",
-  "recall_memory",
-  "remember",
-  "save_memory",
-  "forget_memory",
-  "save_group_memory",
-  "skill_read",
-  "web_search",
-  "web_fetch",
-  "wait_for_work",
-  "scratchpad_list",
-  "scratchpad_add",
-  "scratchpad_update",
-  "scratchpad_complete",
-  "scratchpad_remove",
-]);
-
 /** Keep cross-bot messaging thread-specific while exposing schedules in DMs and groups. */
 export function filterBuiltinToolsForThread<T extends { name: string }>(
   tools: T[],
   groupId: string | null | undefined,
 ): T[] {
-  if (groupId?.startsWith("recruiting-global-"))
-    return tools
-      .filter((tool) => ACCOUNT_WIDE_TOOLS.has(tool.name))
-      .map((tool) => (tool.name === "recruiting_feedback" ? preferencesOnly(tool) : tool));
+  const global = Boolean(groupId?.startsWith("recruiting-global-"));
   return tools.filter(
     (tool) =>
       (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
@@ -92,27 +47,9 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
       // rather than starting a private thread off to one side.
       (!groupId || tool.name !== "message_bot") &&
       // Only the account-wide conversation sits above the role teams.
-      tool.name !== "delegate_work",
+      (tool.name !== "delegate_work" || global),
   );
 }
-
-const PREFERENCES_ONLY_LEAD =
-  "Save the recruiter's explicit reusable recruiting preferences, which hold across all their roles. Feedback on a role's people or rounds, and its requirements, are given in that role's conversation (delegate_work). Use direct human wording; for inferred or ambiguous intent, ask in your reply first. ";
-
-/** The main chat's recruiting_feedback: a preference across roles, never a role's feedback. */
-function preferencesOnly<T extends { name: string }>(tool: T): T {
-  const schema = (tool as { inputSchema?: Record<string, unknown> }).inputSchema;
-  if (!schema || !Array.isArray(schema.oneOf)) return tool;
-  const variants = (
-    schema.oneOf as Array<{ properties?: { target?: { const?: unknown } } }>
-  ).filter((variant) => !ROLE_FEEDBACK_TARGETS.has(String(variant.properties?.target?.const)));
-  return {
-    ...tool,
-    description: PREFERENCES_ONLY_LEAD + RECRUITING_PREFERENCE_TEXT,
-    inputSchema: { ...schema, oneOf: variants },
-  };
-}
-const ROLE_FEEDBACK_TARGETS: ReadonlySet<string> = new Set(["role", "round", "candidate"]);
 
 type ScheduleUnit = "minutes" | "hours" | "days" | "seconds";
 

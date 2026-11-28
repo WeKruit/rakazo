@@ -110,7 +110,6 @@ export function renderBotDirectory(bots: readonly BotAddress[]): string | undefi
     "<teammate_directory>",
     ...formatBotRosterLines(bots),
     "</teammate_directory>",
-    "Use message_bot for useful updates, questions, and results. Delivery is async and does not end your turn. Continue independent work; do not poll or send ack-only messages. Later updates only if they add something new.",
   ].join("\n");
 }
 
