@@ -4,16 +4,19 @@ import { completeToolStep, ONCE_ROUTINE_CRON, RECRUITER_LANGUAGE } from "@rakazo
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
+  dockerComputerToolInstruction,
+  persistentComputerInstruction,
+  userTurnInstructions,
+} from "./agent-session/system-prompt.js";
+import {
   appendToolCompletionAudit,
   appendUsageTimingAudit,
   createRunExecutor,
   createRunWorkspaceCheckpoint,
-  dockerComputerToolInstruction,
   isTerminalModelSetupError,
   loadCurrentTurnImages,
   missingTurnImagesInstruction,
   parseUpdateBotPatch,
-  persistentComputerInstruction,
   routineNotifies,
   runNotificationsEnabled,
   runRoutineProbe,
@@ -23,7 +26,6 @@ import {
   toolCompletionAuditPayload,
   toolCompletionFromResult,
   userTurnContext,
-  userTurnInstructions,
   VOICE_CALL_INSTRUCTION,
   voiceCallInstruction,
   withRecentTurnImages,
@@ -949,9 +951,7 @@ describe("steering attachment hydration", () => {
     expect(withPartiallyMissingImages).toMatchObject({
       images: partiallyHydratedImages,
     });
-    expect(withPartiallyMissingImages.unavailableInstruction).toContain(
-      "its contents are unknown",
-    );
+    expect(withPartiallyMissingImages.unavailableInstruction).toContain("its contents are unknown");
 
     const withAllImagesMissing = await settleSteeringAttachmentLoads(
       Promise.resolve(undefined),

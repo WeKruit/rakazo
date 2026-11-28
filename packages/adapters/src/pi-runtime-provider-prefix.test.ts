@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import type { ConnectorTool } from "@rakazo/adapter-kit";
 import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
-import { userTurnInstructions } from "./executor.js";
+import { userTurnInstructions } from "./agent-session/system-prompt.js";
 import { PiAgentRuntime, resolveRuntimeModel } from "./pi-runtime.js";
 
 describe("Pi outgoing provider prefixes", () => {
