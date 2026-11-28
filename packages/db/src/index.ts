@@ -13,6 +13,7 @@ export * from "./client.js";
 export * from "./closed-asks.js";
 export * from "./computers.js";
 export * from "./connect-asks.js";
+export * from "./conversation-session.js";
 export * from "./credential-secrets.js";
 export * from "./events.js";
 export * from "./expire-stuck-run.js";
