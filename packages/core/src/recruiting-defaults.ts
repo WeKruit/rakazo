@@ -15,31 +15,60 @@ export const RECRUITING_DISABLED_BUILTIN_TOOLS = [
 ] as const;
 
 /**
- * General platform tools a recruiting agent never needs (11-20: skills, sub-agents and the
- * scratchpad are back; they make the base agent stronger and are the harness's own). They are left out of recruiting runs in
- * code, so every crew (new or old) gets the shorter tool list without a data migration: each
- * offered tool costs prompt on every model call, and a long list makes the model pick worse.
+ * The base every recruiting agent shares, as a Claude Code subagent's `tools:` list starts from
+ * the harness's own tools (https://code.claude.com/docs/en/sub-agents): files and shell, questions
+ * and progress, memory, history, the scratchpad, routines, skills, sub-agents and hand-off within
+ * the team. Each agent adds only the recruiting tools its own work calls; a tool not listed is not
+ * offered, since every offered tool costs prompt on every model call and a long list makes the
+ * model pick worse. Old and new crews get it alike: the list is read by the agent's key, not stored.
  */
-export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
-  "vote_poll",
-  "list_secrets",
-  "secret_request",
-  "forget_secret",
-  "render_plot",
-  "canvas_write",
-  "canvas_read",
-  "add_mcp_server",
-  "cloud_agent_launch",
-  "cloud_agent_status",
-  "cloud_agent_reply",
-  "cloud_agent_cancel",
-  "task_catalog",
-  "create_space",
-  "spawn_bot",
-  "update_bot",
-  "archive_bot",
-  "render_view",
+const RECRUITING_BASE_TOOLS = [
+  "artifact_read",
+  "list_files",
+  "read_file",
+  "write_file",
+  "attach_file",
+  "shell",
+  "allow_computer_site",
+  "ask_user",
+  "request_connection",
+  "message_user",
+  "wait_for_work",
+  "stop_work",
+  "end_call",
+  "read_memory",
+  "remember",
+  "save_shared_memory",
+  "save_group_memory",
+  "save_memory",
+  "recall_memory",
+  "forget_memory",
+  "web_search",
+  "web_fetch",
+  "search_history",
+  "read_history",
+  "scratchpad_list",
+  "scratchpad_add",
+  "scratchpad_update",
+  "scratchpad_complete",
+  "scratchpad_remove",
+  "schedule_create",
+  "schedule_list",
+  "schedule_update",
+  "schedule_cancel",
+  "skill_read",
+  "skill_create",
+  "skill_update",
+  "skill_delete",
+  "run_subagent",
+  "handoff_to_bot",
 ] as const;
+
+/** The generic built-in skills every recruiting agent with a computer is listed. */
+const RECRUITING_BASE_SKILLS = ["Tidy memory", "Work with data using code"] as const;
+
+/** What one agent is offered: built-in tool names and maintained skill names (its own skills too). */
+export type RecruitingAgentScope = { tools: readonly string[]; skills: readonly string[] };
 
 /**
  * Typical credits per step, from 14 days of the usage ledger (200 credits = $1 of cost; p50 to
@@ -159,6 +188,34 @@ export const RECRUITING_DEFAULT_BOTS = [
     instructions: `You are Main, recruiting lead. Do the work with your own tools; hand off with handoff_to_bot only what you cannot do, with the recruiter's words and who and what they refer to, adding no limits of your own, and do not take it back that turn. You write and send emails, answer replies and book interviews yourself.
 
 ${RECRUITING_RESPONSIBILITIES}`,
+    tools: [
+      ...RECRUITING_BASE_TOOLS,
+      "recruiting_role",
+      "recruiting_candidates",
+      "recruiting_shortlist",
+      "recruiting_research",
+      "recruiting_crm_target",
+      "recruiting_crm_import",
+      "recruiting_scheduling",
+      "recruiting_reply",
+      "recruiting_reminders",
+      "recruiting_notes",
+      "recruiting_profiles",
+      "recruiting_feedback",
+    ],
+    skills: [
+      ...RECRUITING_BASE_SKILLS,
+      "Sourcing map",
+      "Start a role and show the first ten",
+      "Find more people",
+      "Recruiter feedback on people or requirements",
+      "Role documents",
+      "Write an email or template",
+      "Find contacts",
+      "Send to people",
+      "Answer candidate replies",
+      "Book or move an interview",
+    ],
   },
   {
     key: "sourcer",
@@ -168,6 +225,21 @@ ${RECRUITING_RESPONSIBILITIES}`,
     instructions: `You are Sourcer, the scale-out specialist. Main runs the calibration rounds. Hand an email draft to Outreach only when the recruiter asked, as your last call.
 
 ${RECRUITING_RESPONSIBILITIES}`,
+    tools: [
+      ...RECRUITING_BASE_TOOLS,
+      "recruiting_role",
+      "recruiting_candidates",
+      "recruiting_research",
+      "recruiting_feedback",
+      "recruiting_profiles",
+      "recruiting_notes",
+    ],
+    skills: [
+      ...RECRUITING_BASE_SKILLS,
+      "Sourcing map",
+      "Find more people",
+      "Recruiter feedback on people or requirements",
+    ],
   },
   {
     key: "outreach",
@@ -177,6 +249,26 @@ ${RECRUITING_RESPONSIBILITIES}`,
     instructions: `You are Outreach. You write as the recruiter to candidates, never as a candidate. Interviews go to Scheduling, hiring decisions to Main.
 
 ${RECRUITING_RESPONSIBILITIES}`,
+    tools: [
+      ...RECRUITING_BASE_TOOLS,
+      "recruiting_candidates",
+      "recruiting_shortlist",
+      "recruiting_reply",
+      "recruiting_crm_target",
+      "recruiting_crm_import",
+      "recruiting_reminders",
+      "recruiting_notes",
+      "recruiting_profiles",
+      "recruiting_feedback",
+    ],
+    skills: [
+      ...RECRUITING_BASE_SKILLS,
+      "Role documents",
+      "Write an email or template",
+      "Find contacts",
+      "Send to people",
+      "Answer candidate replies",
+    ],
   },
   {
     key: "scheduling",
@@ -186,6 +278,21 @@ ${RECRUITING_RESPONSIBILITIES}`,
     instructions: `You are Scheduling. Your calendar is the assigned scheduling connection; never ask to connect another while it is assigned.
 
 ${RECRUITING_RESPONSIBILITIES}`,
+    tools: [
+      ...RECRUITING_BASE_TOOLS,
+      "recruiting_candidates",
+      "recruiting_scheduling",
+      "recruiting_reminders",
+      "recruiting_notes",
+      "recruiting_profiles",
+      "recruiting_feedback",
+    ],
+    skills: [
+      ...RECRUITING_BASE_SKILLS,
+      "Role documents",
+      "Answer candidate replies",
+      "Book or move an interview",
+    ],
   },
 ] as const;
 
@@ -204,6 +311,54 @@ export function recruitingBotKey(bot: {
       ? bot.spawnKey.endsWith(`:${role.key}`)
       : bot.name === role.name,
   )?.key;
+}
+
+/**
+ * The recruiter's own conversation across roles: Kruit only reads and hands every ask to the role
+ * that owns it (the maintainer's rule, 11-27, re-confirmed 11-28), so its tools are reads, the
+ * hand-off to a role and its replies, and no maintained skill is listed there (each is a role's
+ * own work). The same Main bot runs it with its own instruction file and this list.
+ */
+const RECRUITING_ACCOUNT_WIDE_AGENT: RecruitingAgentScope = {
+  tools: [
+    "recruiting_candidates",
+    "artifact_read",
+    "read_memory",
+    "recall_memory",
+    "search_history",
+    "read_history",
+    "scratchpad_list",
+    "web_search",
+    "web_fetch",
+    "skill_read",
+    "start_role",
+    "delegate_to_role",
+    "stop_work",
+    "wait_for_work",
+    "message_user",
+    "attach_file",
+  ],
+  skills: [],
+};
+
+/**
+ * The tools and skills an agent is offered, like a Claude Code subagent's `tools:` frontmatter
+ * and the skills it is given: by the agent's key, and in the account-wide conversation by that
+ * conversation's agent. A recruiting bot of no current key gets the shared base. Undefined for
+ * any other bot, which keeps every builtin tool and skill.
+ */
+export function recruitingAgentScope(
+  bot: { name?: string | null; spawnKey?: string | null },
+  groupId: string | null | undefined,
+): RecruitingAgentScope | undefined {
+  const key = recruitingBotKey(bot);
+  if (key === "main" && groupId?.startsWith("recruiting-global-"))
+    return RECRUITING_ACCOUNT_WIDE_AGENT;
+  const agent = RECRUITING_DEFAULT_BOTS.find((role) => role.key === key);
+  if (agent) return agent;
+  return bot.spawnKey?.startsWith("recruiting:")
+    ? { tools: RECRUITING_BASE_TOOLS, skills: RECRUITING_BASE_SKILLS }
+    : undefined;
 }
 
 /** Read when drafting a brief's titles and companies; a starting map, never a rule. */
@@ -367,17 +522,6 @@ A candidate's outreach emails are in the role's mailbox (connectors_search_tools
 ] as const;
 
 /**
- * Whether the account-wide conversation lists this skill: only the user's own. That conversation
- * only reads, opens a role and hands work to it, so every maintained recruiting skill (all of
- * them a role's own work) is listed only in a role's conversation, the way a Claude Code subagent
- * is given only its own skills. Staging 11-27 (handoff3): listed there, "Write an email or
- * template" had Kruit draft in the main chat instead of handing the request to the role.
- */
-export function accountWideSkill(name: string): boolean {
-  return !isRecruitingSkillName(name);
-}
-
-/**
  * The account-wide conversation's own instruction file, in place of the role lead's: the same
  * base agent with a different instruction file, as a Claude Code subagent is the same model with
  * its own system prompt. Rules that hold for every request belong here, not in a skill that loads
@@ -385,7 +529,7 @@ export function accountWideSkill(name: string): boolean {
  * know-how). Staging 11-27 (change-mind-mid-run, korean-recruiter-template, story-handoff2): run
  * on Main's "You write and send emails… yourself", the main chat wrote templates and drafts.
  */
-export const RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS = `You are Kruit, in the recruiter's own conversation across all their roles. Here you only read, open a role and hand work to it; each role's own conversation does everything for that role: finding people, feedback and requirements, contact lookups, writing any email, template or reply and sending it, bookings and campaign changes, and connecting a mailbox or calendar for that work. Never write an email, template or reply here, even a short one, or ask to connect anything here: hand the request over, and that conversation asks for what it needs. Only a preference for every role is saved here (recruiting_feedback target preference).
+export const RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS = `You are Kruit, in the recruiter's own conversation across all their roles. Here you only read, open a role and hand work to it; each role's own conversation does everything for that role: finding people, feedback and requirements, contact lookups, writing any email, template or reply and sending it, bookings and campaign changes, and connecting a mailbox or calendar for that work. Never write an email, template or reply here, even a short one, or ask to connect anything here: hand the request over, and that conversation asks for what it needs.
 
 Reads you answer here: a role's status (match it by title from recruiting_candidates operation roles; when two fit equally, show both roles' cards with show and let the recruiter open the one they mean); interviews, shortlist, replies and sequences across roles (recruiting_candidates operations interviews, shortlist, replies and sequences; follow pagination before totals; an unconnected source is a stated gap, never "can't"); who is in a role (list with its roleId, pages of 10 or the number asked); new people, repeats or whether feedback was used (operation round); why someone fits (sources, one line each with the evidence or "not shown"); something said elsewhere (search_history scope:"mine", then answer with the link).
 

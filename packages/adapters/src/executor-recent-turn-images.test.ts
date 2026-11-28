@@ -4,7 +4,7 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
-import { createRunExecutor, saysSomething, withoutPolls } from "./executor.js";
+import { createRunExecutor, saysSomething } from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
@@ -586,15 +586,6 @@ describe("reply suggestion", () => {
       replySuggestions: true,
     });
     expect(runtimeRun.mock.calls.every(([call]) => !call.runId.endsWith(":suggestion"))).toBe(true);
-  });
-});
-
-describe("withoutPolls", () => {
-  // Staging 11-12: "请只发一张多选问题卡片…" became a poll, which closed and the agent then voted on.
-  it("leaves recruiting runs no poll, so a question for the recruiter is a question card", () => {
-    const tools = [{ name: "ask_user" }, { name: "create_poll" }];
-    expect(withoutPolls(tools, true).map((tool) => tool.name)).toEqual(["ask_user"]);
-    expect(withoutPolls(tools, false)).toHaveLength(2);
   });
 });
 
