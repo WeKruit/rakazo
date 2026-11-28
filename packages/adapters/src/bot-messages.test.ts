@@ -6,6 +6,7 @@ import {
   messageBot,
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
+  returnDelegatedTeamResult,
   showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
@@ -611,6 +612,73 @@ describe("delegating to a role team in another conversation", () => {
     expect(sent).toEqual({ ok: false, error: "a bot cannot message itself" });
   });
 
+});
+
+describe("a role team's result going back to the conversation that handed it the work", () => {
+  // As a Claude Code subagent's final message returns to its parent: fosp on 96dcd1c9, Kruit's
+  // chat relayed an older "timed out" line of the team while the role already held 10 people.
+  const roleRun = { ...run, botId: "bot-main", threadId: "thread-role" };
+  const handed = (stillWorking: number) => {
+    const harness = deps({
+      bots: [{ id: "bot-main", name: "Main", title: "", thread: null }],
+      addressedThread: { id: "thread-global" },
+    });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    prisma.thread!.findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({ group: { name: "Payments" } })
+      .mockResolvedValue({ id: "thread-global" });
+    prisma.run!.count = vi.fn().mockResolvedValue(stillWorking);
+    prisma.message!.findFirst = vi.fn(async (args: { where: { clientNonce?: unknown } }) =>
+      args.where.clientNonce
+        ? null
+        : {
+            id: "message-handed",
+            seq: 4,
+            createdAt: new Date(),
+            blocks: [
+              {
+                kind: "bot_message_received",
+                fromBotId: "bot-main",
+                fromBotName: "Kruit",
+                text: "找10个人",
+                hop: 1,
+                intent: "request",
+                returnThreadId: "thread-global",
+              },
+            ],
+          },
+    );
+    return harness;
+  };
+
+  it("sends the team's final message back as the result", async () => {
+    const harness = handed(0);
+    await returnDelegatedTeamResult(harness.deps, roleRun, "10 people are in the list above.");
+    const blocks = harness.tx.message.create.mock.calls.map(
+      ([call]) => (call as { data: { threadId: string; blocks: unknown[] } }).data,
+    );
+    expect(blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          threadId: "thread-global",
+          blocks: [
+            expect.objectContaining({
+              kind: "bot_message_received",
+              intent: "result",
+              text: "10 people are in the list above.",
+            }),
+          ],
+        }),
+      ]),
+    );
+  });
+
+  it("waits while a teammate in the role still works on it", async () => {
+    const harness = handed(1);
+    await returnDelegatedTeamResult(harness.deps, roleRun, "Handed to Sourcer.");
+    expect(harness.tx.message.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("hop lookup", () => {

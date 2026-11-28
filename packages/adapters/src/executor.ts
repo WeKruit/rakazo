@@ -354,6 +354,7 @@ import {
   messageBot,
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
+  returnDelegatedTeamResult,
   showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
@@ -13615,6 +13616,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await reportGroupStageOutcome(deps, run, thread.groupId, {
               status: "completed",
             }).catch((error) => getLogger().error("group handoff report", error));
+            // Work another conversation handed this role goes back there as its result.
+            if (!completed.continuationRunId && !thread.groupId.startsWith("recruiting-global-"))
+              await returnDelegatedTeamResult(deps, run, text).catch((error) =>
+                getLogger().error("delegated team result return", error),
+              );
           }
           if (botMessageOutcome) {
             // Prefer the final reply. If the turn only posted mid-turn progress, return that
