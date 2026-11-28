@@ -140,10 +140,22 @@ export class RecruitingSourceCheckError extends IsolationError {
 }
 
 export class RecruitingConflictError extends Error {
-  constructor(message = "Recruiting revision changed") {
+  constructor(
+    message = "Recruiting revision changed",
+    /** The record's current revision, when the conflict is a stale expected revision. */
+    readonly currentRevision?: number,
+  ) {
     super(message);
     this.name = "RecruitingConflictError";
   }
+}
+
+/** A call that named a role revision other than the current one: both revisions, as facts. */
+function staleRoleRevision(current: number, expected: number) {
+  return new RecruitingConflictError(
+    `The role is at revision ${current}; this call named revision ${expected}.`,
+    current,
+  );
 }
 
 const TRANSACTION_SCOPE = Symbol.for("prisma.client.transaction.scope_context");
@@ -383,7 +395,7 @@ async function validateSources(
   authorizedRun?: Awaited<ReturnType<typeof requireRun>>,
 ) {
   const artifacts = new Set<string>();
-  const messageIds = new Set<string>();
+  const messageIds = new Map<string, string>();
   for (const source of sources) {
     if (source.anchor.kind === "artifact") {
       const key = `${source.anchor.artifact.artifactId}:${source.anchor.artifact.sha256}`;
@@ -395,17 +407,23 @@ async function validateSources(
         authorizedThread ? { run: authorizedRun, thread: authorizedThread } : undefined,
       );
       artifacts.add(key);
-    } else {
-      messageIds.add(source.anchor.messageId);
+    } else if (!messageIds.has(source.anchor.messageId)) {
+      messageIds.set(source.anchor.messageId, source.id);
     }
   }
   if (!messageIds.size) return;
-  const ids = [...messageIds].sort();
+  const ids = [...messageIds.keys()].sort();
   // A message's thread never changes.
   const messages = await onceInTransaction(tx, `message-threads:${ids.join(",")}`, () =>
     tx.message.findMany({ where: { id: { in: ids } }, select: { id: true, threadId: true } }),
   );
-  if (messages.length !== messageIds.size) throw new IsolationError();
+  const found = new Set(messages.map((message) => message.id));
+  for (const [messageId, sourceId] of messageIds)
+    if (!found.has(messageId))
+      throw new RecruitingSourceCheckError(
+        sourceId,
+        `messageId ${JSON.stringify(messageId)} names no message.`,
+      );
   for (const threadId of new Set(messages.map((message) => message.threadId)))
     if (threadId === authorizedThread?.id) scoped(actor, authorizedThread);
     else await requireThread(tx, actor, threadId);
@@ -484,7 +502,7 @@ function validateBriefAuthorship(
     ...definition.brief.rules,
     ...definition.brief.searchFilters,
   ].filter((item) => item.origin === "user_instruction");
-  const messageIds = new Set<string>();
+  const messageIds = new Map<string, string>();
   for (const item of attributed) {
     for (const id of item.sourceRefIds) {
       const source = sources.get(id);
@@ -493,13 +511,17 @@ function validateBriefAuthorship(
         throw new RecruitingPlaybookValidationError(
           "User-instruction facts require human-message sources; keep JD evidence separately attributed.",
         );
-      messageIds.add(source.anchor.messageId);
+      messageIds.set(source.anchor.messageId, source.id);
     }
   }
-  if (!messageIds.size) return;
-  for (const id of messageIds) {
-    const message = messages.get(id);
-    if (!message || !isNativeHumanMessage(message)) throw new IsolationError();
+  for (const [messageId, sourceId] of messageIds) {
+    const message = messages.get(messageId);
+    if (!message) throw new IsolationError();
+    if (!isNativeHumanMessage(message))
+      throw new RecruitingSourceCheckError(
+        sourceId,
+        `cites a user-instruction fact to message ${JSON.stringify(messageId)}, which the recruiter did not write.`,
+      );
   }
 }
 
@@ -1215,7 +1237,8 @@ async function reviseRoleInTransaction(
   authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
 ) {
   if (role.id !== input.roleId) throw new IsolationError();
-  if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  if (role.revision !== input.expectedRevision)
+    throw staleRoleRevision(role.revision, input.expectedRevision);
   if (input.brief) validateRecruitingBrief(input.brief, input);
   const messages = await validateReadSources(
     tx,
@@ -1497,7 +1520,8 @@ async function archiveRoleInTransaction(
   input: RoleArchiveInput,
 ): Promise<RoleSnapshot> {
   const role = await requireRole(tx, actor, input.roleId, true);
-  if (role.revision !== input.expectedRevision) throw new RecruitingConflictError();
+  if (role.revision !== input.expectedRevision)
+    throw staleRoleRevision(role.revision, input.expectedRevision);
   const archiving = input.operation === "archive";
   if (archiving && !input.force) {
     const [candidates, tasks] = await Promise.all([
@@ -1792,6 +1816,11 @@ async function autoContinuedHumanMessage(
   return previous;
 }
 
+/**
+ * The recruiter's own message behind a decision on people or a round (hold, pass, resume,
+ * accepting a calibration round): those are theirs to make, so the run must trace one. Saves of
+ * record keeping cite runProvenance instead and are never refused over it.
+ */
 async function requireCurrentHumanSource(
   tx: Tx,
   actor: Actor,
@@ -1899,7 +1928,7 @@ async function requireCurrentHumanSource(
   return { source: humanMessageSource(source), message: source };
 }
 
-/** A recruiter's message as a source: where it is, never what it says. */
+/** A message as a source: where it is, never what it says. */
 function humanMessageSource(message: SourceMessage): RecruitingSourceRef {
   const text = (message.blocks as { kind: string }[]).findIndex((block) => block.kind === "text");
   return {
@@ -1915,19 +1944,21 @@ function humanMessageSource(message: SourceMessage): RecruitingSourceRef {
   };
 }
 
-/** The recruiter's latest message in a conversation as the source of record keeping. */
-async function latestHumanSource(
+/**
+ * The provenance of a save (a role, a round's direction, reviews of people, a preference): the
+ * message the runtime names for this call, else the run's own, in the run's conversation. A
+ * structured fact recorded with the save; it never refuses a save over who wrote it.
+ */
+async function runProvenance(
   tx: Tx,
-  threadId: string,
+  run: { threadId: string; sourceMessageId: string | null },
+  sourceMessageId: string | null,
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage } | null> {
-  const recent = await tx.message.findMany({
-    where: { threadId, role: "user", botId: null },
-    orderBy: { seq: "desc" },
-    take: 20,
-    include: humanMessageInclude,
-  });
-  const message = recent.find(isNativeHumanMessage);
-  return message ? { source: humanMessageSource(message), message } : null;
+  const id = sourceMessageId ?? run.sourceMessageId;
+  if (!id) return null;
+  const message = await threadMessage(tx, id, run.threadId);
+  if (!message) throw new IsolationError();
+  return { source: humanMessageSource(message), message };
 }
 
 function verifiedFeedbackChoice(
@@ -2133,9 +2164,10 @@ export async function readRecruitingFeedbackContext(
     sourceRefs: readonly RecruitingSourceRef[];
     candidateKeys?: readonly string[];
     /**
-     * Record keeping (a round's direction, reviews of people) is never refused over which
-     * recruiter message it cites: when the run's own message can't be traced, it cites the
-     * recruiter's latest message in the conversation. Account, run and role checks still apply.
+     * Record keeping (a role revision, a round's direction, reviews of people, a preference)
+     * cites the run's provenance and is never refused over who wrote it; a decision (hold, pass,
+     * resume, accepting a round) still needs the recruiter's own message. Account, run and role
+     * checks apply to both.
      */
     recordKeeping?: boolean;
   },
@@ -2161,17 +2193,11 @@ async function feedbackContextInTransaction(
   const intent = RecruitingHumanIntentSchema.parse(input.intent);
   const sourceRefs = RecruitingSourceRefSchema.array().parse(input.sourceRefs);
   const { run, thread } = authorized ?? (await lockLiveRecruitingRun(tx, actor, input.runId));
-  const { source, message } = await requireCurrentHumanSource(
-    tx,
-    actor,
-    run,
-    input.sourceMessageId,
-  ).catch(async (error: unknown) => {
-    if (!input.recordKeeping || !(error instanceof IsolationError)) throw error;
-    const latest = await latestHumanSource(tx, run.threadId);
-    if (!latest) throw error;
-    return latest;
-  });
+  const cited = input.recordKeeping
+    ? await runProvenance(tx, run, input.sourceMessageId)
+    : await requireCurrentHumanSource(tx, actor, run, input.sourceMessageId);
+  if (!cited) throw new IsolationError();
+  const { source, message } = cited;
   const workspace = thread.activeRecruitingRoleId
     ? await roleSnapshot(
         tx,
@@ -2186,7 +2212,8 @@ async function feedbackContextInTransaction(
       workspace?.role.id !== input.roleId
     )
       throw new IsolationError();
-    if (workspace.role.revision !== input.expectedRoleRevision) throw new RecruitingConflictError();
+    if (workspace.role.revision !== input.expectedRoleRevision)
+      throw staleRoleRevision(workspace.role.revision, input.expectedRoleRevision);
   }
   await validateSources(tx, actor, sourceRefs);
   if (input.candidateKeys) {
@@ -2602,7 +2629,6 @@ export type RecruitingMemoryAdmission = {
   runId: string;
   threadId: string;
   botId: string;
-  previousSourceVerified: boolean;
 };
 
 export async function authorizeRecruitingMemoryCommit(
@@ -2679,12 +2705,8 @@ export async function authorizeRecruitingMemoryCommit(
     (feedback.scope === "bot" ? request.botId !== run.botId : request.botId !== undefined)
   )
     throw new IsolationError();
-  const { source, message } = await requireCurrentHumanSource(
-    tx,
-    actor,
-    run,
-    request.recruiting.sourceMessageId,
-  );
+  const cited = await runProvenance(tx, run, request.recruiting.sourceMessageId);
+  if (!cited) throw new IsolationError();
   await validateSources(tx, actor, feedback.sourceRefs);
   if (thread.activeRecruitingRoleId)
     await roleSnapshot(
@@ -2692,59 +2714,22 @@ export async function authorizeRecruitingMemoryCommit(
       actor,
       await requireRole(tx, actor, thread.activeRecruitingRoleId, true),
     );
+  const current = existing?.revision ?? 0;
+  if (current !== feedback.expectedRevision)
+    throw new RecruitingConflictError(
+      `The preference document is at revision ${current}; this call named revision ${feedback.expectedRevision}.`,
+      current,
+    );
   const edit = applyRecruitingPreferenceEdit(existing?.content ?? "", feedback);
-  if ((existing?.revision ?? 0) !== feedback.expectedRevision || edit.content !== request.content)
-    throw new RecruitingConflictError();
-  let previousSourceVerified = !existing;
-  if (existing) {
-    const previousRevision = await tx.memoryRevision.findUnique({
-      where: { documentId_revision: { documentId: existing.id, revision: existing.revision } },
-    });
-    const receipt =
-      previousRevision?.sourceRunId && previousRevision.sourceThreadId
-        ? await tx.event.findFirst({
-            where: {
-              spaceId: actor.spaceId,
-              threadId: previousRevision.sourceThreadId,
-              runId: previousRevision.sourceRunId,
-              type: "memory.revised",
-              AND: [
-                { payload: { path: ["kind"], equals: "recruiting_preference" } },
-                { payload: { path: ["documentId"], equals: existing.id } },
-                { payload: { path: ["revision"], equals: existing.revision } },
-                { payload: { path: ["scope"], equals: request.scope } },
-                { payload: { path: ["path"], equals: request.path } },
-              ],
-            },
-          })
-        : null;
-    if (receipt) {
-      const previousSource = RecruitingSourceRefSchema.parse(
-        (receipt.payload as { source?: unknown }).source,
-      );
-      if (previousSource.anchor.kind !== "message") throw new IsolationError();
-      const previousMessage = await tx.message.findUnique({
-        where: { id: previousSource.anchor.messageId },
-        include: humanMessageInclude,
-      });
-      if (previousMessage) {
-        await validateSources(tx, actor, [previousSource]);
-        if (!isNativeHumanMessage(previousMessage)) throw new IsolationError();
-        if (previousMessage.id !== message.id && compareHumanMessages(previousMessage, message) > 0)
-          throw new RecruitingConflictError();
-        previousSourceVerified = true;
-      }
-    }
-  }
+  if (edit.content !== request.content) throw new RecruitingConflictError();
   return {
-    source,
+    source: cited.source,
     operation: feedback.operation,
     previousAnchor: edit.previousAnchor,
     anchor: edit.anchor,
     runId: run.id,
     threadId: run.threadId,
     botId: run.botId,
-    previousSourceVerified,
   };
 }
 
@@ -2827,11 +2812,15 @@ export async function executeRecruitingRoleMutation(
         typeof saved.changed !== "boolean"
       )
         throw new IsolationError();
-      const source = RecruitingSourceRefSchema.parse(saved.source);
-      if (source.anchor.kind !== "message") throw new IsolationError();
-      const human = await threadMessage(tx, source.anchor.messageId, run.threadId);
-      if (!human || !isNativeHumanMessage(human)) throw new IsolationError();
-      await validateReadSources(tx, actor, [source], artifacts);
+      const source = saved.source === null ? null : RecruitingSourceRefSchema.parse(saved.source);
+      if (source) {
+        if (
+          source.anchor.kind !== "message" ||
+          !(await threadMessage(tx, source.anchor.messageId, run.threadId))
+        )
+          throw new IsolationError();
+        await validateReadSources(tx, actor, [source], artifacts);
+      }
       const workspace = saved.workspace
         ? {
             role: RecruitingRoleSchema.parse(saved.workspace.role),
@@ -2884,41 +2873,21 @@ export async function executeRecruitingRoleMutation(
     }
     requireResearchLease(run, context);
     if (effect.status !== "executing") throw new IsolationError();
-    if (!definitionInput && !archiveInput) throw new RecruitingConflictError();
-    // An update to a saved role's brief is record keeping: when the run's own recruiter message
-    // can't be traced, it cites their latest message. Create, bind and archive still need it.
-    const { source: humanSource, message: source } = await requireCurrentHumanSource(
-      tx,
-      actor,
-      run,
-      context.sourceMessageId,
-    ).catch(async (error: unknown) => {
-      if (input.operation !== "update" || !(error instanceof IsolationError)) throw error;
-      const latest = await latestHumanSource(tx, run.threadId);
-      if (!latest) throw error;
-      return latest;
-    });
+    // Every role save is record keeping: it cites the run's provenance and is never refused over
+    // who wrote it. The expected revision, the run, the thread and the effect row still apply.
+    const humanSource = (await runProvenance(tx, run, context.sourceMessageId))?.source ?? null;
     const currentRole = thread.activeRecruitingRoleId
       ? await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread)
       : null;
     const current = currentRole ? await roleSnapshot(tx, actor, currentRole, thread) : null;
+    if (!definitionInput && !archiveInput)
+      throw input.operation === "update" && current?.role.id === input.roleId
+        ? staleRoleRevision(current.role.revision, input.expectedRevision)
+        : new RecruitingConflictError();
     if (definitionInput?.operation === "revise") {
       if (current?.role.id !== definitionInput.roleId) throw new IsolationError();
       if (current.role.revision !== definitionInput.expectedRevision)
-        throw new RecruitingConflictError();
-      const sourceIds = current.revision.sourceRefs.flatMap((ref) =>
-        ref.anchor.kind === "message" ? [ref.anchor.messageId] : [],
-      );
-      const previous = await tx.message.findMany({
-        where: { id: { in: sourceIds } },
-        include: humanMessageInclude,
-      });
-      if (
-        previous.some(
-          (message) => isNativeHumanMessage(message) && compareHumanMessages(message, source) > 0,
-        )
-      )
-        throw new RecruitingConflictError();
+        throw staleRoleRevision(current.role.revision, definitionInput.expectedRevision);
     }
     let result: RecruitingRoleToolResult;
     let briefError: string | undefined;
@@ -2945,8 +2914,8 @@ export async function executeRecruitingRoleMutation(
           title: definitionInput.title,
           brief: definitionInput.brief,
           sourceRefs: [
-            ...definitionInput.sourceRefs.filter((ref) => ref.id !== humanSource.id),
-            humanSource,
+            ...definitionInput.sourceRefs.filter((ref) => ref.id !== humanSource?.id),
+            ...(humanSource ? [humanSource] : []),
           ],
           criteria: definitionInput.criteria,
           preferences: definitionInput.preferences,
@@ -3352,68 +3321,6 @@ const looseRecord = (value: unknown): value is LooseRecord =>
 const looseArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /**
- * A citation of a message the recruiter did not write in this conversation (a made-up or
- * mistyped id, or the note that handed their words to this team) cites the recruiter's latest
- * own message instead, as a plain locator, so a save does not fail on it. Staging 11-27: the
- * latest "user" message was the hand-off note, so citing it, or any unknown id, was refused six
- * times in one run as not the recruiter's; a preference save in the main conversation was
- * refused the same way for an id that did not exist.
- */
-export async function citeRecruiterMessages<T>(
-  prisma: Pick<PrismaClient, "message">,
-  threadId: string,
-  args: T,
-): Promise<T> {
-  const messageIds = new Set<string>();
-  const messageOf = (value: unknown) => {
-    const anchor = looseRecord(value) ? value.anchor : undefined;
-    return looseRecord(anchor) && anchor.kind === "message" && typeof anchor.messageId === "string"
-      ? anchor.messageId
-      : null;
-  };
-  const collect = (value: unknown): void => {
-    if (Array.isArray(value)) value.forEach(collect);
-    else if (looseRecord(value)) {
-      const id = messageOf(value);
-      if (id) messageIds.add(id);
-      Object.values(value).forEach(collect);
-    }
-  };
-  collect(args);
-  if (!messageIds.size) return args;
-  const [present, recent] = await Promise.all([
-    prisma.message.findMany({
-      where: { id: { in: [...messageIds] }, threadId },
-      include: humanMessageInclude,
-    }),
-    prisma.message.findMany({
-      where: { threadId, role: "user", botId: null },
-      orderBy: { seq: "desc" },
-      take: 30,
-      include: humanMessageInclude,
-    }),
-  ]);
-  const known = new Set(present.filter(isNativeHumanMessage).map((message) => message.id));
-  const latest = recent.find(isNativeHumanMessage);
-  const repoint = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(repoint);
-    if (!looseRecord(value)) return value;
-    const record = Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, repoint(item)]),
-    );
-    const id = messageOf(value);
-    if (!id || known.has(id) || !latest) return record;
-    getLogger().warn("recruiting.source.repaired", { reason: "message_not_recruiters" });
-    const { quote: _quote, ...rest } = record;
-    return {
-      ...rest,
-      anchor: { kind: "message", messageId: latest.id, locator: "blocks[0].text" },
-    };
-  };
-  return repoint(args) as T;
-}
-
-/**
  * Fill a role save from the server's own records before it is checked, so a value the model
  * copied imperfectly never rejects the save. Ownership is unchanged: every artifact, message and
  * role read here is scoped to the actor, and the save still runs every isolation check.
@@ -3519,8 +3426,7 @@ export async function fillRecruitingRoleArgs(
     const receipt = receipts.get(id);
     return receipt && record.kind === "original_material" ? { ...filled, ...receipt } : filled;
   };
-  let filled = fill(args) as LooseRecord;
-  if (thread) filled = await citeRecruiterMessages(prisma, context.threadId, filled);
+  const filled = fill(args) as LooseRecord;
   if (
     (filled.operation === "update" || filled.operation === "revise") &&
     thread?.activeRecruitingRoleId
@@ -3846,7 +3752,8 @@ async function roleRevisionWorkspace(
   const thread = await requireThread(tx, actor, threadId);
   const role = await requireRole(tx, actor, input.roleId, true);
   if (current && thread.activeRecruitingRoleId !== role.id) throw new IsolationError();
-  if (current && role.revision !== input.expectedRoleRevision) throw new RecruitingConflictError();
+  if (current && role.revision !== input.expectedRoleRevision)
+    throw staleRoleRevision(role.revision, input.expectedRoleRevision);
   const row = await tx.recruitingRoleRevision.findFirst({
     where: { roleId: role.id, revision: input.expectedRoleRevision },
   });

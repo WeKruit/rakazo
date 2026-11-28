@@ -130,7 +130,7 @@ describe("recruiting role archive", () => {
     ).rejects.toBeInstanceOf(IsolationError);
     await expect(
       setRecruitingRoleArchived(prisma, actor, { ...input, expectedRevision: 1 }),
-    ).rejects.toThrow("Recruiting revision changed");
+    ).rejects.toThrow("The role is at revision 2; this call named revision 1.");
     expect(role.archivedAt).toBeNull();
 
     const busy = fake({ candidates: 3, tasks: 0 });

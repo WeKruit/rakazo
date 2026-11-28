@@ -148,6 +148,7 @@ describe("recruiting feedback", () => {
       sourceMessageId: "human",
       intent,
       sourceRefs: [],
+      recordKeeping: true,
     });
     expect(f.read).toHaveBeenCalledWith({ scope: "user", path: preference.path }, context);
     expect(f.commit).toHaveBeenCalledWith(
@@ -437,6 +438,7 @@ describe("recruiting feedback", () => {
       sourceMessageId: trusted.sourceMessageId,
       intent: preference.intent,
       sourceRefs: preference.sourceRefs,
+      recordKeeping: true,
     });
   });
 

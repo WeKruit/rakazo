@@ -212,9 +212,6 @@ describe("jsonSchemaParameters", () => {
       "intent",
     ])
       expect(tool.description).toContain(field);
-    expect(tool.description).toContain(
-      "the runtime adds the verified human instruction only as role authorization",
-    );
     expect(tool.description).not.toContain("expectedRevision:0");
     expect(tool.description).toContain("For JD URLs, call web_fetch before creating the role");
     expect(tool.description).toContain("sourceMaterial");

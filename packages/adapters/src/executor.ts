@@ -179,7 +179,6 @@ import {
   campaignSendCardHash,
   canvasOf,
   changeCanvas,
-  citeRecruiterMessages,
   claimRecruitingCrmImport,
   claimRecruitingReply,
   createRunHistoryCache,
@@ -325,17 +324,6 @@ import {
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
 import { awayRecapNote } from "./away-recap.js";
-import {
-  ownRoleRevisions,
-  PREFERENCE_SAVE_WAIT_MS,
-  preferenceAtCurrentRevision,
-  preferenceInputError,
-  ROLE_SAVE_WAIT_MS,
-  saveInBackground,
-  savesFeedbackInBackground,
-  savesRoleInBackground,
-  transientSaveError,
-} from "./background-save.js";
 import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import {
@@ -859,14 +847,6 @@ const KRUIT_ROLE_GROUP_PREFIX = "role-";
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
 const FEEDBACK_NOT_SAVED = "Not recorded: nothing was saved.";
-
-/** Marks a feedback call naming people who are not saved on the role, which only the agent can fix. */
-const FEEDBACK_INPUT_ERROR = "FEEDBACK_INPUT";
-
-function feedbackInputError(result: unknown): boolean {
-  const payload = (result as { details?: unknown } | null)?.details ?? result;
-  return (payload as { code?: unknown } | null)?.code === FEEDBACK_INPUT_ERROR;
-}
 
 /**
  * What the agent is told when a feedback save is refused. A check that says what to change
@@ -3458,9 +3438,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           Boolean(recruitingBotKey(bot)) &&
           !attachedJob &&
           !roleCreatedInTurn;
-        // Role saves run in the background, so later calls may name a revision this run moved past.
-        const roleRevisions = ownRoleRevisions();
-        const roleSavesInFlight = new Set<Promise<unknown>>();
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
         // The role's total after each people search this run, so a scale-out cannot hand off while
@@ -4214,43 +4191,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               remaining_after: batch.remaining,
             };
           }
-          // A call naming a role revision waits briefly for this run's own role saves still
-          // running, then acts on the newest revision this run saved.
-          const revisionKey =
-            name === "recruiting_role" && args.operation === "update"
-              ? "expectedRevision"
-              : (name === "recruiting_research" || name === "recruiting_feedback") &&
-                  Object.hasOwn(args, "expectedRoleRevision")
-                ? "expectedRoleRevision"
-                : undefined;
-          if (revisionKey) {
-            // A role update never waits on role saves, which would include itself.
-            if (roleSavesInFlight.size && name !== "recruiting_role")
-              await withinDeadline(
-                Promise.all([...roleSavesInFlight]),
-                ROLE_SAVE_WAIT_MS,
-                () => undefined,
-              );
-            const roleId =
-              typeof args.roleId === "string" ? args.roleId : thread.activeRecruitingRoleId;
-            const saved =
-              roleId && typeof args[revisionKey] === "number"
-                ? await Promise.resolve()
-                    .then(() =>
-                      deps.prisma.recruitingRole.findFirst({
-                        where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
-                        select: { revision: true },
-                      }),
-                    )
-                    // Unread, the call keeps the revision it names, as before.
-                    .then(
-                      (role) => role?.revision ?? undefined,
-                      () => undefined,
-                    )
-                : undefined;
-            const current = roleRevisions.current(roleId ?? undefined, args[revisionKey], saved);
-            if (current !== args[revisionKey]) args = { ...args, [revisionKey]: current };
-          }
           // A brief save that names no intent acts on this turn's message.
           const givenQuote = (args.intent as { quote?: unknown } | undefined)?.quote;
           const turnText = (
@@ -4353,8 +4293,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The server fills what it knows about the thread's role and names a person the recruiter
           // mentioned by their saved key, so feedback saves on the first call.
           let feedbackArgsError: string | undefined;
-          if (name === "recruiting_feedback")
-            args = await citeRecruiterMessages(deps.prisma, thread.id, args);
           const feedbackRoleId =
             name === "recruiting_feedback" && args.target !== "preference"
               ? await recruitingFeedbackRole(deps.prisma, {
@@ -6339,7 +6277,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : `A role, message or file this call names is not part of this conversation. ${retry}`,
               };
             if (error instanceof RecruitingConflictError)
-              return { error: error.message, code: "CONFLICT" };
+              return {
+                error: error.message,
+                code: "CONFLICT",
+                ...(error.currentRevision === undefined
+                  ? {}
+                  : { currentRevision: error.currentRevision }),
+              };
             if (
               error instanceof RecruitingPlaybookValidationError ||
               (error instanceof Error && error.name === "ZodError")
@@ -7426,14 +7370,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return null;
               const nobody = searchThatFoundNobody(returned, server.endpoint);
               if (nobody) return nobody;
-              // The step's own brief save lands first, so these people are judged on the
-              // requirements it holds rather than on the role as it was a moment earlier.
-              if (roleSavesInFlight.size)
-                await withinDeadline(
-                  Promise.all([...roleSavesInFlight]),
-                  ROLE_SAVE_WAIT_MS,
-                  () => undefined,
-                );
               // A brief saved in the same step moves the revision; one retry reads the new one.
               for (const attempt of ["", ":2"]) {
                 const role = await deps.prisma.recruitingRole.findFirst({
@@ -8105,11 +8041,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }, finish);
           }
           if (name === "recruiting_feedback" || guardedMemory) {
-            if (feedbackArgsError)
-              return finish({
-                error: feedbackArgsError,
-                code: FEEDBACK_INPUT_ERROR,
-              });
+            if (feedbackArgsError) return finish({ error: feedbackArgsError });
             if (guardedMemory) {
               const invalid =
                 name === "save_memory"
@@ -8193,7 +8125,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return finish({ error: feedbackSaveRefused(error) });
               }
               if (error instanceof RecruitingConflictError)
-                return finish({ error: error.message, code: "CONFLICT" });
+                return finish({
+                  error: error.message,
+                  code: "CONFLICT",
+                  ...(error.currentRevision === undefined
+                    ? {}
+                    : { currentRevision: error.currentRevision }),
+                });
               if (error instanceof MemoryRevisionConflictError && recruitingPreference) {
                 const current = await deps.memory.read(
                   {
@@ -8431,7 +8369,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return finish({ error: RESEARCH_SAVE_REFUSED });
               }
               if (error instanceof RecruitingConflictError)
-                return finish({ error: error.message, code: "CONFLICT" });
+                return finish({
+                  error: error.message,
+                  code: "CONFLICT",
+                  ...(error.currentRevision === undefined
+                    ? {}
+                    : { currentRevision: error.currentRevision }),
+                });
               if (error instanceof Error && error.name === "ZodError")
                 return finish({
                   error: sanitizeConnectorError(error, runSecrets),
@@ -10482,87 +10426,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               throw error;
             },
           );
-          if (savesFeedbackInBackground(name, rawArgs)) {
-            const save = saveInBackground({
-              first: applied,
-              ...(rawArgs.target === "preference" ? { waitMs: PREFERENCE_SAVE_WAIT_MS } : {}),
-              retry: (attempt, previous) =>
-                applyToolNow(
-                  name,
-                  preferenceAtCurrentRevision(rawArgs, previous),
-                  `${executionId}:retry-${attempt}`,
-                ),
-              failed: (result) => toolResultError(result) !== undefined,
-              // A refused preference (a role requirement or a pasted JD) is not retried: the role
-              // keeps it and the shared preference is simply not saved.
-              inputError: (result) =>
-                feedbackInputError(result) ||
-                (rawArgs.target === "preference" &&
-                  preferenceInputError(result, toolResultError(result))),
-              onGiveUp: (result) =>
-                getLogger().warn("recruiting.feedback.not_saved", {
-                  runId,
-                  target: rawArgs.target,
-                  operation: rawArgs.operation,
-                  reason: redactSecrets(String(toolResultError(result)), runSecrets).slice(0, 300),
-                }),
-            });
-            const settled = save.settled.catch(() => undefined);
-            savesInFlight.add(settled);
-            void settled.then(() => savesInFlight.delete(settled));
-            return save.reply;
-          }
-          if (name === "recruiting_role" && rawArgs.operation !== "read") {
-            const noteRevision = (result: unknown) => {
-              const role = (
-                result as {
-                  workspace?: { role?: { id?: unknown; revision?: unknown } };
-                }
-              )?.workspace?.role;
-              if (typeof role?.id === "string" && typeof role.revision === "number")
-                roleRevisions.saved(role.id, role.revision);
-            };
-            void applied.then(noteRevision, () => undefined);
-            if (savesRoleInBackground(name, rawArgs) && !executionId.includes(":role-retry-")) {
-              const save = saveInBackground({
-                first: applied,
-                // A retry acts on the role's current revision: the save only replaces what it names.
-                retry: async (attempt) => {
-                  const roleId =
-                    typeof rawArgs.roleId === "string"
-                      ? rawArgs.roleId
-                      : thread.activeRecruitingRoleId;
-                  const role = roleId
-                    ? await deps.prisma.recruitingRole.findUnique({
-                        where: { id: roleId },
-                        select: { revision: true },
-                      })
-                    : null;
-                  const retried = await applyTool(
-                    name,
-                    role ? { ...rawArgs, expectedRevision: role.revision } : rawArgs,
-                    `${executionId}:role-retry-${attempt}`,
-                  );
-                  return retried;
-                },
-                failed: (result) => toolResultError(result) !== undefined,
-                inputError: (result) => !transientSaveError(result, toolResultError(result)),
-                onGiveUp: (result) =>
-                  getLogger().warn("recruiting.role.not_saved", {
-                    runId,
-                    error: redactSecrets(String(toolResultError(result)), runSecrets).slice(0, 300),
-                  }),
-              });
-              const settled = save.settled.catch(() => undefined);
-              savesInFlight.add(settled);
-              roleSavesInFlight.add(settled);
-              void settled.then(() => {
-                savesInFlight.delete(settled);
-                roleSavesInFlight.delete(settled);
-              });
-              return save.reply;
-            }
-          }
           if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
           if (rawArgs.operation === "create") roleCreatedInTurn = true;
           const settled = applied.catch(() => undefined);
