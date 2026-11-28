@@ -47,8 +47,7 @@ export type RecruitingContextManifest = {
   roleText: string;
   memory: LoadedAgentMemoryContext;
   text: string;
-  recallScope: string | null;
-  placement: "instructions" | "tool_result" | "steering";
+  placement: "instructions" | "tool_result";
   reason: string;
   sourceMessageId: string | null;
 };
@@ -71,7 +70,6 @@ export async function loadRecruitingRunContext(
   options: {
     reason: string;
     sourceMessageId?: string | null;
-    recallScope?: string | null;
     placement?: RecruitingContextManifest["placement"];
     redact?: (value: string) => string;
     trustedWorkspace?: LoadedRecruitingRunContext["workspace"];
@@ -138,7 +136,6 @@ export async function loadRecruitingRunContext(
     ).replace(/</g, "\\u003c"),
     "</recruiting_role>",
   ].join("\n");
-  const recallScope = options.recallScope == null ? null : redact(options.recallScope);
   // ponytail: at most 12 KB of recent receipts; native history retains complete quotes and older decisions.
   const feedback: RecruitingFeedbackRecord[] = [];
   let feedbackSize = 0;
@@ -176,9 +173,6 @@ export async function loadRecruitingRunContext(
             : []),
         ]
       : []),
-    ...(recallScope
-      ? [`Current recall scope (does not change qualification):\n${recallScope}`]
-      : []),
     ...(memory.text ? [memory.text] : []),
   ].join("\n\n");
   const proposed: RecruitingContextManifest = {
@@ -193,7 +187,6 @@ export async function loadRecruitingRunContext(
     roleText,
     memory,
     text,
-    recallScope,
     placement: options.placement ?? "instructions",
     reason: options.reason,
     sourceMessageId: options.sourceMessageId ?? run.sourceMessageId ?? null,

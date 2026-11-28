@@ -100,7 +100,7 @@ export async function withoutShownBefore(
 }
 
 /** P5's one count for a role: the people shown to the recruiter, less those they turned down. */
-export async function shownCount(
+async function shownCount(
   prisma: Parameters<typeof readRecruitingResultsMarks>[0],
   role: { roleId: string; userId: string; spaceId: string },
 ) {
