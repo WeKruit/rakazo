@@ -9,8 +9,7 @@ export function signingName(user: { name: string; email: string } | null): strin
   return name;
 }
 
-export const recruiterNameNote = (name: string) =>
-  `The recruiter's account name is ${name}: sign emails and templates with it (or their saved signature) unless they give another name; never ask which name to sign with.`;
+export const recruiterNameNote = (name: string) => `The recruiter's account name is ${name}.`;
 
 export async function recruiterSigningNote(
   prisma: PrismaClient,

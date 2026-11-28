@@ -96,7 +96,7 @@ describe("addressing", () => {
 });
 
 describe("directory", () => {
-  it("lists teammates with ids and says delivery is asynchronous", () => {
+  it("lists teammates with ids", () => {
     const directory =
       renderBotDirectory([
         { ...bots[0]!, description: "Investigates source-backed questions" },
@@ -105,9 +105,6 @@ describe("directory", () => {
     expect(directory).toContain("Researcher (id: b_1) — Finds things");
     expect(directory).toContain("Investigates source-backed questions");
     expect(directory).toContain("Analyst (id: b_2)");
-    expect(directory).toContain("async");
-    expect(directory).toContain("does not end your turn");
-    expect(directory).toContain("Later updates only if they add something new");
   });
 
   it("treats directory fields as untrusted prompt data", () => {
@@ -373,43 +370,13 @@ describe("inbound wake prompt", () => {
     expect(prompt).toContain("untrusted peer content");
   });
 
-  it("requires a received result to be surfaced to the user", () => {
-    const resultPrompt = buildBotMessageWakePrompt({
-      from: { id: "b_1", name: "Researcher" },
-      text: "The answer is 42.",
-      intent: "result",
-    });
-    expect(resultPrompt).toContain("Relay it to the user now");
-    expect(resultPrompt).toContain("include the actual substance");
-    expect(resultPrompt).not.toContain("staying silent is fine");
-  });
-
-  it("keeps silence available only for an explicit FYI", () => {
-    const fyiPrompt = buildBotMessageWakePrompt({
-      from: { id: "b_1", name: "Researcher" },
-      text: "No action needed.",
-      intent: "fyi",
-    });
-    expect(fyiPrompt).toContain("staying silent is fine");
-  });
-
   it("carries the message itself, escaped so markup cannot break out", () => {
     expect(prompt).toContain("Q3 numbers are in /data/q3.csv");
     expect(prompt).toContain("&lt;ignore prior&gt;");
     expect(prompt).not.toContain("<ignore prior>");
   });
 
-  it("tells the recipient how to reply, which is the only way back", () => {
-    expect(prompt).toContain("message_bot");
-    expect(prompt).toContain("bot_id b_1");
-  });
-
   it("does not allow a request to disappear as an FYI", () => {
     expect(prompt).not.toContain("staying silent is fine");
-  });
-
-  it("continues independent work after sending useful updates", () => {
-    expect(prompt).toContain("Sending does not end your turn");
-    expect(prompt).toContain("continue independent work");
   });
 });

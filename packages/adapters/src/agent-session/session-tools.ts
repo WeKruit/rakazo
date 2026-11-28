@@ -4,9 +4,7 @@ import { AskUserInputSchema, disabledBuiltinToolSet } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
 import {
   isBackgroundRunTrigger,
-  isRecruitingSpawnKey,
-  RECRUITING_UNUSED_BUILTIN_TOOLS,
-  recruitingBotKey,
+  recruitingAgentScope,
   shortQuestion,
   withoutHiddenTools,
 } from "@rakazo/core";
@@ -64,13 +62,6 @@ import { textContentArg } from "../tool-text.js";
 // The tools an agent has in a conversation: which ones it is offered, and how each call reaches
 // the executor. Moved from executor.ts (continueRun) and pi-runtime.ts so the run path and the
 // session path offer the same list from one source.
-
-/**
- * The recruiter sees one assistant: a question for them is an ask_user card. A poll closed on its
- * own and the agent answered it itself (staging 11-11 and 11-12), so recruiting runs have none.
- */
-export const withoutPolls = <T extends { name: string }>(tools: T[], recruiting: boolean): T[] =>
-  recruiting ? tools.filter((tool) => tool.name !== "create_poll") : tools;
 
 async function loadLivePluginSlugs(
   listConnectedPluginSlugs: ((userId: string) => Promise<string[]>) | undefined,
@@ -134,8 +125,11 @@ export function selectBuiltinToolsForRun(options: {
   voiceCall?: boolean;
   /** Built-in names this bot turned off. Unknown names are ignored. */
   disabledBuiltinTools?: readonly string[];
+  /** The agent's own tool list; every builtin when absent (Claude Code subagent `tools:`). */
+  allowedBuiltinTools?: readonly string[];
 }) {
   const disabled = disabledBuiltinToolSet(options.disabledBuiltinTools);
+  const allowed = options.allowedBuiltinTools && new Set(options.allowedBuiltinTools);
   return selectCloudAgentTools(
     selectMemoryTools(
       filterBuiltinToolsForRun(
@@ -154,6 +148,7 @@ export function selectBuiltinToolsForRun(options: {
   ).filter(
     (tool) =>
       !disabled.has(tool.name) &&
+      (!allowed || allowed.has(tool.name)) &&
       (options.ticketBoardEnabled ||
         (tool.name !== "board_tickets" && !tool.name.startsWith("ticket_"))) &&
       (!isBackgroundRunTrigger(options.trigger) ||
@@ -288,9 +283,7 @@ export interface RunToolsInput {
   pageBrowser: boolean;
   heldForTakeover: boolean;
   run: { trigger: string; spaceId: string };
-  bot: { spawnKey: string | null; disabledBuiltinTools: string[] } & Parameters<
-    typeof recruitingBotKey
-  >[0];
+  bot: { disabledBuiltinTools: string[] } & Parameters<typeof recruitingAgentScope>[0];
   thread: { groupId: string | null; activeRecruitingRoleId: string | null };
   semanticMemoryEnabled: boolean;
   cloudAgentEnabled: boolean;
@@ -302,7 +295,6 @@ export interface RunToolsInput {
   /** The owner's block and hide rules. */
   loadOwnerToolRules(): Promise<ActionApprovalRule[]>;
   connectedPlugins: ReadonlyArray<{ provider: string }>;
-  hideVendors: boolean;
 }
 
 /** The tools a bot is offered in a thread, as continueRun has always listed them. */
@@ -327,15 +319,12 @@ export async function assembleRunTools(input: RunToolsInput) {
     discovered,
     loadOwnerToolRules,
     connectedPlugins,
-    hideVendors,
   } = input;
   const graphicalToolsAllowed = graphical && acceptsImages && !heldForTakeover;
   const pageBrowserAllowed = graphical && pageBrowser && !heldForTakeover;
-  // Recruiting crews also drop the general platform tools they never use.
-  const runDisabledBuiltinTools =
-    isRecruitingSpawnKey(bot.spawnKey) || recruitingBotKey(bot)
-      ? [...bot.disabledBuiltinTools, ...RECRUITING_UNUSED_BUILTIN_TOOLS]
-      : bot.disabledBuiltinTools;
+  // A recruiting agent is offered its own tools and skills (Claude Code subagent `tools:`).
+  const agentScope = recruitingAgentScope(bot, thread.groupId);
+  const runDisabledBuiltinTools = bot.disabledBuiltinTools;
   const disabledBuiltinTools = disabledBuiltinToolSet(runDisabledBuiltinTools);
   const builtins = [
     ...selectBuiltinToolsForRun({
@@ -350,6 +339,7 @@ export async function assembleRunTools(input: RunToolsInput) {
       messagingChannelRun,
       voiceCall,
       disabledBuiltinTools: runDisabledBuiltinTools,
+      allowedBuiltinTools: agentScope?.tools,
     }),
     ...(email && !messagingChannelRun && !disabledBuiltinTools.has(COMPLETION_EMAIL_TOOL)
       ? [completionEmailTool]
@@ -427,14 +417,9 @@ export async function assembleRunTools(input: RunToolsInput) {
     await loadOwnerToolRules(),
     connectedPlugins.map((plugin) => plugin.provider),
   );
-  const tools =
-    run.trigger === "created"
-      ? []
-      : withoutPolls(
-          listedTools,
-          hideVendors || recruitingSearch || Boolean(recruitingBotKey(bot)),
-        );
+  const tools = run.trigger === "created" ? [] : listedTools;
   return {
+    agentScope,
     graphicalToolsAllowed,
     pageBrowserAllowed,
     disabledBuiltinTools,
@@ -721,7 +706,7 @@ function toAgentTool(
                     type: "text",
                     text:
                       typeof known === "string"
-                        ? `The recruiter already replied after this question: ${known}\nIf that reply answers it, use it and continue without asking again. If it was about something else, ask the question again now.`
+                        ? `Not asked: the recruiter already replied after this question: ${known}`
                         : known.instead,
                   },
                 ],

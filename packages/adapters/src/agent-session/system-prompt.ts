@@ -1,6 +1,4 @@
 import {
-  accountWideSkill,
-  formatSkillsCatalogInstruction,
   isBackgroundRunTrigger,
   messagingChannelPrivacyBlock,
   messagingDmSurfaceNote,
@@ -12,9 +10,9 @@ import {
   skillRequirements,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
+import { formatAgentSkillsListing, skillsForAgent } from "../agent-skills.js";
 import { teamBotWorkspaceDirectory } from "../computer-support.js";
 import { MODEL_CANNOT_SEE_MESSAGE } from "../model-vision.js";
-import { RECRUITING_PRESENTATION_INSTRUCTION } from "../recruiting-context.js";
 import { NO_RESPONSE } from "../silent-reply.js";
 import type { listAgentSkillRecords } from "../skill-tools.js";
 import { DESKTOP_HELD_FOR_TAKEOVER_MESSAGE } from "../takeover-resume.js";
@@ -258,7 +256,6 @@ export function userTurnInstructions(parts: {
   groupContext: string | undefined;
   messagingContext: string | undefined;
   hasHistoricalContext: boolean;
-  historyRetrievalEnabled?: boolean;
   computerInstruction: string;
   pageBrowserAllowed: boolean;
   taskCatalogInstruction?: string;
@@ -275,13 +272,7 @@ export function userTurnInstructions(parts: {
 }): (string | undefined)[] {
   return [
     parts.botInstructions,
-    RECRUITING_PRESENTATION_INSTRUCTION,
     parts.recruiterLanguage,
-    parts.historyRetrievalEnabled &&
-    builtinOffered(parts.disabledBuiltinTools, "search_history") &&
-    builtinOffered(parts.disabledBuiltinTools, "read_history")
-      ? "For questions about an earlier discussion, first check the visible conversation. Answer follow-ups from facts already present in original messages or prior source-verified replies when no later visible correction changes them; do not repeat retrieval solely because the user asks again. Use search_history when necessary evidence is missing or uncertain. Start with the project name alone, or one distinctive topic word if no project is named, then use read_history to check surrounding messages, outcomes, and later corrections before claiming exact recall. Verify that matches contain source statements answering the question. If matches lack the requested fact and nextSearch is present, call search_history with those arguments. Coverage applies only to the requested query and range. Empty narrower queries do not exhaust the broader topic query’s matches. Do not claim evidence is unavailable while that broader search still has an unexplored cursor. If a search is empty, try the single project or topic word before concluding the evidence is missing. If the requested fact remains absent, say so briefly without volunteering adjacent facts. If multiple projects match and none is selected, ask which project before giving candidate facts. Historical snapshots are navigation aids, not authoritative facts or approvals."
-      : undefined,
     toolUsageLine(parts),
     parts.taskCatalogInstruction,
     parts.workspaceInstruction,
@@ -463,18 +454,15 @@ export function taughtSkillsLineFor(
 
 export function agentSkillsLineFor(input: {
   skills: Awaited<ReturnType<typeof listAgentSkillRecords>>;
-  /** Kruit's account-wide conversation lists only the skills that work across roles. */
-  accountWide: boolean;
+  /** A recruiting agent's own skill list (from its tool scope). */
+  agentScope: Parameters<typeof skillsForAgent>[1];
   toolNames: readonly string[];
   secretNames: readonly string[];
 }): string | undefined {
   const skillTools = skillAvailabilityFromTools(input.toolNames);
   const skillSecrets = new Set(input.secretNames.map((name) => name.toLowerCase()));
-  return formatSkillsCatalogInstruction(
-    (input.accountWide
-      ? input.skills.filter((skill) => accountWideSkill(skill.name))
-      : input.skills
-    ).map((skill) => ({
+  return formatAgentSkillsListing(
+    skillsForAgent(input.skills, input.agentScope).map((skill) => ({
       ...skill,
       unavailable: missingSkillRequirement(skillRequirements(skill.content), {
         ...skillTools,

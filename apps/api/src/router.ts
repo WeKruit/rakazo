@@ -83,6 +83,7 @@ import {
   ensureComputerWorkspaceLayout,
   estimateCatalogTokenCostUsd,
   executeRecruitingSequence,
+  expandRoutineSkills,
   expireComputerControl,
   fillRecruitingRoleProfiles,
   forgetBotSecret,
@@ -199,7 +200,6 @@ import {
   clampCatalogThinkingLevel,
   closedAskClientNonce,
   containsSecret,
-  expandSkillReferencesInPrompt,
   hasMixedOneShotSchedule,
   isConversationalRun,
   isOneShotRoutineCrons,
@@ -4769,7 +4769,7 @@ export function createRouter(deps: RouterDeps) {
           if (existing) return { runId: existing.id };
         }
         const skillRecords = await agentSkills.listWithContent(context.actor);
-        const prompt = expandSkillReferencesInPrompt(routine.prompt, skillRecords);
+        const prompt = expandRoutineSkills(routine.prompt, skillRecords);
         let run: { id: string };
         try {
           // Task + run must commit together so a nonce collision cannot leave an orphan queued Task.

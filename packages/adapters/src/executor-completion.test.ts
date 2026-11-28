@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  completionNotificationPreview,
+  runSendsFinishNotification,
+} from "./agent-session/run-projection.js";
+import {
   LONG_WORK_PROGRESS_GUIDANCE,
   ROUTINE_SILENT_REPLY_GUIDANCE,
   runAllowsSilentEmpty,
@@ -11,14 +15,12 @@ import {
   completionMarksUnread,
   completionMessageSegments,
   completionNotificationBody,
-  completionNotificationPreview,
   DELEGATED_EMPTY_NOTICE,
   emptyDelegatedToolTurnShouldFail,
   isExactNoResponse,
   mayOpenModelStream,
   NO_RESPONSE,
   runPromotesMidTurnNarration,
-  runSendsFinishNotification,
   stripNoResponseReply,
   subagentMarksUnread,
 } from "./executor.js";

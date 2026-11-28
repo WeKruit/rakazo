@@ -58,7 +58,7 @@ export function recruitingAgentRunWaitPrompt(
 ): string {
   // Facts only, like a background-task notification: what to do with it is the skill's.
   return [
-    `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message: it is a notice about your own work. agent_run with runId "${agentRunId}" collects it; the people it returns are saved to Results automatically. An empty reply posts nothing.`,
+    `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message: it is a notice about your own work. The people it returns are saved to Results automatically. An empty reply posts nothing.`,
     countdown
       ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over.`
       : "",

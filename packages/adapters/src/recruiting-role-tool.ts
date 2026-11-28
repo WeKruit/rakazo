@@ -1,6 +1,6 @@
 /**
  * The text of recruiting_role, in the order the agent reads it. The account-wide conversation never
- * holds a role and is not offered this tool (schedule-tools.ts ACCOUNT_WIDE_TOOLS).
+ * holds a role and is not offered this tool (recruitingAgentScope, core recruiting-defaults.ts).
  */
 const ROLE_TOOL_TEXT: readonly string[] = [
   ' A new JD, description or document creates an independent role; never merge roles by company or title. Create shape: {operation:"create",title,sourceRefs:[],criteria:[],preferences:[],definitionQuestions:[],intent:{basis:"direct",quote:"the human\'s words"}}. All arrays are required; use [] only when empty.',

@@ -5,15 +5,18 @@ import {
   extractForcedSkillName,
   extractRoutineSkillMentions,
   findSkillByName,
-  formatSkillsCatalogInstruction,
   isSkillFilePath,
   mergeBuiltinSkills,
   missingSkillRequirement,
   parseSkillMd,
-  SKILL_CATALOG_DESCRIPTION_MAX,
   skillAvailabilityFromTools,
   skillRequirements,
 } from "./agent-skill.js";
+
+const invoke = (skill: { name: string; content: string }, rest?: string) =>
+  [`<skill name="${skill.name}">`, skill.content.trim(), "</skill>", rest]
+    .filter(Boolean)
+    .join("\n");
 
 describe("built-in skill merging", () => {
   it("uses the same normalized names for catalog precedence and prompt expansion", () => {
@@ -35,9 +38,10 @@ describe("built-in skill merging", () => {
     expect(skills).toEqual([saved]);
     expect(findSkillByName(skills, " INTERROGATE ")).toBe(saved);
     for (const prompt of ["/Interrogate\nreview this", "Use @Interrogate to review this"]) {
-      expect(expandSkillReferencesInPrompt(prompt, skills)).toContain("Saved instructions");
-      expect(expandSkillReferencesInPrompt(prompt, skills)).not.toContain("Builtin instructions");
-      expect(expandSkillReferencesInPrompt(prompt, skills)).not.toContain("@Interrogate");
+      const expanded = expandSkillReferencesInPrompt(prompt, skills, invoke, { mentions: true });
+      expect(expanded).toContain("Saved instructions");
+      expect(expanded).not.toContain("Builtin instructions");
+      expect(expanded).not.toContain("@Interrogate");
     }
     expect(mergeBuiltinSkills([builtin], [])).toEqual([builtin]);
   });
@@ -238,12 +242,15 @@ describe("skill prompt helpers", () => {
   });
 
   it("extracts @skill mentions from routine prompts", () => {
-    expect(extractRoutineSkillMentions("Run @Daily standup, then post to Slack")).toEqual([
+    const known = ["Daily standup", "Weekly review"];
+    expect(extractRoutineSkillMentions("Run @Daily standup, then post to Slack", known)).toEqual([
       "Daily standup",
     ]);
-    expect(extractRoutineSkillMentions("ping @everyone then @Weekly review")).toEqual([
+    expect(extractRoutineSkillMentions("ping @everyone then @Weekly review", known)).toEqual([
       "Weekly review",
     ]);
+    // Only a known skill name is a mention: no word list guesses one from the text.
+    expect(extractRoutineSkillMentions("ask @Main then @Weekly", known)).toEqual([]);
   });
 
   it("expands forced and mentioned skills into the prompt", () => {
@@ -256,42 +263,44 @@ describe("skill prompt helpers", () => {
         content: SAMPLE,
       },
     ];
-    const forced = expandSkillReferencesInPrompt("/Daily standup\nfocus on blockers", skills);
-    expect(forced).toContain("Use skill: Daily standup");
+    const forced = expandSkillReferencesInPrompt(
+      "/Daily standup\nfocus on blockers",
+      skills,
+      invoke,
+    );
+    expect(forced).toContain('<skill name="Daily standup">');
     expect(forced).toContain(SAMPLE.trim());
     expect(forced).toContain("focus on blockers");
 
-    const mentioned = expandSkillReferencesInPrompt("Run @Daily standup then email me", skills);
-    expect(mentioned).toContain("Use skill: Daily standup");
+    const mention = { mentions: true };
+    const mentioned = expandSkillReferencesInPrompt(
+      "Run @Daily standup then email me",
+      skills,
+      invoke,
+      mention,
+    );
+    expect(mentioned).toContain('<skill name="Daily standup">');
     expect(mentioned).toContain("then email me");
     expect(mentioned).not.toMatch(/@Daily standup/i);
 
     // Fire-time expand then run-time expand must not duplicate the body.
-    const again = expandSkillReferencesInPrompt(mentioned, skills);
+    const again = expandSkillReferencesInPrompt(mentioned, skills, invoke, mention);
     expect(again).toBe(mentioned);
     expect(again.split(SAMPLE.trim()).length - 1).toBe(1);
 
     const twice = expandSkillReferencesInPrompt(
       "Run @Daily standup then repeat @Daily standup",
       skills,
+      invoke,
+      mention,
     );
     expect(twice).not.toMatch(/@Daily standup/i);
     expect(twice.split(SAMPLE.trim()).length - 1).toBe(1);
-    expect(expandSkillReferencesInPrompt(twice, skills)).toBe(twice);
-  });
-
-  it("builds catalog instructions for auto-use", () => {
-    const line = formatSkillsCatalogInstruction([
-      {
-        name: "Daily standup",
-        description: "Prepare standup notes",
-        source: "user",
-        readOnly: false,
-      },
-    ]);
-    expect(line).toContain("- Daily standup: Prepare standup notes");
-    expect(line).toContain("skill_read");
-    expect(line).toContain("Prefer matching skills");
+    expect(expandSkillReferencesInPrompt(twice, skills, invoke, mention)).toBe(twice);
+    // A turn's own prompt expands only a forced skill: a mention there is the person's text.
+    expect(expandSkillReferencesInPrompt("Run @Daily standup", skills, invoke)).toBe(
+      "Run @Daily standup",
+    );
   });
 });
 
@@ -324,21 +333,6 @@ describe("skill requirements", () => {
     expect(missingSkillRequirement(needs, { mcp: new Set(["hubspot"]) })).toBe(
       "needs connection autumn",
     );
-  });
-
-  it("marks unavailable skills and keeps catalog descriptions short", () => {
-    const line = formatSkillsCatalogInstruction([
-      {
-        name: "Deploy",
-        description: "x".repeat(1_000),
-        source: "user",
-        readOnly: false,
-        unavailable: "needs connection autumn",
-      },
-    ]);
-    expect(line).toContain("- Deploy (unavailable: needs connection autumn): ");
-    expect(line).toContain("Do not run it");
-    expect(line).not.toContain("x".repeat(SKILL_CATALOG_DESCRIPTION_MAX));
   });
 
   it("recognizes skill files in the workspace", () => {

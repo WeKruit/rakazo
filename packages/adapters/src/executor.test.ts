@@ -3,6 +3,14 @@ import { CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE } from "@rakazo/contracts";
 import { completeToolStep, ONCE_ROUTINE_CRON, RECRUITER_LANGUAGE } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
+import {
+  appendToolCompletionAudit,
+  appendUsageTimingAudit,
+  routineNotifies,
+  runNotificationsEnabled,
+  toolCompletionAuditPayload,
+  toolCompletionFromResult,
+} from "./agent-session/run-projection.js";
 import { selectBuiltinToolsForRun } from "./agent-session/session-tools.js";
 import {
   dockerComputerToolInstruction,
@@ -10,21 +18,15 @@ import {
   userTurnInstructions,
 } from "./agent-session/system-prompt.js";
 import {
-  appendToolCompletionAudit,
-  appendUsageTimingAudit,
   createRunExecutor,
   createRunWorkspaceCheckpoint,
   isTerminalModelSetupError,
   loadCurrentTurnImages,
   missingTurnImagesInstruction,
   parseUpdateBotPatch,
-  routineNotifies,
-  runNotificationsEnabled,
   runRoutineProbe,
   settleSteeringAttachmentLoads,
   threadContextForRun,
-  toolCompletionAuditPayload,
-  toolCompletionFromResult,
   userTurnContext,
   VOICE_CALL_INSTRUCTION,
   voiceCallInstruction,
@@ -32,7 +34,6 @@ import {
 } from "./executor.js";
 import { UnavailableModelForAuthError } from "./model-selection.js";
 import { RetiredModelCredentialError, serializeModelSecret } from "./pi-oauth.js";
-import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
 
 describe("bot tool permissions", () => {
   it("offers feedback with native and semantic memory while respecting channel and tool permissions", () => {
@@ -1338,7 +1339,6 @@ describe("userTurnInstructions", () => {
 
     expect(instructions).toEqual([
       "Bot instructions",
-      RECRUITING_PRESENTATION_INSTRUCTION,
       computerLine,
       "This entire computer workspace is your private home.",
       "Agent environment",
@@ -1370,7 +1370,6 @@ describe("userTurnInstructions", () => {
 
     expect(instructions).toEqual([
       "Bot instructions",
-      RECRUITING_PRESENTATION_INSTRUCTION,
       computerLine,
       "This entire computer workspace is your private home.",
       ...stableMiddle,
@@ -1397,7 +1396,6 @@ describe("userTurnInstructions", () => {
 
     expect(instructions).toEqual([
       "Bot instructions",
-      RECRUITING_PRESENTATION_INSTRUCTION,
       computerLine,
       "Catalog guidance",
       "This entire computer workspace is your private home.",
@@ -1405,26 +1403,6 @@ describe("userTurnInstructions", () => {
       archiveBot,
       ...stableTail,
     ]);
-  });
-
-  it("omits paired history guidance when either history tool is disabled", () => {
-    for (const name of ["search_history", "read_history"]) {
-      const text = userTurnInstructions({
-        ...base,
-        groupContext: undefined,
-        messagingContext: undefined,
-        hasHistoricalContext: false,
-        agentEnvironmentInstruction: undefined,
-        botDirectory: undefined,
-        pluginLine: undefined,
-        agentSkillsLine: undefined,
-        taughtSkillsLine: undefined,
-        historyRetrievalEnabled: true,
-        disabledBuiltinTools: new Set([name]),
-      }).join("\n");
-      expect(text).not.toContain("search_history");
-      expect(text).not.toContain("read_history");
-    }
   });
 
   it("stops telling the model to use a disabled web tool", () => {
@@ -2292,7 +2270,7 @@ description: Prepare standup notes
 
     await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
 
-    expect(createdPrompt).toContain("Use skill: Daily standup");
+    expect(createdPrompt).toContain('<skill name="Daily standup"');
     expect(createdPrompt).toContain("Summarize wins");
     expect(createdPrompt).toContain("keep the report local");
     expect(createdPrompt).not.toContain("email me");
