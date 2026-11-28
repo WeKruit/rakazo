@@ -83,7 +83,6 @@ import {
 import type { ActionApprovalRule, ReplyLanguage, ToolCallStreak } from "@rakazo/core";
 import {
   ACTIVE_RUN_STATUSES,
-  accountWideSkill,
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
@@ -110,10 +109,8 @@ import {
   createVendorNameStream,
   creditEstimateNote,
   endsSentence,
-  expandSkillReferencesInPrompt,
   externalTextTriggerToolRefusal,
   findSkillByName,
-  formatSkillsCatalogInstruction,
   GMAIL_MCP_ENDPOINT,
   GMAIL_SEND_TOOLS,
   GOOGLE_CALENDAR_ENDPOINT,
@@ -152,8 +149,8 @@ import {
   RECRUITER_LANGUAGE,
   RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
-  RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
+  recruitingAgentScope,
   RETIRED_APPROVAL_KINDS,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -705,6 +702,12 @@ import {
   skillReadFromTool,
   skillUpdateFromTool,
 } from "./skill-tools.js";
+import {
+  expandForcedSkill,
+  expandRoutineSkills,
+  formatAgentSkillsListing,
+  skillsForAgent,
+} from "./agent-skills.js";
 import type { TakeoverResumeCheckpoint } from "./takeover-resume.js";
 import {
   continueRunClaimFence,
@@ -1313,13 +1316,6 @@ const SAYS_NOTHING = new Set([
   "bot_message_sent",
   "bot_message_received",
 ]);
-/**
- * The recruiter sees one assistant: a question for them is an ask_user card. A poll closed on its
- * own and the agent answered it itself (staging 11-11 and 11-12), so recruiting runs have none.
- */
-export const withoutPolls = <T extends { name: string }>(tools: T[], recruiting: boolean): T[] =>
-  recruiting ? tools.filter((tool) => tool.name !== "create_poll") : tools;
-
 /** Built-in calls after a handoff that leave the request with the teammate. */
 // Waiting for the teammate is not new work: staging 11-13, Main waited for Outreach's template,
 // then posted it again as its own reply.
@@ -2084,7 +2080,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             botId: bot.id,
             threadId: thread.id,
             userId: routine.userId,
-            prompt: expandSkillReferencesInPrompt(currentRoutine.prompt, skillRecords),
+            prompt: expandRoutineSkills(currentRoutine.prompt, skillRecords),
             status: "queued",
           },
         });
@@ -3505,11 +3501,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const graphicalToolsAllowed = graphical && acceptsImages && !heldForTakeover;
         const pageBrowserAllowed =
           graphical && browser.describe().capabilities.page && !heldForTakeover;
-        // Recruiting crews also drop the general platform tools they never use.
-        const runDisabledBuiltinTools =
-          isRecruitingSpawnKey(bot.spawnKey) || recruitingBotKey(bot)
-            ? [...bot.disabledBuiltinTools, ...RECRUITING_UNUSED_BUILTIN_TOOLS]
-            : bot.disabledBuiltinTools;
+        // A recruiting agent is offered its own tools and skills (Claude Code subagent `tools:`).
+        const agentScope = recruitingAgentScope(bot, thread.groupId);
+        const runDisabledBuiltinTools = bot.disabledBuiltinTools;
         const disabledBuiltinTools = disabledBuiltinToolSet(runDisabledBuiltinTools);
         const builtins = [
           ...selectBuiltinToolsForRun({
@@ -3524,6 +3518,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             messagingChannelRun,
             voiceCall,
             disabledBuiltinTools: runDisabledBuiltinTools,
+            allowedBuiltinTools: agentScope?.tools,
           }),
           ...(deps.email && !messagingChannelRun && !disabledBuiltinTools.has(COMPLETION_EMAIL_TOOL)
             ? [completionEmailTool]
@@ -3653,7 +3648,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const tools =
           run.trigger === "created"
             ? []
-            : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
+            : listedTools;
         setupMark("toolsReady");
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
@@ -11518,11 +11513,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined;
         const skillTools = skillAvailabilityFromTools(tools.map((tool) => tool.name));
         const skillSecrets = new Set(agentSecretRows.map((row) => row.name.toLowerCase()));
-        const agentSkillsLine = formatSkillsCatalogInstruction(
-          (thread.groupId?.startsWith("recruiting-global-")
-            ? agentSkills.filter((skill) => accountWideSkill(skill.name))
-            : agentSkills
-          ).map((skill) => ({
+        const agentSkillsLine = formatAgentSkillsListing(
+          skillsForAgent(agentSkills, agentScope).map((skill) => ({
             ...skill,
             unavailable: missingSkillRequirement(skillRequirements(skill.content), {
               ...skillTools,
@@ -11558,7 +11550,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             code: probe.code,
           });
         }
-        const taskPrompt = expandSkillReferencesInPrompt(
+        const taskPrompt = expandForcedSkill(
           [task.prompt, probeNote, missingImagesInstruction].filter(Boolean).join("\n\n"),
           agentSkills,
         );
@@ -14263,8 +14255,11 @@ export function selectBuiltinToolsForRun(options: {
   voiceCall?: boolean;
   /** Built-in names this bot turned off. Unknown names are ignored. */
   disabledBuiltinTools?: readonly string[];
+  /** The agent's own tool list; every builtin when absent (Claude Code subagent `tools:`). */
+  allowedBuiltinTools?: readonly string[];
 }) {
   const disabled = disabledBuiltinToolSet(options.disabledBuiltinTools);
+  const allowed = options.allowedBuiltinTools && new Set(options.allowedBuiltinTools);
   return selectCloudAgentTools(
     selectMemoryTools(
       filterBuiltinToolsForRun(
@@ -14283,6 +14278,7 @@ export function selectBuiltinToolsForRun(options: {
   ).filter(
     (tool) =>
       !disabled.has(tool.name) &&
+      (!allowed || allowed.has(tool.name)) &&
       (options.ticketBoardEnabled ||
         (tool.name !== "board_tickets" && !tool.name.startsWith("ticket_"))) &&
       (!isBackgroundRunTrigger(options.trigger) ||

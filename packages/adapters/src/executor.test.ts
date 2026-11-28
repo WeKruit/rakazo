@@ -2290,7 +2290,7 @@ description: Prepare standup notes
 
     await executor.wakeRoutine("routine-1", scheduledAt.toISOString());
 
-    expect(createdPrompt).toContain("Use skill: Daily standup");
+    expect(createdPrompt).toContain('<skill name="Daily standup"');
     expect(createdPrompt).toContain("Summarize wins");
     expect(createdPrompt).toContain("keep the report local");
     expect(createdPrompt).not.toContain("email me");

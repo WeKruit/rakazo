@@ -1,6 +1,7 @@
 /**
- * Claude Agent Skills: reusable SKILL.md recipes shared across assistants.
- * The Pi runtime already understands this format; we persist and inject them.
+ * Agent Skills (agentskills.io SKILL.md recipes) stored per user. This file parses, builds and
+ * checks them; the listing an agent sees and an explicit invocation are Pi's own
+ * (`formatSkillsForSystemPrompt`, `formatSkillInvocation`, adapters/src/agent-skills.ts).
  * Distinct from taught skills (demo/record playbooks on a single bot).
  */
 
@@ -25,13 +26,13 @@ export type SkillCatalogEntry = {
   description: string;
   source: SkillSource;
   readOnly: boolean;
-  /** Set when a declared requirement is missing for this run, e.g. "needs mcp autumn". */
+  /** Set when a declared requirement is missing for this run, e.g. "needs connection calendar". */
   unavailable?: string;
 };
 
 /**
  * What a skill declares it needs in its frontmatter, for example
- * `requires:` with nested `tools: [web_search]`, `mcp: [autumn]` and `secrets: [GITHUB_TOKEN]`.
+ * `requires:` with nested `tools: [web_search]`, `mcp: [calendar]` and `secrets: [GITHUB_TOKEN]`.
  * A bare list (`requires: [web_search]`) names tools.
  */
 export type SkillRequirements = { tools: string[]; mcp: string[]; secrets: string[] };
@@ -109,26 +110,6 @@ export type SkillRecord = SkillCatalogEntry & {
 };
 
 const FORCE_SKILL_PREFIX = /^(?:\/|use\s+skill:\s*)(.+?)(?:\n|$)/i;
-const ROUTINE_SKILL_STOP = new Set([
-  "then",
-  "and",
-  "or",
-  "to",
-  "for",
-  "with",
-  "from",
-  "via",
-  "before",
-  "after",
-  "please",
-  "the",
-  "a",
-  "an",
-]);
-/** Fallback when no catalog is available: @Token with optional Title-case words. */
-const ROUTINE_SKILL_MENTION =
-  /(?:^|[\s(,])@([A-Za-z][\w-]*(?:[ ]+[A-Za-z][\w-]*){0,5})(?=[\s,.)]|$)/g;
-
 /** A workspace path that holds one skill: `SKILL.md`, usually as `skills/<name>/SKILL.md`. */
 export function isSkillFilePath(filePath: string): boolean {
   return /(^|\/)SKILL\.md$/.test(filePath.trim());
@@ -198,50 +179,6 @@ export function buildSkillMd(input: {
   return `---\n${lines.join("\n")}\n---\n${body.startsWith("\n") ? body : `\n${body}`}`;
 }
 
-/** Catalog descriptions are cut to this length; skill_read returns the full text. */
-export const SKILL_CATALOG_DESCRIPTION_MAX = 200;
-const SKILL_CATALOG_MAX = 50;
-
-export function skillCatalogLine(
-  entry: Pick<SkillCatalogEntry, "name" | "description" | "unavailable">,
-): string {
-  const flat = entry.description.replace(/\s+/g, " ").trim();
-  const description =
-    flat.length > SKILL_CATALOG_DESCRIPTION_MAX
-      ? `${flat.slice(0, SKILL_CATALOG_DESCRIPTION_MAX - 1).trimEnd()}…`
-      : flat;
-  const status = entry.unavailable ? ` (unavailable: ${entry.unavailable})` : "";
-  return `- ${entry.name}${status}: ${description}`;
-}
-
-export function formatSkillsCatalogInstruction(entries: SkillCatalogEntry[]): string | undefined {
-  if (entries.length === 0) return undefined;
-  // Every line is paid on every turn, so the catalog stays a short index.
-  const lines = entries.slice(0, SKILL_CATALOG_MAX).map(skillCatalogLine);
-  const hidden = entries.length - SKILL_CATALOG_MAX;
-  if (hidden > 0) lines.push(`- …and ${hidden} more; call skill_read with a name to open one.`);
-  return [
-    "Available Claude Agent Skills (SKILL.md recipes shared across assistants; generic how-tos, not account-specific routines). The Pi runtime already understands this format; we persist and inject them:",
-    lines.join("\n"),
-    "When a skill matches the user's request, call skill_read for that name and follow it immediately. Prefer matching skills over improvising multi-step recipes.",
-    ...(entries.some((entry) => entry.unavailable)
-      ? [
-          "A skill marked unavailable is missing something it declares it needs. Do not run it; tell the user what to connect or add.",
-        ]
-      : []),
-    "Users can force a skill with /Name in the composer. Routines may mention a skill as @Name — that loads the skill at fire time.",
-    "Create a skill with skill_create when a multi-step task is worth repeating (or when asked). After creating one, mention /Name so the user can open it.",
-    "Only skill_update / skill_delete user-created skills (not builtin or plugin).",
-  ].join("\n");
-}
-
-export function formatForcedSkillPrompt(name: string, content: string, rest?: string): string {
-  const parts = [`Use skill: ${name}`, "", content.trim()];
-  const trailing = rest?.trim();
-  if (trailing) parts.push("", trailing);
-  return parts.join("\n");
-}
-
 /** Detect a composer-forced skill (`/Name` or `Use skill: Name`) at the start of a prompt. */
 export function extractForcedSkillName(prompt: string): { name: string; rest: string } | null {
   const text = prompt.trimStart();
@@ -255,57 +192,23 @@ export function extractForcedSkillName(prompt: string): { name: string; rest: st
   return { name, rest };
 }
 
-/**
- * Mentions like `@Daily standup` inside a routine prompt. Returns unique names in order.
- * When `knownNames` is provided, matches those names (longest first). Otherwise uses a
- * heuristic that stops before common connector words and skips `@everyone`.
- */
-export function extractRoutineSkillMentions(prompt: string, knownNames?: string[]): string[] {
-  if (knownNames && knownNames.length > 0) {
-    const sorted = knownNames
-      .map((name) => name.trim())
-      .filter(Boolean)
-      .sort((a, b) => b.length - a.length);
-    const found: string[] = [];
-    const seen = new Set<string>();
-    for (const name of sorted) {
-      const re = new RegExp(`(?:^|[\\s(,])@${escapeRegExp(name)}(?=[\\s,.)]|$)`, "gi");
-      if (!re.test(prompt)) continue;
-      const key = name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      found.push(name);
-    }
-    return found;
-  }
-
-  const names: string[] = [];
+/** Mentions like `@Daily standup` of the given skill names in a routine prompt, in order. */
+export function extractRoutineSkillMentions(prompt: string, knownNames: string[]): string[] {
+  const sorted = knownNames
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  const found: string[] = [];
   const seen = new Set<string>();
-  ROUTINE_SKILL_MENTION.lastIndex = 0;
-  let match = ROUTINE_SKILL_MENTION.exec(prompt);
-  while (match !== null) {
-    const raw = (match[1] ?? "").trim();
-    if (!raw) {
-      match = ROUTINE_SKILL_MENTION.exec(prompt);
-      continue;
-    }
-    const parts = raw.split(/\s+/);
-    while (parts.length > 1 && ROUTINE_SKILL_STOP.has(parts[parts.length - 1]!.toLowerCase())) {
-      parts.pop();
-    }
-    const name = parts.join(" ").trim();
-    if (!name || name.toLowerCase() === "everyone") {
-      match = ROUTINE_SKILL_MENTION.exec(prompt);
-      continue;
-    }
+  for (const name of sorted) {
+    const re = new RegExp(`(?:^|[\\s(,])@${escapeRegExp(name)}(?=[\\s,.)]|$)`, "gi");
+    if (!re.test(prompt)) continue;
     const key = name.toLowerCase();
-    if (!seen.has(key)) {
-      seen.add(key);
-      names.push(name);
-    }
-    match = ROUTINE_SKILL_MENTION.exec(prompt);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(name);
   }
-  return names;
+  return found;
 }
 
 /** Keep user-owned skills reachable when a later builtin claims the same name. */
@@ -337,22 +240,31 @@ function restAlreadyIncludesSkillContent(rest: string, content: string): boolean
   );
 }
 
-/** Expand forced `/Name` or routine `@Name` mentions into full skill bodies for the task prompt. */
+/** How an explicitly invoked skill enters the prompt: Pi's `formatSkillInvocation` in the runtime. */
+export type SkillInvocationFormat = (skill: SkillRecord, rest?: string) => string;
+
+/**
+ * Expand a forced `/Name` (or `Use skill: Name`) at the start of a prompt into that skill's
+ * invocation; with `mentions`, also a routine's `@Name` of a known skill.
+ */
 export function expandSkillReferencesInPrompt(
   prompt: string,
   skills: readonly SkillRecord[],
+  invoke: SkillInvocationFormat,
+  options: { mentions?: boolean } = {},
 ): string {
   const forced = extractForcedSkillName(prompt);
   if (forced) {
     const skill = findSkillByName(skills, forced.name);
     if (skill) {
-      // Routines expand at fire time into `Use skill: …`; run time expands again — stay idempotent.
+      // Routines expand at fire time; run time sees the expanded prompt again — stay idempotent.
       if (restAlreadyIncludesSkillContent(forced.rest, skill.content)) {
         return prompt.trimStart();
       }
-      return formatForcedSkillPrompt(skill.name, skill.content, forced.rest);
+      return invoke(skill, forced.rest.trim() || undefined);
     }
   }
+  if (!options.mentions) return prompt;
 
   const mentions = extractRoutineSkillMentions(
     prompt,
@@ -365,7 +277,7 @@ export function expandSkillReferencesInPrompt(
   for (const mention of mentions) {
     const skill = findSkillByName(skills, mention);
     if (!skill) continue;
-    blocks.push(formatForcedSkillPrompt(skill.name, skill.content));
+    blocks.push(invoke(skill));
     // Strip the @mention token so the agent is not confused by a dangling pointer.
     remaining = remaining.replace(
       new RegExp(`(^|[\\s(,])@${escapeRegExp(mention)}(?=[\\s,.)]|$)`, "gi"),
