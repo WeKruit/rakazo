@@ -4,9 +4,7 @@ import {
   currentBotMessageHop,
   loadBotMessageContext,
   messageBot,
-  reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
-  showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
@@ -40,6 +38,7 @@ function deps(
 ) {
   const enqueue = vi.fn().mockResolvedValue(undefined);
   const notify = vi.fn().mockResolvedValue(undefined);
+  const wake = vi.fn().mockResolvedValue(undefined);
   const messageFindUnique = vi
     .fn()
     .mockImplementation(async (args: { where?: { threadId_clientNonce?: unknown } }) =>
@@ -47,8 +46,27 @@ function deps(
         ? (options.alreadyDelivered ?? null)
         : { blocks: options.hopBlocks ?? [] },
     );
+  // Session inputs, read from the values of submitSessionInput's one statement.
+  const inputs: Array<{
+    sessionId: unknown;
+    kind: unknown;
+    messageId: unknown;
+    trigger: unknown;
+    payload: { text: string };
+  }> = [];
   const tx = {
-    $queryRaw: vi.fn().mockResolvedValue([{ id: "thread" }]),
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      if (!strings.join("?").includes("INSERT INTO session_inputs")) return [{ id: "thread" }];
+      inputs.push({
+        sessionId: values[0],
+        kind: values[3],
+        messageId: values[4],
+        payload: JSON.parse(String(values[5])),
+        trigger: values[6],
+      });
+      return [{ id: "input-1", seq: inputs.length }];
+    }),
+    conversationSession: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
     run: {
       findFirst: vi.fn(async (args: { where: { trigger?: string; OR?: unknown } }) =>
         // The team's earlier turn for this conversation; otherwise the sender's own run.
@@ -117,12 +135,14 @@ function deps(
     }),
   } as unknown as PrismaClient;
   return {
-    deps: { prisma, events: { notify }, jobs: { enqueue } } as unknown as Pick<
+    deps: { prisma, events: { notify, wakeSessions: wake }, jobs: { enqueue } } as unknown as Pick<
       ExecutorDeps,
       "prisma" | "events" | "jobs"
     >,
     tx,
     enqueue,
+    wake,
+    inputs,
     notify,
   };
 }
@@ -136,25 +156,21 @@ describe("messaging another bot", () => {
     });
 
     expect(sent).toMatchObject({ ok: true, botId: "bot-target", name: "Analyst" });
-    expect(harness.tx.task.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          botId: "bot-target",
-          threadId: "thread-target",
-          prompt: expect.stringMatching(/not the user typing[\s\S]*untrusted peer content/),
-        }),
-      }),
-    );
-    expect(harness.tx.run.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          botId: "bot-target",
-          threadId: "thread-target",
-          status: "queued",
-          trigger: "bot_message",
-        }),
-      }),
-    );
+    // One input into the target agent's session in its own chat; no run is made here.
+    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.inputs).toEqual([
+      {
+        sessionId: "thread-target:bot-target",
+        kind: "message",
+        messageId: "message-1",
+        trigger: "bot_message",
+        payload: {
+          text: expect.stringMatching(/not the user typing[\s\S]*untrusted peer content/),
+          internal: true,
+        },
+      },
+    ]);
+    expect(harness.wake).toHaveBeenCalledWith(["thread-target:bot-target"]);
     expect(harness.notify).toHaveBeenCalledWith("thread-target", 7);
     expect(harness.notify).toHaveBeenCalledWith("thread-sender", 7);
     expect(harness.tx.message.create).toHaveBeenCalledTimes(2);
@@ -163,7 +179,7 @@ describe("messaging another bot", () => {
         ([call]) => (call as { data?: { unread?: boolean } }).data?.unread,
       ),
     ).toHaveLength(0);
-    expect(harness.enqueue).toHaveBeenCalledTimes(1);
+    expect(harness.wake).toHaveBeenCalledTimes(1);
   });
 
   it("marks a forced failure return unread on both sides", async () => {
@@ -204,7 +220,7 @@ describe("messaging another bot", () => {
       message: "hello",
     });
     expect(sent).toEqual({ ok: false, error: "a bot cannot message itself" });
-    expect(harness.enqueue).not.toHaveBeenCalled();
+    expect(harness.wake).not.toHaveBeenCalled();
   });
 
   it("refuses an unknown target without starting a run", async () => {
@@ -214,7 +230,7 @@ describe("messaging another bot", () => {
       message: "hello",
     });
     expect(sent).toEqual({ ok: false, error: "no bot found with that id or name" });
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(0);
   });
 
   it("refuses an empty message", async () => {
@@ -233,7 +249,7 @@ describe("messaging another bot", () => {
       message: "x".repeat(8_001),
     });
     expect(sent).toEqual({ ok: false, error: "message exceeds the 8000 character limit" });
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(0);
   });
 
   it("does not deliver once the sending run is no longer active", async () => {
@@ -243,7 +259,7 @@ describe("messaging another bot", () => {
       message: "hello",
     });
     expect(sent).toMatchObject({ ok: false });
-    expect(harness.enqueue).not.toHaveBeenCalled();
+    expect(harness.wake).not.toHaveBeenCalled();
   });
 
   it("stops a chain that has volleyed too many times", async () => {
@@ -259,7 +275,7 @@ describe("messaging another bot", () => {
       { bot_id: "bot-target", message: "again" },
     );
     expect(sent.ok).toBe(false);
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(0);
   });
 
   it("allows a final result back through after the request hop limit", async () => {
@@ -286,7 +302,8 @@ describe("messaging another bot", () => {
     expect(sent.ok).toBe(true);
     // Both conversations in one statement, role conversations first: answering a role's card
     // locks the same rows in that order, so the two cannot deadlock.
-    expect(harness.tx.$queryRaw).toHaveBeenCalledTimes(1);
+    // The lock comes first; the second statement is the session input.
+    expect(harness.tx.$queryRaw).toHaveBeenCalledTimes(2);
     const [lockSql, ...lockedIds] = harness.tx.$queryRaw.mock.calls[0]!;
     expect(lockSql.join("?")).toContain(
       `ORDER BY ("groupId" IS NULL OR "groupId" LIKE 'recruiting-global-%'), id`,
@@ -383,7 +400,7 @@ describe("messaging another bot", () => {
       { allowTerminalSource: true },
     );
     expect(sent.ok).toBe(false);
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(0);
   });
 
   it("does not let a result label bypass the hop limit toward an unrelated bot", async () => {
@@ -410,7 +427,7 @@ describe("messaging another bot", () => {
       { bot_id: "bot-other", message: "keep going", intent: "result" },
     );
     expect(sent.ok).toBe(false);
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(0);
   });
 
   it("keeps model-supplied status updates subject to the hop limit", async () => {
@@ -479,11 +496,9 @@ describe("delegating to a role team in another conversation", () => {
       },
       select: { id: true },
     });
-    expect(harness.tx.run.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ botId: "bot-main", threadId: "thread-role" }),
-      }),
-    );
+    expect(harness.inputs).toEqual([
+      expect.objectContaining({ sessionId: "thread-role:bot-main" }),
+    ]);
     const blocks = harness.tx.message.create.mock.calls.map(
       ([call]) => (call as { data: { blocks: unknown[] } }).data.blocks[0],
     );
@@ -535,7 +550,7 @@ describe("delegating to a role team in another conversation", () => {
         data: expect.objectContaining({ status: "cancelled" }),
       }),
     );
-    expect(harness.tx.run.create).toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(1);
   });
 
   it("tells Kruit the team is still on its earlier request instead of a fresh start", async () => {
@@ -560,11 +575,16 @@ describe("delegating to a role team in another conversation", () => {
     expect(sent).toMatchObject({ ok: true });
     if (!sent.ok) throw new Error("not sent");
     // Staging 11-15: queued behind the round, the request ran a second paid search after it.
-    expect(harness.tx.steeringMessage.create).toHaveBeenCalledWith({
-      data: { messageId: "message-1", botId: "bot-sourcer", userId: "user-1", runId: "run-team" },
-    });
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
-    expect(harness.enqueue).not.toHaveBeenCalled();
+    // A message mid-run steers the teammate's own session instead of queueing a second turn.
+    expect(harness.inputs).toEqual([
+      expect.objectContaining({
+        sessionId: "thread-role:bot-sourcer",
+        messageId: "message-1",
+        kind: "message",
+        trigger: "bot_message",
+      }),
+    ]);
+    expect(harness.wake).toHaveBeenCalledWith(["thread-role:bot-sourcer"]);
     expect(sent.note).toContain("Sourcer has been working on the recruiter's request for 3 min");
     expect(harness.tx.run.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -604,7 +624,7 @@ describe("delegating to a role team in another conversation", () => {
       message: "Find 50 more people",
     });
     expect(sent).toMatchObject({ ok: false });
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(0);
   });
 
   it("still refuses messaging itself in the same conversation", async () => {
@@ -727,8 +747,8 @@ describe("hardening", () => {
     });
 
     expect(sent).toMatchObject({ ok: true, replayed: true, botId: "bot-target" });
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
-    expect(harness.enqueue).not.toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(0);
+    expect(harness.wake).not.toHaveBeenCalled();
   });
 
   it("stamps the delivery so a retry can recognise it", async () => {
@@ -752,7 +772,7 @@ describe("hardening", () => {
       message: "chart it",
     });
     expect(sent.ok).toBe(true);
-    expect(harness.tx.run.create).toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(1);
   });
 
   it("does not deliver to a bot archived while the message was being sent", async () => {
@@ -762,8 +782,8 @@ describe("hardening", () => {
       message: "chart it",
     });
     expect(sent).toMatchObject({ ok: false });
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
-    expect(harness.enqueue).not.toHaveBeenCalled();
+    expect(harness.inputs).toHaveLength(0);
+    expect(harness.wake).not.toHaveBeenCalled();
   });
 
   it("treats a delivery-key unique conflict as a replay", async () => {
@@ -780,7 +800,7 @@ describe("hardening", () => {
     });
 
     expect(sent).toMatchObject({ ok: true, replayed: true, botId: "bot-target" });
-    expect(harness.enqueue).not.toHaveBeenCalled();
+    expect(harness.wake).not.toHaveBeenCalled();
     expect(harness.notify).not.toHaveBeenCalled();
   });
 
@@ -792,7 +812,7 @@ describe("hardening", () => {
     });
     expect(sent.ok).toBe(true);
     expect(harness.deps.prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(harness.enqueue).toHaveBeenCalledOnce();
+    expect(harness.wake).toHaveBeenCalledOnce();
   });
 });
 
@@ -858,9 +878,7 @@ describe("automatic outcome return", () => {
       "The answer is 42.",
     );
     expect(returned).toBe(true);
-    expect(harness.tx.run.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ trigger: "bot_message" }) }),
-    );
+    expect(harness.inputs).toEqual([expect.objectContaining({ trigger: "bot_message" })]);
     expect(harness.tx.run.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -868,7 +886,7 @@ describe("automatic outcome return", () => {
         }),
       }),
     );
-    expect(harness.enqueue).toHaveBeenCalledOnce();
+    expect(harness.wake).toHaveBeenCalledOnce();
     expect(harness.deps.prisma.run.updateMany).toHaveBeenCalledWith({
       where: {
         id: run.id,
@@ -933,13 +951,13 @@ describe("automatic outcome return", () => {
       expect(sent).toContain("thread-global");
       expect(sent).toContain("20 people are in the list.");
       expect(sent).toContain('"intent":"result"');
-      expect(done.enqueue).toHaveBeenCalledOnce();
+      expect(done.wake).toHaveBeenCalledOnce();
     });
 
     it("waits while a teammate or a continuation is still working", async () => {
       const working = delegated({ active: 1, reply: "Round 1: 10 people." });
       expect(await ret(working, "Round 1: 10 people.")).toBe(false);
-      expect(working.enqueue).not.toHaveBeenCalled();
+      expect(working.wake).not.toHaveBeenCalled();
       expect(working.deps.prisma.run.updateMany).not.toHaveBeenCalled();
     });
 
@@ -954,7 +972,7 @@ describe("automatic outcome return", () => {
     it("leaves the result to a later request with its own turn", async () => {
       const later = delegated({ later: true, reply: "Done." });
       expect(await ret(later, "Done.")).toBe(true);
-      expect(later.enqueue).not.toHaveBeenCalled();
+      expect(later.wake).not.toHaveBeenCalled();
     });
 
     it("sends a failure back at once", async () => {
@@ -967,7 +985,7 @@ describe("automatic outcome return", () => {
         "status",
         { forceUnread: true },
       );
-      expect(failed.enqueue).toHaveBeenCalledOnce();
+      expect(failed.wake).toHaveBeenCalledOnce();
     });
   });
 
@@ -1008,7 +1026,7 @@ describe("automatic outcome return", () => {
     );
 
     expect(returned).toBe(true);
-    expect(harness.enqueue).toHaveBeenCalledOnce();
+    expect(harness.wake).toHaveBeenCalledOnce();
   });
 
   it("skips the automatic return when a result was already sent", async () => {
@@ -1048,7 +1066,7 @@ describe("automatic outcome return", () => {
     );
 
     expect(returned).toBe(true);
-    expect(harness.enqueue).not.toHaveBeenCalled();
+    expect(harness.wake).not.toHaveBeenCalled();
     expect(harness.deps.prisma.run.updateMany).toHaveBeenCalled();
   });
 });

@@ -1,6 +1,8 @@
 export * from "./agent-connections.js";
 export * from "./agent-environment.js";
 export * from "./agent-skills.js";
+export * from "./agent-session/ports.js";
+export * from "./agent-session/session-cutover.js";
 export * from "./ai-consent.js";
 export { buildApprovalAskBlock } from "./approval-ask.js";
 export * from "./artifact-read.js";

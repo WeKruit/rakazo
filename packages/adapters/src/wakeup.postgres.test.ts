@@ -36,6 +36,8 @@ function handlers(overrides: Partial<BackgroundJobHandlers> = {}): BackgroundJob
     "notification.retry": vi.fn(async () => undefined),
     "poll.close": vi.fn(async () => undefined),
     "discovery.warm": vi.fn(async () => undefined),
+    "session.drive": vi.fn(async () => undefined),
+    "session.cutover": vi.fn(async () => undefined),
     ...overrides,
   };
 }

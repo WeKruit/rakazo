@@ -14,6 +14,8 @@ import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { sendRunNotification } from "./agent-session/run-projection.js";
+import type { DriveSession } from "./agent-session/ports.js";
+import { cutoverToSessions } from "./agent-session/session-cutover.js";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
 import { pollCloudAgent } from "./cloud-agent-poll.js";
 import { expireComputerControl } from "./computer-control.js";
@@ -69,6 +71,10 @@ export function createBackgroundJobHandlers(deps: {
    * cannot take every slot from people chatting. Unset means no limit.
    */
   scheduledRunSlots?: number;
+  /** Owns one session until it is idle (plan Task 4 `runSessionHost`, deps bound). */
+  driveSession: DriveSession;
+  /** Aborted when the worker drains: each owned session quiesces and releases its lease. */
+  sessionHostSignal: AbortSignal;
 }): BackgroundJobHandlers {
   let scheduledRunsActive = 0;
   const isScheduledRun = async (runId: string) =>
@@ -170,7 +176,18 @@ export function createBackgroundJobHandlers(deps: {
       );
     },
     "recruiting_agent_run.wait": async (payload) => {
-      await waitForRecruitingAgentRun({ prisma: deps.prisma, jobs: deps.jobs }, payload);
+      await waitForRecruitingAgentRun(
+        { prisma: deps.prisma, jobs: deps.jobs, events: deps.events },
+        payload,
+      );
+    },
+    "session.drive": async (payload) => {
+      // Returns when the session is idle and released, or when another worker owns it (that
+      // owner hears the notify). A deploy drain aborts the signal: the live turn may finish first.
+      await deps.driveSession(payload.sessionId, deps.sessionHostSignal);
+    },
+    "session.cutover": async () => {
+      await cutoverToSessions({ prisma: deps.prisma, events: deps.events });
     },
     "notification.retry": async (payload) => {
       if (!deps.notifications) return;

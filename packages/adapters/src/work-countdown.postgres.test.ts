@@ -109,26 +109,30 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     });
   }
 
-  /** The agent finishes each wake it was given, as a real turn would. */
+  /** The agent's session takes each wake it was given, as its lane would. */
   async function finishWakes(threadId: string) {
-    await prisma.run.updateMany({
-      where: { threadId, status: "queued", trigger: "recruiting_research" },
-      data: { status: "completed" },
+    await prisma.sessionInput.updateMany({
+      where: { session: { threadId }, trigger: "recruiting_research", deliveredAt: null },
+      data: { deliveredAt: new Date() },
     });
   }
 
   async function wakes(threadId: string) {
-    return prisma.run.findMany({
-      where: { threadId, trigger: "recruiting_research" },
-      orderBy: { createdAt: "asc" },
-      select: { task: { select: { prompt: true } } },
+    const inputs = await prisma.sessionInput.findMany({
+      where: { session: { threadId }, trigger: "recruiting_research" },
+      orderBy: { seq: "asc" },
+      select: { payload: true },
     });
+    return inputs.map((input) => ({
+      task: { prompt: String((input.payload as { text: string }).text) },
+    }));
   }
 
   it("reports progress each time a search's countdown runs out, then ends with the search", async () => {
     const { bot, thread, turn } = await conversation();
     const agentRunId = `agent_run_${suffix}`;
     const jobs = { enqueue: vi.fn(async () => undefined) };
+    const events = { wakeSessions: vi.fn(async () => undefined) };
     const payload = { threadId: thread.id, botId: bot.id, agentRunId };
     await answer(turn.id, agentRunId, "running");
     const started = await startWorkEstimate(prisma, turn, {
@@ -142,11 +146,11 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     expect(shown).toMatchObject({ kind: "search", people: 100, estimateMs: 2 * MINUTE });
 
     // One minute in, the recruiter wrote moments ago: the quiet check-in waits for them.
-    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + MINUTE);
+    await waitForRecruitingAgentRun({ prisma, jobs, events }, payload, t0 + MINUTE);
     expect(await wakes(thread.id)).toHaveLength(0);
 
     // The 2-minute countdown runs out, two minutes after the recruiter asked: one progress line.
-    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 2.5 * MINUTE);
+    await waitForRecruitingAgentRun({ prisma, jobs, events }, payload, t0 + 2.5 * MINUTE);
     let woken = await wakes(thread.id);
     expect(woken).toHaveLength(1);
     expect(woken[0]?.task?.prompt).toContain("estimated 2 minutes are up");
@@ -154,11 +158,11 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     await answer(turn.id, agentRunId, "running");
 
     // Still inside the second countdown and the recruiter wrote under five minutes ago: quiet.
-    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 3.5 * MINUTE);
+    await waitForRecruitingAgentRun({ prisma, jobs, events }, payload, t0 + 3.5 * MINUTE);
     expect(await wakes(thread.id)).toHaveLength(1);
 
     // The second countdown runs out: a second progress line.
-    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 4.5 * MINUTE);
+    await waitForRecruitingAgentRun({ prisma, jobs, events }, payload, t0 + 4.5 * MINUTE);
     woken = await wakes(thread.id);
     expect(woken).toHaveLength(2);
     expect(woken[1]?.task?.prompt).toContain("estimated 2 minutes are up");
@@ -166,7 +170,7 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     await answer(turn.id, agentRunId, "running");
 
     // Later, with the recruiter quiet, a check-in inside the third countdown stays quiet.
-    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 5.5 * MINUTE);
+    await waitForRecruitingAgentRun({ prisma, jobs, events }, payload, t0 + 5.5 * MINUTE);
     woken = await wakes(thread.id);
     expect(woken).toHaveLength(3);
     expect(woken[2]?.task?.prompt).not.toContain("minutes are up");
@@ -174,7 +178,7 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
 
     // The search finishes: no more wakes from the job, and the countdown is gone.
     await answer(turn.id, agentRunId, "completed");
-    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 6 * MINUTE);
+    await waitForRecruitingAgentRun({ prisma, jobs, events }, payload, t0 + 6 * MINUTE);
     expect(await wakes(thread.id)).toHaveLength(3);
     expect(
       await currentWorkEstimate(prisma, { spaceId, threadId: thread.id }, t0 + 6 * MINUTE),
@@ -185,6 +189,7 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     const { bot, thread, turn } = await conversation();
     const agentRunId = `agent_run_wait_${suffix}`;
     const jobs = { enqueue: vi.fn(async () => undefined) };
+    const events = { wakeSessions: vi.fn(async () => undefined) };
     await answer(turn.id, agentRunId, "running");
     const started = await startWorkEstimate(prisma, turn, {
       ref: agentRunId,
@@ -212,7 +217,7 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
 
     // The agent reported in its own turn, so the follow-up job adds no second line for it.
     await waitForRecruitingAgentRun(
-      { prisma, jobs },
+      { prisma, jobs, events },
       { threadId: thread.id, botId: bot.id, agentRunId },
       now + 10_000,
     );
@@ -274,6 +279,7 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     await save(10, 0);
     const scope = { spaceId, threadId: thread.id };
     const jobs = { enqueue: vi.fn(async () => undefined) };
+    const events = { wakeSessions: vi.fn(async () => undefined) };
 
     // The first wave asks for 200 people: a 5-minute countdown toward 210 in Results.
     const first = await startWorkEstimate(prisma, turn, {
@@ -304,7 +310,7 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
 
     // When the first countdown runs out, the recruiter hears about it once.
     const payload = { threadId: thread.id, botId: bot.id, agentRunId: waveId };
-    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 5.5 * MINUTE);
+    await waitForRecruitingAgentRun({ prisma, jobs, events }, payload, t0 + 5.5 * MINUTE);
     const woken = await wakes(thread.id);
     expect(woken).toHaveLength(1);
     expect(woken[0]?.task?.prompt).toContain("estimated 5 minutes are up");

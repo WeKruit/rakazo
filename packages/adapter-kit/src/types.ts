@@ -809,6 +809,10 @@ export interface BackgroundJobPayloads {
   "poll.close": { messageId: string; pollId: string };
   /** List a bot's tools ahead of its first run; scope is loaded from the database. */
   "discovery.warm": { botId: string };
+  /** Own one agent's conversation session and hand its inputs to its Pi lane. */
+  "session.drive": { sessionId: string };
+  /** One-time upgrade: turn work still live on the run harness into session inputs. */
+  "session.cutover": Record<string, never>;
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;
