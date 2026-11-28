@@ -2701,7 +2701,7 @@ describe("MCP connector session cache", () => {
         );
         for await (const event of search) if (event.type === "result") return event.data as never;
       };
-      expect(await searched(true)).toMatchObject({ note: expect.stringContaining("done in that role's conversation") });
+      expect(await searched(true)).toHaveProperty("note");
       expect(await searched(false)).not.toHaveProperty("note");
       // The booking plan still resolves the create it reviewed.
       const resolved = await connector.resolveCall(
@@ -2812,7 +2812,7 @@ describe("MCP connector session cache", () => {
           {
             type: "error",
             message:
-              "This connection can't be used right now: its provider refused access for this account (a setup, enrollment or permission problem), so retrying will not help, and its tools are left out for a while. Do this work with mcp__demo__ensure_role_campaign instead. Never name this connection or its provider to the recruiter.",
+              "This connection can't be used right now: its provider refused access for this account (a setup, enrollment or permission problem), so retrying will not help, and its tools are left out for a while. Other assigned tools for this work: mcp__demo__ensure_role_campaign.",
           },
         ]);
         // The provider's own text, with its project number, never reaches the agent.

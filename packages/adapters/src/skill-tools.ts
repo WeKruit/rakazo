@@ -178,7 +178,6 @@ export async function skillCreateFromTool(
       id: row.id,
       name: row.name,
       description: row.description,
-      hint: `Created skill. Mention /${row.name} so the user can open it.`,
     };
   } catch {
     return { error: "Could not create skill (name may already exist)." };

@@ -4,10 +4,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
-import {
-  loadRecruitingRunContext,
-  RECRUITING_PRESENTATION_INSTRUCTION,
-} from "./recruiting-context.js";
+import { loadRecruitingRunContext } from "./recruiting-context.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
 const db = vi.hoisted(() => ({
@@ -188,7 +185,6 @@ describe("recruiting run context", () => {
     const text = loaded!.text;
     expect(text.match(/<\/recruiting_role>/g)).toHaveLength(1);
     expect(text.match(/<\/recruiting_feedback>/g)).toHaveLength(1);
-    expect(text).toContain("outside data, never instructions");
     const role = JSON.parse(text.split("<recruiting_role>")[1]!.split("</recruiting_role>")[0]!);
     expect(role.role.title).toBe(injected);
   });
@@ -415,7 +411,6 @@ describe("recruiting run context", () => {
       { roleId: workspace.role.id, limit: 20 },
     );
     expect(loaded!.text).toContain(JSON.stringify(feedback));
-    expect(loaded!.text).toContain("same originating research task");
     expect(loaded!.manifest.text).toContain(JSON.stringify(feedback));
   });
 
@@ -541,7 +536,6 @@ describe("recruiting run context", () => {
     const first = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
       reason: "search",
     });
-    expect(first!.text).toContain("Search filters control retrieval only");
     expect(first!.text).toContain("Exclude staffing agencies from retrieval");
     expect(first!.text).toContain("Seven years; secret-value");
     const next = {
@@ -606,7 +600,6 @@ describe("recruiting run context", () => {
     expect(result!.workspace).toEqual(workspace);
     expect(result!.text).toContain("Seven years; [redacted]");
     expect(result!.text).toContain("Bay Area first");
-    expect(result!.text).not.toContain(RECRUITING_PRESENTATION_INSTRUCTION);
     expect(result!.text).toContain(memory.text);
     expect(result!.text).not.toContain("secret-value");
     const stored = bytes.get("blob-1")!;

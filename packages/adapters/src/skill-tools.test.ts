@@ -108,7 +108,6 @@ describe("skill tools", () => {
       body: "1. Summarize yesterday.\n2. List blockers.",
     });
     expect(created).toMatchObject({ ok: true, name: "Daily standup" });
-    expect(String(created.hint)).toContain("/Daily standup");
 
     const read = await skillReadFromTool(prisma as never, owner, { name: "Daily standup" });
     expect(read).toMatchObject({

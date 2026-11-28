@@ -9,7 +9,6 @@ const parts = () => ({
   groupContext: "Members: Main, Sourcer, Outreach.",
   messagingContext: undefined,
   hasHistoricalContext: true,
-  historyRetrievalEnabled: true,
   computerInstruction: "",
   pageBrowserAllowed: false,
   workspaceInstruction: "Use the workspace files.",
