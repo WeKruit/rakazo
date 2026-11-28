@@ -123,6 +123,7 @@ function runInputOf(input: SessionInputRow | undefined): RunInput {
     trigger: input.trigger,
     sourceMessageId: input.messageId ?? null,
     ...(typeof payload?.text === "string" ? { prompt: payload.text } : {}),
+    ...(input.kind === "cardAnswer" ? { cardAnswer: true } : {}),
   };
 }
 

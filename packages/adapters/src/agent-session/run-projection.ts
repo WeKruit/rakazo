@@ -71,6 +71,8 @@ export interface RunInput {
   trigger: string;
   sourceMessageId?: string | null;
   prompt?: string;
+  /** The answer to the card the agent's waiting run showed: this run continues that one. */
+  cardAnswer?: boolean;
 }
 
 /** `input` is required on `run_start`; other events need nothing. */
@@ -720,8 +722,13 @@ export function createRunProjection(deps: RunProjectionDeps, key: RunProjectionK
         const waited = await tx.run.updateManyAndReturn({
           where: { threadId: key.threadId, botId: key.botId, status: "waiting_input" },
           data: { status: "completed", completedAt: endedAt },
-          select: { id: true, taskId: true, startedAt: true },
+          select: { id: true, taskId: true, startedAt: true, sourceMessageId: true },
         });
+        // An answer given on the card names no message of its own: the run continues the card's
+        // run, acting for the message that run acted for (and returning where it returned).
+        const sourceMessageId =
+          input.sourceMessageId ??
+          (input.cardAnswer ? (waited[0]?.sourceMessageId ?? undefined) : undefined);
         if (waited.length > 0) {
           await tx.task.updateMany({
             where: { id: { in: waited.map((row) => row.taskId) } },
@@ -769,7 +776,7 @@ export function createRunProjection(deps: RunProjectionDeps, key: RunProjectionK
             userId: key.userId,
             status: "running",
             trigger: input.trigger,
-            sourceMessageId: input.sourceMessageId ?? undefined,
+            sourceMessageId: sourceMessageId ?? undefined,
             startedAt: run.startedAt,
           },
         });

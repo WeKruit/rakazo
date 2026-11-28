@@ -135,7 +135,7 @@ describePostgres("run projection (PostgreSQL)", () => {
       await projected;
       expect(errors).toEqual([]);
     };
-    return { thread, lane, run, userMessage, settle, harness, on: listeners };
+    return { thread, lane, run, userMessage, settle, harness, starts, on: listeners };
   }
 
   it("one run row per Pi operation", async () => {
@@ -363,6 +363,47 @@ describePostgres("run projection (PostgreSQL)", () => {
     expect(await status("op-card-1")).toBe("completed");
     expect(await status("op-card-2")).toBe("completed");
     expect(await runEvents("op-card-1")).toEqual(["run.started", "run.completed"]);
+    await t.harness.close(C);
+  });
+
+  it("a card answer with no message of its own continues the card run's source", async () => {
+    const ask: AgentHarnessTool<undefined> = {
+      name: "ask",
+      label: "ask",
+      description: "Ask",
+      parameters: { type: "object", properties: {} } as never,
+      execute: async () => {
+        await prisma.run.update({ where: { id: "op-src-1" }, data: { status: "waiting_input" } });
+        return { content: [{ type: "text", text: "asked" }], details: {}, terminate: true };
+      },
+    };
+    const t = await setup(
+      [
+        fauxAssistantMessage([fauxToolCall("ask", {})], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Sent."),
+      ],
+      [ask],
+    );
+    const first = await t.run("op-src-1", "send the first email");
+    await first.driven;
+    await t.settle();
+    // An approval answered on the card: the input names no message.
+    t.starts.set("op-src-2", { input: { trigger: "user", cardAnswer: true } });
+    const accepted = await t.lane.accept(
+      {
+        kind: "prompt",
+        operationId: "op-src-2",
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "Answer: allow" }], timestamp: 1 },
+        ],
+      },
+      C,
+    );
+    expect(accepted.ok).toBe(true);
+    await t.lane.drive({ operationId: "op-src-2" }, C);
+    await t.settle();
+    const answered = await prisma.run.findUniqueOrThrow({ where: { id: "op-src-2" } });
+    expect(answered.sourceMessageId).toBe(first.input.id);
     await t.harness.close(C);
   });
 });
