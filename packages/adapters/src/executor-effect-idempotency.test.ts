@@ -29,9 +29,9 @@ import {
   RecruitingConflictError,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { selectBuiltinToolsForRun } from "./agent-session/session-tools.js";
 import type * as ArtifactReadModule from "./artifact-read.js";
 import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.js";
-
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
 import type * as BotMessagesModule from "./bot-messages.js";
@@ -57,7 +57,6 @@ import {
   resumeBriefForRun,
   STEERING_ACK,
   savedCandidateKeyForm,
-  selectBuiltinToolsForRun,
   setupRetryNoticeText,
   shortQuestion,
   toolArgsSummary,

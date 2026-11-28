@@ -10,7 +10,6 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import { compact } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models, RetryPolicy } from "@earendil-works/pi-ai";
-import { HISTORY_SUMMARY_TEMPLATE } from "../history-compaction.js";
 import {
   pruneComputerScreenshotContext,
   pruneStalePageStateContext,
@@ -20,6 +19,22 @@ import type { GuardrailDeps } from "./guardrails.js";
 import { installGuardrails } from "./guardrails.js";
 import type { RakazoToolContext } from "./harness-tools.js";
 import { toHarnessTool } from "./harness-tools.js";
+
+/**
+ * Fixed sections keep recruiting constraints and decisions anchored across repeated
+ * compactions; an omitted section would otherwise silently drop on the next merge.
+ */
+export const HISTORY_SUMMARY_TEMPLATE = [
+  "Use exactly these sections in this order, each as a heading, and write (none) under any empty section:",
+  "## Goal: the human's current objective and the roles in play.",
+  "## Requirements and preferences: hard requirements, preferences, exclusions, location, compensation, disclosure limits and the human's standing working preferences.",
+  "## Candidates and decisions: people advanced, held, passed or rejected with the stated reason, and approvals given or refused, each with its message reference.",
+  "## Progress: completed work and current state, such as searches, saved results, drafts and scheduling, with actual counts.",
+  "## Open questions and next steps: unanswered questions, pending cards or approvals and promised follow-ups.",
+  "## Critical references: exact message and artifact IDs, provider task references, URLs, numbers and dates needed to continue.",
+  "## Mistakes to avoid: corrections the human made and failed attempts not to repeat.",
+  "Copy the human's wording, names, numbers, IDs and URLs verbatim; never paraphrase a constraint. Do not pad. When space runs short, condense settled history before current requirements, open items and references.",
+].join("\n");
 
 /** Pi's defaults (compaction.js:75-79), stated so a Pi upgrade cannot move them silently. */
 export const SESSION_COMPACTION: CompactionSettings = {

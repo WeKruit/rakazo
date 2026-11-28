@@ -58,7 +58,6 @@ import {
   CANVAS_HTML_MAX_BYTES,
   CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
   COMPUTER_COMMAND_OUTPUT_MAX_CHARS,
-  disabledBuiltinToolSet,
   HistoryReadInputSchema,
   HistorySearchInputSchema,
   isAttachmentImageMimeType,
@@ -146,7 +145,6 @@ import {
   EMAIL_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
-  RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
   RETIRED_APPROVAL_KINDS,
   RecruitingPlaybookValidationError,
@@ -172,7 +170,6 @@ import {
   userTurnMessageForRun,
   waitingApprovalCards,
   waitingApprovalNote,
-  withoutHiddenTools,
   workActivityForTool,
   workStepDetail,
   screenIsChinese,
@@ -294,6 +291,11 @@ import {
   workspaceInstructionFor,
 } from "./agent-session/system-prompt.js";
 import {
+  assembleRunTools,
+  loadRunConnections,
+  PAGE_BROWSER_TOOL_NAMES,
+} from "./agent-session/session-tools.js";
+import {
   desktopProtectionGuardMessage,
   protectedComputerLifecycleRefusal,
 } from "./computer-lifecycle-guard.js";
@@ -387,7 +389,7 @@ import {
   browserNavigateFromTool,
   browserSnapshotFromTool,
 } from "./browser-tools.js";
-import { agentConnectionTools, builtinAgentTools, sharedMemorySaveError } from "./builtin-tools.js";
+import { builtinAgentTools, sharedMemorySaveError } from "./builtin-tools.js";
 import {
   CalendarApprovalEvidenceSchema,
   calendarApprovalRoute,
@@ -407,21 +409,13 @@ import type { CloudAgentConnection } from "./cloud-agent-factory.js";
 import { cloudAgentsEnabled } from "./cloud-agent-factory.js";
 import { executeCloudAgentTool } from "./cloud-agent-service.js";
 import { validCloudAgentArgs } from "./cloud-agent-tools.js";
-import { selectCloudAgentTools } from "./cloud-agent-tools-select.js";
 import { cloudflareGatewayProviderEnv } from "./cloudflare-ai-gateway.js";
 import {
   COMPLETION_EMAIL_TOOL,
-  completionEmailTool,
   recordCompletionEmailChoice,
   sendCompletionEmailIfDone,
 } from "./completion-email.js";
-import type { PluginConnectionRow } from "./composio-connector.js";
-import {
-  collectLogIds,
-  mergeConnectedPlugins,
-  needsLivePluginSync,
-  planLiveConnectionSync,
-} from "./composio-connector.js";
+import { collectLogIds } from "./composio-connector.js";
 import { BACKGROUND_WORK_LAUNCH, scheduleComputerSleep } from "./computer-idle.js";
 import type { ComputerExecutionLease } from "./computer-lifecycle.js";
 import {
@@ -530,7 +524,7 @@ import {
 } from "./mcp-server-tool.js";
 import { lastingPreferenceNote, loadAgentMemoryContext } from "./memory-context.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
-import { applyMemoryEdit, nativeMemorySaveError, selectMemoryTools } from "./memory-tools.js";
+import { applyMemoryEdit, nativeMemorySaveError } from "./memory-tools.js";
 import {
   isCatalogModelChoice,
   isDeploymentModelChoice,
@@ -543,7 +537,6 @@ import {
   validateModelAuthAvailability,
 } from "./model-selection.js";
 import {
-  filterImageReturningComputerTools,
   IMAGE_RETURNING_COMPUTER_TOOLS,
   MODEL_CANNOT_SEE_MESSAGE,
   modelAcceptsImageInput,
@@ -667,8 +660,6 @@ import {
   cancelScheduleFromTool,
   compactScheduleInput,
   createScheduleFromTool,
-  filterBuiltinToolsForRun,
-  filterBuiltinToolsForThread,
   listSchedulesFromTool,
   prepareScheduleUpdateFromTool,
   RoutineUpdateError,
@@ -1315,13 +1306,6 @@ const SAYS_NOTHING = new Set([
   "bot_message_sent",
   "bot_message_received",
 ]);
-/**
- * The recruiter sees one assistant: a question for them is an ask_user card. A poll closed on its
- * own and the agent answered it itself (staging 11-11 and 11-12), so recruiting runs have none.
- */
-export const withoutPolls = <T extends { name: string }>(tools: T[], recruiting: boolean): T[] =>
-  recruiting ? tools.filter((tool) => tool.name !== "create_poll") : tools;
-
 /** Built-in calls after a handoff that leave the request with the teammate. */
 // Waiting for the teammate is not new work: staging 11-13, Main waited for Outreach's template,
 // then posted it again as its own reply.
@@ -1708,53 +1692,6 @@ export async function deferFutureRoutine(
   if (scheduledAt.getTime() <= Date.now() + 1_000) return false;
   await jobs.enqueue(routineWakeupJob(routineId, scheduledAt));
   return true;
-}
-
-async function loadLivePluginSlugs(
-  listConnectedPluginSlugs: ExecutorDeps["listConnectedPluginSlugs"],
-  userId: string,
-): Promise<{ ok: true; slugs: string[] } | { ok: false }> {
-  if (!listConnectedPluginSlugs) return { ok: false };
-  try {
-    return { ok: true, slugs: await listConnectedPluginSlugs(userId) };
-  } catch {
-    return { ok: false };
-  }
-}
-
-export async function persistLivePluginConnections(
-  prisma: PrismaClient,
-  owner: { userId: string; spaceId: string },
-  rows: PluginConnectionRow[],
-  liveSlugs: string[],
-): Promise<void> {
-  const sync = planLiveConnectionSync(rows, liveSlugs);
-  if (sync.connectIds.length > 0) {
-    await prisma.connection.updateMany({
-      where: {
-        id: { in: sync.connectIds },
-        userId: owner.userId,
-        spaceId: owner.spaceId,
-      },
-      data: { status: "connected" },
-    });
-    for (const row of rows) {
-      if (sync.connectIds.includes(row.id)) row.status = "connected";
-    }
-  }
-  if (sync.revokeIds.length > 0) {
-    await prisma.connection.updateMany({
-      where: {
-        id: { in: sync.revokeIds },
-        userId: owner.userId,
-        spaceId: owner.spaceId,
-      },
-      data: { status: "revoked" },
-    });
-    for (const row of rows) {
-      if (sync.revokeIds.includes(row.id)) row.status = "revoked";
-    }
-  }
 }
 
 export const APPROVED_EFFECT_REPLAY_ORDER = [{ createdAt: "asc" as const }, { id: "asc" as const }];
@@ -2528,24 +2465,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const onShutdown = () => runAbortController?.abort(deps.shutdownSignal?.reason);
         deps.shutdownSignal?.addEventListener("abort", onShutdown);
         detachShutdown = () => deps.shutdownSignal?.removeEventListener("abort", onShutdown);
-        const composioRows = storedConnections.filter(
-          (connection) => connection.connectorId === "composio",
-        );
-        let liveSlugs: string[] = [];
-        if (needsLivePluginSync(composioRows)) {
-          const listing = await loadLivePluginSlugs(deps.listConnectedPluginSlugs, run.userId);
-          if (listing.ok) {
-            liveSlugs = listing.slugs;
-            // Bookkeeping for the next run; this run already uses the live list.
-            void persistLivePluginConnections(deps.prisma, run, composioRows, listing.slugs).catch(
-              () => undefined,
-            );
-          }
-        }
-        const connectedComposio = mergeConnectedPlugins(composioRows, liveSlugs);
-        const connectedPlugins = selectRunConnections(
+        const { connectedPlugins, connectedComposio } = await loadRunConnections(
+          deps,
+          run,
           storedConnections,
-          connectedComposio.map((connection) => connection.provider),
         );
         const context = {
           operationId: runId,
@@ -3498,103 +3421,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const callEndRun = run.trigger === "call_end";
         const callClientNonceForRun = callEndRun ? run.clientNonce : sourceClientNonce;
         const voiceCall = callEndRun || isCallClientNonce(sourceClientNonce);
-        const graphicalToolsAllowed = graphical && acceptsImages && !heldForTakeover;
-        const pageBrowserAllowed =
-          graphical && browser.describe().capabilities.page && !heldForTakeover;
-        // Recruiting crews also drop the general platform tools they never use.
-        const runDisabledBuiltinTools =
-          isRecruitingSpawnKey(bot.spawnKey) || recruitingBotKey(bot)
-            ? [...bot.disabledBuiltinTools, ...RECRUITING_UNUSED_BUILTIN_TOOLS]
-            : bot.disabledBuiltinTools;
-        const disabledBuiltinTools = disabledBuiltinToolSet(runDisabledBuiltinTools);
-        const builtins = [
-          ...selectBuiltinToolsForRun({
-            ticketBoardEnabled: deps.ticketBoardEnabled,
-            historyRetrievalEnabled: contextStrategy !== "current",
-            graphicalToolsAllowed,
-            pageBrowserAllowed,
-            groupId: thread.groupId,
-            trigger: run.trigger,
-            semanticMemoryEnabled,
-            cloudAgentEnabled: cloudAgentsEnabled(cloudAgent, run.spaceId),
-            messagingChannelRun,
-            voiceCall,
-            disabledBuiltinTools: runDisabledBuiltinTools,
-          }),
-          ...(deps.email && !messagingChannelRun && !disabledBuiltinTools.has(COMPLETION_EMAIL_TOOL)
-            ? [completionEmailTool]
-            : []),
-          // Cross-owner agent connections only exist for chat-linked bots.
-          ...(hasMessagingIdentity && !isBackgroundRunTrigger(run.trigger)
-            ? agentConnectionTools.filter((tool) => !disabledBuiltinTools.has(tool.name))
-            : []),
-        ];
-        // Before a role's first round the people search is already listed and the turn ends on
-        // the next-step card, so the tool catalog would only cost a lookup step. A role built from
-        // the recruiter's own list may never have a round, so it keeps the catalog.
-        // A bot with the people search is recruiting, even before a role is linked to the thread:
-        // older crews' Main has no recruiting spawn key, so its first turns would get no English or
-        // vendor-name rules.
-        const recruitingSearch = discovered.some((tool) =>
-          tool.name.endsWith("web_search_advanced_exa"),
-        );
-        if (recruitingSearch) hideVendors = true;
-        // A JD sent as a file on a thread with no role: the model creates the role with its first
-        // question, so the intake rules apply before any role exists.
-        const attachedJob =
-          !thread.activeRecruitingRoleId &&
-          recruitingSearch &&
-          currentTurnMessage?.role === "user" &&
-          currentTurnMessage.blocks.some((block) => block.kind === "file");
-        const firstRoundPending =
-          Boolean(thread.activeRecruitingRoleId) &&
-          recruitingSearch &&
-          !(await deps.prisma.recruitingCalibrationRound.findFirst({
-            where: {
-              roleId: thread.activeRecruitingRoleId ?? "",
-              role: { spaceId: run.spaceId },
-            },
-            select: { id: true },
-          })) &&
-          !(await deps.prisma.externalEffect.findFirst({
-            where: {
-              spaceId: run.spaceId,
-              kind: "recruiting_research",
-              status: "completed",
-              AND: [
-                { request: { path: ["operation"], equals: "import_csv" } },
-                {
-                  request: {
-                    path: ["roleId"],
-                    equals: thread.activeRecruitingRoleId ?? "",
-                  },
-                },
-              ],
-            },
-            select: { id: true },
-          }));
-        // A role that emails people the recruiter named may never have a round: once its sending
-        // campaign exists, the role keeps the catalog that holds its sending tools (gate 44c1ad44:
-        // a turn after the card could not save a corrected email or answer about its sends).
-        const hideCatalog =
-          firstRoundPending &&
-          !(await deps.prisma.externalEffect.findFirst({
-            where: {
-              spaceId: run.spaceId,
-              kind: "instantly_role_campaign",
-              status: "completed",
-              request: { path: ["roleId"], equals: thread.activeRecruitingRoleId ?? "" },
-            },
-            select: { id: true },
-          }));
-        const exposedConnectorTools = discovered.filter(
-          (tool) =>
-            !builtinAgentTools.some((builtin) => builtin.name === tool.name) &&
-            !(hideCatalog && /_(search_tools|load_tool|execute_tool)$/.test(tool.name)),
-        );
-        const connectorTools = new Map(
-          exposedConnectorTools.map((tool) => [tool.name, tool] as const),
-        );
         let approvalRulesPromise: Promise<ActionApprovalRule[]> | undefined;
         const loadApprovalRules = () => {
           approvalRulesPromise ??= deps.prisma.actionApprovalRule
@@ -3632,24 +3458,44 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .then((row) => row?.enabled ?? deploymentAutoReviewDefault());
           return autoReviewPreferencePromise;
         };
-        // The intro turn confirms how a bot read its own role before anyone hands it
-        // real work — it must not be able to act on that reading (shell, computer,
-        // scheduling, spawning another bot, ...) before the user has assigned any task.
-        // Asking to allow a site only means something on a computer limited to allowed sites.
-        const sitesLimited = await Promise.resolve()
-          .then(() => loadEgressRules(deps.prisma, run.spaceId))
-          .then(egressLocked, () => false);
-        const listedTools = withoutHiddenTools(
-          [...builtins, ...exposedConnectorTools].filter(
-            (tool) => sitesLimited || tool.name !== "allow_computer_site",
-          ),
-          await loadOwnerToolRules(),
-          connectedPlugins.map((plugin) => plugin.provider),
-        );
-        const tools =
-          run.trigger === "created"
-            ? []
-            : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
+        const {
+          graphicalToolsAllowed,
+          pageBrowserAllowed,
+          disabledBuiltinTools,
+          recruitingSearch,
+          firstRoundPending,
+          connectorTools,
+          tools,
+        } = await assembleRunTools({
+          prisma: deps.prisma,
+          ticketBoardEnabled: deps.ticketBoardEnabled,
+          email: Boolean(deps.email),
+          historyRetrievalEnabled: contextStrategy !== "current",
+          graphical,
+          acceptsImages,
+          pageBrowser: browser.describe().capabilities.page,
+          heldForTakeover,
+          run,
+          bot,
+          thread,
+          semanticMemoryEnabled,
+          cloudAgentEnabled: cloudAgentsEnabled(cloudAgent, run.spaceId),
+          messagingChannelRun,
+          voiceCall,
+          hasMessagingIdentity,
+          discovered,
+          loadOwnerToolRules,
+          connectedPlugins,
+          hideVendors,
+        });
+        if (recruitingSearch) hideVendors = true;
+        // A JD sent as a file on a thread with no role: the model creates the role with its first
+        // question, so the intake rules apply before any role exists.
+        const attachedJob =
+          !thread.activeRecruitingRoleId &&
+          recruitingSearch &&
+          currentTurnMessage?.role === "user" &&
+          currentTurnMessage.blocks.some((block) => block.kind === "file");
         setupMark("toolsReady");
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
@@ -14182,103 +14028,6 @@ function disabledToolError(name: string): string {
     : "This tool is disabled for this bot.";
 }
 
-export function selectBuiltinToolsForRun(options: {
-  ticketBoardEnabled?: boolean;
-  historyRetrievalEnabled?: boolean;
-  graphicalToolsAllowed: boolean;
-  /** Page browser tools need a graphical computer (Chrome), not model vision. */
-  pageBrowserAllowed?: boolean;
-  groupId: string | null;
-  trigger: string;
-  semanticMemoryEnabled: boolean;
-  cloudAgentEnabled?: boolean;
-  messagingChannelRun: boolean;
-  /** Hanging up is only offered to a turn the caller spoke on a live call. */
-  voiceCall?: boolean;
-  /** Built-in names this bot turned off. Unknown names are ignored. */
-  disabledBuiltinTools?: readonly string[];
-}) {
-  const disabled = disabledBuiltinToolSet(options.disabledBuiltinTools);
-  return selectCloudAgentTools(
-    selectMemoryTools(
-      filterBuiltinToolsForRun(
-        filterBuiltinToolsForThread(
-          filterPageBrowserTools(
-            filterImageReturningComputerTools(builtinAgentTools, options.graphicalToolsAllowed),
-            options.pageBrowserAllowed ?? options.graphicalToolsAllowed,
-          ),
-          options.groupId,
-        ),
-        options.trigger,
-      ),
-      options.semanticMemoryEnabled,
-    ),
-    Boolean(options.cloudAgentEnabled),
-  ).filter(
-    (tool) =>
-      !disabled.has(tool.name) &&
-      (options.ticketBoardEnabled ||
-        (tool.name !== "board_tickets" && !tool.name.startsWith("ticket_"))) &&
-      (!isBackgroundRunTrigger(options.trigger) ||
-        ![
-          "message_user",
-          "message_bot",
-          "delegate_to_role",
-          "start_role",
-          "stop_work",
-          "handoff_to_bot",
-          "message_agent",
-          "create_poll",
-          "vote_poll",
-          "render_view",
-          "canvas_write",
-        ].includes(tool.name)) &&
-      (options.voiceCall || tool.name !== "end_call") &&
-      (options.historyRetrievalEnabled ||
-        !["search_history", "read_history"].includes(tool.name)) &&
-      (!options.messagingChannelRun ||
-        (![
-          "remember",
-          "recruiting_role",
-          "recruiting_candidates",
-          "recruiting_shortlist",
-          "recruiting_feedback",
-          "recruiting_research",
-          "recruiting_crm_target",
-          "recruiting_crm_import",
-          "read_memory",
-          "save_shared_memory",
-          "save_group_memory",
-          "save_memory",
-          "recall_memory",
-          "forget_memory",
-          "task_catalog",
-          "board_tickets",
-          "create_poll",
-          "vote_poll",
-          "render_view",
-          "canvas_write",
-          "canvas_read",
-        ].includes(tool.name) &&
-          !tool.name.startsWith("scratchpad_") &&
-          !tool.name.startsWith("ticket_"))),
-  );
-}
-
-export const PAGE_BROWSER_TOOL_NAMES = new Set([
-  "browser_navigate",
-  "browser_snapshot",
-  "browser_act",
-]);
-
-export function filterPageBrowserTools<T extends { name: string }>(
-  tools: T[],
-  pageBrowserAllowed: boolean,
-): T[] {
-  if (pageBrowserAllowed) return tools;
-  return tools.filter((tool) => !PAGE_BROWSER_TOOL_NAMES.has(tool.name));
-}
-
 /**
  * Context that changes between runs of one thread: role state, memory, scratchpad, ticket and
  * the current message receipts. It rides as the last history entry before the prompt so the
@@ -15668,31 +15417,6 @@ function cloudflareRunFields(resolved: { accountId?: string; gatewayId?: string 
     ...(resolved.accountId ? { accountId: resolved.accountId } : {}),
     ...(resolved.gatewayId ? { gatewayId: resolved.gatewayId } : {}),
   };
-}
-
-export function selectRunConnections<
-  T extends { connectorId: string; provider: string; status: string },
->(rows: T[], connectedComposioProviders: string[]): T[] {
-  const liveProviders = new Set(
-    connectedComposioProviders.map((provider) => provider.trim().toLowerCase()).filter(Boolean),
-  );
-  const connectedKeys = new Set(
-    rows
-      .filter((row) => row.status === "connected")
-      .map((row) => `${row.connectorId}:${row.provider.trim().toLowerCase()}`),
-  );
-  return rows.filter((row) => {
-    if (row.status === "connected") return true;
-    if (row.status === "revoked") return false;
-    // Recover a pending/error Composio row only when this provider has no
-    // connected row of its own. A sibling that shares the slug must not
-    // pull a non-live row — and its dead providerRef — into the run.
-    if (row.connectorId !== "composio") return false;
-    if (row.status !== "pending" && row.status !== "error") return false;
-    const providerKey = row.provider.trim().toLowerCase();
-    if (!liveProviders.has(providerKey)) return false;
-    return !connectedKeys.has(`composio:${providerKey}`);
-  });
 }
 
 export async function loadCurrentTurnImages(

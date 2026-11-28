@@ -3,6 +3,7 @@ import { CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE } from "@rakazo/contracts";
 import { completeToolStep, ONCE_ROUTINE_CRON, RECRUITER_LANGUAGE } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
+import { selectBuiltinToolsForRun } from "./agent-session/session-tools.js";
 import {
   dockerComputerToolInstruction,
   persistentComputerInstruction,
@@ -20,7 +21,6 @@ import {
   routineNotifies,
   runNotificationsEnabled,
   runRoutineProbe,
-  selectBuiltinToolsForRun,
   settleSteeringAttachmentLoads,
   threadContextForRun,
   toolCompletionAuditPayload,
@@ -951,7 +951,9 @@ describe("steering attachment hydration", () => {
     expect(withPartiallyMissingImages).toMatchObject({
       images: partiallyHydratedImages,
     });
-    expect(withPartiallyMissingImages.unavailableInstruction).toContain("its contents are unknown");
+    expect(withPartiallyMissingImages.unavailableInstruction).toContain(
+      "its contents are unknown",
+    );
 
     const withAllImagesMissing = await settleSteeringAttachmentLoads(
       Promise.resolve(undefined),

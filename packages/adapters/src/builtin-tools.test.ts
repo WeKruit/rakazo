@@ -10,8 +10,8 @@ import {
 import { RECRUITING_DISABLED_BUILTIN_TOOLS, RECRUITING_UNUSED_BUILTIN_TOOLS } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { selectBuiltinToolsForRun } from "./agent-session/session-tools.js";
 import { builtinAgentTools } from "./builtin-tools.js";
-import { selectBuiltinToolsForRun } from "./executor.js";
 import { normalizeOpenAiToolParameters } from "./openai-tool-parameters.js";
 
 describe("native recruiting approval tool", () => {

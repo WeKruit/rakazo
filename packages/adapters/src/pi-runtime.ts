@@ -46,26 +46,14 @@ import type {
   ConnectorTool,
   ModelCallObserver,
 } from "@rakazo/adapter-kit";
-import { AskUserInputSchema, usableModelId } from "@rakazo/contracts";
-import {
-  abortableDelay,
-  shortQuestion,
-  type WorkActivity,
-  workActivityForTool,
-} from "@rakazo/core";
+import { usableModelId } from "@rakazo/contracts";
+import { abortableDelay, type WorkActivity, workActivityForTool } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
-import { isToolPauseResult } from "./approval-effect.js";
+import { toAgentTools } from "./agent-session/session-tools.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
-import { databaseConflictText } from "./connector-safety.js";
 import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
-import {
-  RECORD_TOOL_DEADLINE_MS,
-  RECORD_TOOL_LATE_TEXT,
-  RECORD_TOOLS,
-  withinDeadline,
-} from "./deadline.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -87,7 +75,6 @@ import {
   CODEX_STREAM_HEADERS_TIMEOUT_MS,
   clipContentWithFullOutput,
   clipToolResultText,
-  clipWithFullOutput,
   compactionReserveTokens,
   MODEL_ERROR_BODY_TIMEOUT_MS,
   MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
@@ -98,15 +85,12 @@ import {
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
-  spillRequiredResult,
   type ToolOutputStore,
-  withoutUndeclaredArguments,
 } from "./pi-runtime-limits.js";
 import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { observedPiStream } from "./pi-usage.js";
 import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
-import { normalizeRecruitingRoleArgs, repairSourceRefs } from "./recruiting-tools.js";
 import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
@@ -122,7 +106,6 @@ import {
   waitForSubagents,
 } from "./subagent-delivery.js";
 import { sanitizeThought } from "./thought.js";
-import { textContentArg } from "./tool-text.js";
 import { REPORT_BEFORE_END } from "./turn-report.js";
 
 const running = new Map<string, { controller: AbortController; work: Promise<void> }>();
@@ -1155,44 +1138,6 @@ export function modelsForRequest(
   return catalogModels();
 }
 
-function toAgentTools(toolDefs: readonly ConnectorTool[], host: ToolHost): AgentTool[] {
-  // Registration order is incidental. Canonicalize before allocating collision suffixes
-  // so both provider-visible names and JSON schema serialization stay stable.
-  const canonicalJson = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(canonicalJson);
-    if (value && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value)
-          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-          .map(([key, item]) => [key, canonicalJson(item)]),
-      );
-    }
-    return value;
-  };
-  const ordered = toolDefs
-    .map((tool) => ({
-      tool: {
-        ...tool,
-        inputSchema: canonicalJson(tool.inputSchema) as Record<string, unknown>,
-      },
-      key: JSON.stringify(canonicalJson(tool)),
-    }))
-    .sort((a, b) =>
-      a.tool.name < b.tool.name
-        ? -1
-        : a.tool.name > b.tool.name
-          ? 1
-          : a.key < b.key
-            ? -1
-            : a.key > b.key
-              ? 1
-              : 0,
-    )
-    .map(({ tool }) => tool);
-  const names = normalizeAgentToolNames(ordered);
-  return ordered.map((tool, index) => toAgentTool(tool, host, names[index]!));
-}
-
 function auditUndispatchedToolFailure(
   event: AgentEvent,
   host: ToolHost,
@@ -1758,407 +1703,12 @@ export function prepareRequestSecretArguments(raw: Record<string, unknown>) {
   };
 }
 
-function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): AgentTool {
-  return {
-    name: exposedName,
-    label: tool.name,
-    description: tool.description,
-    parameters: parametersFor(tool),
-    prepareArguments: (args: unknown) => {
-      const raw = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-      if (tool.name === "destination.write") {
-        return {
-          collection: String(raw.collection ?? "notes"),
-          title: String(raw.title ?? "Rakazo result"),
-          body: String(raw.body ?? ""),
-        };
-      }
-      if (tool.name === "remember") {
-        return {
-          // An edit carries no content; an undefined value here failed every edit-mode save.
-          ...(raw.content === undefined ? {} : { content: raw.content }),
-          path: String(raw.path ?? "MEMORY.md"),
-          expectedRevision: raw.expectedRevision,
-          // The schema offers a partial edit; dropping it here failed every edit-mode save.
-          ...(raw.edit === undefined ? {} : { edit: raw.edit }),
-          ...(raw.recruitingFeedback === undefined
-            ? {}
-            : { recruitingFeedback: raw.recruitingFeedback }),
-        };
-      }
-      // Repair slips before the schema check so they never reject a regenerated brief.
-      if (tool.name === "recruiting_role")
-        return normalizeRecruitingRoleArgs(raw, new Date().toISOString());
-      // A preference cites the recruiter's words; a citation written in another tool's shape is
-      // rewritten to this one instead of failing the save.
-      if (tool.name === "recruiting_feedback" && raw.target === "preference") {
-        const sourceRefs = repairSourceRefs(raw.sourceRefs, new Date().toISOString());
-        return sourceRefs ? { ...raw, sourceRefs } : raw;
-      }
-      // The server fills sources and names the people; an empty list reaches it for a precise error.
-      if (tool.name === "recruiting_feedback" && raw.target !== "preference") {
-        const { candidateKeys, ...rest } = raw;
-        return {
-          ...rest,
-          sourceRefs: Array.isArray(raw.sourceRefs) ? raw.sourceRefs : [],
-          ...(typeof candidateKeys === "string"
-            ? { candidateKeys: [candidateKeys] }
-            : Array.isArray(candidateKeys) && candidateKeys.length
-              ? { candidateKeys }
-              : {}),
-        };
-      }
-      if (tool.name === "request_takeover") {
-        return { reason: String(raw.reason ?? "I need you on the screen.") };
-      }
-      if (tool.name === "ask_user") {
-        // An over-long option keeps its start instead of failing the card (80 characters).
-        const options = Array.isArray(raw.options)
-          ? raw.options.map((option) => {
-              const text = String(option).trim();
-              return text.length > 80 ? `${text.slice(0, 79).trimEnd()}…` : text;
-            })
-          : raw.options;
-        return {
-          // An over-long question loses its leading sentences instead of failing the card.
-          question: shortQuestion(String(raw.question ?? "What should I use?")),
-          // Keep a missing/invalid options value as-is so schema minItems can reject it;
-          // do not coerce to [] (that used to look like a valid empty list upstream).
-          ...(options === undefined ? {} : { options }),
-          ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
-          ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
-        };
-      }
-      if (tool.name === "request_secret") {
-        return prepareRequestSecretArguments(raw);
-      }
-      if (tool.name === "write_file") {
-        return {
-          ...(raw.path === undefined ? {} : { path: String(raw.path) }),
-          ...(Object.hasOwn(raw, "content") ? { content: textContentArg(raw.content, "") } : {}),
-          ...(Object.hasOwn(raw, "artifactId") ? { artifactId: raw.artifactId } : {}),
-        };
-      }
-      if (tool.name === "computer_act") {
-        return {
-          actions: Array.isArray(raw.actions) ? raw.actions : [],
-          observe: raw.observe === undefined ? true : Boolean(raw.observe),
-          settle_ms: Number(raw.settle_ms ?? 350),
-        };
-      }
-      if (tool.name === "list_files") return { path: String(raw.path ?? "") };
-      if (tool.name === "read_file" || tool.name === "open_path") {
-        return { path: String(raw.path ?? "") };
-      }
-      if (tool.name === "launch_app") {
-        return {
-          application: String(raw.application ?? ""),
-          uri: raw.uri ? String(raw.uri) : "",
-        };
-      }
-      if (tool.name === "shell") {
-        return {
-          command: String(raw.command ?? ""),
-          // The executor chooses the bot-scoped default, including Team workspaces.
-          ...(raw.cwd ? { cwd: String(raw.cwd) } : {}),
-        };
-      }
-      if (tool.name === "run_subagent") {
-        return {
-          name: String(raw.name ?? "helper"),
-          task: String(raw.task ?? ""),
-          instructions: raw.instructions ? String(raw.instructions) : "",
-          model_provider: raw.model_provider ? String(raw.model_provider) : "",
-          model_id: raw.model_id ? String(raw.model_id) : "",
-          ...(raw.background === true ? { background: true } : {}),
-          ...(raw.handle ? { handle: String(raw.handle) } : {}),
-          ...(Array.isArray(raw.wait) ? { wait: raw.wait.map(String) } : {}),
-          ...(raw.timeout_seconds !== undefined ? { timeout_seconds: raw.timeout_seconds } : {}),
-        };
-      }
-      if (tool.name === "spawn_bot") {
-        return {
-          name: String(raw.name ?? ""),
-          title: raw.title ? String(raw.title) : "",
-          instructions: raw.instructions ? String(raw.instructions) : "",
-          prompt: raw.prompt ? String(raw.prompt) : "",
-          computer_mode: raw.computer_mode ? String(raw.computer_mode) : "",
-        };
-      }
-      if (tool.name === "update_bot") {
-        const notifyRaw = raw.notifyOnFinish ?? raw.notify_on_finish;
-        return {
-          ...(raw.name !== undefined ? { name: String(raw.name) } : {}),
-          ...(raw.title !== undefined ? { title: String(raw.title) } : {}),
-          ...(raw.description !== undefined ? { description: String(raw.description) } : {}),
-          ...(raw.color !== undefined ? { color: String(raw.color) } : {}),
-          ...(raw.artifact_id !== undefined ? { artifact_id: String(raw.artifact_id) } : {}),
-          ...(raw.use_attached_image !== undefined
-            ? { use_attached_image: raw.use_attached_image }
-            : {}),
-          ...(notifyRaw !== undefined ? { notifyOnFinish: notifyRaw } : {}),
-        };
-      }
-      if (tool.name === "create_space") {
-        return { name: String(raw.name ?? "") };
-      }
-      if (tool.name === "archive_bot" || tool.name === "delete_bot") {
-        return {
-          confirm_name: String(raw.confirm_name ?? raw.confirmName ?? ""),
-          bot_id: raw.bot_id ? String(raw.bot_id) : raw.botId ? String(raw.botId) : "",
-        };
-      }
-      return withoutUndeclaredArguments(raw, tool.inputSchema) as never;
-    },
-    execute: async (toolCallId, params): Promise<AgentToolResult<unknown>> => {
-      host.signal.throwIfAborted();
-      const args = (params ?? {}) as Record<string, unknown>;
-      const rawCallId =
-        toolCallId || `${host.request.runId}:${tool.name}:${host.toolCallSeq.value++}`;
-      // Backend idempotency includes the agent namespace; Pi wire IDs remain untouched.
-      const executionId = JSON.stringify(["pi-tool", host.agentNamespace ?? "main", rawCallId]);
-      if (!beginToolCall(host)) {
-        return {
-          content: [{ type: "text", text: "Skipped: tool-call limit reached." }],
-          details: { skipped: true },
-        };
-      }
-      host.queue.push({ type: "tool", name: tool.name, args, executionId });
-      const startedAt = Date.now();
-      let result: unknown;
-      let failure: unknown;
-      host.dispatchedToolCalls.add(toolCallId);
-      let promotion: Promise<void> | undefined;
-      // Human interaction tools pause explicitly; only executing work moves to the background.
-      const promotionTimer =
-        host.request.onSlowTool &&
-        !["ask_user", "request_takeover", "request_secret"].includes(tool.name)
-          ? setTimeout(() => {
-              promotion = host.request.onSlowTool!({
-                name: tool.name,
-                executionId,
-                durationMs: Date.now() - startedAt,
-              }).catch((error) => {
-                getLogger().error("slow tool promotion failed", error);
-              });
-            }, SLOW_TOOL_BACKGROUND_MS)
-          : undefined;
-      try {
-        result = await (async () => {
-          if (tool.name === "request_takeover") {
-            const helped = await subagentResultsBeforePause(host);
-            if (helped) return helped;
-            host.pausePending = true;
-            host.queue.push({
-              type: "takeover",
-              reason: String(args.reason ?? "I need you on the screen."),
-            });
-            return {
-              content: [{ type: "text", text: "Takeover requested." }],
-              details: args,
-              terminate: true,
-            };
-          }
-          if (tool.name === "ask_user") {
-            const parsed = AskUserInputSchema.safeParse(args);
-            if (!parsed.success)
-              throw new Error(
-                "ask_user requires two to four unique, non-empty options or a valid requestedSchema. Add two to four short options (the card already offers a custom answer) and ask again; never ask in plain text instead.",
-              );
-            const { question } = parsed.data;
-            const known = await host.request.beforeAsk?.(question);
-            if (known) {
-              // Each bounce costs the person another model step before the card; say which check.
-              getLogger().info("ask.not_shown", {
-                runId: host.request.runId,
-                reason: typeof known === "string" ? "already_answered" : known.instead.slice(0, 80),
-              });
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text:
-                      typeof known === "string"
-                        ? `The recruiter already replied after this question: ${known}\nIf that reply answers it, use it and continue without asking again. If it was about something else, ask the question again now.`
-                        : known.instead,
-                  },
-                ],
-                details: args,
-              };
-            }
-            const helped = await subagentResultsBeforePause(host);
-            if (helped) return helped;
-            // A message the user sent while this question was being written may already answer
-            // it; read it before pausing, so the user is never left waiting behind the card.
-            const arrived = (host.steeredUnseen ?? 0) + ((await host.claimNewSteering?.()) ?? 0);
-            if (arrived)
-              return {
-                content: [{ type: "text", text: ASK_SUPERSEDED_BY_MESSAGE }],
-                details: args,
-              };
-            const options = "options" in parsed.data ? parsed.data.options : undefined;
-            const requestedSchema =
-              "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
-            host.pausePending = true;
-            host.queue.push({
-              type: "ask",
-              text: question,
-              ...(requestedSchema
-                ? { requestedSchema }
-                : {
-                    actions: options!.map((label, index) => ({
-                      id: `choice-${index + 1}`,
-                      label,
-                    })),
-                    ...("multiple" in parsed.data && parsed.data.multiple
-                      ? { multiple: true }
-                      : {}),
-                  }),
-            });
-            return {
-              content: [{ type: "text", text: "Waiting for the user's answer." }],
-              details: args,
-              terminate: true,
-            };
-          }
-          if (tool.name === "request_secret") {
-            if (host.request.executeTool) {
-              const result = await host.request.executeTool(tool.name, args, executionId);
-              if (isAgentToolExecutionResult(result)) {
-                if (isToolPauseResult(result)) host.pausePending = true;
-                return result;
-              }
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: serializeToolResult(
-                      result,
-                      host.request.contextStrategy,
-                      tool.name,
-                      args,
-                    ),
-                  },
-                ],
-                details: result,
-              };
-            }
-            host.pausePending = true;
-            return {
-              content: [{ type: "text", text: "Protected input requested." }],
-              details: args,
-              terminate: true,
-            };
-          }
-          if (tool.name === "run_subagent") {
-            const result = await executeSubagent(host, executionId, args);
-            return {
-              content: [{ type: "text", text: result }],
-              details: { result },
-            };
-          }
-          if (host.request.executeTool) {
-            const call = host.request.executeTool(tool.name, args, executionId, tool.route, {
-              onShellStillRunning: (completion) => {
-                host.pendingShells.push(completion);
-              },
-            });
-            const result = await untilStopped(
-              RECORD_TOOLS.has(tool.name)
-                ? withinDeadline(call, RECORD_TOOL_DEADLINE_MS, () => {
-                    getLogger().warn("run.tool.late", {
-                      runId: host.request.runId,
-                      tool: tool.name,
-                      executionId,
-                    });
-                    return { error: RECORD_TOOL_LATE_TEXT };
-                  })
-                : call,
-              host.signal,
-              () =>
-                getLogger().warn("run.tool.abandoned", {
-                  runId: host.request.runId,
-                  tool: tool.name,
-                  executionId,
-                }),
-            );
-            if (isAgentToolExecutionResult(result)) {
-              if (isToolPauseResult(result)) host.pausePending = true;
-              return boundAgentToolResult(result);
-            }
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: await clipWithFullOutput(
-                    toolResultJson(result),
-                    (full) =>
-                      shortenToolResultText(full, 12_000, { name: tool.name, arguments: args }),
-                    VERBATIM_TOOL_RESULTS.has(tool.name)
-                      ? undefined
-                      : toolOutputStore(host, tool.name, executionId),
-                    VERBATIM_TOOL_RESULTS.has(tool.name) ? Number.POSITIVE_INFINITY : 12_000,
-                  ),
-                },
-              ],
-              details: result,
-            };
-          }
-          return {
-            content: [
-              {
-                type: "text",
-                text: `${tool.name} is unavailable without an executor.`,
-              },
-            ],
-            details: { error: "no executor" },
-          };
-        })();
-        clearTimeout(promotionTimer);
-        await promotion;
-        if (VERBATIM_TOOL_RESULTS.has(tool.name))
-          return spillRequiredResult(
-            result as AgentToolResult<unknown>,
-            toolOutputStore(host, tool.name, executionId),
-            host.activeModel.config.contextWindow ?? host.activeModel.model.contextWindow,
-          );
-        return boundAgentToolResult(
-          result as AgentToolResult<unknown>,
-          toolOutputStore(host, tool.name, executionId),
-        );
-      } catch (error) {
-        failure = error;
-        // A database conflict reaches the model as plain words, never its SQL or code.
-        const conflict = databaseConflictText(error);
-        if (conflict) throw new Error(conflict, { cause: error });
-        throw error;
-      } finally {
-        clearTimeout(promotionTimer);
-        endToolCall(host);
-        const completion: AgentToolCompletion = {
-          name: tool.name,
-          executionId,
-          durationMs: Math.max(0, Date.now() - startedAt),
-          ...(result === undefined ? {} : { result }),
-          ...(failure === undefined ? {} : { error: failure }),
-          ...(host.pausePending ? { paused: true } : {}),
-        };
-        try {
-          void Promise.resolve(host.request.onToolCompleted?.(completion)).catch(() => undefined);
-        } catch {
-          // Audit hooks are best effort and must never change tool behavior.
-        }
-      }
-    },
-  };
-}
-
 /** Helpers one turn may start, and how many may work at the same time. */
 export const SUBAGENT_TURN_LIMIT = 32;
 export const SUBAGENT_CONCURRENCY = 8;
 
 /** run_subagent: start a helper, continue one by handle, or wait for background results. */
-async function executeSubagent(
+export async function executeSubagent(
   host: ToolHost,
   executionId: string,
   args: Record<string, unknown>,
@@ -2215,7 +1765,7 @@ async function executeSubagent(
  * A question or takeover ends the run, and helpers cannot outlive it: first wait for background
  * helpers and give their results to the model, which then asks again if it still needs to.
  */
-async function subagentResultsBeforePause(
+export async function subagentResultsBeforePause(
   host: ToolHost,
 ): Promise<AgentToolResult<unknown> | undefined> {
   if (host.depth > 0) return undefined;
@@ -2896,7 +2446,7 @@ function isComputerScreenshotMessage(
   );
 }
 
-function isAgentToolExecutionResult(result: unknown): result is AgentToolExecutionResult {
+export function isAgentToolExecutionResult(result: unknown): result is AgentToolExecutionResult {
   if (
     !result ||
     typeof result !== "object" ||
@@ -3129,7 +2679,7 @@ export function toolResultJson(result: unknown): string {
   }
 }
 
-async function boundAgentToolResult<T>(
+export async function boundAgentToolResult<T>(
   result: AgentToolResult<T>,
   store?: ToolOutputStore,
 ): Promise<AgentToolResult<T>> {
@@ -3149,7 +2699,7 @@ const STORED_DATA_READ_TOOLS: ReadonlySet<string> = new Set([
   "skill_read",
 ]);
 
-function toolOutputStore(
+export function toolOutputStore(
   host: ToolHost,
   name: string,
   executionId: string,
@@ -3324,10 +2874,10 @@ interface EventQueue {
   iterate(): AsyncIterable<AgentRuntimeEvent>;
 }
 
-const ASK_SUPERSEDED_BY_MESSAGE =
+export const ASK_SUPERSEDED_BY_MESSAGE =
   "Not asked: the user sent a new message while this question was being written. It comes next; act on it, and ask this question again only if that message leaves it open.";
 
-interface ToolHost {
+export interface ToolHost {
   context?: Partial<AdapterContext>;
   onContextDecision?: PiAgentRuntimeOptions["onContextDecision"];
   modelCallObserver?: ModelCallObserver;
@@ -3392,7 +2942,7 @@ function maybeAbortToolCallBudget(host: ToolHost) {
   }
 }
 
-function beginToolCall(host: ToolHost): boolean {
+export function beginToolCall(host: ToolHost): boolean {
   const budget = host.toolCallBudget;
   if (budget.limit <= 0) {
     budget.count += 1;
@@ -3418,7 +2968,7 @@ function beginToolCall(host: ToolHost): boolean {
   return false;
 }
 
-function endToolCall(host: ToolHost) {
+export function endToolCall(host: ToolHost) {
   host.toolCallBudget.inFlight = Math.max(0, host.toolCallBudget.inFlight - 1);
   maybeAbortToolCallBudget(host);
 }

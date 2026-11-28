@@ -6,12 +6,9 @@ import type {
 } from "@rakazo/adapter-kit";
 import { RECRUITING_DISABLED_BUILTIN_TOOLS } from "@rakazo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { selectBuiltinToolsForRun } from "./agent-session/session-tools.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
-import {
-  COMPUTER_TOOLS_DISABLED_ERROR,
-  createRunExecutor,
-  selectBuiltinToolsForRun,
-} from "./executor.js";
+import { COMPUTER_TOOLS_DISABLED_ERROR, createRunExecutor } from "./executor.js";
 
 const {
   acquireLease,
