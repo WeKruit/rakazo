@@ -86,8 +86,7 @@ export const DELEGATION_TOOL_NAMES = new Set([
   "delete_bot",
   "handoff_to_bot",
   "message_bot",
-  "delegate_to_role",
-  "start_role",
+  "delegate_work",
 ]);
 
 const scheduleCreateProperties = {
@@ -163,7 +162,7 @@ const scheduleCreateInputSchema = {
 
 /** recruiting_feedback's text on cross-role preferences, the one part the main chat is offered. */
 export const RECRUITING_PREFERENCE_TEXT =
-  'For explicit reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". A pasted job description or a new role is never a preference: open the role first (start_role) and keep its requirements there. Keep this human\'s cross-role preferences in one user-scope document at path preferences/recruiting-collaboration.md: read it with read_memory first and use its expectedRevision, or 0 when it does not exist yet; never start another preference file. When a preference is withdrawn, also revoke it from any older preference document in memory. Bot-private notes use their own loaded scope and path. operation:"add" appends the full exact preference text in content, separated from existing text by two newlines; never substitute a summary. operation:"replace" replaces only the anchored span with content; operation:"revoke" removes only that span. Both preserve all other text. For a quote occurring exactly once in the loaded document, use anchor:{quote:<exact text>} without counting offsets. Missing or repeated quotes are rejected; for repeated text provide the intended exact UTF-16 start, end and quote. Supplied offsets must match exactly and are never corrected automatically. User scope is this user\'s bots in this Space, not the organization. Correct deterministic pre-write validation errors using the loaded document and actual error, then resubmit only the originally authorized edit; required approvals still apply. Inspect the original receipt before retrying an unknown write outcome.';
+  'For explicit reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". A pasted job description or a new role is never a preference: open the role first (delegate_work with new_role) and keep its requirements there. Keep this human\'s cross-role preferences in one user-scope document at path preferences/recruiting-collaboration.md: read it with read_memory first and use its expectedRevision, or 0 when it does not exist yet; never start another preference file. When a preference is withdrawn, also revoke it from any older preference document in memory. Bot-private notes use their own loaded scope and path. operation:"add" appends the full exact preference text in content, separated from existing text by two newlines; never substitute a summary. operation:"replace" replaces only the anchored span with content; operation:"revoke" removes only that span. Both preserve all other text. For a quote occurring exactly once in the loaded document, use anchor:{quote:<exact text>} without counting offsets. Missing or repeated quotes are rejected; for repeated text provide the intended exact UTF-16 start, end and quote. Supplied offsets must match exactly and are never corrected automatically. User scope is this user\'s bots in this Space, not the organization. Correct deterministic pre-write validation errors using the loaded document and actual error, then resubmit only the originally authorized edit; required approvals still apply. Inspect the original receipt before retrying an unknown write outcome.';
 
 export const builtinAgentTools: ConnectorTool[] = [
   {
@@ -1524,22 +1523,37 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
-    name: "delegate_to_role",
+    name: "delegate_work",
     description:
-      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId of the role the working state names (the role this conversation last opened or handed work to, or one of its role teams) or from recruiting_candidates operation roles, or the groupId for a team with no saved role yet, optionally a teammate to give it to directly, and the people and round the recruiter's words refer to. The team receives the recruiter's newest words exactly as written, with those people and that round; nothing else is passed. The team works in the role's conversation, with its usual approval cards there. The role's card is shown here and the turn ends with the call; the team's rounds, emails and results show only in the role's conversation. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
+      "Account-wide conversation only. Give the recruiter's request to the agent that owns it, as a job that runs in that agent's own conversation: the agent receives the recruiter's newest words exactly as written, the files of their latest message, and the people and round you pass; nothing else is passed. For work on a role pass its roleId (or groupId for a role conversation with no saved role yet), and agent to give it to that role's teammate instead of its lead. For a new role pass new_role with its title (it opens the role's conversation, copies the recruiter's message there, and shows its card). For work that belongs to no role pass only agent. The job's final answer comes back here once, when its conversation is idle; a card it waits on is shown here. The turn ends with the call.",
     inputSchema: {
       type: "object",
       properties: {
-        role_id: { type: "string", description: "Role id from the working state or recruiting_candidates roles." },
+        agent: {
+          type: "string",
+          description:
+            "The agent that owns the work, by name: Main (a role's people, feedback and requirements), Sourcer, Outreach (contacts, any email, template or reply, the sending mailbox) or Scheduling (interviews and the calendar). Required for work in no role; left out on a role, its lead.",
+        },
+        role_id: {
+          type: "string",
+          description: "Role id from the working state or recruiting_candidates roles.",
+        },
         group_id: {
           type: "string",
           description:
             "The role conversation's groupId from the working state, for a role team with no saved role yet. Use instead of role_id.",
         },
-        teammate: {
+        new_role: {
           type: "string",
           description:
-            "Optional teammate on that role team to give the work to directly (for example Sourcer or Scheduling). Leave out to give it to the team's lead.",
+            'Only for a new role: its name as the recruiter gave it, word for word (for example the text before a colon or inside 「」); when only their JD names it, a short title from it such as "Agent Engineer (new grad)".',
+        },
+        earlier_messages: {
+          type: "integer",
+          minimum: 0,
+          maximum: 10,
+          description:
+            "With new_role: how many of the recruiter's messages before their latest one hold this role's JD or requirements and are copied with it (0 when the latest holds them).",
         },
         people: {
           type: "array",
@@ -1563,37 +1577,9 @@ export const builtinAgentTools: ConnectorTool[] = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
-    name: "start_role",
-    description:
-      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's latest message and attached files exactly as they wrote them, and shows the recruiter a card that opens it. Use it when the recruiter names a role that has no team yet, with its JD, link, file or job title; a question about how to start or how to get candidates opens nothing and is answered in words. When they say the role is new, call it directly, and check recruiting_candidates operation roles first only when they may mean a role that already exists. Pass a short title. The role's team cannot see this conversation and receives only what this call hands over: the recruiter's latest message, plus as many of their messages before it as earlier_messages says, copied as written (never retype a JD). When the JD or requirements came in an earlier message and the latest one only says to go on, count back to that message. Use message only for what those copied messages do not hold, such as an email template they approved. The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        title: {
-          type: "string",
-          description:
-            'The role\'s name as the recruiter gave it, word for word (for example the text before a colon or inside 「」); when only their JD names it, a short title from it such as "Agent Engineer (new grad)".',
-        },
-        message: {
-          type: "string",
-          description:
-            "What the role needs that the copied messages do not hold (an approved email template word for word), in the recruiter's own words.",
-        },
-        earlier_messages: {
-          type: "integer",
-          minimum: 0,
-          maximum: 10,
-          description:
-            "How many of the recruiter's messages before their latest one to hand over with it: 0 when the latest message alone holds the role's JD or requirements; otherwise count back until the message that holds them is included.",
-        },
-      },
-      required: ["title", "earlier_messages"],
-    },
-  },
-  {
     name: "handoff_to_bot",
     description:
-      "In a group chat only: transfer a genuinely distinct next stage to another current member. Appends a visible handoff and starts that bot asynchronously. Your reply after a handoff is not shown, so hand off last, at most once per turn; never redo the handed work yourself. Do not hand a stage back merely to report or repeat the same work; post results in the shared thread. Write message as a brief the member can finish without asking, in this order: Goal (the user's own words, never narrowed by limits or checks of your own), Where (the role or thread the work belongs to), and Context it needs (who and what the words refer to). When the stage ends, finished, failed or stopped, it comes back to you as your next turn with how it ended: check it against the Goal before the user relies on it, and hand a correction to the same member when it falls short. Set report_back for this outside a coordinator, which always gets it.",
+      "In a group chat only: transfer a genuinely distinct next stage to another current member. Appends a visible handoff and starts that bot asynchronously. Your reply after a handoff is not shown, so hand off last, at most once per turn; never redo the handed work yourself. Do not hand a stage back merely to report or repeat the same work; post results in the shared thread. Write message as a brief the member can finish without asking, in this order: Goal (the user's own words, never narrowed by limits or checks of your own), Where (the role or thread the work belongs to), and Context it needs (who and what the words refer to). When the stage ends it comes back to you once, as your next turn, with how it ended. Set report_back for this outside a coordinator, which always gets it.",
     inputSchema: {
       type: "object",
       properties: {

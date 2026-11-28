@@ -62,7 +62,7 @@ describe("recruitingAgentScope", () => {
     const kruit = recruitingAgentScope(key("main"), "recruiting-global-abc");
     // Staging handoff3: "Write an email or template" listed there had Kruit draft in the main chat.
     expect(kruit?.skills).toEqual([]);
-    expect(kruit?.tools).toEqual(expect.arrayContaining(["delegate_to_role", "start_role"]));
+    expect(kruit?.tools).toEqual(expect.arrayContaining(["delegate_work"]));
     for (const work of [
       "recruiting_feedback",
       "recruiting_role",

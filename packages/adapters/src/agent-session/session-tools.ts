@@ -155,8 +155,7 @@ export function selectBuiltinToolsForRun(options: {
         ![
           "message_user",
           "message_bot",
-          "delegate_to_role",
-          "start_role",
+          "delegate_work",
           "stop_work",
           "handoff_to_bot",
           "message_agent",

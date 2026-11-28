@@ -840,8 +840,9 @@ describe("a role team's card", () => {
         toolName: "confirm_booking",
       },
     };
+    // The delegation the card belongs to is looked up in this conversation (bot-messages.ts).
     const delegating = vi.fn(async () => null);
-    Object.assign(f.prisma.thread, { findFirst: delegating });
+    Object.assign(f.prisma.message, { findFirst: delegating });
     Object.assign(f.prisma, {
       botMcpServer: {
         findFirst: vi.fn(async () => ({
@@ -870,7 +871,11 @@ describe("a role team's card", () => {
     expect(f.pauseRunForInput).toHaveBeenCalledOnce();
     await vi.waitFor(() =>
       expect(delegating).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ groupId: { not: null } }) }),
+        expect.objectContaining({
+          where: expect.objectContaining({
+            blocks: { array_contains: [{ kind: "bot_message_received" }] },
+          }),
+        }),
       ),
     );
   });
@@ -1288,14 +1293,41 @@ describe("one request handed to a role", () => {
   it("goes to that role's conversation once per turn", async () => {
     const f = await roleFixture("delegate-once");
     vi.mocked(messageBot).mockClear();
-    const ask = { name: "delegate_to_role", args: { role_id: "role-1" } };
+    const ask = { name: "delegate_work", args: { role_id: "role-1" } };
     f.setCalls([
       { ...ask, executionId: "d1" },
       { ...ask, executionId: "d2" },
     ]);
     await f.run();
     expect(messageBot).toHaveBeenCalledTimes(1);
-    expect(f.results[1]).toMatchObject({ ok: true, note: expect.stringContaining("Already") });
+    expect(f.results[1]).toMatchObject({
+      details: { ok: true, note: expect.stringContaining("Already") },
+    });
+  });
+
+  // Nightly 11-28: on a new account 「帮我写一封面试后跟进邮件的模板」 opened a role named after the
+  // template. Work in no role is a child job in its owner's own conversation, with no role card.
+  it("gives work in no role to its owner's own conversation, opening no role", async () => {
+    const f = await roleFixture("delegate-no-role");
+    vi.mocked(messageBot).mockClear();
+    Object.assign(f.prisma, {
+      chatGroupMember: {
+        findMany: vi.fn(async () => [
+          { bot: { id: "bot-outreach", name: "Outreach", archivedAt: null } },
+        ]),
+      },
+    });
+    Object.assign(f.prisma.thread, { findFirst: vi.fn(async () => ({ id: "outreach-own" })) });
+    f.setCalls([{ name: "delegate_work", args: { agent: "outreach" }, executionId: "d" }]);
+    await f.run();
+    expect(vi.mocked(messageBot).mock.calls[0]?.[3]).toMatchObject({
+      bot_id: "bot-outreach",
+      thread_id: "outreach-own",
+      intent: "request",
+    });
+    expect(String(vi.mocked(messageBot).mock.calls[0]?.[3].message)).toContain("郭小明不合适");
+    expect(f.results[0]).toMatchObject({ kind: "agent_tool_result", terminate: true });
+    expect(JSON.stringify(f.published)).not.toContain("role_link");
   });
 
   // Branch play 11-27 (handoff5): the role's card was shown and Kruit still wrote the email draft
@@ -1304,7 +1336,7 @@ describe("one request handed to a role", () => {
     const f = await roleFixture("delegate-card-shown");
     f.setCalls([
       {
-        name: "delegate_to_role",
+        name: "delegate_work",
         args: { role_id: "role-1" },
         executionId: "d",
       },
@@ -1318,12 +1350,16 @@ describe("one request handed to a role", () => {
     const f = await roleFixture("delegate-referents");
     vi.mocked(messageBot).mockClear();
     const queryRaw = vi.fn(async () => [
-      { candidateKey: "linkedin:ada", name: "Ada Chen", linkedinUrl: "https://linkedin.com/in/ada" },
+      {
+        candidateKey: "linkedin:ada",
+        name: "Ada Chen",
+        linkedinUrl: "https://linkedin.com/in/ada",
+      },
     ]);
     Object.assign(f.prisma, { $queryRaw: queryRaw });
     f.setCalls([
       {
-        name: "delegate_to_role",
+        name: "delegate_work",
         args: { role_id: "role-1", people: ["https://www.linkedin.com/in/ada/"], round: 2 },
         executionId: "d",
       },
@@ -1339,7 +1375,7 @@ describe("one request handed to a role", () => {
     const g = await roleFixture("delegate-unknown-person");
     Object.assign(g.prisma, { $queryRaw: vi.fn(async () => []) });
     g.setCalls([
-      { name: "delegate_to_role", args: { role_id: "role-1", people: ["Ada"] }, executionId: "d" },
+      { name: "delegate_work", args: { role_id: "role-1", people: ["Ada"] }, executionId: "d" },
     ]);
     await g.run();
     // Play s179: a name the model wrote still hands off; the recruiter's words name the person.

@@ -387,7 +387,6 @@ async function main() {
     jobs,
     events,
     notifications,
-    completionEmail: Boolean(email),
     email,
     webOrigin: process.env.WEB_ORIGIN ?? "http://127.0.0.1:5173",
     leadership: createPostgresReconciliationLeadership(sessionPool),

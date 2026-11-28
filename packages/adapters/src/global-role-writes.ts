@@ -64,6 +64,7 @@ export function delegatedRequestMessage(
   words: string,
   people: readonly RoleReferent[],
   round?: number,
+  files: readonly string[] = [],
 ): string {
   const named = people.map((person) =>
     [person.name?.trim() || person.candidateKey, person.linkedinUrl].filter(Boolean).join(", "),
@@ -71,6 +72,7 @@ export function delegatedRequestMessage(
   const refers = [
     ...(named.length ? [`People they refer to: ${named.join("; ")}.`] : []),
     ...(round ? [`Round they refer to: round ${round}.`] : []),
+    ...(files.length ? [`Files the recruiter attached: ${files.join(", ")}.`] : []),
   ];
   return [`The recruiter wrote, word for word:\n"${words}"`, ...refers].join("\n\n");
 }

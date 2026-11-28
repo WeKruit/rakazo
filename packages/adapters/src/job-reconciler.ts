@@ -17,7 +17,6 @@ import { getLogger } from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { returnBotMessageOutcome } from "./bot-messages.js";
 import { scheduleComputerControlExpiry } from "./computer-control.js";
-import { watchOpenStages } from "./group-handoff.js";
 import { rearmRecruitingAgentRunWaits } from "./recruiting-agent-run-wait.js";
 import { RECRUITING_CHECKIN_INTERVAL_MS, sweepRecruitingCheckins } from "./recruiting-checkin.js";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
@@ -31,7 +30,6 @@ const DEFAULT_BATCH_SIZE = 100;
 const PROFILE_RECENT_MS = 60 * 60_000;
 const ROUTINE_LOOKAHEAD_MS = 60_000;
 const CONTROL_LOOKAHEAD_MS = 60_000;
-const STAGE_WATCH_SCAN_MS = 60_000;
 /** Searches still running at the provider get their follow-up re-armed this often. */
 const SEARCH_WAIT_REARM_MS = 2 * 60_000;
 // Two keys give Rakazo's lock a namespace without relying on a hash that might collide
@@ -145,8 +143,6 @@ export function createJobReconciler(
     jobs: JobPublisher;
     events?: ThreadEvents;
     notifications?: NotificationProvider;
-    /** Account email is configured, so long stages may offer an email when they finish. */
-    completionEmail?: boolean;
     /** Emails the recruiter once when a card has waited on them (recruiting-question-nudge). */
     email?: TransactionalEmailProvider;
     webOrigin?: string;
@@ -168,7 +164,6 @@ export function createJobReconciler(
   let profileCursor: Cursor | undefined;
   let profileSweptAt: Date | undefined;
   let controlScanDeadline: Date | undefined;
-  let stagesWatchedAt = 0;
   let searchWaitsArmedAt = 0;
   let checkinsOfferedAt = 0;
   // Set on stop: an in-flight pass ends at its next step instead of querying a closing pool.
@@ -247,24 +242,6 @@ export function createJobReconciler(
           await sweepRecruitingCheckins({ prisma: deps.prisma, jobs: deps.jobs, now, batchSize });
         } catch (error) {
           getLogger().error("reply check-in sweep", error);
-        }
-      }
-      if (stopped) return;
-      if (deps.events && now.getTime() - stagesWatchedAt >= STAGE_WATCH_SCAN_MS) {
-        stagesWatchedAt = now.getTime();
-        try {
-          await watchOpenStages(
-            {
-              prisma: deps.prisma,
-              jobs: deps.jobs,
-              events: deps.events,
-              completionEmail: deps.completionEmail,
-            },
-            now,
-            batchSize,
-          );
-        } catch (error) {
-          getLogger().error("stage watch", error);
         }
       }
       if (stopped) return;

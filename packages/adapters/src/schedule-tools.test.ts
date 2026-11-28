@@ -393,18 +393,15 @@ describe("resolveScheduleTiming", () => {
 });
 
 describe("filterBuiltinToolsForThread", () => {
-  it("offers opening and handing work to a role only in the account-wide conversation", () => {
+  it("offers giving work out only in the account-wide conversation", () => {
     // What else that conversation is offered is its agent's own tool list (recruitingAgentScope).
-    const all = ["start_role", "delegate_to_role", "handoff_to_bot", "recruiting_scheduling"].map(
-      (name) => ({ name }),
-    );
+    const all = ["delegate_work", "handoff_to_bot", "recruiting_scheduling"].map((name) => ({
+      name,
+    }));
     const names = (groupId: string | null) =>
       filterBuiltinToolsForThread(all, groupId).map((t) => t.name);
-    expect(names("recruiting-global-abc")).toEqual(
-      expect.arrayContaining(["start_role", "delegate_to_role"]),
-    );
-    expect(names("role-group")).not.toContain("delegate_to_role");
-    expect(names("role-group")).not.toContain("start_role");
+    expect(names("recruiting-global-abc")).toEqual(expect.arrayContaining(["delegate_work"]));
+    expect(names("role-group")).not.toContain("delegate_work");
     expect(names("role-group")).toContain("recruiting_scheduling");
     expect(names("role-group")).toContain("handoff_to_bot");
     expect(names(null)).not.toContain("handoff_to_bot");

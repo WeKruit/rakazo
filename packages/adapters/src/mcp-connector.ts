@@ -177,7 +177,7 @@ export async function agentCrmCandidatesArgs(
 ) {
   if (bindings.length !== 1)
     throw new IsolationError(
-      "CRM candidates are read one role at a time, in that role's conversation; across roles use recruiting_candidates, and for one role delegate_to_role",
+      "CRM candidates are read one role at a time, in that role's conversation; across roles use recruiting_candidates, and for one role delegate_work",
     );
   const target = bindings[0]!;
   if (
@@ -2329,7 +2329,7 @@ export class McpConnector implements ConnectorProvider {
     );
     if (!target || target.mcpServerId !== server.id || target.serverRevision !== server.revision)
       throw new IsolationError(
-        "CRM tools work on the role this conversation is linked to; across roles use recruiting_candidates, and for one role delegate_to_role",
+        "CRM tools work on the role this conversation is linked to; across roles use recruiting_candidates, and for one role delegate_work",
       );
     return target;
   }
@@ -2466,7 +2466,7 @@ export class McpConnector implements ConnectorProvider {
     }
     if (run.thread.groupId?.startsWith("recruiting-crm-"))
       throw new IsolationError(
-        "Campaign email is read in its role's conversation; across roles use recruiting_candidates replies, and for one role delegate_to_role",
+        "Campaign email is read in its role's conversation; across roles use recruiting_candidates replies, and for one role delegate_work",
       );
     return null;
   }

@@ -370,10 +370,24 @@ describe("inbound wake prompt", () => {
     expect(prompt).toContain("untrusted peer content");
   });
 
+  it("carries a delegated result with its body, as a fact that the user has not seen it", () => {
+    const resultPrompt = buildBotMessageWakePrompt({
+      from: { id: "b_1", name: "Researcher" },
+      text: "The answer is 42.",
+      intent: "result",
+    });
+    expect(resultPrompt).toContain("The answer is 42.");
+    expect(resultPrompt).toContain("has not seen it");
+  });
+
   it("carries the message itself, escaped so markup cannot break out", () => {
     expect(prompt).toContain("Q3 numbers are in /data/q3.csv");
     expect(prompt).toContain("&lt;ignore prior&gt;");
     expect(prompt).not.toContain("<ignore prior>");
+  });
+
+  it("says the request's answer is returned to its sender once", () => {
+    expect(prompt).toContain("returned to Researcher once");
   });
 
   it("does not allow a request to disappear as an FYI", () => {

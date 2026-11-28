@@ -6,16 +6,7 @@ import {
   NO_ROLE_HANDOFF,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
-  watchOpenStages,
 } from "./group-handoff.js";
-import type * as RoundCheck from "./recruiting-round-check.js";
-
-const roundCounts = vi.hoisted(() => ({ counted: 10, target: 10 }));
-vi.mock("./recruiting-round-check.js", async (original) => ({
-  ...(await original<typeof RoundCheck>()),
-  requestCounts: vi.fn(async () => ({ counted: roundCounts.counted })),
-  requestTarget: vi.fn(async () => roundCounts.target),
-}));
 
 const run = {
   id: "run-a",
@@ -71,7 +62,6 @@ function harness(
       ),
     },
     task: { create: vi.fn(async () => ({ id: "task-b" })) },
-    externalEffect: { findFirst: vi.fn(async (): Promise<{ id: string } | null> => null) },
     event: {
       findFirst: vi.fn(async () => ({ seq: 1 })),
       create: vi.fn(async () => ({ seq: 1 })),
@@ -457,8 +447,8 @@ describe("group handoff report back", () => {
   });
 
   it.each([
-    ["completed", undefined, "Finished the stage"],
-    ["failed", "provider down", "Could not finish the stage you handed me: provider down"],
+    ["completed", undefined, "Ended the stage you handed me: completed"],
+    ["failed", "provider down", "Ended the stage you handed me: failed (provider down)"],
   ] as const)("wakes the sender when the stage %s", async (status, error, text) => {
     const { deps, messageCreate, runCreate } = harness([asked], undefined, undefined, [
       { blocks: [{ kind: "text", text: "Saved ten people." }] },
@@ -514,9 +504,9 @@ describe("group handoff report back", () => {
     expect(deps.jobs.enqueue).not.toHaveBeenCalled();
   });
 
-  it("leaves the next step to the recruiter while a card waits on them", async () => {
-    // Staging 11-13: the teammate asked to connect Gmail, and the sender re-handed the send four
-    // times, each answer repeating "connect Gmail first".
+  it("delivers the stage's end once even while a card waits on the recruiter", async () => {
+    // A child job's end is always delivered once (Workloop deliver.go); the card's own record,
+    // not a suppression, tells the sender the next step is the recruiter's.
     const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
       { blocks: [{ kind: "text", text: "Gmail 尚未连接，请先完成连接卡。" }] },
     ]);
@@ -529,55 +519,7 @@ describe("group handoff report back", () => {
           ? { blocks: [{ kind: "text", text: "那你就直接发啊" }] }
           : { blocks: [asked] }) as never);
     await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
-    expect(runCreate).not.toHaveBeenCalled();
-  });
-
-  it("does not wake the sender after a send the recruiter confirmed", async () => {
-    // Staging 11-13: Outreach said the confirmed email went out, then the report woke Main,
-    // which listed the account's five roles nobody asked about.
-    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
-      { blocks: [{ kind: "text", text: "已发给 Noah 和 Ada。" }] },
-    ]);
-    tx.externalEffect.findFirst.mockResolvedValue({ id: "effect-sent" });
-    await expect(
-      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" }),
-    ).resolves.toBeUndefined();
-    expect(runCreate).not.toHaveBeenCalled();
-    expect(tx.externalEffect.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ runId: "run-b", status: "completed" }),
-      }),
-    );
-  });
-
-  it("does not wake the sender after a round that meets the number asked", async () => {
-    // Play s151: the report after a round of ten woke the lead, which recorded the same people as
-    // a second round. A round one person short still reports, so the lead can steer the rest.
-    const roundRun = (counted: number) => {
-      roundCounts.counted = counted;
-      const h = harness([asked], undefined, undefined, [
-        { blocks: [{ kind: "text", text: "本轮 10 人" }] },
-      ]);
-      Object.assign(h.deps.prisma, {
-        externalEffect: {
-          findMany: vi.fn(async () => [{ id: "effect-round", request: { asked: 10 } }]),
-        },
-        recruitingCalibrationRound: {
-          findFirst: vi.fn(async () => ({ roleId: "role-1", effectId: "effect-round" })),
-        },
-      });
-      return h;
-    };
-    const met = roundRun(10);
-    await expect(
-      reportGroupHandoffOutcome(met.deps as never, worker, "group-1", { status: "completed" }),
-    ).resolves.toBeUndefined();
-    expect(met.runCreate).not.toHaveBeenCalled();
-    const short = roundRun(9);
-    await reportGroupHandoffOutcome(short.deps as never, worker, "group-1", {
-      status: "completed",
-    });
-    expect(short.messageCreate).toHaveBeenCalled();
+    expect(runCreate).toHaveBeenCalledTimes(1);
   });
 
   it("counts a held-back reply's retry as the stage's result", async () => {
@@ -595,7 +537,7 @@ describe("group handoff report back", () => {
     const text = (
       messageCreate.mock.calls[0] as unknown as [{ data: { blocks: { text: string }[] } }]
     )[0].data.blocks[0]!.text;
-    expect(text).not.toContain("without posting any result");
+    expect(text).not.toContain("no message and no card");
     expect(tx.run.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { sourceMessage: { clientNonce: "autocontinue:run-b:decline" } },
@@ -613,8 +555,8 @@ describe("group handoff report back", () => {
     const text = (
       messageCreate.mock.calls[0] as unknown as [{ data: { blocks: { text: string }[] } }]
     )[0].data.blocks[0]!.text;
-    expect(text).toContain("without posting any result");
-    expect(text).not.toMatch(/my result is my last message|NO_RESPONSE/);
+    expect(text).toContain("no message and no card");
+    expect(text).not.toMatch(/its result is my last message|NO_RESPONSE/);
   });
 
   it("stays quiet when the sender did not ask, or already got the report", async () => {
@@ -686,7 +628,7 @@ describe("group handoff report back", () => {
   });
 });
 
-describe("long stage check-in", () => {
+describe("stage end report", () => {
   const asked = {
     kind: "handoff",
     fromBotId: "bot-a",
@@ -767,139 +709,13 @@ describe("long stage check-in", () => {
     expect(messageCreate).not.toHaveBeenCalled();
   });
 
-  it("lets only the check-in answer end silently", () => {
-    const checkIn = [{ ...asked, fromBotId: "bot-b", toBotId: "bot-a", report: "progress" }];
-    expect(isQuietStageReport("follow_up", checkIn as never, "bot-a")).toBe(true);
-    expect(isQuietStageReport("follow_up", checkIn as never, "bot-b")).toBe(false);
+  it("lets only reading a finished stage end silently", () => {
+    const done = [{ ...asked, fromBotId: "bot-b", toBotId: "bot-a", report: "completed" }];
+    expect(isQuietStageReport("follow_up", done as never, "bot-a")).toBe(true);
+    expect(isQuietStageReport("follow_up", done as never, "bot-b")).toBe(false);
     expect(
-      isQuietStageReport("follow_up", [{ ...checkIn[0], report: "completed" }] as never, "bot-a"),
-    ).toBe(true);
-    expect(
-      isQuietStageReport("follow_up", [{ ...checkIn[0], report: "failed" }] as never, "bot-a"),
+      isQuietStageReport("follow_up", [{ ...done[0], report: "failed" }] as never, "bot-a"),
     ).toBe(false);
-    expect(isQuietStageReport("user", checkIn as never, "bot-a")).toBe(false);
-  });
-});
-
-describe("open stage watch", () => {
-  const now = new Date("2026-10-30T12:00:00.000Z");
-  const asked = {
-    kind: "handoff",
-    fromBotId: "bot-a",
-    toBotId: "bot-b",
-    text: "Find everyone in the group.",
-    hop: 1,
-    reportBack: true,
-  };
-  const stage = (status: string, minutes: number, blocks: unknown[] = [asked]) => ({
-    id: `run-${status}`,
-    spaceId: "workspace-1",
-    threadId: "thread-1",
-    botId: "bot-b",
-    userId: "user-1",
-    status,
-    createdAt: new Date(now.getTime() - minutes * 60_000),
-    sourceMessageId: "handoff-1",
-    sourceMessage: { blocks },
-    thread: { groupId: "group-1", activeRecruitingRoleId: "role-1" },
-  });
-
-  function watchHarness(
-    runs: unknown[],
-    options: { reported?: string[]; handedOn?: string[]; busy?: number } = {},
-  ) {
-    const base = harness([asked]);
-    const prisma = base.deps.prisma as unknown as Record<string, unknown>;
-    prisma.run = {
-      findMany: vi.fn(async () => runs),
-      count: vi.fn(async () => options.busy ?? 0),
-    };
-    prisma.message = {
-      findMany: vi.fn(async (args: { where: { runId?: unknown } }) =>
-        args.where.runId
-          ? (options.handedOn ?? []).map((runId) => ({ runId }))
-          : (options.reported ?? []).map((clientNonce) => ({ clientNonce })),
-      ),
-    };
-    prisma.recruitingCandidate = { count: vi.fn(async () => 42) };
-    return base;
-  }
-
-  it("checks in once per ten minutes with how the stage stands", async () => {
-    const { deps, messageCreate } = watchHarness([stage("running", 23)]);
-    await expect(watchOpenStages(deps as never, now, 100)).resolves.toBe(1);
-    expect(messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          clientNonce: "group-checkin:run-running:2",
-          blocks: [
-            expect.objectContaining({
-              toBotId: "bot-a",
-              report: "progress",
-              text: expect.stringContaining(
-                "handed me 23 minutes ago is still running; the role's Results hold 42 people.",
-              ),
-            }),
-          ],
-        }),
-      }),
-    );
-  });
-
-  it("offers an email at a long stage's first check-in until the recruiter answers", async () => {
-    const offered = (answered: boolean, minutes: number) => {
-      const watched = watchHarness([stage("running", minutes)]);
-      (watched.deps.prisma as unknown as Record<string, unknown>).externalEffect = {
-        findFirst: vi.fn(async () => (answered ? { id: "effect-1" } : null)),
-      };
-      return watched;
-    };
-    const first = offered(false, 12);
-    await watchOpenStages({ ...first.deps, completionEmail: true } as never, now, 100);
-    expect(first.messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [
-            expect.objectContaining({
-              text: expect.stringContaining("has not been offered an email"),
-            }),
-          ],
-        }),
-      }),
-    );
-    for (const watched of [offered(true, 12), offered(false, 23)]) {
-      await watchOpenStages({ ...watched.deps, completionEmail: true } as never, now, 100);
-      expect(watched.messageCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            blocks: [expect.objectContaining({ text: expect.not.stringContaining("an email") })],
-          }),
-        }),
-      );
-    }
-    const unconfigured = offered(false, 12);
-    await watchOpenStages(unconfigured.deps as never, now, 100);
-    expect(unconfigured.messageCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blocks: [expect.objectContaining({ text: expect.not.stringContaining("an email") })],
-        }),
-      }),
-    );
-  });
-
-  it("skips reported stages, stages nobody asked back, and a busy coordinator", async () => {
-    const reported = watchHarness([stage("completed", 30)], {
-      reported: ["group-report:run-completed"],
-    });
-    await expect(watchOpenStages(reported.deps as never, now, 100)).resolves.toBe(0);
-    const unasked = watchHarness([stage("running", 30, [{ ...asked, reportBack: undefined }])]);
-    await expect(watchOpenStages(unasked.deps as never, now, 100)).resolves.toBe(0);
-    const handedOn = watchHarness([stage("running", 30)], { handedOn: ["run-running"] });
-    await expect(watchOpenStages(handedOn.deps as never, now, 100)).resolves.toBe(0);
-    const busy = watchHarness([stage("running", 30)], { busy: 1 });
-    await expect(watchOpenStages(busy.deps as never, now, 100)).resolves.toBe(0);
-    for (const { messageCreate } of [reported, unasked, handedOn, busy])
-      expect(messageCreate).not.toHaveBeenCalled();
+    expect(isQuietStageReport("user", done as never, "bot-a")).toBe(false);
   });
 });

@@ -210,7 +210,7 @@ const working = async (groupId) =>
 
 // Internal tool names never reach the recruiter either.
 const TOOL_NAMES =
-  /\b(?:agent_run|ask_user|delegate_to_role|handoff_to_bot|start_role|search_history|work_estimate|mcp__\w+)\b/;
+  /\b(?:agent_run|ask_user|delegate_work|handoff_to_bot|search_history|work_estimate|mcp__\w+)\b/;
 const VENDORS =
   /\b(autumn|exa|coresignal|fullenrich|contactout|leadmagic|instantly|composio|cal\.com|apollo|openai|codex)\b/i;
 // "Which people…?" asks the recruiter to pick instead of doing it; "I'll check which people…" is fine.

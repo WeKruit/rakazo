@@ -8,6 +8,7 @@ import {
   RecruitingShortlistToolInputSchema,
 } from "@rakazo/contracts";
 import {
+  RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
@@ -143,11 +144,11 @@ describe("recruiting agents' own tool lists", () => {
 
   // A skill or instruction that names a tool its agent is not offered sends the model looking
   // for it: each listed skill's builtin tools are in that agent's own list.
-  it.each(scopes.filter(({ label }) => !label.includes("global")))(
+  it.each(scopes)(
     "$label is offered every built-in tool its instructions and skills name",
-    ({ bot, scope }) => {
+    ({ bot, scope, label }) => {
       const text = [
-        bot.instructions,
+        label.includes("global") ? RECRUITING_ACCOUNT_WIDE_INSTRUCTIONS : bot.instructions,
         ...RECRUITING_DEFAULT_SKILLS.filter((skill) => scope.skills.includes(skill.name)).map(
           (skill) => skill.body,
         ),
