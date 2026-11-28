@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  completionNotificationPreview,
+  runSendsFinishNotification,
+} from "./agent-session/run-projection.js";
+import {
   completionMarksUnread,
   completionMessageSegments,
   completionNotificationBody,
-  completionNotificationPreview,
   DELEGATED_EMPTY_NOTICE,
   emptyDelegatedToolTurnShouldFail,
   isExactNoResponse,
@@ -15,7 +18,6 @@ import {
   runIdentityInstruction,
   runPromotesMidTurnNarration,
   runReplyGuidance,
-  runSendsFinishNotification,
   stripNoResponseReply,
   subagentMarksUnread,
   TICKET_SILENT_REPLY_GUIDANCE,

@@ -6,6 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   appendToolCompletionAudit,
   appendUsageTimingAudit,
+  routineNotifies,
+  runNotificationsEnabled,
+  toolCompletionAuditPayload,
+  toolCompletionFromResult,
+} from "./agent-session/run-projection.js";
+import {
   createRunExecutor,
   createRunWorkspaceCheckpoint,
   dockerComputerToolInstruction,
@@ -14,14 +20,10 @@ import {
   missingTurnImagesInstruction,
   parseUpdateBotPatch,
   persistentComputerInstruction,
-  routineNotifies,
-  runNotificationsEnabled,
   runRoutineProbe,
   selectBuiltinToolsForRun,
   settleSteeringAttachmentLoads,
   threadContextForRun,
-  toolCompletionAuditPayload,
-  toolCompletionFromResult,
   userTurnContext,
   userTurnInstructions,
   VOICE_CALL_INSTRUCTION,

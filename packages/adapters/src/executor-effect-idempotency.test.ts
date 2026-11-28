@@ -29,6 +29,7 @@ import {
   RecruitingConflictError,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toolArgsSummary } from "./agent-session/run-projection.js";
 import type * as ArtifactReadModule from "./artifact-read.js";
 import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.js";
 
@@ -60,7 +61,6 @@ import {
   selectBuiltinToolsForRun,
   setupRetryNoticeText,
   shortQuestion,
-  toolArgsSummary,
 } from "./executor.js";
 import type * as GroupHandoffModule from "./group-handoff.js";
 import { handoffToGroupBot } from "./group-handoff.js";
