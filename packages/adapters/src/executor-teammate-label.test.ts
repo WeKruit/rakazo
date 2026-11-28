@@ -63,7 +63,9 @@ describe("failure notification", () => {
       thread: {
         findUnique: async () => ({
           group: { name: "后端工程师" },
-          messages: [{ blocks: [{ kind: "text", text: "这两个人不太行，必须会中文" }] }],
+          messages: [
+            { blocks: [{ kind: "text", text: "这两个人不太行，必须会中文", uiLocale: "zh-CN" }] },
+          ],
         }),
       },
     };
