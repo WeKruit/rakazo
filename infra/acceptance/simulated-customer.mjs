@@ -778,6 +778,8 @@ async function play(journey, label, owner, mailbox, out) {
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));
   if (!kruit) throw new Error("the account has no Kruit conversation");
   // A journey about pages can only be judged by looking at them, so it always uses the browser.
+  // The screen a recruiter of this journey uses, sent with each message as the web composer does.
+  const screenLocale = journey.chinese ? "zh-CN" : "en";
   const browser = UI || journey.mechanisms?.includes("pages");
   const ui = browser
     ? await openUi({
@@ -897,7 +899,7 @@ async function play(journey, label, owner, mailbox, out) {
           else if (!(await landed(rpc, chat.id, move.text)))
             problems.push(`"${move.text.slice(0, 40)}" was sent but did not appear in the chat`);
         }
-        if (!typed) await send(rpc, chat.id, move.text);
+        if (!typed) await send(rpc, chat.id, move.text, undefined, screenLocale);
       } else if (ui && move.action === "look") {
         waitForKruit = false;
         const chat = move.chat ? await chatNamed(move.chat) : null;
@@ -959,7 +961,8 @@ async function play(journey, label, owner, mailbox, out) {
         if (value === null) {
           log(`${label}: recruiter writes under the card: ${answer}`);
           if (ui) await ui.openChat(card.groupId);
-          if (!(ui && (await ui.say(answer)))) await send(rpc, card.groupId, answer);
+          if (!(ui && (await ui.say(answer))))
+            await send(rpc, card.groupId, answer, undefined, screenLocale);
           turn.underCard = true;
         }
         let pressed = value === null;
@@ -1000,7 +1003,7 @@ async function play(journey, label, owner, mailbox, out) {
           const typed = ui ? await ui.say(move.text) : false;
           if (ui && !typed)
             problems.push(`could not send "${move.text.slice(0, 40)}" from the chat composer`);
-          if (!typed) await send(rpc, card.groupId, move.text);
+          if (!typed) await send(rpc, card.groupId, move.text, undefined, screenLocale);
         }
       } else {
         turn.invalid = `no card ${move.card} to ${move.action}`;

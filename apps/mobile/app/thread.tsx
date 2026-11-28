@@ -58,7 +58,7 @@ import {
   userVisibleMessages,
   withLiveStreamingProgress,
   workStageKind,
-  writesChinese,
+  screenIsChinese,
 } from "@rakazo/core";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -748,7 +748,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const liveWorkSession = workSession?.endedAt ? null : workSession;
   const threadMessages = snap?.messages;
   const recruiterWritesChinese = useMemo(
-    () => writesChinese(threadMessages ?? []),
+    () => screenIsChinese(threadMessages ?? []),
     [threadMessages],
   );
   const stageKind = useCallback(
@@ -1759,7 +1759,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         snapRef.current.run.status !== "failed"
       )
         return;
-      const text = retryMessageText(writesChinese(snapRef.current?.messages ?? []));
+      const text = retryMessageText(screenIsChinese(snapRef.current?.messages ?? []));
       const attempt = feedback.sendAttempt({
         originThreadKey: threadKey!,
         displayText: text,

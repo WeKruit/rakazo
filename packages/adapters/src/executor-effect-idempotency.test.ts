@@ -1407,34 +1407,6 @@ describe("computer that will not start", () => {
   });
 });
 
-describe("steered message language", () => {
-  // Staging eval 11-11: an English JD, then 「对了，远程也可以」 4 s later, got English replies.
-  it("tells the turn to switch to the language of a message steered into it", async () => {
-    const f = fixture("steered-language");
-    const bot = await f.prisma.bot.findUniqueOrThrow();
-    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
-      ...bot,
-      spawnKey: "recruiting:user-1:main",
-    } as typeof bot);
-    f.claimSteering.mockResolvedValue([
-      {
-        id: "steering-zh",
-        messageId: "message-zh",
-        text: "对了，远程也可以，不一定要在西雅图",
-        blocks: [{ kind: "text", text: "对了，远程也可以，不一定要在西雅图" }],
-      },
-    ]);
-    let steered = "";
-    f.runtimeRun.mockImplementation(async function* (request) {
-      const [steering] = await request.claimSteering!([]);
-      steered = steering!.text;
-      yield { type: "done" as const, text: "好的。" };
-    });
-    await f.run();
-    expect(steered).toContain("The recruiter's newest message is in Chinese.");
-  });
-});
-
 describe("setup retries the recruiter can see", () => {
   it("tells the chat once, after a few failed starts, that it is still retrying", async () => {
     for (const failures of [1, 3, 4]) {

@@ -1,5 +1,5 @@
 import type { BackgroundWorkTiming, MessageBlock } from "@rakazo/contracts";
-import { recruiterLanguage, recruitingBotKey } from "./recruiting-defaults.js";
+import { recruitingBotKey, screenLanguage } from "./recruiting-defaults.js";
 import { hideVendorNames } from "./vendor-names.js";
 
 /**
@@ -1016,17 +1016,17 @@ export const WORK_LABELS_ZH: {
   progress: { thinking: "思考中…", retrying: "重试中…", compacting: "整理上下文…" },
 };
 
-/** Whether the recruiter writes in Chinese: the same decision every reply of a turn follows. */
-export function writesChinese(
+/** Whether the recruiter's screen shows Chinese: the UI locale their newest message carries. */
+export function screenIsChinese(
   messages: readonly { role?: string; internal?: boolean; blocks: readonly MessageBlock[] }[],
 ): boolean {
-  const texts = messages
-    .filter((message) => message.role === "user" && !message.internal)
-    .map((message) =>
-      message.blocks.map((block) => (block.kind === "text" ? block.text : "")).join(""),
-    )
-    .reverse();
-  return recruiterLanguage(texts) === "zh";
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role !== "user" || message.internal) continue;
+    for (const block of message.blocks)
+      if (block.kind === "text" && block.uiLocale) return screenLanguage(block.uiLocale) === "zh";
+  }
+  return false;
 }
 
 /**

@@ -183,8 +183,8 @@ export const botText = (message) =>
 // A recruiter asking for a recap or a one-line summary of what changed.
 const RECAP = /一句话|总结|概括|说下改了|改了(什么|啥)|summari[sz]e|\brecap\b|what changed|in one line|tl;?dr/i;
 
-// The product's rule (textLanguage, recruiterWords): the newest message with a clear language
-// counts. A word or two ("allow", "OK") says nothing.
+// Kruit's rule (RECRUITER_LANGUAGE): replies follow the newest message with a clear language;
+// a word or two ("allow", "OK") says nothing.
 const clearLanguage = (text) =>
   /\p{Script=Han}/u.test(text) || (text.match(/[A-Za-z]{2,}/g) ?? []).length >= 3;
 /**

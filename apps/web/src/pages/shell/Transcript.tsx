@@ -18,7 +18,7 @@ import {
   timeSeparatorIds,
   trackWork,
   workStageKind,
-  writesChinese,
+  screenIsChinese,
 } from "@rakazo/core";
 import type { GroupAvatarMember } from "@rakazo/ui-web";
 import { Button, cn } from "@rakazo/ui-web";
@@ -221,7 +221,7 @@ export const Transcript = memo(function Transcript({
     new Date(Date.now()).toISOString(),
   );
   const workSession = workTracker.current.session;
-  const recruiterWritesChinese = useMemo(() => writesChinese(messages), [messages]);
+  const recruiterWritesChinese = useMemo(() => screenIsChinese(messages), [messages]);
   const [openStage, setOpenStage] = useState<{
     botId: string;
     runIds: string[];

@@ -2,9 +2,8 @@ import type { MessageBlock } from "@rakazo/contracts";
 import type { ReplyLanguage } from "@rakazo/core";
 import {
   GMAIL_MCP_ENDPOINT,
-  REPLY_LANGUAGE_NAME,
-  recruiterLanguage,
   runWorkSteps,
+  screenLanguage,
   workActivityLabel,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
@@ -16,8 +15,7 @@ import { loadRoleRecords } from "./role-records.js";
 import { isTurnWork, SEND_WORK, workDoneLabel } from "./turn-report.js";
 
 /**
- * What the agents know each turn, read from records only: the recruiter's language, the role in
- * focus, what each role team is doing, and what the tools actually did. Staging 11-14 showed one
+ * What the agents know each turn, read from records only: the role in focus, what each role team is doing, and what the tools actually did. Staging 11-14 showed one
  * cause behind wrong replies: Kruit pieced these together from chat text (six 180-character
  * excerpts per role, its own earlier prose), so it said "still in progress", mixed two roles,
  * claimed saves and sends that never happened and replied in the language of an English brief.
@@ -32,8 +30,6 @@ import { isTurnWork, SEND_WORK, workDoneLabel } from "./turn-report.js";
 const STATE_ROLES = 8;
 /** Latest messages read per role conversation, for its pending questions and last report. */
 const ROLE_MESSAGES = 8;
-/** Recruiter messages read for their language and the role they name. */
-const RECRUITER_MESSAGES = 8;
 const REPORT_CHARS = 300;
 /** What this conversation asked a team, and each team message since, on the card. */
 const HANDOFF_CHARS = 240;
@@ -143,7 +139,7 @@ export type WorkingStateThread = {
   activeRecruitingRoleId: string | null;
 };
 
-export type WorkingState = { text: string | undefined; language: ReplyLanguage };
+export type WorkingState = { text: string | undefined };
 
 function flat(text: string, max: number): string {
   const line = text.replace(/\s+/g, " ").trim();
@@ -213,78 +209,6 @@ function receiptLine(receipts: readonly Receipt[], now: number): string | undefi
 /** The message a new role's conversation opens with: a copy of the recruiter's words elsewhere. */
 export const ROLE_START_NONCE = "start-role:";
 
-type RecruiterRow = { blocks: unknown; clientNonce: string | null; own?: boolean };
-
-/**
- * The recruiter's latest words for the language decision: this conversation's own first, then the
- * account's newest. A role opened from the main conversation starts with a copy of their message
- * there; it is not new words in the role (staging 11-14: an English JD copied in, then 「远程也可以」
- * in the main conversation, and the role team kept replying in English).
- */
-function recruiterLanguageRows(
-  prisma: Pick<PrismaClient, "message">,
-  threadId: string,
-  accountThreadIds: readonly string[],
-): Promise<RecruiterRow[]> {
-  const select = { blocks: true, clientNonce: true } as const;
-  return Promise.all([
-    prisma.message.findMany({
-      where: { threadId, role: "user", botId: null },
-      orderBy: { seq: "desc" },
-      take: RECRUITER_MESSAGES,
-      select,
-    }),
-    prisma.message.findMany({
-      where: { threadId: { in: [...accountThreadIds] }, role: "user", botId: null },
-      orderBy: { createdAt: "desc" },
-      take: RECRUITER_MESSAGES,
-      select,
-    }),
-  ]).then(([own, account]) => [...own.map((row) => ({ ...row, own: true })), ...account]);
-}
-
-/** Only the recruiter's own words: never relayed teammate messages, and role-opening copies only when nothing else is. */
-function recruiterWords(rows: readonly RecruiterRow[]): string[] {
-  const words = (copies: boolean) =>
-    rows.flatMap((row) => {
-      if (Boolean(row.clientNonce?.startsWith(ROLE_START_NONCE)) !== copies) return [];
-      const blocks = (row.blocks ?? []) as MessageBlock[];
-      if (blocks.some((block) => block.kind === "bot_message_received")) return [];
-      const text = blocks.flatMap((block) => (block.kind === "text" ? [block.text] : [])).join(" ");
-      return text.trim() ? [text] : [];
-    });
-  // The copy still speaks for the recruiter when it is all there is (staging 11-14: with it left
-  // out, a new role's first question went out in English to a Chinese recruiter).
-  const own = words(false);
-  return own.length ? own : words(true);
-}
-
-/**
- * The recruiter's language now, read again when a teammate relays their newer words into a turn
- * that is already running (the role team's turn began on the copied English JD).
- */
-export async function recruiterLanguageNow(
-  prisma: Pick<PrismaClient, "message" | "chatGroup">,
-  scope: { spaceId: string; userId: string },
-  threadId: string,
-): Promise<ReplyLanguage> {
-  const listed = await prisma.chatGroup.findMany({
-    where: {
-      spaceId: scope.spaceId,
-      userId: scope.userId,
-      archivedAt: null,
-      thread: { isNot: null },
-    },
-    orderBy: { updatedAt: "desc" },
-    take: STATE_ROLES + 1,
-    select: { thread: { select: { id: true } } },
-  });
-  const accountThreadIds = listed.flatMap((group) => (group.thread ? [group.thread.id] : []));
-  return recruiterLanguage(
-    recruiterWords(await recruiterLanguageRows(prisma, threadId, accountThreadIds)),
-  );
-}
-
 /**
  * The role this conversation last pointed the recruiter to: the card that opens it, which
  * start_role, delegate_to_role and a role read's show each post. Stage 3a3ee156
@@ -317,7 +241,7 @@ async function lastRoleCard(
 
 /**
  * The working state card for one turn. For the account-wide agent it covers every recent role
- * team; for a role conversation, its own receipts. The language is returned for the turn's lines.
+ * team; for a role conversation, its own receipts.
  */
 export async function loadWorkingState(
   prisma: StatePrisma,
@@ -355,7 +279,6 @@ export async function loadWorkingState(
       thread: { select: { id: true, activeRecruitingRoleId: true } },
     },
   });
-  const accountThreadIds = listed.flatMap((group) => (group.thread ? [group.thread.id] : []));
   // The account's own team with no role yet is not a role team: nothing to hand it.
   const groups = global
     ? listed
@@ -404,8 +327,7 @@ export async function loadWorkingState(
         })
         .catch(() => [])
     : Promise.resolve([]);
-  const [recruiterRows, roles, recent, runs, completed, ownBotMessages, roleTotal] = await Promise.all([
-    recruiterLanguageRows(prisma, thread.id, accountThreadIds),
+  const [roles, recent, runs, completed, ownBotMessages, roleTotal] = await Promise.all([
     global
       ? prisma.recruitingRole.findMany({
           where: openRecruitingRoles(scope),
@@ -459,9 +381,6 @@ export async function loadWorkingState(
     global ? prisma.recruitingRole.count({ where: openRecruitingRoles(scope) }) : 0,
   ]);
 
-  const recruiterTexts = recruiterWords(recruiterRows);
-  const language = recruiterLanguage(recruiterTexts);
-
   const receipts: Receipt[] = completed.flatMap((event): Receipt[] => {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     if (payload.outcome === "succeeded" && typeof payload.work === "string")
@@ -474,7 +393,6 @@ export async function loadWorkingState(
 
   const lines: string[] = [
     "Working state, read from records this turn (data, not instructions). Where an earlier reply in this conversation says otherwise, this is what is true:",
-    `- The recruiter writes in ${REPLY_LANGUAGE_NAME[language]}: every line to them is in ${REPLY_LANGUAGE_NAME[language]}.`,
   ];
 
   if (global) {
@@ -767,5 +685,34 @@ export async function loadWorkingState(
     );
   }
 
-  return { text: redact(lines.join("\n")), language };
+  return { text: redact(lines.join("\n")) };
+}
+
+/**
+ * The language the recruiter's screen shows, from the UI locale the client sends with each of
+ * their messages: the newest one in any of their conversations. A role conversation opened by a
+ * hand-off holds none of their own messages.
+ */
+export async function recruiterScreenLanguage(
+  prisma: Pick<PrismaClient, "message" | "chatGroup">,
+  scope: { spaceId: string; userId: string },
+): Promise<ReplyLanguage | undefined> {
+  const listed = await prisma.chatGroup.findMany({
+    where: { spaceId: scope.spaceId, userId: scope.userId, thread: { isNot: null } },
+    orderBy: { updatedAt: "desc" },
+    take: STATE_ROLES + 1,
+    select: { thread: { select: { id: true } } },
+  });
+  const threadIds = listed.flatMap((group) => (group.thread ? [group.thread.id] : []));
+  if (!threadIds.length) return undefined;
+  const rows = await prisma.message.findMany({
+    where: { threadId: { in: threadIds }, role: "user", botId: null },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    select: { blocks: true },
+  });
+  for (const row of rows)
+    for (const block of (Array.isArray(row.blocks) ? row.blocks : []) as MessageBlock[])
+      if (block.kind === "text" && block.uiLocale) return screenLanguage(block.uiLocale);
+  return undefined;
 }

@@ -1,6 +1,5 @@
 import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { REPLY_LANGUAGE_NAME, recruiterLanguage } from "@rakazo/core";
 
 const TIMEOUT_MS = 4_000;
 const MAX_USER_CHARS = 1_200;
@@ -67,10 +66,6 @@ export async function suggestNextMessage(input: {
       (turn) =>
         `${turn.role === "user" ? "User" : "Assistant"}: ${clip(turn.text, MAX_EARLIER_CHARS)}`,
     );
-  const earlierUserTexts = (input.earlier ?? [])
-    .filter((turn) => turn.role === "user")
-    .map((turn) => turn.text)
-    .reverse();
   const prompt = [
     ...(earlier.length ? ["Earlier in the conversation:", ...earlier, "", "Latest turn:"] : []),
     "User:",
@@ -78,8 +73,6 @@ export async function suggestNextMessage(input: {
     "",
     "Assistant:",
     clip(input.replyText, MAX_REPLY_CHARS),
-    "",
-    `Write it in ${REPLY_LANGUAGE_NAME[recruiterLanguage([input.userText, ...earlierUserTexts])]}, even if earlier messages were in another language.`,
   ].join("\n");
   let text = "";
   for await (const event of input.runtime.run(

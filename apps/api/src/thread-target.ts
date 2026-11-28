@@ -36,7 +36,7 @@ import {
   runFailureError,
   runsBesidePerson,
   takesPersonMessages,
-  writesChinese,
+  screenIsChinese,
 } from "@rakazo/core";
 import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-quote";
 import type { PrismaClient, QueuedMessageChange, ThreadEvents } from "@rakazo/db";
@@ -1718,7 +1718,7 @@ export async function stopThreadRuns(
           kind: "meta",
           text: stoppedNotice(
             user?.name,
-            writesChinese(
+            screenIsChinese(
               latest && Array.isArray(latest.blocks)
                 ? [{ role: "user", blocks: latest.blocks as MessageBlock[] }]
                 : [],

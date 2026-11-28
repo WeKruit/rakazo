@@ -50,113 +50,8 @@ export function creditEstimateNote(remaining: number): string {
 }
 
 
-
-/**
- * Mostly English text: at least three English words, outnumbering Han characters, so an English
- * JD that quotes a Chinese name or tag is still English.
- */
-/**
- * How Chinese a message reads: its Han characters, plus Chinese punctuation the writer typed
- * between their own words (not inside a quote). A Chinese brief naming many English terms,
- * 「新role Senior Data Engineer，Seattle，hybrid每周3天，Spark Kafka生产经验」, is still Chinese.
- */
-function hanWeight(text: string): number {
-  const han = text.match(/\p{Script=Han}/gu)?.length ?? 0;
-  const unquoted = text.replace(/"[^"]*"|“[^”]*”|「[^」]*」|『[^』]*』/g, " ");
-  const punctuation = unquoted.match(/[，。：；？！、]/g)?.length ?? 0;
-  return han ? han + 2 * punctuation : 0;
-}
-
-export function isEnglishText(text: string): boolean {
-  text = ownWords(text);
-  const words = text.match(/[A-Za-z]{2,}/g)?.length ?? 0;
-  return words >= 3 && words > hanWeight(text);
-}
-
-/**
- * The recruiter message whose language replies follow, from their messages newest first. A short
- * answer such as a company name ("Acme Test Co") keeps the language of their last sentence.
- */
-export function recruiterLanguageText(newestFirst: string[]): string {
-  return newestFirst.find((text) => textLanguage(text)) ?? newestFirst[0] ?? "";
-}
-
-/** What a recruiter may see. The executor adds this to every recruiting run's instructions. */
-/**
- * A question to the recruiter written mostly in Chinese when no recruiter message asked for
- * Chinese. Han characters only count when they outnumber Latin letters, so an English question
- * that quotes a Chinese name or phrase passes.
- */
-/** Mostly Chinese text, by script: recruiter-facing replies and questions follow it. */
-/**
- * Emails and links say nothing about the language a recruiter writes in: 「发给 alex.chen@example.com」
- * is Chinese, though its address has more English words than it has Han characters.
- */
-// An email body the recruiter dictates ("正文：Hi Alex, …") or quotes is the candidate's language,
-// not the one they write to us in.
-const DICTATED =
-  /(?:正文|内容|邮件内容|\bbody|\bmessage)\s*[:：][\s\S]*$|“[^”]*”|「[^」]*」|"[^"]*"/gi;
-
-function ownWords(text: string): string {
-  const own = text.replace(/\S+@\S+|https?:\/\/\S+|www\.\S+/gi, " ");
-  const said = own.replace(DICTATED, " ");
-  return /[\p{Script=Han}A-Za-z]/u.test(said) ? said : own;
-}
-
-export function isChineseText(text: string): boolean {
-  text = ownWords(text);
-  // Korean or Japanese that quotes a Chinese word (a menu name such as 收件箱) is not Chinese.
-  if (/[\uac00-\ud7af\u3040-\u30ff]/.test(text)) return false;
-  // A Han character is about a word, so compare it with English words, not letters: a Chinese
-  // request naming USC, CS and AI agent is still Chinese.
-  const words = text.match(/[A-Za-z]+/g)?.length ?? 0;
-  return hanWeight(text) > words;
-}
-
-/** The languages Kruit replies in; anything else follows the closest of these, English by default. */
-export type ReplyLanguage = "zh" | "ko" | "ja" | "en";
-
-/**
- * The language a message is clearly written in, or undefined when it is too short to tell ("Acme
- * Test Co", "200-250k", "OK"). Korean and Japanese come first: they may quote a Chinese word (收件箱).
- * A pasted English spec with the recruiter's own Chinese clause (six or more Han in a row) is Chinese.
- */
-export function textLanguage(text: string, minEnglishWords = 5): ReplyLanguage | undefined {
-  const own = ownWords(text);
-  if (/[\uac00-\ud7af]/.test(own)) return "ko";
-  if (/[\u3040-\u30ff]/.test(own)) return "ja";
-  if (isChineseText(text) || /\p{Script=Han}{6,}/u.test(own)) return "zh";
-  // A short sentence ("ok, go ahead") is English; a short name ("Acme Test Co") says nothing.
-  const words = own.match(/[A-Za-z]{2,}/g) ?? [];
-  const lower = words.filter((word) => /^[a-z]/.test(word)).length;
-  return words.length >= minEnglishWords || (words.length >= 3 && lower >= 2) ? "en" : undefined;
-}
-
-/**
- * The one decision of which language every recruiter-facing line of a turn uses (progress
- * notes, final reply, cards), from their messages newest first: the newest
- * one with a clear language, else English.
- */
-export function recruiterLanguage(newestFirst: readonly string[]): ReplyLanguage {
-  for (const text of newestFirst) {
-    const language = textLanguage(text);
-    if (language) return language;
-  }
-  return "en";
-}
-
-/** A line Kruit wrote in another clear language than the recruiter's. Short lines ("OK.") pass. */
-export function inOtherLanguage(line: string, language: ReplyLanguage): boolean {
-  const written = textLanguage(line, 3);
-  return !!written && written !== language;
-}
-
-const REPLY_IN: Record<ReplyLanguage, string> = {
-  zh: "The recruiter's newest message is in Chinese.",
-  en: "The recruiter's newest message is in English.",
-  ko: "The recruiter's newest message is in Korean.",
-  ja: "The recruiter's newest message is in Japanese.",
-};
+/** The languages the product's own words come in: the recruiter's screen locale picks one. */
+export type ReplyLanguage = "zh" | "en";
 
 /**
  * The left menu as the recruiter's screen shows it: only the Chinese catalog translates it, so
@@ -170,19 +65,9 @@ export function menuNames(language: ReplyLanguage): string {
     : "Candidates, Inbox, Sequence, Interview, Roles (these English names, never translated). Inbox lists each email conversation, sent and received, with only the filters All and Unread and a search box";
 }
 
-export const REPLY_LANGUAGE_NAME: Record<ReplyLanguage, string> = {
-  zh: "Chinese",
-  ko: "Korean",
-  ja: "Japanese",
-  en: "English",
-};
-
-/** `screen` is the language the recruiter's screen shows, when the client sent it. */
-export function replyLanguageNote(
-  language: ReplyLanguage,
-  screen: ReplyLanguage = language,
-): string {
-  return `${REPLY_IN[language]} Their left menu reads: ${menuNames(screen)}.`;
+/** The recruiter's screen as the client reports it: what its left menu shows. */
+export function screenNote(screen: ReplyLanguage): string {
+  return `Their left menu reads: ${menuNames(screen)}.`;
 }
 
 /** The screen language from the client's UI locale tag ("zh-CN", "en"): only Chinese is translated. */
@@ -222,7 +107,7 @@ Two rules come first. When the recruiter doubts you ("你昨天明明说发了",
 
 Facts come only from tool results in this turn: counts, and whether something was sent, saved, queued, booked or exists. Queued is not sent, and an approved card is not sent until its tool says so. Name a block or failure only when a tool result showed it.
 
-Language: everything the recruiter sees is in the language of their latest message, never the JD's; a reply carrying an English email opens with a line in their language. Emails to candidates stay in English unless asked otherwise. Never name a vendor or tool (Autumn, Coresignal, FullEnrich, ContactOut, LeadMagic, Instantly, Composio, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API), IDs, gate codes or JSON, and no CRM, campaign, lead, mailbox or setup talk; only a connect card names a service. Talent data comes from professional profiles and the public web. Name places with the left-menu names in this turn's language note.
+Language: everything the recruiter sees is in the language of their latest message, never the JD's; a reply carrying an English email opens with a line in their language. Emails to candidates stay in English unless asked otherwise. Never name a vendor or tool (Autumn, Coresignal, FullEnrich, ContactOut, LeadMagic, Instantly, Composio, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API), IDs, gate codes or JSON, and no CRM, campaign, lead, mailbox or setup talk; only a connect card names a service. Talent data comes from professional profiles and the public web. Name places with the left-menu names in this turn's screen note.
 
 Do the work: do what was asked this turn with your own tools; never decline a clear request, ask them to pick or review first, or offer "want me to…?" for work you can do now. Before saying you can't, look for the tool (yours, then connectors_search_tools). You reach people only by email and calendar invites; for a LinkedIn message, text or call, say so first and give the text ready to paste. Follow a tool error's next step; never work around one that says to stop. Reuse finished and paid work.
 

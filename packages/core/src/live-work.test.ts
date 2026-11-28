@@ -7,7 +7,6 @@ import {
   formatWorkClock,
   formatWorkDuration,
   observeWorkSession,
-  retryMessageText,
   runWorkSteps,
   specialistWorkLabel,
   trackWork,
@@ -22,7 +21,7 @@ import {
   workStageMessages,
   workStepDetail,
   workTimeline,
-  writesChinese,
+  screenIsChinese,
 } from "./live-work.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
 import { reduceThreadEvent } from "./thread-reducer.js";
@@ -905,20 +904,19 @@ describe("specific step labels", () => {
   });
 });
 
-it("follows the language of the recruiter's own latest message", () => {
-  const user = (text: string, internal = false) => ({
+it("follows the language of the recruiter's screen, from the locale their messages carry", () => {
+  const user = (text: string, uiLocale?: string, internal = false) => ({
     role: "user",
     internal,
-    blocks: [{ kind: "text" as const, text }],
+    blocks: [{ kind: "text" as const, text, ...(uiLocale ? { uiLocale } : {}) }],
   });
-  expect(writesChinese([user("Find SWE"), user("在专属岗位对话里继续")])).toBe(true);
-  expect(writesChinese([user("在专属岗位对话里继续"), user("ok, go ahead")])).toBe(false);
-  // Try again and Continue keep the chat's language, so the next reply does not turn English.
-  expect(writesChinese([user("必须会中文"), user(continueMessageText(true))])).toBe(true);
-  expect(writesChinese([user("必须会中文"), user(retryMessageText(true))])).toBe(true);
-  expect(writesChinese([user("Find SWE"), user(continueMessageText(false))])).toBe(false);
-  expect(writesChinese([user("找人"), user("internal wake", true)])).toBe(true);
-  expect(writesChinese([])).toBe(false);
+  expect(screenIsChinese([user("Find SWE", "en"), user("ok", "zh-CN")])).toBe(true);
+  expect(screenIsChinese([user("找人", "zh-CN"), user("继续", "en")])).toBe(false);
+  // A message without a locale (a Continue or Try again) keeps the screen the last one showed.
+  expect(screenIsChinese([user("找人", "zh-CN"), user(continueMessageText(true))])).toBe(true);
+  expect(screenIsChinese([user("找人", "zh-CN"), user("internal wake", "en", true)])).toBe(true);
+  expect(screenIsChinese([user("找人")])).toBe(false);
+  expect(screenIsChinese([])).toBe(false);
 });
 
 it("keeps an invalid work timestamp unknown instead of rendering a NaN clock", () => {

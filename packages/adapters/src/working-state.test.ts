@@ -201,9 +201,7 @@ describe("loadWorkingState", () => {
       (t) => t.replace("secret", "[redacted]"),
       now,
     );
-    expect(state.language).toBe("zh");
     const card = state.text ?? "";
-    expect(card).toContain("writes in Chinese");
     expect(card).toContain(
       "Done in this conversation in the last 24 h (tool receipts): FAILED save_template (1 min ago).",
     );
@@ -425,7 +423,6 @@ describe("loadWorkingState", () => {
         now,
       );
     const state = await load([text("Done."), card("g1"), card("g2")]);
-    expect(state.language).toBe("en");
     expect(state.text).toContain(
       'This conversation last opened, or handed work to, "Agent" (roleId role-1).',
     );
@@ -440,84 +437,6 @@ describe("loadWorkingState", () => {
     expect(state.text).toContain(
       "Saved emails: none on record for the roles below. An email written only in chat",
     );
-  });
-
-  it("gives a role conversation the recruiter's language from anywhere in the account", async () => {
-    const prisma = fakePrisma({ recruiter: [text("候选人要会普通话，西雅图现场办公")] });
-    const state = await loadWorkingState(
-      prisma as never,
-      scope,
-      { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
-      (t) => t,
-      now,
-    );
-    expect(state.language).toBe("zh");
-    expect(state.text).not.toContain("Role teams");
-  });
-
-  it("puts this conversation's own words before the account's newest", async () => {
-    const thread = { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" };
-    const zh = await loadWorkingState(
-      fakePrisma({
-        recruiter: [text("西雅图现场办公，要会普通话")],
-        account: [text("please send the new grads list to my manager now")],
-      }) as never,
-      scope,
-      thread,
-      (t) => t,
-      now,
-    );
-    expect(zh.language).toBe("zh");
-    const handedOff = await loadWorkingState(
-      fakePrisma({ recruiter: [], account: [text("候选人要会普通话")] }) as never,
-      scope,
-      thread,
-      (t) => t,
-      now,
-    );
-    expect(handedOff.language).toBe("zh");
-  });
-
-  it("takes no language from the copy of the recruiter's message a new role opens with", async () => {
-    // Staging 11-14: an English JD opened the role, then 「远程也可以」 in the main conversation,
-    // and the role team kept replying in English.
-    const state = await loadWorkingState(
-      fakePrisma({
-        recruiter: [
-          {
-            ...text("Senior Data Engineer, Seattle, hybrid, 5+ years"),
-            clientNonce: "start-role:k",
-          },
-        ],
-        account: [text("对了，远程也可以，不一定要在西雅图")],
-      }) as never,
-      scope,
-      { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
-      (t) => t,
-      now,
-    );
-    expect(state.language).toBe("zh");
-  });
-
-  it("takes the language from that copy when the recruiter has written nothing else", async () => {
-    // Staging 11-14 2bb9124c: with the copy left out, a new role's first question went out in
-    // English to a Chinese recruiter.
-    const state = await loadWorkingState(
-      fakePrisma({
-        recruiter: [
-          {
-            ...text("新岗位：华东区销售总监，常驻上海，医疗器械行业"),
-            clientNonce: "start-role:k",
-          },
-        ],
-        account: [],
-      }) as never,
-      scope,
-      { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
-      (t) => t,
-      now,
-    );
-    expect(state.language).toBe("zh");
   });
 
   it("never offers the account's own team as a role team before it holds a role", async () => {

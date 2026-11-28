@@ -80,7 +80,7 @@ import {
   UsageRecordedPayloadSchema,
   ViewBlockSchema,
 } from "@rakazo/contracts";
-import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
+import type { ActionApprovalRule, ReplyLanguage, ToolCallStreak } from "@rakazo/core";
 import {
   ACTIVE_RUN_STATUSES,
   accountWideSkill,
@@ -154,27 +154,23 @@ import {
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
-  REPLY_LANGUAGE_NAME,
   RETIRED_APPROVAL_KINDS,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
   RUN_EGRESS_RATE_LIMITED,
   recruiterConnectBlock,
-  recruiterLanguage,
-  recruiterLanguageText,
   recruitingBotKey,
   redactSecrets,
   renderBotDirectory,
-  replyLanguageNote,
   resolveActionApprovalDetail,
   runBudgetExceeded,
   runBudgetStopText,
   sandboxCommandTimeoutMs,
   screenLanguage,
+  screenNote,
   shortQuestion,
   skillAvailabilityFromTools,
   skillRequirements,
-  textLanguage,
   toolReadsExternalText,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
@@ -188,7 +184,7 @@ import {
   withoutHiddenTools,
   workActivityForTool,
   workStepDetail,
-  writesChinese,
+  screenIsChinese,
 } from "@rakazo/core";
 import {
   approvalEffectKey,
@@ -767,7 +763,7 @@ import {
   isRolelessHomeTeam,
   loadWorkingState,
   ROLE_START_NONCE,
-  recruiterLanguageNow,
+  recruiterScreenLanguage,
 } from "./working-state.js";
 
 /** Built-in tools that reach the outside network for the run. */
@@ -2629,9 +2625,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             setupMarks.modelKeyOwnMs = Math.round(performance.now() - modelKeyStartedAt);
           }),
         );
-        // The one language every recruiter-facing line of this turn uses: the newest clear one of
-        // their messages, set once history loads and moved by a message steered in.
-        let turnLanguage = recruiterLanguage([]);
+        // The language of the recruiter's screen, which words the product writes itself follow; set
+        // once history loads.
+        let turnLanguage: ReplyLanguage = "en";
         // The run's newest one-line reply, which its next line or answer replaces so the person
         // reads one message.
         let quickReplyMessageId: string | undefined;
@@ -8978,12 +8974,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   round?: unknown;
                 } | null;
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
-                  if (hideVendors)
-                    turnLanguage = await recruiterLanguageNow(
-                      deps.prisma,
-                      { spaceId: run.spaceId, userId: run.userId },
-                      thread.id,
-                    ).catch(() => turnLanguage);
                   const list = await recruitingRoundListText(deps.prisma, {
                     chinese: turnLanguage === "zh",
                     threadId: run.threadId,
@@ -9060,13 +9050,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             .catch(() => ({}))
                         : {}),
                       ...(roundShown ? { shownToRecruiter: roundShown } : {}),
-                      // Gate 9d632819: the turn began on an English JD, the recruiter went on in
-                      // Chinese in the main chat, and the card after the round was English.
-                      ...(hideVendors
-                        ? {
-                            next: `The recruiter now writes in ${REPLY_LANGUAGE_NAME[turnLanguage]}.`,
-                          }
-                        : {}),
                     }
                   : round;
               }
@@ -11805,42 +11788,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .join(" ")
               : "",
           );
-        const roleStartTexts = messages.flatMap((message) =>
-          message.role === "user" &&
-          message.clientNonce?.startsWith(ROLE_START_NONCE) &&
-          Array.isArray(message.blocks)
-            ? [
-                message.blocks
-                  .map((block) =>
-                    block &&
-                    typeof block === "object" &&
-                    "text" in block &&
-                    typeof block.text === "string"
-                      ? block.text
-                      : "",
-                  )
-                  .join(" "),
-              ]
-            : [],
-        );
-        // A message steered into the running turn moves it on to the language that message is in.
-        let lastRecruiterText = recruiterLanguageText(recruiterTexts);
-        turnLanguage = recruiterTexts.some((text) => textLanguage(text))
-          ? recruiterLanguage(recruiterTexts)
-          : // A role conversation opened by a handoff holds only Kruit's brief, or a copy of the
-            // recruiter's message. Their newest message with a clear language, in any of their
-            // conversations, decides (an English JD, then 「继续吧」 in Kruit's chat, is Chinese);
-            // the copied message decides only when they have written nothing else.
-            ((await workingState)?.language ??
-            // No working state before the role is saved (gate cc656e26: stopped, then 「继续吧」 in
-            // Kruit's chat, and the role team's progress line was English).
-            (thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
-              ? await recruiterLanguageNow(
-                  deps.prisma,
-                  { spaceId: run.spaceId, userId: run.userId },
-                  thread.id,
-                ).catch(() => recruiterLanguage(roleStartTexts))
-              : recruiterLanguage(roleStartTexts)));
+        // The recruiter's newest own message is the one a hand-off carries.
+        let lastRecruiterText = recruiterTexts[0] ?? "";
         const roleReferenceOverruled = new Set<string>();
         const creditsLeft = hideVendors
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
@@ -11863,7 +11812,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             block.kind === "text" && block.uiLocale ? [block.uiLocale] : [],
           )[0],
         );
-        const languageNote = hideVendors ? replyLanguageNote(turnLanguage, screen) : undefined;
+        // Words the product writes itself (lists, reports, labels) follow the recruiter's screen.
+        turnLanguage =
+          screen ??
+          (await recruiterScreenLanguage(deps.prisma, {
+            spaceId: run.spaceId,
+            userId: run.userId,
+          }).catch(() => undefined)) ??
+          "en";
+        const languageNote = hideVendors ? screenNote(turnLanguage) : undefined;
         const jobPageNote = intake?.page
           ? `The role's job page, already read and saved:\n\n${intake.page}`
           : undefined;
@@ -12835,6 +12792,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         // A new message from the person is this turn's to answer, whoever had the
                         // request before it (gate 493e9f2e: its reply was dropped as handed off).
                         if (freshHumanSteering && !freshHumanSteering.internal) {
+                          lastRecruiterText = freshHumanSteering.text;
                           handedOff = false;
                           // Nor is a teammate's report quiet once the person writes into it (gate
                           // f25185df: its answers to 「草稿还在吗」 were dropped).
@@ -12843,33 +12801,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun;
                           }
                         }
-                        // Replies follow the language of the recruiter's newest message, also when
-                        // it arrives while the turn runs (an English JD, then 「远程也可以」).
-                        const steeringLanguageNote = (text: string) => {
-                          const language = hideVendors ? textLanguage(text) : undefined;
-                          if (!language) return undefined;
-                          lastRecruiterText = text;
-                          turnLanguage = language;
-                          return replyLanguageNote(language);
-                        };
-                        // A teammate relaying the recruiter's newer words into a role team's
-                        // running turn: their language comes from the records, not the relay.
-                        const relayedLanguage =
-                          hideVendors &&
-                          !freshHumanSteering &&
-                          (thread.activeRecruitingRoleId ||
-                            thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX))
-                            ? await recruiterLanguageNow(
-                                deps.prisma,
-                                { spaceId: run.spaceId, userId: run.userId },
-                                thread.id,
-                              ).catch(() => undefined)
-                            : undefined;
-                        const relayedLanguageNote =
-                          relayedLanguage && relayedLanguage !== turnLanguage
-                            ? replyLanguageNote(relayedLanguage)
-                            : undefined;
-                        if (relayedLanguage) turnLanguage = relayedLanguage;
                         const recruitingContextMessage = humanSteering ?? steering.at(-1);
                         const currentThread =
                           steering.length > 0 && !messagingChannelRun
@@ -12928,11 +12859,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                   ? EARLIER_STEERING
                                   : item === freshHumanSteering
                                     ? STEERING_ACK
-                                    : undefined,
-                                item === freshHumanSteering && !item.internal
-                                  ? steeringLanguageNote(item.text)
-                                  : item === steering.at(-1)
-                                    ? relayedLanguageNote
                                     : undefined,
                               ]
                                 .filter(Boolean)
@@ -15136,7 +15062,7 @@ async function recruiterThreadVoice(
     .catch(() => null);
   const blocks = thread?.messages?.[0]?.blocks;
   return {
-    chinese: writesChinese(
+    chinese: screenIsChinese(
       Array.isArray(blocks) ? [{ role: "user", blocks: blocks as MessageBlock[] }] : [],
     ),
     roleName: thread?.group?.name?.trim() || undefined,
