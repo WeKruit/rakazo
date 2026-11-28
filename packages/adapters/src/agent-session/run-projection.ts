@@ -28,6 +28,7 @@ import type { AppendEventInput, Prisma, PrismaClient, ThreadEvents } from "@raka
 import {
   appendEventInTransaction,
   appendEventsInTransaction,
+  cancelRunsInTransaction,
   completedRunSummary,
   createThreadMessageInTransaction,
   recordUsage,
@@ -724,6 +725,18 @@ export function createRunProjection(deps: RunProjectionDeps, key: RunProjectionK
       deps.prisma.$transaction(async (tx) => {
         // A recovered lane can replay its start: the row is already there.
         if (await tx.run.findUnique({ where: { id: runId }, select: { id: true } })) return null;
+        // The lane runs one operation at a time: a live row it no longer runs (its end was never
+        // projected) has ended, and the one-live-run index needs it closed first.
+        const orphans = await tx.run.updateManyAndReturn({
+          where: {
+            threadId: key.threadId,
+            botId: key.botId,
+            status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
+          },
+          data: { status: "cancelled", completedAt: new Date(startedAt) },
+          select: { id: true, taskId: true },
+        });
+        await cancelRunsInTransaction(tx, orphans, new Date(startedAt));
         const task = await tx.task.create({
           data: {
             spaceId: key.spaceId,
