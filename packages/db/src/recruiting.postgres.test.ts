@@ -349,6 +349,151 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
   });
 
+  // Staging 11-28: a role opened from the main chat shows the recruiter's message copied into its
+  // conversation, then the request; the role's brief cited the copy, which is newer than the
+  // main-chat message the run acts for, so every later update of that run was refused.
+  it("updates a role opened from the main chat whose brief cites the recruiter's copied message", async () => {
+    const globalGroup = await prisma.chatGroup.create({
+      data: {
+        id: `recruiting-global-${crypto.randomUUID()}`,
+        spaceId,
+        userId,
+        name: "Kruit",
+        members: { create: { botId } },
+      },
+    });
+    const globalThread = await prisma.thread.create({
+      data: { spaceId, userId, groupId: globalGroup.id },
+    });
+    const words = "Find a senior data engineer in Seattle with seven years";
+    const asked = await recruiting.createThreadMessage(prisma, {
+      threadId: globalThread.id,
+      role: "user",
+      blocks: [{ kind: "text", text: words }],
+    });
+    const mainTask = await prisma.task.create({
+      data: { spaceId, userId, botId, threadId: globalThread.id, prompt: words, status: "done" },
+    });
+    const mainRun = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId,
+        threadId: globalThread.id,
+        taskId: mainTask.id,
+        sourceMessageId: asked.id,
+        trigger: "user",
+        status: "completed",
+      },
+    });
+    const roleGroup = await prisma.chatGroup.create({
+      data: { spaceId, userId, name: "Senior Data Engineer", members: { create: { botId } } },
+    });
+    const roleThread = await prisma.thread.create({
+      data: { spaceId, userId, groupId: roleGroup.id },
+    });
+    const copy = await recruiting.createThreadMessage(prisma, {
+      threadId: roleThread.id,
+      role: "user",
+      blocks: [{ kind: "text", text: words }],
+      clientNonce: `role-start:${asked.id}`,
+    });
+    const request = "New role: Senior Data Engineer. The recruiter's message above is the request.";
+    const echo = await recruiting.createThreadMessage(prisma, {
+      threadId: globalThread.id,
+      role: "bot",
+      botId,
+      runId: mainRun.id,
+      blocks: [{ kind: "bot_message_sent", toBotId: botId, toBotName: "Team", text: request }],
+    });
+    const delivery = await recruiting.createThreadMessage(prisma, {
+      threadId: roleThread.id,
+      role: "user",
+      blocks: [
+        {
+          kind: "bot_message_received",
+          fromBotId: botId,
+          fromBotName: "Kruit",
+          text: request,
+          intent: "request",
+          returnToMessageId: echo.id,
+          returnThreadId: globalThread.id,
+        },
+      ],
+    });
+    const task = await prisma.task.create({
+      data: { spaceId, userId, botId, threadId: roleThread.id, prompt: request, status: "running" },
+    });
+    const run = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId,
+        threadId: roleThread.id,
+        taskId: task.id,
+        sourceMessageId: delivery.id,
+        trigger: "bot_message",
+        status: "running",
+      },
+    });
+    const context = { runId: run.id, sourceMessageId: delivery.id };
+    const created = await mutateRole(prisma, actor, context, {
+      operation: "create",
+      title: "Senior Data Engineer",
+      sourceRefs: [source(copy.id)],
+      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [source(copy.id)] }],
+      preferences: [],
+      definitionQuestions: [],
+      intent: { basis: "direct", quote: words },
+    });
+    expect(created.source?.anchor).toMatchObject({ messageId: asked.id });
+    const updated = await mutateRole(prisma, actor, context, {
+      operation: "update",
+      roleId: created.workspace!.role.id,
+      expectedRevision: 1,
+      intent: { basis: "direct", quote: words },
+      preferences: ["Seattle"],
+    } as recruiting.RecruitingRoleMutationInput);
+    expect(updated).toMatchObject({ status: "saved", workspace: { role: { revision: 2 } } });
+    // The recruiter writing in the role's conversation after the request still wins over this run.
+    const later = await recruiting.createThreadMessage(prisma, {
+      threadId: roleThread.id,
+      role: "user",
+      blocks: [{ kind: "text", text: "Remote is fine" }],
+    });
+    const laterTask = await prisma.task.create({
+      data: { spaceId, userId, botId, threadId: roleThread.id, prompt: "x", status: "running" },
+    });
+    const laterRun = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId,
+        threadId: roleThread.id,
+        taskId: laterTask.id,
+        sourceMessageId: later.id,
+        trigger: "user",
+        status: "running",
+      },
+    });
+    await mutateRole(prisma, actor, { runId: laterRun.id, sourceMessageId: later.id }, {
+      operation: "update",
+      roleId: created.workspace!.role.id,
+      expectedRevision: 2,
+      intent: { basis: "direct", quote: "Remote is fine" },
+      preferences: ["Remote is fine"],
+    } as recruiting.RecruitingRoleMutationInput);
+    await expect(
+      mutateRole(prisma, actor, context, {
+        operation: "update",
+        roleId: created.workspace!.role.id,
+        expectedRevision: 3,
+        intent: { basis: "direct", quote: words },
+        preferences: ["Seattle"],
+      } as recruiting.RecruitingRoleMutationInput),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+  });
+
   it("admits group notes only for the run's own group conversation", async () => {
     const f = await roleRunFixture("Group notes fixture");
     await prisma.thread.update({
