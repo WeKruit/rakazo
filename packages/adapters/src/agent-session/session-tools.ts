@@ -430,6 +430,16 @@ export async function assembleRunTools(input: RunToolsInput) {
   };
 }
 
+/**
+ * Tools whose call shows the person a card and ends the turn: a question, a takeover of the
+ * screen, or protected input. The answer arrives as the person's next input.
+ */
+export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "ask_user",
+  "request_takeover",
+  "request_secret",
+]);
+
 /** Where a tool call's stop comes from. */
 export interface ToolAbortSource {
   /** A harness session: each call's own signal (per-call Stop). Otherwise the host's signal. */
@@ -658,8 +668,7 @@ function toAgentTool(
       let promotion: Promise<void> | undefined;
       // Human interaction tools pause explicitly; only executing work moves to the background.
       const promotionTimer =
-        host.request.onSlowTool &&
-        !["ask_user", "request_takeover", "request_secret"].includes(tool.name)
+        host.request.onSlowTool && !CARD_TOOL_NAMES.has(tool.name)
           ? setTimeout(() => {
               promotion = host.request.onSlowTool!({
                 name: tool.name,

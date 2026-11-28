@@ -2,6 +2,7 @@ import type { AgentRunRequest, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadSessionConfig } from "./agent-session/session-load.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
 import { createRunExecutor, saysSomething } from "./executor.js";
@@ -464,7 +465,7 @@ async function runWithModel(
     finalizeRun,
   };
   lastExecutorEvents = events;
-  const executor = createRunExecutor({
+  const executorDeps = {
     prisma,
     deploymentModelKey: "fake-deployment-key",
     runtime: { describe: () => ({ capabilities: { scripted } }), run: runtimeRun },
@@ -496,7 +497,8 @@ async function runWithModel(
     secrets: [],
     replySuggestions: options.replySuggestions,
     ...(options.discoverTools ? { connector: { discoverTools: options.discoverTools } } : {}),
-  } as unknown as Parameters<typeof createRunExecutor>[0]);
+  } as unknown as Parameters<typeof createRunExecutor>[0];
+  const executor = createRunExecutor(executorDeps);
 
   await executor.continueRun(run.id, "worker-1");
   expect(runtimeRun).toHaveBeenCalled();
@@ -506,8 +508,29 @@ async function runWithModel(
   }
   expect(finalizeRun).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
   if (!request) throw new Error("runtime was not called");
-  return { request, get, prisma, run, finalizeRun, runtimeRun, events };
+  return { request, get, prisma, run, finalizeRun, runtimeRun, events, executorDeps };
 }
+
+describe("session config", () => {
+  it("gives a seeded bot the system prompt and tools a person's turn on the run path gets", async () => {
+    const { request, prisma, executorDeps } = await runWithModel(TEXT_ONLY_MODEL);
+    // The session reads the bot and thread scoped to the account; the run path reads them by id.
+    Object.assign(prisma.bot, {
+      findFirstOrThrow: prisma.bot.findUniqueOrThrow,
+      findFirst: vi.fn(async () => null),
+    });
+    Object.assign(prisma.thread, { findFirstOrThrow: prisma.thread.findUniqueOrThrow });
+    const config = await loadSessionConfig(
+      { ...executorDeps, toolHost: () => ({ signal: new AbortController().signal }) as never },
+      { spaceId: "space-1", userId: "user-1", threadId: "thread-1", botId: "bot-1" },
+    );
+    expect(config.systemPrompt).toBe(request.instructions);
+    // toAgentTools orders tools by name for both paths; the request keeps listing order.
+    expect(config.tools.map((tool) => tool.name).sort()).toEqual(
+      request.tools.map((tool) => tool.name).sort(),
+    );
+  });
+});
 
 describe("prompt cache order", () => {
   it("keeps per-turn recall after the history so the history stays a cached prefix", async () => {

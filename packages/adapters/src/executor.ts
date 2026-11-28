@@ -3,7 +3,6 @@ import type {
   AdapterContext,
   AgentContextStrategy,
   AgentHomeStore,
-  AgentModelOAuthCredential,
   AgentRunRequest,
   AgentRuntime,
   AgentRuntimeEvent,
@@ -61,7 +60,6 @@ import {
   isAttachmentImageMimeType,
   MailReplySchema,
   MessageBlock as MessageBlockSchema,
-  OPENAI_COMPATIBLE_PROVIDER_ID,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
@@ -279,6 +277,17 @@ import {
   taughtSkillsLineFor,
   workspaceInstructionFor,
 } from "./agent-session/system-prompt.js";
+import { runHasReadExternalText } from "./agent-session/tool-gate.js";
+import {
+  backupModelResolver,
+  loadBackupModels,
+  MISSING_MODEL_MESSAGE,
+  resolveBotModel,
+  resolveConnectedModelFor,
+  resolveModelKey,
+  runModelFromResolved,
+  runtimeFallbackModel,
+} from "./agent-session/session-models.js";
 import {
   assembleRunTools,
   loadRunConnections,
@@ -415,7 +424,6 @@ import type { CloudAgentConnection } from "./cloud-agent-factory.js";
 import { cloudAgentsEnabled } from "./cloud-agent-factory.js";
 import { executeCloudAgentTool } from "./cloud-agent-service.js";
 import { validCloudAgentArgs } from "./cloud-agent-tools.js";
-import { cloudflareGatewayProviderEnv } from "./cloudflare-ai-gateway.js";
 import {
   COMPLETION_EMAIL_TOOL,
   recordCompletionEmailChoice,
@@ -532,37 +540,22 @@ import { lastingPreferenceNote, loadAgentMemoryContext } from "./memory-context.
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { applyMemoryEdit, nativeMemorySaveError } from "./memory-tools.js";
 import {
-  isCatalogModelChoice,
-  isDeploymentModelChoice,
   pinnedModelCredentialError,
   routineRunModelPin,
   runModelChoice,
   selectConfiguredModel,
   UnavailableModelForAuthError,
-  validateConnectedModelChoice,
-  validateModelAuthAvailability,
 } from "./model-selection.js";
 import {
   IMAGE_RETURNING_COMPUTER_TOOLS,
   MODEL_CANNOT_SEE_MESSAGE,
   modelAcceptsImageInput,
-  modelIdSupportsImages,
 } from "./model-vision.js";
 import { outreachStopRefusal, outreachStops } from "./outreach-stops.js";
 import { ownMailboxSendRefusal } from "./own-mailbox-sends.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
-import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
-import {
-  isRetiredModelCredentialError,
-  parseModelSecret,
-  RetiredModelCredentialError,
-  resolveModelAuth,
-  secretValuesToRedact,
-  serializeModelSecret,
-  storedModelOAuthModifier,
-  withStoredModelCredential,
-} from "./pi-oauth.js";
+import { isRetiredModelCredentialError } from "./pi-oauth.js";
 import type { PlotSpec } from "./plot-tool.js";
 import {
   assertPlotDataWithinLimits,
@@ -1417,12 +1410,6 @@ export function createRunWorkspaceCheckpoint(checkpoint: () => Promise<unknown>)
   };
 }
 
-const MISSING_MODEL_MESSAGE = "Connect a model in Settings before running bots.";
-
-function runtimeFallbackModel(runtime: AgentRuntime) {
-  return runtime.describe().capabilities.scripted ? { provider: "scripted", id: "scripted" } : null;
-}
-
 export interface ExecutorDeps {
   contextStrategy?: AgentContextStrategy;
   prisma: PrismaClient;
@@ -1617,141 +1604,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
   const web = deps.web ?? createWebProvider();
   const browser = deps.browser ?? createBrowserProvider(undefined, { sandbox: deps.sandbox });
   const cloudAgent = deps.cloudAgent;
-  const resolveConnectedModel = async (
+  const resolveConnectedModel = (
     scope: { userId: string; spaceId: string },
     provider: string,
     modelId: string,
     registerSecrets?: (values: string[]) => void,
     requireStoredSecret = false,
-  ): Promise<AgentRunRequest["model"]> => {
-    const credential = await findModelCredential(deps.prisma, scope, provider, modelId);
-    const deployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
-    const validationError = await validateConnectedModelChoice(
-      deps.prisma,
-      scope,
-      provider,
-      modelId,
-      deployment,
-    );
-    if (validationError) throw new Error(validationError);
-    if (!credential && !isDeploymentModelChoice(provider, modelId, deployment))
-      throw new Error("Connect that model provider first");
-    // Free-form selections must keep the preference that owns this modelId. A
-    // intervening delete/change can make findModelCredential fall back to another
-    // same-provider credential; reject that mismatch instead of mixing baseUrl.
-    if (!isCatalogModelChoice(provider, modelId) && credential?.defaultModel !== modelId) {
-      throw new Error("Unknown model for that provider");
-    }
-    const resolved = await resolveModelKey(
-      deps,
-      scope.userId,
-      scope.spaceId,
-      credential,
-      provider,
-      modelId,
-      registerSecrets,
-      requireStoredSecret,
-    );
-    return {
-      provider,
-      id: modelId,
-      apiKey: resolved.oauth ? undefined : resolved.apiKey,
-      ...cloudflareRunFields(resolved),
-      baseUrl: resolved.baseUrl,
-      cacheCapabilities: resolved.cacheCapabilities,
-      contextWindow: resolved.contextWindow,
-
-      reasoning: resolved.reasoning,
-      maxTokens: resolved.maxTokens,
-      acceptsImages: resolved.acceptsImages,
-      maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-      thinkingLevel:
-        ((credential?.defaultModel === modelId
-          ? credential.thinkingLevel
-          : null) as AgentRunRequest["model"]["thinkingLevel"]) ??
-        resolved.thinkingLevel ??
-        null,
-      oauth: resolved.oauth
-        ? {
-            credential: resolved.oauth,
-            modify: resolved.modifyOAuth,
-          }
-        : undefined,
-    };
-  };
+  ) =>
+    resolveConnectedModelFor(deps, scope, provider, modelId, registerSecrets, requireStoredSecret);
   return {
     resolveConnectedModel,
     contextStrategy,
-    async resolveModel(scope: {
-      userId: string;
-      spaceId: string;
-      botId?: string;
-    }): Promise<AgentRunRequest["model"]> {
-      const override = scope.botId
-        ? await deps.prisma.bot.findFirst({
-            where: {
-              id: scope.botId,
-              userId: scope.userId,
-              spaceId: scope.spaceId,
-            },
-            select: { modelProvider: true, modelId: true, thinkingLevel: true },
-          })
-        : null;
-      const hasOverride = Boolean(override?.modelProvider && override.modelId);
-      const [overrideCredential, defaultCredential, settings] = await Promise.all([
-        hasOverride
-          ? findModelCredential(deps.prisma, scope, override!.modelProvider!, override!.modelId)
-          : Promise.resolve(null),
-        findDefaultModelCredential(deps.prisma, scope),
-        deps.prisma.deploymentSettings.findUnique({
-          where: { id: "default" },
-        }),
-      ]);
-      const selected = selectConfiguredModel({
-        override,
-        overrideCredential,
-        defaultCredential,
-        settings,
-        deployment: deps.deploymentModelConfigured ? resolveDeploymentModel() : null,
-      });
-      const { credential, thinkingLevel } = selected;
-      let { provider, id } = selected;
-      if (!provider || !id) {
-        const runtimeFallback = runtimeFallbackModel(deps.runtime);
-        provider ??= runtimeFallback?.provider;
-        id ??= runtimeFallback?.id ?? null;
-      }
-      if (!provider || !id) throw new Error(MISSING_MODEL_MESSAGE);
-      // The key is resolved for the provider that won above, not before it is known.
-      const resolved = await resolveModelKey(
-        deps,
-        scope.userId,
-        scope.spaceId,
-        credential,
-        provider,
-        id,
-      );
-      return {
-        provider,
-        id,
-        apiKey: resolved.oauth ? undefined : resolved.apiKey,
-        ...cloudflareRunFields(resolved),
-        baseUrl: resolved.baseUrl,
-        cacheCapabilities: resolved.cacheCapabilities,
-        contextWindow: resolved.contextWindow,
-
-        reasoning: resolved.reasoning,
-        maxTokens: resolved.maxTokens,
-        acceptsImages: resolved.acceptsImages,
-        maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-        thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
-        oauth: resolved.oauth
-          ? {
-              credential: resolved.oauth,
-              modify: resolved.modifyOAuth,
-            }
-          : undefined,
-      };
+    resolveModel(scope: { userId: string; spaceId: string; botId?: string }) {
+      return resolveBotModel(deps, scope);
     },
 
     async wakeRoutine(routineId: string, scheduledFor: string) {
@@ -2880,17 +2745,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let readExternalText = false;
         const runReadExternalText = async () => {
           if (readExternalText) return true;
-          const called = await deps.prisma.event.findMany({
-            where: { runId, threadId: thread.id, type: "agent.tool.called" },
-            select: { payload: true },
-          });
-          readExternalText = called.some((event) => {
-            const tool = (event.payload as { name?: unknown } | null)?.name;
-            return (
-              typeof tool === "string" &&
-              toolReadsExternalText(tool, !BUILTIN_AGENT_TOOL_NAMES.has(tool))
-            );
-          });
+          readExternalText = await runHasReadExternalText(deps.prisma, { runId, threadId: thread.id });
           return readExternalText;
         };
         const refreshMemoryContext = async () => {
@@ -11838,21 +11693,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return;
         }
 
-        let fallbackModels: { provider: string; modelId: string }[] = [];
-        if (!scripted) {
-          try {
-            fallbackModels = await deps.prisma.spaceBackupModel.findMany({
-              where: { userId: run.userId, spaceId: run.spaceId },
-              orderBy: { position: "asc" },
-              select: { provider: true, modelId: true },
-            });
-          } catch (error) {
-            getLogger().warn("Backup models could not be loaded", {
-              runId,
-              error,
-            });
-          }
-        }
+        const fallbackModels = scripted ? [] : await loadBackupModels(deps.prisma, run);
         const fallbackModelKeys = new Set(
           fallbackModels
             .filter(
@@ -12200,21 +12041,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   tools,
                   model: runModel,
                   fallbackModels: runFallbackModels,
-                  resolveFallbackModel: fallbackModelKeys.size
-                    ? async (provider, modelId) => {
-                        const key = JSON.stringify([provider, modelId]);
-                        if (!fallbackModelKeys.has(key))
-                          throw new Error("Backup model is not selected");
-                        if (key === configuredModelKey) return configuredRunModel;
-                        return resolveConnectedModel(
-                          { userId: run.userId, spaceId: run.spaceId },
-                          provider,
-                          modelId,
-                          (values) => runSecrets.push(...values),
-                          true,
-                        );
-                      }
-                    : undefined,
+                  resolveFallbackModel: backupModelResolver(deps, {
+                    scope: { userId: run.userId, spaceId: run.spaceId },
+                    selected: fallbackModelKeys,
+                    configured: { key: configuredModelKey, model: configuredRunModel },
+                    registerSecrets: (values) => runSecrets.push(...values),
+                  }),
                   onModelChange: async (provider, modelId) => {
                     if (!fallbackModelKeys.has(JSON.stringify([provider, modelId]))) {
                       throw new Error("Backup model is not selected");
@@ -14808,188 +14640,6 @@ function uncertainEffectError(toolName: string): Error {
   return new Error(
     `tool ${toolName} has an earlier execution with an uncertain outcome; it may already have completed, so verify the destination before retrying`,
   );
-}
-
-/**
- * The deployment key is a bearer credential for exactly one vendor, so it is handed out
- * only when the provider that won the resolution above is that vendor. A provider named
- * by deployment settings or a bot override gets no key rather than another vendor's.
- */
-function deploymentKeyFor(deps: ExecutorDeps, provider: string): string | undefined {
-  if (!deps.deploymentModelKey) return undefined;
-  return provider === resolveDeploymentModel().provider ? deps.deploymentModelKey : undefined;
-}
-
-/**
- * A run can afford a longer catalog wait than the models.list read bound — the
- * account answer decides whether a statically excluded model is allowed at all.
- * Still bounded well under the fetch's own abort timeout.
- */
-const CODEX_LIVE_RUN_WAIT_MS = 8_000;
-
-async function resolveModelKey(
-  deps: ExecutorDeps,
-  userId: string,
-  spaceId: string,
-  credential: {
-    id: string;
-    secretId: string;
-    provider: string;
-    defaultModel?: string | null;
-    supportsImages?: boolean;
-  } | null,
-  provider: string,
-  modelId: string,
-  registerSecrets?: (values: string[]) => void,
-  requireStoredSecret = false,
-): Promise<{
-  apiKey?: string;
-  accountId?: string;
-  gatewayId?: string;
-  baseUrl?: string;
-  cacheCapabilities?: AgentRunRequest["model"]["cacheCapabilities"];
-  contextWindow?: number;
-  reasoning?: boolean;
-  maxTokens?: number;
-  thinkingLevel?: AgentRunRequest["model"]["thinkingLevel"];
-  acceptsImages?: boolean;
-  maxImagesPerPrompt?: number;
-  oauth?: AgentModelOAuthCredential;
-  modifyOAuth?: NonNullable<AgentRunRequest["model"]["oauth"]>["modify"];
-  redact: string[];
-}> {
-  if (credential) {
-    const result = await withStoredModelCredential(
-      deps.prisma,
-      deps.secretStore,
-      { userId, spaceId },
-      credential,
-      async (plaintext, { persist, retire, signal }) => {
-        registerSecrets?.(secretValuesToRedact(parseModelSecret(plaintext)));
-        const unavailable = validateModelAuthAvailability(provider, modelId, plaintext);
-        if (unavailable && !deps.codexCatalog) throw new UnavailableModelForAuthError(unavailable);
-        const resolved = await resolveModelAuth(plaintext, credential.provider, {
-          persist,
-          retire,
-          signal,
-        });
-        const oauth = resolved.secret.kind === "oauth" ? resolved.secret.credential : undefined;
-        const baseUrl =
-          resolved.secret.kind === "openai_compatible" ? resolved.secret.baseUrl : undefined;
-        const acceptsImages =
-          credential.provider === OPENAI_COMPATIBLE_PROVIDER_ID &&
-          resolved.secret.kind === "openai_compatible" &&
-          (modelIdSupportsImages(resolved.secret.visionModelIds, modelId) ||
-            // Legacy secrets have no per-model list, so keep their existing
-            // capability scoped to the model saved in the space preference.
-            (resolved.secret.visionModelIds === undefined &&
-              credential.supportsImages === true &&
-              credential.defaultModel?.trim() === modelId.trim()));
-        const accountId =
-          resolved.secret.kind === "api_key" ? resolved.secret.accountId : undefined;
-        const gatewayId =
-          resolved.secret.kind === "api_key" ? resolved.secret.gatewayId : undefined;
-        cloudflareGatewayProviderEnv({ provider, accountId, gatewayId });
-        return {
-          secret: resolved.secret,
-          apiKey: resolved.apiKey,
-          accountId,
-          gatewayId,
-          baseUrl,
-          cacheCapabilities:
-            resolved.secret.kind !== "oauth" ? resolved.secret.cacheCapabilities : undefined,
-          contextWindow:
-            resolved.secret.kind !== "oauth" ? resolved.secret.contextWindow : undefined,
-          reasoning:
-            resolved.secret.kind === "openai_compatible" ? resolved.secret.reasoning : undefined,
-          maxTokens: resolved.secret.maxTokens,
-          thinkingLevel:
-            resolved.secret.kind === "openai_compatible"
-              ? resolved.secret.thinkingLevel
-              : undefined,
-          acceptsImages,
-          maxImagesPerPrompt:
-            resolved.secret.kind === "openai_compatible"
-              ? resolved.secret.maxImagesPerPrompt
-              : undefined,
-          oauth,
-          modifyOAuth: oauth
-            ? storedModelOAuthModifier(
-                deps.prisma,
-                deps.secretStore,
-                { userId, spaceId },
-                credential,
-              )
-            : undefined,
-          redact: [...secretValuesToRedact(resolved.secret), resolved.apiKey].filter(
-            (value): value is string => Boolean(value),
-          ),
-        };
-      },
-    );
-    if (!result)
-      throw new RetiredModelCredentialError(
-        "Model connection is no longer available. Connect it again.",
-      );
-    const authError = validateModelAuthAvailability(
-      provider,
-      modelId,
-      serializeModelSecret(result.secret),
-    );
-    if (
-      authError &&
-      !(
-        deps.codexCatalog &&
-        result.secret.kind === "oauth" &&
-        (await codexLiveListsModel(deps.codexCatalog, userId, result.secret, modelId, {
-          waitMs: CODEX_LIVE_RUN_WAIT_MS,
-        }))
-      )
-    )
-      throw new UnavailableModelForAuthError(authError);
-    return result;
-  }
-  if (requireStoredSecret) throw new Error("Backup model credential is no longer available");
-  cloudflareGatewayProviderEnv({ provider });
-  return { apiKey: deploymentKeyFor(deps, provider), redact: [] };
-}
-
-function runModelFromResolved(
-  provider: string,
-  id: string,
-  resolved: Awaited<ReturnType<typeof resolveModelKey>>,
-  thinkingLevel: AgentRunRequest["model"]["thinkingLevel"] | undefined,
-): AgentRunRequest["model"] {
-  return {
-    provider,
-    id,
-    apiKey: resolved.oauth ? undefined : resolved.apiKey,
-    ...cloudflareRunFields(resolved),
-    baseUrl: resolved.baseUrl,
-    cacheCapabilities: resolved.cacheCapabilities,
-    contextWindow: resolved.contextWindow,
-    reasoning: resolved.reasoning,
-    maxTokens: resolved.maxTokens,
-    acceptsImages: resolved.acceptsImages,
-    maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-    thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
-    oauth: resolved.oauth
-      ? {
-          credential: resolved.oauth,
-          modify: resolved.modifyOAuth,
-        }
-      : undefined,
-  };
-}
-
-function cloudflareRunFields(resolved: { accountId?: string; gatewayId?: string }): {
-  accountId?: string;
-  gatewayId?: string;
-} {
-  return {
-    ...(resolved.accountId ? { accountId: resolved.accountId } : {}),
-    ...(resolved.gatewayId ? { gatewayId: resolved.gatewayId } : {}),
-  };
 }
 
 export async function loadCurrentTurnImages(

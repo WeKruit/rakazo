@@ -21,6 +21,7 @@ export interface RunLimitFact {
   limit: RunBudgetLimit;
   costUsd: number;
   elapsedMs: number;
+  toolCalls: number;
 }
 
 export interface GuardrailDeps {
@@ -37,6 +38,7 @@ interface ActiveRun {
   runId: string;
   startedAt: number;
   costUsd: number;
+  toolCalls: number;
   stopped: boolean;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -61,7 +63,13 @@ export function installGuardrails(
     const limit = runBudgetExceeded({ costUsd: run.costUsd, elapsedMs }, limits);
     if (!limit || run.stopped) return;
     run.stopped = true;
-    deps.onRunLimit?.({ runId: run.runId, limit, costUsd: run.costUsd, elapsedMs });
+    deps.onRunLimit?.({
+      runId: run.runId,
+      limit,
+      costUsd: run.costUsd,
+      elapsedMs,
+      toolCalls: run.toolCalls,
+    });
     void lane.requestAbort(run.runId, BACKGROUND_CONTEXT).catch(() => undefined);
   };
 
@@ -71,6 +79,7 @@ export function installGuardrails(
       runId,
       startedAt,
       costUsd: 0,
+      toolCalls: 0,
       stopped: false,
       timer: setTimeout(() => stop(run), Math.max(0, startedAt + limits.wallClockMs - Date.now())),
     };
@@ -101,6 +110,9 @@ export function installGuardrails(
       if (active?.runId !== event.runId) return;
       clearTimeout(active.timer);
       active = undefined;
+    }),
+    harness.events.on("tool_start", (event) => {
+      if (event.lane === lane.name && active?.runId === event.runId) active.toolCalls += 1;
     }),
     harness.events.on("usage", (event) => {
       if (event.lane !== lane.name || !active) return;
