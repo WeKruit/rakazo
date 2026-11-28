@@ -6,11 +6,25 @@ import {
   createGroupInTransaction,
   createThreadMessageInTransaction,
   lockSpaceForContentCreation,
+  recruitingHomeGroupId,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
-import { ROLE_START_NONCE } from "./working-state.js";
+
+/** The message a new role's conversation opens with: a copy of the recruiter's words elsewhere. */
+export const ROLE_START_NONCE = "start-role:";
+
+/**
+ * The account's own team before it holds a role. It is not a role team, so Kruit neither lists
+ * it with the roles nor hands it work; account setup such as the sending email stays with Kruit.
+ */
+export function isRolelessHomeTeam(
+  scope: { spaceId: string; userId: string },
+  group: { id: string; thread?: { activeRecruitingRoleId: string | null } | null },
+): boolean {
+  return group.id === recruitingHomeGroupId(scope) && !group.thread?.activeRecruitingRoleId;
+}
 
 /** The parts of a recruiter's own message that a new role conversation starts from. */
 function recruiterBlocks(message: {

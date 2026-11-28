@@ -5,12 +5,12 @@ import type { ExecutorDeps } from "./executor.js";
 import { delegatedRequestMessage } from "./global-role-writes.js";
 import {
   copyRecruiterMessageToRole,
+  isRolelessHomeTeam,
   latestRecruiterFiles,
   openRoleGroup,
   roleAlreadyOpenNote,
   roleOpenedFromLatestMessage,
 } from "./role-start.js";
-import { isRolelessHomeTeam } from "./working-state.js";
 
 /**
  * The account-wide conversation's one way to give work out (harness step D, 11-28): a child job for

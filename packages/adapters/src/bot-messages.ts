@@ -24,7 +24,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { roundListedNotRecorded } from "./recruiting-round-check.js";
-import { ROLE_START_NONCE } from "./working-state.js";
+import { ROLE_START_NONCE } from "./role-start.js";
 
 /**
  * The hop the current run sits at, read back from the message that woke this

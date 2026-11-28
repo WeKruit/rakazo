@@ -474,7 +474,7 @@ describe("recruiting run context", () => {
     },
   );
 
-  it.each(["instructions", "tool_result", "steering"] as const)(
+  it.each(["instructions", "tool_result"] as const)(
     "carries the role as data in %s context",
     async (placement) => {
       const { deps } = fixture();
@@ -592,14 +592,12 @@ describe("recruiting run context", () => {
       ],
     };
     const result = await loadRecruitingRunContext(deps, run, memory, context, {
-      reason: "steering",
+      reason: "role_tool",
       sourceMessageId: "message",
-      recallScope: "Bay Area first",
       redact: (value) => value.replaceAll("secret-value", "[redacted]"),
     });
     expect(result!.workspace).toEqual(workspace);
     expect(result!.text).toContain("Seven years; [redacted]");
-    expect(result!.text).toContain("Bay Area first");
     expect(result!.text).toContain(memory.text);
     expect(result!.text).not.toContain("secret-value");
     const stored = bytes.get("blob-1")!;
@@ -614,8 +612,7 @@ describe("recruiting run context", () => {
       botId: "bot",
       text: result!.text,
       memory,
-      recallScope: "Bay Area first",
-      reason: "steering",
+      reason: "role_tool",
       sourceMessageId: "message",
     });
     expect(result!.contextArtifact).toEqual({
@@ -714,12 +711,14 @@ describe("recruiting run context", () => {
       reason: "run",
       placement: "instructions",
     });
-    const steering = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
-      reason: "steering",
-      placement: "steering",
+    const toolResult = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "role_tool",
+      placement: "tool_result",
     });
-    expect(steering!.manifest.placement).toBe("steering");
-    expect(steering!.contextArtifact.artifactId).not.toBe(instructions!.contextArtifact.artifactId);
+    expect(toolResult!.manifest.placement).toBe("tool_result");
+    expect(toolResult!.contextArtifact.artifactId).not.toBe(
+      instructions!.contextArtifact.artifactId,
+    );
     expect(saved.size).toBe(2);
     expect(db.workspace).toHaveBeenCalledTimes(2);
   });
