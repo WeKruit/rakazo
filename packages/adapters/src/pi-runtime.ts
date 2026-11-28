@@ -3423,7 +3423,7 @@ function endToolCall(host: ToolHost) {
   maybeAbortToolCallBudget(host);
 }
 
-function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Model<Api> {
+export function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Model<Api> {
   const maxTokens = resolveCompletionMaxTokens(
     model.maxTokens,
     configuredMaxTokens,
@@ -3434,7 +3434,7 @@ function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Mo
   return { ...model, maxTokens };
 }
 
-interface RuntimeModelTarget {
+export interface RuntimeModelTarget {
   config: AgentRunRequest["model"];
   models: Models;
   model: Model<Api>;
@@ -3442,8 +3442,8 @@ interface RuntimeModelTarget {
   credentials?: PiRuntimeCredentialStore;
 }
 
-interface FallbackStreamState {
-  request: AgentRunRequest;
+export interface FallbackStreamState {
+  request: Pick<AgentRunRequest, "model" | "fallbackModels" | "resolveFallbackModel" | "tools">;
   getActive(): RuntimeModelTarget;
   signal: AbortSignal;
   attempted: Set<string>;
@@ -3679,7 +3679,7 @@ function fallbackSupportsContext(
   return !requiresReasoning || candidate.model.reasoning;
 }
 
-function fallbackAwareModelStream(
+export function fallbackAwareModelStream(
   state: FallbackStreamState,
   context: TranscriptContext,
   options: ModelsSimpleStreamOptions | undefined,
