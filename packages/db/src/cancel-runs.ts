@@ -44,9 +44,10 @@ export function threadStopRunWhere(
 }
 
 /**
- * Stop the live runs that are operations of an agent session: each session gets one `stop`
- * input, which its owner turns into an abort; the run ends through its own projection. Returns
- * the sessions to wake after commit and the runs that belong to no session.
+ * Stop the live runs that are operations of an agent session: each run gets a `stop` input that
+ * names it, which its session's owner turns into an abort of exactly that operation (or ends the
+ * row when no lane runs it); the run ends through its own projection. Returns the sessions to
+ * wake after commit and the runs that belong to no session.
  */
 export async function submitStopInputsInTransaction(
   tx: Pick<Prisma.TransactionClient, "conversationSession" | "$queryRaw" | "$executeRaw">,
@@ -68,7 +69,6 @@ export async function submitStopInputsInTransaction(
       unowned.push(run.id);
       continue;
     }
-    if (stopped.has(session.id)) continue;
     stopped.add(session.id);
     await submitSessionInput(tx, {
       sessionId: session.id,

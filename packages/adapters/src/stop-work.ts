@@ -3,6 +3,7 @@ import {
   appendEventInTransaction,
   cancelRunsInTransaction,
   endThreadWorkInTransaction,
+  submitStopInputsInTransaction,
   threadStopRunWhere,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -50,10 +51,16 @@ export async function stopConversationWork(
   for (const threadId of [run.threadId, ...handed.map((thread) => thread.id)]) {
     const stopped = await deps.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM threads WHERE id = ${threadId} FOR UPDATE`;
+      // A run its session runs is stopped by that session's owner; one no session owns ends here.
+      const live = await tx.run.findMany({
+        where: { ...threadStopRunWhere(threadId, undefined, "all"), id: { not: run.id } },
+        select: { id: true, threadId: true, botId: true },
+      });
+      const stops = await submitStopInputsInTransaction(tx, live, "stop");
       const cancelled = await tx.run.updateManyAndReturn({
         where: {
           ...threadStopRunWhere(threadId, undefined, "all"),
-          id: { not: run.id },
+          id: { in: stops.unowned },
         },
         data: { status: "cancelled", completedAt: new Date(), error: null },
         select: { id: true, botId: true, taskId: true },
@@ -85,9 +92,10 @@ export async function stopConversationWork(
             runId: { in: cancelled.map((item) => item.id) },
           },
         });
-      return { count: cancelled.length, seq };
+      return { count: live.length, seq, sessionIds: stops.sessionIds };
     });
     stoppedTurns += stopped.count;
+    await deps.events.wakeSessions(stopped.sessionIds);
     if (stopped.seq !== null)
       await deps.events.notify(threadId, stopped.seq).catch((error) => {
         getLogger().error("stop work realtime notification", error);

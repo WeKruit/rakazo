@@ -4,6 +4,8 @@ import type { RealtimeFanout } from "@rakazo/adapter-kit";
 import type { PrismaClient, SessionLease } from "@rakazo/db";
 import {
   acquireSessionLease,
+  appendEventInTransaction,
+  cancelRunsInTransaction,
   markSessionInputDelivered,
   pendingSessionInputs,
   releaseSessionLease,
@@ -22,6 +24,34 @@ import { runSessionHost } from "./session-host.js";
 import type { SessionLoadDeps } from "./session-load.js";
 import { loadSessionConfig } from "./session-load.js";
 import { prismaSeedSource, seedSession } from "./session-seed.js";
+
+/** A stopped run whose operation no lane is running ends here, as Stop asked. */
+async function endStaleRun(deps: Pick<SessionDriverDeps, "prisma" | "projection">, runId: string) {
+  const committed = await deps.prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const [run] = await tx.run.updateManyAndReturn({
+      where: { id: runId, status: { in: ["queued", "leased", "running", "waiting_input"] } },
+      data: { status: "cancelled", completedAt: now },
+      select: { id: true, taskId: true, spaceId: true, threadId: true, botId: true },
+    });
+    if (!run) return null;
+    await cancelRunsInTransaction(tx, [run], now);
+    return appendEventInTransaction(tx, {
+      spaceId: run.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      type: "run.cancelled",
+      runId: run.id,
+      payload: {},
+    });
+  });
+  if (committed)
+    await deps.projection.events
+      .notify(committed.threadId, committed.seq)
+      .catch((error: unknown) => {
+        getLogger().error("stale run realtime notification", error, { runId });
+      });
+}
 
 export interface SessionDriverDeps {
   prisma: PrismaClient;
@@ -223,6 +253,7 @@ export function createSessionDriver(deps: SessionDriverDeps) {
         },
         openSession,
         buildConfig,
+        endStaleRun: (runId) => endStaleRun(deps, runId),
         async onEvent(event, context) {
           if (!projection) return;
           // A run resumed after its owner died gets its tools set up again.

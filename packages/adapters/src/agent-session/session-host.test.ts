@@ -154,6 +154,7 @@ function startHost(options: {
   inputs: ReturnType<typeof memoryInputs>;
   config: () => SessionConfig;
   onEvent?: (event: HarnessEvent, lane: AgentLane) => void;
+  endStaleRun?: (runId: string) => Promise<void>;
 }): HostHandle {
   const events: HarnessEvent[] = [];
   const listeners = new Set<() => void>();
@@ -180,6 +181,7 @@ function startHost(options: {
       events.push(event);
       options.onEvent?.(event, context.lane);
     },
+    ...(options.endStaleRun ? { endStaleRun: options.endStaleRun } : {}),
     timing: { renewMs: 5, quiesceMs: 2_000 },
   };
   const done = runSessionHost(deps, controller.signal);
@@ -361,6 +363,42 @@ describe("session host", () => {
     host.notify();
     await vi.waitFor(() => expect(ofType(host.events, "run_end")).toHaveLength(2));
     expect(userTexts(seen[0]!)).toEqual(["long search", "also check Munich", "go on"]);
+  });
+
+  it("stop aborts only the run it names and ends a row no lane runs", async () => {
+    const { faux, models, model } = fauxModels();
+    await settle(faux, [
+      async (_context, options) => {
+        await new Promise((resolve) => options?.signal?.addEventListener("abort", resolve));
+        return fauxAssistantMessage("never seen");
+      },
+    ]);
+    const inputs = memoryInputs();
+    const stale: string[] = [];
+    const host = track(
+      startHost({
+        openSession: memorySessions(),
+        inputs,
+        config: simpleConfig(models, model),
+        endStaleRun: async (runId) => {
+          stale.push(runId);
+        },
+      }),
+    );
+    inputs.submit("message", "long search");
+    host.notify();
+    await vi.waitFor(() => expect(ofType(host.events, "run_start")).toHaveLength(1));
+    const live = ofType(host.events, "run_start")[0]!.runId;
+    const other = inputs.submit("stop");
+    other.payload = { text: "", runId: "an-earlier-run" };
+    host.notify();
+    await vi.waitFor(() => expect(stale).toEqual(["an-earlier-run"]));
+    expect(ofType(host.events, "run_end")).toHaveLength(0);
+    const named = inputs.submit("stop");
+    named.payload = { text: "", runId: live };
+    host.notify();
+    await vi.waitFor(() => expect(ofType(host.events, "run_end")).toHaveLength(1));
+    expect(ofType(host.events, "run_end")[0]?.status).toBe("aborted");
   });
 
   it("stop on an idle lane is a no-op", async () => {

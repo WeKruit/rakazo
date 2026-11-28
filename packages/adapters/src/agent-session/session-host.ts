@@ -81,6 +81,8 @@ export interface SessionHostDeps {
    * lane command (that command would wait behind this delivery).
    */
   onEvent?(event: HarnessEvent, context: SessionEventContext): void | Promise<void>;
+  /** Stop named a run this lane is not running: its row outlived its operation. */
+  endStaleRun?(runId: string): Promise<void>;
   timing?: Partial<typeof SESSION_HOST_TIMING>;
 }
 
@@ -122,6 +124,14 @@ const HARNESS_EVENT_TYPES: readonly HarnessEventType[] = [
 
 /** Recent branch entries searched for inputs already handed to Pi before a crash. */
 const DELIVERED_SCAN_ENTRIES = 50;
+
+function stopRunId(payload: unknown): string | undefined {
+  if (payload && typeof payload === "object" && "runId" in payload) {
+    const { runId } = payload as { runId: unknown };
+    if (typeof runId === "string" && runId) return runId;
+  }
+  return undefined;
+}
 
 function inputText(payload: unknown): string {
   if (payload && typeof payload === "object" && "text" in payload) {
@@ -173,12 +183,14 @@ export interface InputDelivery extends SessionInputDelivery {
   started?: string;
   /** Stop aborted a live operation. */
   aborted?: boolean;
+  /** Stop named a run that is not this lane's live operation. */
+  stale?: string;
 }
 
 /**
  * Hands one input to the lane. A message starts a run when the lane is idle and is steered into
- * the live run otherwise; Stop aborts only a live operation, and the steers it pulls out of the
- * inbox are kept for the next run.
+ * the live run otherwise; Stop aborts only the live operation it names, and the steers it pulls
+ * out of the inbox are kept for the next run.
  */
 export async function deliverInput(
   lane: AgentLane,
@@ -208,7 +220,8 @@ export async function deliverInput(
     }
     case "stop": {
       const current = (await lane.inspectExecution(context)).current;
-      if (!current) return {};
+      const named = stopRunId(input.payload);
+      if (!current || (named && current.id !== named)) return named ? { stale: named } : {};
       const requested = await lane.requestAbort(current.id, context);
       if (!requested.ok) {
         if (requested.error._tag === "OperationMismatch") return {};
@@ -364,6 +377,7 @@ async function ownSession(own: Ownership): Promise<SessionHostOutcome> {
       delivered.add(input.id);
       if (input.kind !== "stop") parked = false;
       if (result.aborted) parked = true;
+      if (result.stale) await deps.endStaleRun?.(result.stale);
       await deps.inputs.markDelivered(input.id, {
         ...(result.piEntryId === undefined ? {} : { piEntryId: result.piEntryId }),
         ...(result.operationId === undefined ? {} : { operationId: result.operationId }),
