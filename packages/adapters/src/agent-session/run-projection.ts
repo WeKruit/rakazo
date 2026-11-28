@@ -712,18 +712,43 @@ export function createRunProjection(deps: RunProjectionDeps, key: RunProjectionK
       deps.prisma.$transaction(async (tx) => {
         // A recovered lane can replay its start: the row is already there.
         if (await tx.run.findUnique({ where: { id: runId }, select: { id: true } })) return null;
-        // The lane runs one operation at a time: a live row it no longer runs (its end was never
-        // projected) has ended, and the one-live-run index needs it closed first.
+        // The lane runs one operation at a time, and the one-live-run index needs the agent's
+        // other live row closed first. A run waiting on its card completes: its answer, or the
+        // recruiter's next words, is this run's input. Any other live row has ended without its
+        // end projected.
+        const endedAt = new Date(startedAt);
+        const waited = await tx.run.updateManyAndReturn({
+          where: { threadId: key.threadId, botId: key.botId, status: "waiting_input" },
+          data: { status: "completed", completedAt: endedAt },
+          select: { id: true, taskId: true, startedAt: true },
+        });
+        if (waited.length > 0) {
+          await tx.task.updateMany({
+            where: { id: { in: waited.map((row) => row.taskId) } },
+            data: { status: "completed" },
+          });
+          await appendEventsInTransaction(
+            tx,
+            waited.map((row) => ({
+              spaceId: key.spaceId,
+              threadId: key.threadId,
+              botId: key.botId,
+              type: "run.completed",
+              runId: row.id,
+              payload: completedRunSummary([], row.startedAt, endedAt),
+            })),
+          );
+        }
         const orphans = await tx.run.updateManyAndReturn({
           where: {
             threadId: key.threadId,
             botId: key.botId,
-            status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
+            status: { in: ["queued", "leased", "running", "waiting_takeover"] },
           },
-          data: { status: "cancelled", completedAt: new Date(startedAt) },
+          data: { status: "cancelled", completedAt: endedAt },
           select: { id: true, taskId: true },
         });
-        await cancelRunsInTransaction(tx, orphans, new Date(startedAt));
+        await cancelRunsInTransaction(tx, orphans, endedAt);
         const task = await tx.task.create({
           data: {
             spaceId: key.spaceId,
@@ -846,6 +871,9 @@ export function createRunProjection(deps: RunProjectionDeps, key: RunProjectionK
         if (!row || !["running", "queued", "leased", "waiting_input"].includes(row.status))
           return null;
         const now = new Date();
+        // An operation that ended on its card leaves the row waiting for the answer; the next
+        // run of this agent completes it.
+        const waits = row.status === "waiting_input" && status === "completed";
         const events: AppendEventInput[] = [];
         if (leftover.length > 0 && !isBackgroundRunTrigger(row.trigger)) {
           const message = await createThreadMessageInTransaction(tx, {
@@ -864,39 +892,46 @@ export function createRunProjection(deps: RunProjectionDeps, key: RunProjectionK
             payload: { messageId: message.id, role: "bot", blocks: leftover },
           });
         }
-        await tx.run.update({
-          where: { id: event.runId },
-          data: { status, error, completedAt: now },
-        });
-        await tx.task.update({ where: { id: row.taskId }, data: { status } });
-        events.push({
-          spaceId: key.spaceId,
-          threadId: key.threadId,
-          botId: key.botId,
-          type:
-            status === "completed"
-              ? "run.completed"
-              : status === "failed"
-                ? "run.failed"
-                : "run.cancelled",
-          runId: event.runId,
-          payload:
-            status === "completed"
-              ? completedRunSummary([...(run?.posted ?? []), ...leftover], row.startedAt, now)
-              : status === "failed"
-                ? { error }
-                : {},
-        });
-        const last = (await appendEventsInTransaction(tx, events)).at(-1)!;
+        if (!waits) {
+          await tx.run.update({
+            where: { id: event.runId },
+            data: { status, error, completedAt: now },
+          });
+          await tx.task.update({ where: { id: row.taskId }, data: { status } });
+          events.push({
+            spaceId: key.spaceId,
+            threadId: key.threadId,
+            botId: key.botId,
+            type:
+              status === "completed"
+                ? "run.completed"
+                : status === "failed"
+                  ? "run.failed"
+                  : "run.cancelled",
+            runId: event.runId,
+            payload:
+              status === "completed"
+                ? completedRunSummary([...(run?.posted ?? []), ...leftover], row.startedAt, now)
+                : status === "failed"
+                  ? { error }
+                  : {},
+          });
+        }
+        const last = (await appendEventsInTransaction(tx, events)).at(-1);
         await tx.event.deleteMany({ where: { runId: event.runId, type: "thread.progress" } });
         await tx.bot.update({ where: { id: key.botId }, data: { updatedAt: now } });
-        return { seq: last.seq, trigger: row.trigger };
+        return { seq: last?.seq, trigger: row.trigger, waits };
       }),
     );
     if (!committed) return;
-    await notify(committed.seq);
+    if (committed.seq !== undefined) await notify(committed.seq);
     const body = completionNotificationPreview(run?.lastText ?? "");
-    if (status === "completed" && runSendsFinishNotification(committed.trigger) && body) {
+    if (
+      status === "completed" &&
+      !committed.waits &&
+      runSendsFinishNotification(committed.trigger) &&
+      body
+    ) {
       const bot = await deps.prisma.bot.findUnique({
         where: { id: key.botId },
         select: { name: true },

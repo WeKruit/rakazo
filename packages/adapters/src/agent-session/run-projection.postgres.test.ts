@@ -326,4 +326,43 @@ describePostgres("run projection (PostgreSQL)", () => {
     expect(terminal.map((event) => event.type)).toEqual(["run.started", "run.cancelled"]);
     await t.harness.close(C);
   });
+
+  it("a run that ended on its card keeps waiting until the next run starts", async () => {
+    // The card tool pauses the row as pauseRunForInput does; the operation then ends.
+    const ask: AgentHarnessTool<undefined> = {
+      name: "ask",
+      label: "ask",
+      description: "Ask",
+      parameters: { type: "object", properties: {} } as never,
+      execute: async () => {
+        await prisma.run.update({ where: { id: "op-card-1" }, data: { status: "waiting_input" } });
+        return { content: [{ type: "text", text: "asked" }], details: {}, terminate: true };
+      },
+    };
+    const t = await setup(
+      [
+        fauxAssistantMessage([fauxToolCall("ask", {})], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Thanks."),
+      ],
+      [ask],
+    );
+    await (await t.run("op-card-1", "draft it")).driven;
+    await t.settle();
+    const status = async (id: string) =>
+      (await prisma.run.findUniqueOrThrow({ where: { id } })).status;
+    // The card is still answerable: readers of a waiting card see its run waiting.
+    expect(await status("op-card-1")).toBe("waiting_input");
+    const runEvents = async (runId: string) =>
+      (await prisma.event.findMany({ where: { runId }, orderBy: { seq: "asc" } }))
+        .map((event) => event.type)
+        .filter((type) => type.startsWith("run."));
+    expect(await runEvents("op-card-1")).toEqual(["run.started"]);
+
+    await (await t.run("op-card-2", "send it")).driven;
+    await t.settle();
+    expect(await status("op-card-1")).toBe("completed");
+    expect(await status("op-card-2")).toBe("completed");
+    expect(await runEvents("op-card-1")).toEqual(["run.started", "run.completed"]);
+    await t.harness.close(C);
+  });
 });
