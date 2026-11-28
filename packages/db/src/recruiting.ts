@@ -2909,16 +2909,25 @@ export async function executeRecruitingRoleMutation(
       const sourceIds = current.revision.sourceRefs.flatMap((ref) =>
         ref.anchor.kind === "message" ? [ref.anchor.messageId] : [],
       );
-      const previous = await tx.message.findMany({
-        where: { id: { in: sourceIds } },
-        include: humanMessageInclude,
-      });
+      const [previous, asked] = await Promise.all([
+        tx.message.findMany({ where: { id: { in: sourceIds } }, include: humanMessageInclude }),
+        // A run asked from another conversation acts, in its own, on the request it received:
+        // the recruiter's messages before it (such as theirs copied in when a role opens, which a
+        // save cites as their latest message here) are not newer than what it acts for.
+        source.threadId === run.threadId
+          ? source
+          : tx.message.findUniqueOrThrow({ where: { id: run.sourceMessageId ?? "" } }),
+      ]);
       if (
         previous.some(
-          (message) => isNativeHumanMessage(message) && compareHumanMessages(message, source) > 0,
+          (message) =>
+            isNativeHumanMessage(message) &&
+            compareHumanMessages(message, message.threadId === run.threadId ? asked : source) > 0,
         )
       )
-        throw new RecruitingConflictError();
+        throw new RecruitingConflictError(
+          `Role revision ${current.role.revision} was saved for a newer recruiter message than this run's.`,
+        );
     }
     let result: RecruitingRoleToolResult;
     let briefError: string | undefined;
