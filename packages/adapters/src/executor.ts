@@ -522,11 +522,11 @@ import {
 import {
   executeRecruitingRoleTool,
   importRecruitingCandidateCsv,
-  normalizeRecruitingRoleArgs,
   PEOPLE_SEARCH_AUTOSAVE_KEY,
   RecruitingCsvImportError,
   RecruitingPeopleSearchError,
   repairedRoleSave,
+  roleArgsWithMessageCitations,
   saveRecruitingPeopleSearch,
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
@@ -3340,10 +3340,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ),
                 )
               : name === "recruiting_role"
-                ? normalizeRecruitingRoleArgs(
+                ? await roleArgsWithMessageCitations(
+                    deps.prisma,
                     rawArgs,
-                    new Date().toISOString(),
-                    currentMessageSourceRef(currentTurnMessage),
+                    recruitingSourceMessageId,
+                    currentTurnMessage,
                   )
                 : rawArgs;
           // A lookup for the first N people of the role: the server picks the next batch in Results
@@ -10500,38 +10501,6 @@ async function renewRunLease(
     data: { leaseExpiresAt: new Date(Date.now() + 5 * 60_000) },
   });
   return renewed.count === 1;
-}
-
-/** The person's current message as a role citation, used when a criterion arrives uncited. */
-function currentMessageSourceRef(
-  message:
-    | {
-        id: string;
-        role: string;
-        botId: string | null;
-        blocks: readonly MessageBlock[];
-      }
-    | null
-    | undefined,
-): Record<string, unknown> | undefined {
-  if (message?.role !== "user" || message.botId !== null) return undefined;
-  const blockIndex = message.blocks.findIndex(
-    (block) => block.kind === "text" && block.text.trim().length > 0,
-  );
-  const block = message.blocks[blockIndex];
-  if (block?.kind !== "text") return undefined;
-  return {
-    id: "current-message-source",
-    kind: "original_material",
-    anchor: {
-      kind: "message",
-      messageId: message.id,
-      locator: `blocks[${blockIndex}].text`,
-    },
-    readState: "read",
-    readAt: new Date().toISOString(),
-    quote: block.text.trim(),
-  };
 }
 
 /** Desktop, browser and login-takeover tools; managed recruiting bots disable all of them. */

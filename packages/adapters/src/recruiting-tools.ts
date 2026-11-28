@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AdapterContext, ArtifactStore, ConnectorProvider } from "@rakazo/adapter-kit";
-import type { Actor, RecruitingResearchToolInput } from "@rakazo/contracts";
+import type { Actor, MessageBlock, RecruitingResearchToolInput } from "@rakazo/contracts";
 import {
   RecruitingCrmCandidatesReadSchema,
   RecruitingCrmRoleMailReadSchema,
@@ -58,6 +58,15 @@ const READ_STATES = ["read", "unread", "unavailable"];
 const SHA256 = /^[a-f0-9]{64}$/;
 
 /**
+ * Which messages exist, and the run's own message citation. The model is not shown message ids,
+ * so a message id that names none is recorded as the run's own message (or dropped without one).
+ */
+export type MessageCitations = {
+  known: ReadonlySet<string>;
+  turnRef?: Record<string, unknown>;
+};
+
+/**
  * Rewrites one source reference into the shape the schema takes, or drops it when it names no
  * message or file. The server then fills the file fingerprint and checks ownership as before, so a
  * citation slip never costs the save.
@@ -66,6 +75,7 @@ function repairSourceRef(
   value: unknown,
   now: string,
   index: number,
+  messages?: MessageCitations,
 ): Record<string, unknown> | undefined {
   const object = (item: unknown): item is Record<string, unknown> =>
     !!item && typeof item === "object" && !Array.isArray(item);
@@ -92,6 +102,9 @@ function repairSourceRef(
           }
         : undefined;
   if (!fixedAnchor) return undefined;
+  const id = text(value.id) ?? `source-${index + 1}`;
+  if (fixedAnchor.kind === "message" && messages && !messages.known.has(String(messageId)))
+    return messages.turnRef ? { ...messages.turnRef, id } : undefined;
   const readState = READ_STATES.includes(String(value.readState))
     ? String(value.readState)
     : "read";
@@ -99,7 +112,7 @@ function repairSourceRef(
   const quote = readState === "read" ? text(value.quote) : undefined;
   const url = text(value.url);
   return {
-    id: text(value.id) ?? `source-${index + 1}`,
+    id,
     kind: SOURCE_KINDS.includes(String(value.kind)) ? value.kind : "original_material",
     anchor: fixedAnchor,
     readState,
@@ -109,13 +122,83 @@ function repairSourceRef(
   };
 }
 
+/** The person's current message as a role citation, used when a criterion arrives uncited. */
+function currentMessageSourceRef(
+  message:
+    | {
+        id: string;
+        role: string;
+        botId: string | null;
+        blocks: readonly MessageBlock[];
+      }
+    | null
+    | undefined,
+): Record<string, unknown> | undefined {
+  if (message?.role !== "user" || message.botId !== null) return undefined;
+  const blockIndex = message.blocks.findIndex(
+    (block) => block.kind === "text" && block.text.trim().length > 0,
+  );
+  const block = message.blocks[blockIndex];
+  if (block?.kind !== "text") return undefined;
+  return {
+    id: "current-message-source",
+    kind: "original_material",
+    anchor: {
+      kind: "message",
+      messageId: message.id,
+      locator: `blocks[${blockIndex}].text`,
+    },
+    readState: "read",
+    readAt: new Date().toISOString(),
+    quote: block.text.trim(),
+  };
+}
+
+/**
+ * normalizeRecruitingRoleArgs with the facts it checks message citations against: which cited
+ * message ids exist, and the run's own message (the newest person's message it took in).
+ */
+export async function roleArgsWithMessageCitations(
+  prisma: PrismaClient,
+  args: Record<string, unknown>,
+  sourceMessageId: string | null,
+  turnMessage?: Parameters<typeof currentMessageSourceRef>[0],
+): Promise<Record<string, unknown>> {
+  const now = new Date().toISOString();
+  const cited = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (!Array.isArray(value)) {
+      const anchor = record.anchor as Record<string, unknown> | undefined;
+      const id = anchor?.messageId ?? record.messageId;
+      if (typeof id === "string" && id.trim()) cited.add(id.trim());
+    }
+    for (const item of Object.values(record)) visit(item);
+  };
+  visit(args);
+  const lookup = [...cited, ...(sourceMessageId ? [sourceMessageId] : [])];
+  const rows = lookup.length
+    ? await prisma.message.findMany({
+        where: { id: { in: lookup } },
+        select: { id: true, role: true, botId: true, blocks: true },
+      })
+    : [];
+  const source = rows.find((row) => row.id === sourceMessageId);
+  const turnRef = currentMessageSourceRef(
+    source ? { ...source, blocks: source.blocks as MessageBlock[] } : turnMessage,
+  );
+  return normalizeRecruitingRoleArgs(args, now, turnRef, new Set(rows.map((row) => row.id)));
+}
+
 export function repairSourceRefs(
   value: unknown,
   now: string,
+  messages?: MessageCitations,
 ): Record<string, unknown>[] | undefined {
   if (value === undefined) return undefined;
   return (Array.isArray(value) ? value : [value]).flatMap((item, index) => {
-    const repaired = repairSourceRef(item, now, index);
+    const repaired = repairSourceRef(item, now, index, messages);
     return repaired ? [repaired] : [];
   });
 }
@@ -125,13 +208,16 @@ export function repairSourceRefs(
  * regenerated brief: a read carries only its operation; a read human-message reference without
  * readAt gets the call time (message reads have no receipt time); brief lists written next to
  * the brief move into it, and role lists written inside it move out. A criterion left without a
- * citation cites the role's first source, or else the person's current message (turnRef).
+ * citation cites the role's first source, or else the person's current message (turnRef). With
+ * knownMessageIds, a message citation that names no message cites turnRef instead.
  */
 export function normalizeRecruitingRoleArgs(
   args: Record<string, unknown>,
   now: string,
   turnRef?: Record<string, unknown>,
+  knownMessageIds?: ReadonlySet<string>,
 ): Record<string, unknown> {
+  const messages = knownMessageIds ? { known: knownMessageIds, turnRef } : undefined;
   if (args.operation === "read") return { operation: "read" };
   const visit = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(visit);
@@ -149,7 +235,7 @@ export function normalizeRecruitingRoleArgs(
   const object = (value: unknown): value is Record<string, unknown> =>
     !!value && typeof value === "object" && !Array.isArray(value);
   // Every citation is put into the schema's shape; a criterion keeps at least the role's first one.
-  const roleRefs = repairSourceRefs(visited.sourceRefs, now);
+  const roleRefs = repairSourceRefs(visited.sourceRefs, now, messages);
   if (roleRefs) visited = { ...visited, sourceRefs: roleRefs };
   // A criterion written as a JSON string is parsed; one with no definition questions has none.
   const asObject = (item: unknown): unknown => {
@@ -170,7 +256,7 @@ export function normalizeRecruitingRoleArgs(
             definitionQuestions: criterion.definitionQuestions ?? [],
           };
           if (criterion.sourceRefs === undefined) return { ...criterion, ...questions };
-          const refs = repairSourceRefs(criterion.sourceRefs, now) ?? [];
+          const refs = repairSourceRefs(criterion.sourceRefs, now, messages) ?? [];
           const fallback = roleRefs?.length ? roleRefs.slice(0, 1) : turnRef ? [turnRef] : [];
           return {
             ...criterion,
