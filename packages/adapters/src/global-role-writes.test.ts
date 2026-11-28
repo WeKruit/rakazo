@@ -80,6 +80,11 @@ describe("delegatedRequestMessage", () => {
       'The recruiter wrote, word for word:\n"find 20 more"',
     );
   });
+  it("puts the earlier messages of the request first, verbatim (branch play 11-28)", () => {
+    expect(delegatedRequestMessage("改成英文", [], undefined, [], ["帮我写封邮件给 Wei"])).toBe(
+      'Earlier, the recruiter wrote, word for word:\n"帮我写封邮件给 Wei"\n\nThen the recruiter wrote, word for word:\n"改成英文"',
+    );
+  });
 });
 
 describe("newestRecruiterWords", () => {

@@ -6,11 +6,24 @@ import { expandSkillReferencesInPrompt, parseSkillMd } from "@rakazo/core";
 /**
  * Skills reach the model through Pi's own Agent Skills support (pi-agent-core harness/skills.js,
  * harness/system-prompt.js): the agentskills.io listing of name, description and location, and
- * `formatSkillInvocation` for a skill the user invokes. Stored skills have no file on the
- * computer, so the location is the conventional `skills/<name>/SKILL.md` and skill_read loads it
- * by name.
+ * `formatSkillInvocation` for a skill the user invokes. Pi's listing says to read the skill file at
+ * its location, so the conventional `skills/<name>/SKILL.md` is served by read_file from the
+ * stored skill (skillFileFromTool), as a written SKILL.md is saved as one; skill_read loads it by
+ * name too.
  */
-const skillLocation = (name: string) => `skills/${name}/SKILL.md`;
+const SKILLS_DIR = "skills/";
+const SKILL_FILE = "/SKILL.md";
+const skillLocation = (name: string) => `${SKILLS_DIR}${name}${SKILL_FILE}`;
+
+/** The skill name a listed location names (`skills/<name>/SKILL.md`), else undefined. */
+export function skillNameAtLocation(path: string): string | undefined {
+  let relative = path.trim();
+  while (relative.startsWith("./") || relative.startsWith("/"))
+    relative = relative.slice(relative.startsWith("/") ? 1 : 2);
+  if (!relative.startsWith(SKILLS_DIR) || !relative.endsWith(SKILL_FILE)) return undefined;
+  const name = relative.slice(SKILLS_DIR.length, -SKILL_FILE.length);
+  return name && !name.includes("/") ? name : undefined;
+}
 
 function piSkill(skill: Pick<SkillRecord, "name" | "description" | "content">): Skill {
   const parsed = parseSkillMd(skill.content);

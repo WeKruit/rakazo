@@ -245,6 +245,23 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "send-which-role",
+    mechanisms: ["reference", "state-claims"],
+    title: "要发邮件但没说哪个岗位",
+    area: "sending",
+    source:
+      "maintainer 11-28 12:29: 「职位外发不出是正确的，肯定啊。那这个时候就要clarify职位啊？」 — a send always belongs to a role; when the words leave it unclear, Kruit asks which one",
+    chinese: true,
+    maxTurns: 4,
+    persona: `${AGENCY_RECRUITER} A friend just passed you a candidate's email and you want to reach out right away. You have not said which job it is for.`,
+    facts: () =>
+      "The person: Wei Zhang <wei.zhang.test@example.com>, a backend engineer. You have not decided which job to pitch; never name one first. Never approve a send.",
+    goals: [
+      "Ask Kruit to email Wei Zhang about an opportunity (帮我给 wei.zhang.test@example.com 发封邮件，聊聊机会), without naming any job: met only when Kruit asks which role it is for, in one short question with concrete choices (your roles by name, or a new role), sends nothing, queues nothing and opens no role on its own. A send, a send card, an email written outside a role, or a role opened before you answer is a fail.",
+      "Answer that it is for a new role, Senior Go Backend Engineer (payments, New York), and check that a role by that name opens and that nothing was sent.",
+    ],
+  },
+  {
     name: "template-no-role",
     mechanisms: ["email-content", "state-claims"],
     gate: true,
@@ -802,17 +819,19 @@ export const JOURNEYS = [
     mechanisms: ["state-claims", "filler"],
     title: "老用户回来问：昨天到现在有什么新情况",
     area: "first message",
+    // Its own new account, so what is "new" is known (branch play 11-28: on the shared batch copy it
+    // read whatever role an earlier play left, and on a branch backend that copy starts empty).
     source:
-      "11-16 user: more varied plays; 11-10/11-13 customers: progress questions got deferrals instead of the actual state",
-    account: "batch",
+      "11-16 user: more varied plays; 11-10/11-13 customers: progress questions got deferrals instead of the actual state; branch play 11-28: 「没有新人、发送或回复」 on an account with no roles, withdrawn when asked which roles were checked",
     chinese: true,
     maxTurns: 5,
-    persona: `${AGENCY_RECRUITER} You were away for a day and want a quick catch-up before a client call.`,
-    facts: () => "Do not approve any send. You only ask. Never pick a role whose name mentions Dyna.",
+    persona: `${AGENCY_RECRUITER} You were away for a day and want a quick catch-up before a client call. You don't remember whether you set up any role here yet.`,
+    facts: () =>
+      "This account is new: it has no roles, no sends and no replies. Do not approve any send. You only ask.",
     goals: [
       "Ask what is new since yesterday across your roles (replies, sends, new people), in one short message.",
-      "Met only when the first reply gives concrete items that match the pages and records (or says plainly there is nothing new), not a promise to check.",
-      "Pick one item from the answer and ask for its details, and check they match the role's pages.",
+      "Met only when the first reply gives the account's actual state from its records: here, plainly that there are no roles yet (so nothing to report) and what to do first. A promise to check, or 'no new people, sends or replies' said as though roles had been checked, is a fail.",
+      "Ask which roles it looked at, and check the answer matches the pages and its first reply.",
     ],
   },
   {
