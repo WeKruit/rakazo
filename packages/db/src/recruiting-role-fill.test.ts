@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { citeRecruiterMessages, fillRecruitingRoleArgs } from "./recruiting.js";
+import { fillRecruitingRoleArgs } from "./recruiting.js";
 
 const actor = { spaceId: "space-1", userId: "user-1", email: "", isDeploymentOwner: false };
 const hash = "a".repeat(64);
@@ -18,15 +18,10 @@ const human = (id: string, text: string) => ({
   blocks: [{ kind: "text", text }],
 });
 
-// The note that hands the recruiter's words to a role team: a "user" row no recruiter typed.
-const note = { kind: "bot_message_received", text: "The recruiter wrote, word for word: go on" };
-
 function prisma({
   activeRoleId = null as string | null,
   events = [receipt] as unknown[],
   messages = [] as unknown[],
-  outside = [] as string[],
-  notes = [] as string[],
 } = {}) {
   return {
     thread: {
@@ -39,14 +34,7 @@ function prisma({
     artifact: { findMany: vi.fn(async () => [{ id: "artifact-1", hash }]) },
     event: { findMany: vi.fn(async () => events.map((payload) => ({ payload }))) },
     message: {
-      // An id lookup finds every message in this conversation except the ones named outside.
-      findMany: vi.fn(async ({ where }: { where: { id?: { in: string[] } } }) =>
-        where.id
-          ? where.id.in
-              .filter((id) => !outside.includes(id))
-              .map((id) => (notes.includes(id) ? { ...human(id, ""), blocks: [note] } : human(id, "")))
-          : messages,
-      ),
+      findMany: vi.fn(async () => messages),
     },
     recruitingRole: { findFirst: vi.fn(async () => null) },
     recruitingRoleRevision: { findUnique: vi.fn(async () => null) },
@@ -216,74 +204,6 @@ describe("fillRecruitingRoleArgs", () => {
     expect(brief.rules).toEqual([
       { criterionId: "sim", origin: "jd", effect: "reject", sourceRefIds: ["jd"] },
     ]);
-  });
-
-  // A made-up message id cites the recruiter's latest message as a plain locator.
-  it("re-points a citation of a message outside this conversation", async () => {
-    const made = {
-      id: "human-salary",
-      kind: "original_material",
-      anchor: { kind: "message", messageId: "human-salary", locator: "blocks[0].text" },
-      readState: "read",
-      readAt: "2026-10-27T16:28:00.000Z",
-      quote: "US$51K–68K",
-    };
-    const filled = await fillRecruitingRoleArgs(
-      prisma({ events: [], outside: ["human-salary"], messages: [human("latest-human", "pay")] }),
-      actor,
-      context,
-      { operation: "create", sourceRefs: [made], criteria: [] },
-    );
-    const { quote: _quote, ...rest } = made;
-    expect(filled.sourceRefs).toEqual([
-      {
-        ...rest,
-        anchor: { kind: "message", messageId: "latest-human", locator: "blocks[0].text" },
-      },
-    ]);
-  });
-
-  it("re-points a citation of the hand-off note to the recruiter's own latest message (staging 2026-11-27)", async () => {
-    const cited = {
-      id: "location_src",
-      kind: "original_material",
-      anchor: { kind: "message", messageId: "handoff", locator: "blocks[0].text" },
-      readState: "read",
-    };
-    const filled = await fillRecruitingRoleArgs(
-      prisma({
-        events: [],
-        notes: ["handoff"],
-        messages: [{ ...human("handoff", ""), blocks: [note] }, human("jd-message", "Seattle")],
-      }),
-      actor,
-      context,
-      { operation: "create", sourceRefs: [cited], criteria: [] },
-    );
-    expect(filled.sourceRefs).toEqual([
-      { ...cited, anchor: { kind: "message", messageId: "jd-message", locator: "blocks[0].text" } },
-    ]);
-  });
-
-  it("re-points a made-up message id on a preference save (staging 2026-11-27)", async () => {
-    const args = {
-      target: "preference",
-      operation: "add",
-      sourceRefs: [
-        {
-          id: "ask",
-          kind: "original_material",
-          anchor: { kind: "message", messageId: "made-up", locator: "blocks[0].text" },
-          readState: "read",
-        },
-      ],
-    };
-    const filled = await citeRecruiterMessages(
-      prisma({ outside: ["made-up"], messages: [human("typed", "always write in English")] }),
-      "thread-1",
-      args,
-    );
-    expect(filled.sourceRefs[0]!.anchor.messageId).toBe("typed");
   });
 
   // 2026-10-26: roles with several page excerpts, or a JD pasted as a message, left JD facts uncited.

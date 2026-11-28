@@ -1590,8 +1590,8 @@ describe("a turn-end nudge that reaches a run already working", () => {
   });
 });
 
-describe("record keeping is never refused over which recruiter message it cites", () => {
-  it("cites the recruiter's latest message when the run's own message can't be traced", async () => {
+describe("record keeping is never refused over who wrote the message it cites", () => {
+  it("cites the message the runtime names, even a report it cannot trace to the recruiter", async () => {
     const f = reportFixture();
     f.asked.clientNonce = "something-else";
     const result = await readRecruitingFeedbackContext(f.prisma, actor, {
@@ -1599,8 +1599,8 @@ describe("record keeping is never refused over which recruiter message it cites"
       recordKeeping: true,
     });
     expect(result.source).toMatchObject({
-      id: "human-message:human",
-      anchor: { messageId: f.source.id },
+      id: `human-message:${f.report.id}`,
+      anchor: { messageId: f.report.id },
     });
   });
 

@@ -153,7 +153,6 @@ export class MarkdownMemoryStore implements MemoryStore {
                 previousAnchor: recruiting.previousAnchor,
                 anchor: recruiting.anchor,
                 source: recruiting.source,
-                previousSourceVerified: recruiting.previousSourceVerified,
               },
             });
           return { id: doc.id, path: doc.path, revision: doc.revision, content: doc.content };

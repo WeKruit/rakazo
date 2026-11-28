@@ -267,7 +267,6 @@ describePostgres("memory commits (PostgreSQL)", () => {
       kind: "recruiting_preference",
       documentId: added.id,
       revision: 2,
-      previousSourceVerified: false,
       scope: "user",
       path: f.path,
       operation: "add",
@@ -396,12 +395,11 @@ describePostgres("memory commits (PostgreSQL)", () => {
     expect(event.payload).toMatchObject({
       documentId: original.id,
       revision: 2,
-      previousSourceVerified: false,
       source: { anchor: { messageId: current.source.id } },
     });
   });
 
-  it("prevents an older live run from reapplying its human input over a newer preference source", async () => {
+  it("accepts an older live run's edit at the current revision after a newer preference source", async () => {
     const older = await agentFixture();
     const newer = await agentFixture();
     const original = await store.commit(
@@ -432,45 +430,44 @@ describePostgres("memory commits (PostgreSQL)", () => {
       },
       newer.agentContext,
     );
-    await expect(
-      store.commit(
-        {
-          ...older.commit,
-          content: original.content,
-          expectedRevision: 2,
-          recruiting: {
-            ...older.recruiting,
-            feedback: {
-              ...older.feedback,
-              operation: "replace",
-              expectedRevision: 2,
-              anchor: { start: 0, end: text.length, quote: text },
-            },
+    const reapplied = await store.commit(
+      {
+        ...older.commit,
+        content: original.content,
+        expectedRevision: 2,
+        recruiting: {
+          ...older.recruiting,
+          feedback: {
+            ...older.feedback,
+            operation: "replace",
+            expectedRevision: 2,
+            anchor: { start: 0, end: text.length, quote: text },
           },
         },
-        older.agentContext,
-      ),
-    ).rejects.toThrow();
-    expect((await document(older.path)).content).toBe(text);
+      },
+      older.agentContext,
+    );
+    expect(reapplied.revision).toBe(3);
+    expect((await document(older.path)).content).toBe(original.content);
     const refined = await store.commit(
       {
         ...newer.commit,
         path: older.path,
         content: "Compact reports",
-        expectedRevision: 2,
+        expectedRevision: 3,
         recruiting: {
           sourceMessageId: newer.source.id,
           feedback: {
             ...feedback,
-            expectedRevision: 2,
-            anchor: { start: 0, end: text.length, quote: text },
+            expectedRevision: 3,
+            anchor: { start: 0, end: original.content.length, quote: original.content },
             content: "Compact reports",
           },
         },
       },
       newer.agentContext,
     );
-    expect(refined.revision).toBe(3);
+    expect(refined.revision).toBe(4);
   });
 
   it("allows explicit preferences before role selection and preserves ordinary agent memory behavior outside recruiting", async () => {
@@ -519,66 +516,10 @@ describePostgres("memory commits (PostgreSQL)", () => {
     await expect(
       store.commit(valid, { ...f.agentContext, userId: "other-owner" }),
     ).rejects.toThrow();
-    const unclaimed = await prisma.message.create({
-      data: {
-        threadId: f.thread.id,
-        seq: 1,
-        role: "user",
-        blocks: [{ kind: "text", text: f.feedback.intent.quote }],
-      },
-    });
-    await expect(
-      store.commit(
-        { ...valid, recruiting: { ...f.recruiting, sourceMessageId: unclaimed.id } },
-        f.agentContext,
-      ),
-    ).rejects.toThrow();
-    await prisma.message.update({
-      where: { id: f.source.id },
-      data: {
-        blocks: [
-          {
-            kind: "bot_message_received",
-            fromBotId: f.bot.id,
-            fromBotName: "Peer",
-            text: f.feedback.intent.quote,
-          },
-        ],
-      },
-    });
-    await expect(store.commit(valid, f.agentContext)).rejects.toThrow();
     expect(
       await prisma.memoryDocument.count({ where: { spaceId: context.spaceId, path: f.path } }),
     ).toBe(0);
     expect(await prisma.memoryRevision.count({ where: { sourceRunId: f.run.id } })).toBe(0);
-  });
-
-  it("cites newer claimed human steering as the source", async () => {
-    const f = await agentFixture();
-    const newer = await prisma.message.create({
-      data: {
-        threadId: f.thread.id,
-        seq: 1,
-        role: "user",
-        blocks: [{ kind: "text", text: "Use compact reports instead" }],
-      },
-    });
-    await prisma.steeringMessage.create({
-      data: {
-        messageId: newer.id,
-        botId: f.bot.id,
-        userId: context.userId,
-        runId: f.run.id,
-        claimedAt: new Date(),
-      },
-    });
-    await store.commit({ ...f.commit, recruiting: f.recruiting }, f.agentContext);
-    const receipt = await prisma.event.findFirstOrThrow({
-      where: { runId: f.run.id, type: "memory.revised" },
-    });
-    expect(receipt.payload).toMatchObject({
-      source: { anchor: { kind: "message", messageId: newer.id } },
-    });
   });
 
   it("rechecks live run state inside the memory transaction after an earlier authorization", async () => {

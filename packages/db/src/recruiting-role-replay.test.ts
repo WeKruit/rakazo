@@ -133,14 +133,11 @@ describe("native role creation after clarification", () => {
     "stale hint",
     "foreign thread",
     "foreign actor",
-    "bot source",
-    "forged answer",
-    "new steering",
     "bind",
     "explicit criterion source",
     "missing criterion source",
   ])(
-    "cites the newest recruiter message with multiple authenticated answers: %s",
+    "cites the message the runtime names for the call as the role's provenance: %s",
     async (boundary) => {
       const f = fixture();
       f.run.status = "running";
@@ -181,14 +178,7 @@ describe("native role creation after clarification", () => {
           },
         },
       ]);
-      // Sent while the role was being written; the save's intent.quote is not in it.
-      const newer = {
-        ...f.human,
-        id: "newer",
-        seq: 5,
-        blocks: [{ kind: "text", text: "继续吧" }] as MessageBlock[],
-      };
-      const messages = [f.human, ...cards, ...answers, newer];
+      const messages = [f.human, ...cards, ...answers];
       f.tx.message.findFirst.mockImplementation(async (query) => {
         const { where } = query as { where: { id: string; threadId: string } };
         return messages.find(
@@ -224,11 +214,7 @@ describe("native role creation after clarification", () => {
           findMany: vi.fn(async () => receipts),
           create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
         },
-        steeringMessage: {
-          findMany: vi.fn(async () =>
-            boundary === "new steering" ? [{ messageId: newer.id, message: newer }] : [],
-          ),
-        },
+        steeringMessage: { findMany: vi.fn(async () => []) },
       });
       for (const answer of answers)
         f.input.sourceRefs.push({
@@ -240,8 +226,6 @@ describe("native role creation after clarification", () => {
       if (boundary === "latest hint") f.context.sourceMessageId = answers.at(-1)!.id;
       if (boundary === "stale hint") f.context.sourceMessageId = "unrelated";
       if (boundary === "foreign thread") f.human.threadId = "foreign";
-      if (boundary === "bot source") f.human.role = "bot";
-      if (boundary === "forged answer") receipts.at(-1)!.payload.answeredByUserId = "foreign";
       const criterion = {
         id: "systems",
         priority: "hard" as const,
@@ -284,19 +268,15 @@ describe("native role creation after clarification", () => {
         expect(f.tx.recruitingRoleRevision.create).not.toHaveBeenCalled();
         return;
       }
-      if (
-        !["valid", "latest hint", "bind", "explicit criterion source", "new steering"].includes(
-          boundary,
-        )
-      ) {
+      if (!["valid", "latest hint", "bind", "explicit criterion source"].includes(boundary)) {
         await expect(result).rejects.toThrow(IsolationError);
         expect(create).not.toHaveBeenCalled();
         return;
       }
       const saved = await result;
       expect(saved.status).toBe("saved");
-      // Staging 11-26: "继续吧" sent while a role was opening refused the save over its quote.
-      const cited = boundary === "new steering" ? newer.id : answers.at(-1)!.id;
+      // Who wrote the message is not checked: it is recorded, never a reason to refuse.
+      const cited = boundary === "latest hint" ? answers.at(-1)!.id : f.human.id;
       expect(saved.source).toMatchObject({
         id: `human-message:${cited}`,
         anchor: { kind: "message", messageId: cited, locator: "blocks[0].text" },

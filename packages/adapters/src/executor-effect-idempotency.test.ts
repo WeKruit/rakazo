@@ -2721,6 +2721,36 @@ describe("native recruiting role effect delivery", () => {
     expect(f.effects.map((effect) => effect.status)).toEqual(["completed", "completed"]);
   });
 
+  // A role update is saved before its result returns: a refused save reaches the agent in the
+  // tool result, with the current revision, and is never retried behind its back.
+  it("returns a role update's conflict to the agent with the current revision, without retrying", async () => {
+    const f = fixture("role-update-conflict");
+    const { RecruitingConflictError } = await vi.importActual<typeof DatabaseModule>("@rakazo/db");
+    vi.mocked(executeRecruitingRoleTool).mockRejectedValue(
+      new RecruitingConflictError("The role is at revision 3; this call named revision 2.", 3),
+    );
+    const update = {
+      operation: "update",
+      roleId: workspace.role.id,
+      expectedRevision: 2,
+      intent: { basis: "direct", quote: source.quote },
+      title: "Geometry lead",
+    };
+    f.setCalls([{ name: "recruiting_role", args: update, executionId: "role-update-conflict" }]);
+    await f.run();
+    expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
+      expectedRevision: 2,
+    });
+    expect(f.results).toEqual([
+      {
+        error: "The role is at revision 3; this call named revision 2.",
+        code: "CONFLICT",
+        currentRevision: 3,
+      },
+    ]);
+  });
+
   it.each(["scope"])(
     "settles native role source %s errors without repeating the mutation",
     async (kind) => {
@@ -3848,7 +3878,7 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(f.semanticSave).not.toHaveBeenCalled();
   });
 
-  it("leaves the claimed effect uncertain, without a retry or a stopped task, when a preference commit acknowledgement is lost", async () => {
+  it("leaves the claimed effect uncertain, without a retry, when a preference commit acknowledgement is lost", async () => {
     const f = fixture("run-feedback-unknown-commit");
     vi.mocked(executeRecruitingFeedback).mockRejectedValue(
       new Error("native commit acknowledgement lost"),
@@ -3857,11 +3887,12 @@ describe("native recruiting feedback effect dispatch", () => {
       { name: "recruiting_feedback", args: feedback, executionId: "feedback-unknown-commit" },
     ]);
 
-    // Saving a preference is record keeping: the recruiter's task carries on.
-    await f.run();
+    // The save's own error is the tool call's outcome; this fake runtime does not turn a thrown
+    // tool error into a tool result, so it ends the run with it.
+    await f.run("native commit acknowledgement lost");
 
     expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
-    expect(f.results).toEqual([{ error: "native commit acknowledgement lost" }]);
+    expect(f.results).toEqual([]);
     expect(f.effects).toEqual([
       expect.objectContaining({
         kind: "recruiting_feedback",
@@ -3873,28 +3904,18 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(f.semanticSave).not.toHaveBeenCalled();
   });
 
-  it("saves a preference that lost a revision race at the current revision, in the background", async () => {
+  it("returns a preference that lost a revision race to the agent with the current revision", async () => {
     const f = fixture("run-feedback-preference-conflict");
     f.memoryRead.mockResolvedValue({
       documents: [{ path: "MEMORY.md", content: "Earlier line", revision: 3 }],
     } as never);
-    vi.mocked(executeRecruitingFeedback)
-      .mockRejectedValueOnce(new MemoryRevisionConflictError())
-      .mockResolvedValueOnce({
-        status: "saved",
-        feedback,
-        source,
-        workspace: null,
-        document: { id: "doc-1", scope: "bot", path: "MEMORY.md", revision: 4, anchor: "a" },
-      } as never);
+    vi.mocked(executeRecruitingFeedback).mockRejectedValueOnce(new MemoryRevisionConflictError());
     f.setCalls([{ name: "recruiting_feedback", args: feedback, executionId: "feedback-conflict" }]);
 
     await f.run();
 
-    expect(executeRecruitingFeedback).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(executeRecruitingFeedback).mock.calls[1]?.[2]).toMatchObject({
-      expectedRevision: 3,
-    });
+    expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
+    expect(f.results[0]).toMatchObject({ code: "CONFLICT", currentRevision: 3 });
   });
 
   it("hands a slow preference refusal back to the agent so it can fix and resend it", async () => {
