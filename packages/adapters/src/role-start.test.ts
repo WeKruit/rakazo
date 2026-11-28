@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { createThreadMessageInTransaction } from "@rakazo/db";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  copyRecruiterMessageToRole,
   roleAlreadyOpenedHere,
   roleGroupId,
   roleOpenedFromLatestMessage,
   roleStartKey,
-  startRoleFromRecruiterMessage,
 } from "./role-start.js";
 
 vi.mock("@rakazo/db", () => ({
@@ -20,8 +21,6 @@ function deps(source: unknown, already: unknown = null) {
   const tx = {
     $queryRaw: vi.fn(async () => []),
     message: { findUnique: vi.fn(async () => already) },
-    task: { create: vi.fn(async () => ({ id: "task-1" })) },
-    run: { create: vi.fn(async () => ({ id: "run-1" })) },
   };
   return {
     tx,
@@ -31,21 +30,21 @@ function deps(source: unknown, already: unknown = null) {
         $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
       },
       events: { notify: vi.fn(async () => undefined) },
-      jobs: { enqueue: vi.fn(async () => undefined) },
     },
   };
 }
 
 const run = { spaceId: "s", userId: "u", threadId: "t-global", sourceMessageId: "m-1" };
 const role = { threadId: "t-role", botId: "bot-main", deliveryKey: "k" };
+const mine = { role: "user", botId: null, clientNonce: null, externalTranscriptFor: null };
+const copiedBlocks = () => vi.mocked(createThreadMessageInTransaction).mock.lastCall?.[1].blocks;
 
-describe("startRoleFromRecruiterMessage", () => {
-  it("copies the recruiter's own words into the role and starts the lead's turn", async () => {
-    const { deps: d, tx } = deps({
-      role: "user",
-      botId: null,
-      clientNonce: null,
-      externalTranscriptFor: null,
+describe("copyRecruiterMessageToRole", () => {
+  beforeEach(() => vi.mocked(createThreadMessageInTransaction).mockClear());
+
+  it("copies the recruiter's own words into the role and returns the request", async () => {
+    const { deps: d } = deps({
+      ...mine,
       blocks: [
         {
           kind: "text",
@@ -54,198 +53,89 @@ describe("startRoleFromRecruiterMessage", () => {
         },
       ],
     });
-    expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(true);
-    expect(tx.run.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          botId: "bot-main",
-          trigger: "user",
-          sourceMessageId: "msg-role",
-        }),
-      }),
-    );
-    expect(tx.task.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ prompt: "Open an agent engineer role" }),
-      }),
-    );
-    expect(d.jobs.enqueue).toHaveBeenCalledTimes(1);
+    expect(await copyRecruiterMessageToRole(d as never, run, role)).toMatch(/message above/);
+    // The global conversation's chat context does not belong to the new role.
+    expect(copiedBlocks()).toEqual([{ kind: "text", text: "Open an agent engineer role" }]);
+    expect(d.events.notify).toHaveBeenCalledWith("t-role", 7);
   });
 
   it("adds the requirements given earlier when the latest message is only a go-ahead", async () => {
-    const { deps: d, tx } = deps({
-      role: "user",
-      botId: null,
-      clientNonce: null,
-      externalTranscriptFor: null,
+    const { deps: d } = deps({
+      ...mine,
       blocks: [{ kind: "text", text: "Start finding candidates now" }],
     });
     expect(
-      await startRoleFromRecruiterMessage(d as never, run, {
+      await copyRecruiterMessageToRole(d as never, run, {
         ...role,
         earlier: "Senior nurse, Austin TX, 5+ years ICU",
       }),
-    ).toBe(true);
-    expect(tx.task.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          prompt: expect.stringMatching(
-            /^Start finding candidates now\n\n.*earlier.*\nSenior nurse, Austin TX, 5\+ years ICU$/s,
-          ),
-        }),
-      }),
-    );
+    ).toMatch(/earlier.*\nSenior nurse, Austin TX, 5\+ years ICU$/s);
   });
 
-  it("hands over the earlier message with the JD when the latest only says to go on (staging 2026-11-26, stop-then-continue)", async () => {
-    const mine = { role: "user", botId: null, clientNonce: null, externalTranscriptFor: null };
-    const { deps: d, tx } = deps([
+  it("copies the earlier message with the JD when the latest only says to go on (staging 2026-11-26, stop-then-continue)", async () => {
+    const { deps: d } = deps([
       { ...mine, id: "m-2", blocks: [{ kind: "text", text: "继续吧" }] },
       { ...mine, id: "m-1", blocks: [{ kind: "text", text: "高级数据工程师，上海，5 年以上" }] },
       { ...mine, id: "m-0", blocks: [{ kind: "text", text: "你好" }] },
     ]);
-    expect(
-      await startRoleFromRecruiterMessage(d as never, run, { ...role, earlierMessages: 1 }),
-    ).toBe(true);
-    expect(tx.task.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ prompt: "高级数据工程师，上海，5 年以上\n继续吧" }),
-      }),
-    );
+    await copyRecruiterMessageToRole(d as never, run, { ...role, earlierMessages: 1 });
+    expect(copiedBlocks()).toEqual([
+      { kind: "text", text: "高级数据工程师，上海，5 年以上" },
+      { kind: "text", text: "继续吧" },
+    ]);
   });
 
   it("names the role when the message asks for several at once (simulated 2026-11-16, honest-limits)", async () => {
-    const { deps: d, tx } = deps({
-      role: "user",
-      botId: null,
-      clientNonce: null,
-      externalTranscriptFor: null,
-      blocks: [{ kind: "text", text: "所以到底有没有？没有就直接帮我建这三个" }],
-    });
-    expect(
-      await startRoleFromRecruiterMessage(d as never, run, { ...role, title: "Data Engineer" }),
-    ).toBe(true);
-    const prompt = (
-      tx.task.create.mock.calls as unknown as [{ data: { prompt: string } }][]
-    )[0]?.[0].data.prompt as string;
-    expect(prompt.split("\n")[0]).toContain("Data Engineer");
-    expect(prompt).toContain("所以到底有没有？没有就直接帮我建这三个");
-  });
-
-  it("names the role when the message lists every role by name (simulated 2026-11-16, push-back)", async () => {
-    const { deps: d, tx } = deps({
-      role: "user",
-      botId: null,
-      clientNonce: null,
-      externalTranscriptFor: null,
+    const { deps: d } = deps({
+      ...mine,
       blocks: [{ kind: "text", text: "那帮我现在建，Java、Android、data engineer 三个" }],
     });
-    await startRoleFromRecruiterMessage(d as never, run, { ...role, title: "Java" });
-    const prompt = (
-      tx.task.create.mock.calls as unknown as [{ data: { prompt: string } }][]
-    )[0]?.[0].data.prompt as string;
-    const [first] = prompt.split("\n");
-    expect(first).toContain("Java");
-    expect(first).not.toContain("Android");
-    expect(prompt).toContain("那帮我现在建，Java、Android、data engineer 三个");
+    const request = await copyRecruiterMessageToRole(d as never, run, { ...role, title: "Java" });
+    expect(request).toContain("New role: Java.");
+    expect(request).toContain("other roles it mentions have their own conversations");
   });
 
   it("starts the role from a JD sent only as a file", async () => {
-    const { deps: d, tx } = deps({
-      role: "user",
-      botId: null,
-      clientNonce: null,
-      externalTranscriptFor: null,
-      blocks: [
-        {
-          kind: "file",
-          name: "jd.docx",
-          size: 10,
-          mimeType: "application/msword",
-          artifactId: "a1",
-        },
-      ],
-    });
-    expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(true);
-    expect(tx.task.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ prompt: "jd.docx" }) }),
-    );
+    const file = {
+      kind: "file",
+      name: "jd.docx",
+      size: 10,
+      mimeType: "application/msword",
+      artifactId: "a1",
+    };
+    const { deps: d } = deps({ ...mine, blocks: [file] });
+    expect(await copyRecruiterMessageToRole(d as never, run, role)).toBeDefined();
+    expect(copiedBlocks()).toEqual([file]);
   });
 
-  it("does not start twice for the same call", async () => {
-    const { deps: d, tx } = deps(
-      {
-        role: "user",
-        botId: null,
-        clientNonce: null,
-        externalTranscriptFor: null,
-        blocks: [{ kind: "text", text: "x" }],
-      },
+  it("does not copy twice for the same call", async () => {
+    const { deps: d } = deps(
+      { ...mine, blocks: [{ kind: "text", text: "x" }] },
       { id: "msg-role" },
     );
-    expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(true);
-    expect(tx.run.create).not.toHaveBeenCalled();
-    expect(d.jobs.enqueue).not.toHaveBeenCalled();
+    expect(await copyRecruiterMessageToRole(d as never, run, role)).toBeDefined();
+    expect(createThreadMessageInTransaction).not.toHaveBeenCalled();
   });
 
   it("uses the recruiter's latest message, skipping teammates' messages", async () => {
-    const { deps: d, tx } = deps(null);
-    d.prisma.message.findMany = vi.fn(async () => [
-      {
-        role: "user",
-        botId: null,
-        clientNonce: null,
-        externalTranscriptFor: null,
-        blocks: [{ kind: "bot_message_received", text: "x" }],
-      },
-      {
-        role: "user",
-        botId: null,
-        clientNonce: null,
-        externalTranscriptFor: null,
-        blocks: [{ kind: "text", text: "Open role 5" }],
-      },
-      {
-        role: "user",
-        botId: null,
-        clientNonce: null,
-        externalTranscriptFor: null,
-        blocks: [{ kind: "text", text: "Open role 4" }],
-      },
-    ]) as never;
-    expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(true);
-    expect(tx.task.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ prompt: "Open role 5" }) }),
-    );
+    const { deps: d } = deps([
+      { ...mine, blocks: [{ kind: "bot_message_received", text: "x" }] },
+      { ...mine, blocks: [{ kind: "text", text: "Open role 5" }] },
+      { ...mine, blocks: [{ kind: "text", text: "Open role 4" }] },
+    ]);
+    await copyRecruiterMessageToRole(d as never, run, role);
+    expect(copiedBlocks()).toEqual([{ kind: "text", text: "Open role 5" }]);
   });
 
   it("refuses a source the recruiter did not write", async () => {
     for (const source of [
-      {
-        role: "user",
-        botId: null,
-        clientNonce: null,
-        externalTranscriptFor: null,
-        blocks: [{ kind: "bot_message_received", text: "x" }],
-      },
-      {
-        role: "bot",
-        botId: "b",
-        clientNonce: null,
-        externalTranscriptFor: null,
-        blocks: [{ kind: "text", text: "x" }],
-      },
-      {
-        role: "user",
-        botId: null,
-        clientNonce: "autocontinue:1",
-        externalTranscriptFor: null,
-        blocks: [{ kind: "text", text: "x" }],
-      },
+      { ...mine, blocks: [{ kind: "bot_message_received", text: "x" }] },
+      { ...mine, role: "bot", botId: "b", blocks: [{ kind: "text", text: "x" }] },
+      { ...mine, clientNonce: "autocontinue:1", blocks: [{ kind: "text", text: "x" }] },
       null,
     ]) {
       const { deps: d } = deps(source);
-      expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(false);
+      expect(await copyRecruiterMessageToRole(d as never, run, role)).toBeUndefined();
     }
   });
 });

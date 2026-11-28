@@ -354,7 +354,6 @@ import {
   messageBot,
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
-  returnDelegatedTeamResult,
   showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
@@ -646,7 +645,7 @@ import {
   openRoleGroup,
   roleOpenedFromLatestMessage,
   roleAlreadyOpenNote,
-  startRoleFromRecruiterMessage,
+  copyRecruiterMessageToRole,
 } from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
@@ -10757,40 +10756,43 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "The role conversation could not be opened.",
               });
-            // The role starts from the recruiter's own message, so its team runs intake and
-            // saves the role as if it had been written there. A request with no recruiter
-            // message behind it (a routine) is handed over as a brief instead.
-            const started = await startRoleFromRecruiterMessage(deps, run, {
+            // The role team is asked through message_bot, as delegate_to_role asks it, so its final
+            // result returns here the same way. Its conversation first shows the recruiter's own
+            // message; a request with no recruiter message behind it (a routine) is sent as words.
+            const copied = await copyRecruiterMessageToRole(deps, run, {
               threadId: group.thread.id,
               botId: bot.id,
               deliveryKey: roleKey,
               title,
               earlier: request,
-              earlierMessages: Math.min(10, Math.max(0, Math.trunc(Number(args.earlier_messages) || 0))),
+              earlierMessages: Math.min(
+                10,
+                Math.max(0, Math.trunc(Number(args.earlier_messages) || 0)),
+              ),
               askedMessageId,
             });
-            if (!started) {
-              if (!request)
-                return finish({
-                  error:
-                    "The recruiter's latest message has no request to hand over: pass message with their requirements in their own words.",
-                });
-              const sent = await messageBot(
-                deps,
-                { ...run, sourceMessageId: run.sourceMessageId },
-                { id: bot.id, name: bot.name },
-                {
-                  bot_id: bot.id,
-                  thread_id: group.thread.id,
-                  sender_label: RECRUITING_GLOBAL_AGENT_NAME,
-                  target_label: `${title} team`,
-                  message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
-                  intent: "request",
-                  deliveryKey: roleKey,
-                },
-              );
-              if (!sent.ok) return finish({ error: sent.error });
-            }
+            if (!copied && !request)
+              return finish({
+                error:
+                  "The recruiter's latest message has no request to hand over: pass message with their requirements in their own words.",
+              });
+            const sent = await messageBot(
+              deps,
+              { ...run, sourceMessageId: run.sourceMessageId },
+              { id: bot.id, name: bot.name },
+              {
+                bot_id: bot.id,
+                thread_id: group.thread.id,
+                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
+                target_label: `${title} team`,
+                message:
+                  copied ??
+                  `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
+                intent: "request",
+                deliveryKey: roleKey,
+              },
+            );
+            if (!sent.ok) return finish({ error: sent.error });
             groupsStartedInTurn.add(group.id);
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: group.id, title },
@@ -13627,11 +13629,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await reportGroupStageOutcome(deps, run, thread.groupId, {
               status: "completed",
             }).catch((error) => getLogger().error("group handoff report", error));
-            // Work another conversation handed this role goes back there as its result.
-            if (!completed.continuationRunId && !thread.groupId.startsWith("recruiting-global-"))
-              await returnDelegatedTeamResult(deps, run, text).catch((error) =>
-                getLogger().error("delegated team result return", error),
-              );
           }
           if (botMessageOutcome) {
             // Prefer the final reply. If the turn only posted mid-turn progress, return that

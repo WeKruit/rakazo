@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import {
@@ -217,14 +216,14 @@ export async function roleOpenedFromLatestMessage(
 }
 
 /**
- * Start a new role's conversation from the recruiter's own message in the global
- * conversation: the same words appear there as theirs, and the role team's lead takes
- * its first turn on them, exactly as if they had been written in the role.
- * Returns false when the source is not a message the recruiter wrote.
+ * Copy the recruiter's own message from the global conversation into a new role's conversation,
+ * so the same words (and files) appear there as theirs. The role team is then asked through
+ * message_bot like any delegated request, and its final result returns the same way. Returns the
+ * request to send, or undefined when the source is not a message the recruiter wrote.
  */
-export async function startRoleFromRecruiterMessage(
-  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
-  run: { spaceId: string; userId: string; threadId: string; sourceMessageId?: string | null },
+export async function copyRecruiterMessageToRole(
+  deps: Pick<ExecutorDeps, "prisma" | "events">,
+  run: { spaceId: string; threadId: string; sourceMessageId?: string | null },
   role: {
     threadId: string;
     botId: string;
@@ -242,8 +241,8 @@ export async function startRoleFromRecruiterMessage(
     /** The recruiter message the role was opened from; later messages are not copied. */
     askedMessageId?: string;
   },
-): Promise<boolean> {
-  if (!run.sourceMessageId) return false;
+): Promise<string | undefined> {
+  if (!run.sourceMessageId) return undefined;
   // The recruiter's latest message here: a turn resumed by answering a card keeps the
   // card's original message as its source, but the role was asked for in the answer.
   const blocks = (
@@ -256,7 +255,7 @@ export async function startRoleFromRecruiterMessage(
   )
     .reverse()
     .flatMap((message) => message.blocks);
-  if (!blocks.length) return false;
+  if (!blocks.length) return undefined;
   // A JD sent only as a file still starts the role; its team reads the file.
   const text = blocks
     .flatMap((block) =>
@@ -264,21 +263,20 @@ export async function startRoleFromRecruiterMessage(
     )
     .join("\n")
     .trim();
-  if (!text) return false;
-  // Staging 11-13: "现在开始找候选人" opened the role with only those words, so its team asked
-  // for the location the recruiter had given earlier, and that card held every later request.
-  const earlier = role.earlier?.trim();
-  const asked =
-    earlier && !text.includes(earlier)
-      ? `${text}\n\nWhat the recruiter said about this role earlier, in the main conversation:\n${earlier}`
-      : text;
+  if (!text) return undefined;
   // Staging 11-16: 「没有就直接帮我建这三个」 opened three roles with the same words, so the
   // Java team asked what the other two are called and Data Engineer asked what 「三个」 means;
   // 「Java、Android、data engineer 三个」 names them all, and Java still set up all three.
   const title = role.title?.trim();
-  const prompt = title
-    ? `This conversation is for one role: ${title}. The recruiter wrote the message below in the main conversation; any other roles it mentions have their own conversations.\n\n${asked}`
-    : asked;
+  // Staging 11-13: "现在开始找候选人" opened the role with only those words, so its team asked
+  // for the location the recruiter had given earlier, and that card held every later request.
+  const earlier = role.earlier?.trim();
+  const request = [
+    `New role${title ? `: ${title}` : ""}. The recruiter's message above, copied from the main conversation, is the request${title ? "; any other roles it mentions have their own conversations" : ""}.`,
+    ...(earlier && !text.includes(earlier)
+      ? [`What the recruiter said about this role earlier, in the main conversation:\n${earlier}`]
+      : []),
+  ].join("\n\n");
   const clientNonce = `${ROLE_START_NONCE}${role.deliveryKey}`;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
@@ -294,47 +292,19 @@ export async function startRoleFromRecruiterMessage(
         blocks,
         clientNonce,
       });
-      const task = await tx.task.create({
-        data: {
-          spaceId: run.spaceId,
-          botId: role.botId,
-          threadId: role.threadId,
-          userId: run.userId,
-          prompt,
-          status: "queued",
-        },
-      });
-      const next = await tx.run.create({
-        data: {
-          spaceId: run.spaceId,
-          botId: role.botId,
-          threadId: role.threadId,
-          taskId: task.id,
-          userId: run.userId,
-          status: "queued",
-          trigger: "user",
-          sourceMessageId: message.id,
-        },
-        select: { id: true },
-      });
       const event = await appendEventInTransaction(tx, {
         spaceId: run.spaceId,
         threadId: role.threadId,
         botId: role.botId,
         type: "thread.message.created",
-        runId: next.id,
-        payload: { messageId: message.id, role: "user", blocks, runIds: [next.id] },
+        payload: { messageId: message.id, role: "user", blocks, runIds: [] },
       });
-      return { runId: next.id, eventSeq: event.seq };
+      return { eventSeq: event.seq };
     }),
   );
-  if (!committed) return true;
-  await deps.events.notify(role.threadId, committed.eventSeq).catch((error) => {
-    getLogger().error("role start realtime notification", error);
-  });
-  await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
-    // The queued run is durable; the job reconciler repairs a missed wake.
-    getLogger().error("role start enqueue", error);
-  });
-  return true;
+  if (committed)
+    await deps.events.notify(role.threadId, committed.eventSeq).catch((error) => {
+      getLogger().error("role start realtime notification", error);
+    });
+  return request;
 }

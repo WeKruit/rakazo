@@ -6,7 +6,6 @@ import {
   messageBot,
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
-  returnDelegatedTeamResult,
   showDelegatedTeamCard,
   teamProgress,
 } from "./bot-messages.js";
@@ -611,74 +610,6 @@ describe("delegating to a role team in another conversation", () => {
     });
     expect(sent).toEqual({ ok: false, error: "a bot cannot message itself" });
   });
-
-});
-
-describe("a role team's result going back to the conversation that handed it the work", () => {
-  // As a Claude Code subagent's final message returns to its parent: fosp on 96dcd1c9, Kruit's
-  // chat relayed an older "timed out" line of the team while the role already held 10 people.
-  const roleRun = { ...run, botId: "bot-main", threadId: "thread-role" };
-  const handed = (stillWorking: number) => {
-    const harness = deps({
-      bots: [{ id: "bot-main", name: "Main", title: "", thread: null }],
-      addressedThread: { id: "thread-global" },
-    });
-    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
-    prisma.thread!.findFirst = vi
-      .fn()
-      .mockResolvedValueOnce({ group: { name: "Payments" } })
-      .mockResolvedValue({ id: "thread-global" });
-    prisma.run!.count = vi.fn().mockResolvedValue(stillWorking);
-    prisma.message!.findFirst = vi.fn(async (args: { where: { clientNonce?: unknown } }) =>
-      args.where.clientNonce
-        ? null
-        : {
-            id: "message-handed",
-            seq: 4,
-            createdAt: new Date(),
-            blocks: [
-              {
-                kind: "bot_message_received",
-                fromBotId: "bot-main",
-                fromBotName: "Kruit",
-                text: "找10个人",
-                hop: 1,
-                intent: "request",
-                returnThreadId: "thread-global",
-              },
-            ],
-          },
-    );
-    return harness;
-  };
-
-  it("sends the team's final message back as the result", async () => {
-    const harness = handed(0);
-    await returnDelegatedTeamResult(harness.deps, roleRun, "10 people are in the list above.");
-    const blocks = harness.tx.message.create.mock.calls.map(
-      ([call]) => (call as { data: { threadId: string; blocks: unknown[] } }).data,
-    );
-    expect(blocks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          threadId: "thread-global",
-          blocks: [
-            expect.objectContaining({
-              kind: "bot_message_received",
-              intent: "result",
-              text: "10 people are in the list above.",
-            }),
-          ],
-        }),
-      ]),
-    );
-  });
-
-  it("waits while a teammate in the role still works on it", async () => {
-    const harness = handed(1);
-    await returnDelegatedTeamResult(harness.deps, roleRun, "Handed to Sourcer.");
-    expect(harness.tx.message.create).not.toHaveBeenCalled();
-  });
 });
 
 describe("hop lookup", () => {
@@ -942,6 +873,44 @@ describe("automatic outcome return", () => {
     });
   });
 
+  it("returns work delegated from another conversation there, but not its progress", async () => {
+    // fosp on 96dcd1c9: the role held 10 people while Kruit's chat never heard back.
+    const delegated = () =>
+      deps({
+        addressedThread: { id: "thread-global", group: { name: "Payments" } },
+        hopBlocks: [
+          {
+            kind: "bot_message_received",
+            fromBotId: "bot-target",
+            fromBotName: "Kruit",
+            text: "找10个人",
+            hop: 1,
+            intent: "request",
+            returnThreadId: "thread-global",
+          },
+        ],
+      });
+    const done = delegated();
+    await returnBotMessageOutcome(
+      done.deps,
+      { ...run, sourceMessageId: "message-source" },
+      sender,
+      "10 people are in the list.",
+    );
+    expect(JSON.stringify(done.tx.message.create.mock.calls)).toContain("thread-global");
+    expect(done.enqueue).toHaveBeenCalledOnce();
+
+    const progress = delegated();
+    await returnBotMessageOutcome(
+      progress.deps,
+      { ...run, sourceMessageId: "message-source" },
+      sender,
+      "Still searching.",
+      "status",
+    );
+    expect(progress.enqueue).not.toHaveBeenCalled();
+  });
+
   it("still returns a final result after an interim status update", async () => {
     const harness = deps({
       hopBlocks: [
@@ -1044,27 +1013,6 @@ describe("teamProgress", () => {
       roleId: "role",
     });
     expect(progress?.note).toContain("Round 2 is recorded");
-  });
-
-  it("counts the turn of a role opened from Kruit's chat as the team working (staging 2026-11-15)", async () => {
-    // Asked "where are the people?" while a role opened from Kruit's chat ran its first round,
-    // Kruit listed seven unchecked people from Results: only delegated turns counted as working.
-    const startedAt = new Date(Date.now() - 60_000);
-    const prisma = {
-      run: {
-        findFirst: vi.fn(async ({ where }: { where: { OR?: Array<Record<string, unknown>> } }) =>
-          JSON.stringify(where.OR ?? []).includes("start-role:")
-            ? { id: "start", botId: "lead", createdAt: startedAt, startedAt, bot: { name: "Lead" } }
-            : null,
-        ),
-      },
-      thread: { findUnique: vi.fn(async () => null) },
-    } as unknown as PrismaClient;
-    const progress = await teamProgress(prisma, {
-      threadId: "role-thread",
-      returnThreadId: "global",
-    });
-    expect(progress?.name).toBe("Lead");
   });
 
   it("counts a team turn requeued after a follow-up as still working (staging 2026-11-15)", async () => {

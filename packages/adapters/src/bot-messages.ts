@@ -468,9 +468,6 @@ export function teamWorkingFor(
             },
           },
         },
-        // Staging 11-15: a role opened from Kruit's chat ran its first round on the copy of the
-        // recruiter's words, and meanwhile Kruit listed seven unchecked people from Results.
-        { sourceMessage: { is: { clientNonce: { startsWith: ROLE_START_NONCE } } } },
         // The teammate the work was handed to: with one lane per agent, a request that missed it
         // would start a second turn beside it instead of steering the one doing the work.
         { trigger: "follow_up" },
@@ -608,11 +605,11 @@ export async function returnBotMessageOutcome(
     await markBotOutcomeReturned(deps.prisma, run.id);
     return true;
   }
-  // Work delegated from another conversation returns through returnDelegatedTeamResult, once its
-  // run is done; a teammate's progress or empty status never goes back (send-at-night 11-16: each
-  // one woke Kruit, which posted again and asked the team a second time). Only a failure goes back
-  // at once.
-  if (source.returnThreadId && (intent === "result" || !options?.forceUnread)) {
+  // Work delegated from another conversation returns its final result there, the way a Claude Code
+  // subagent's final message returns to the agent that started it. A teammate's progress never goes
+  // back (send-at-night 11-16: each one woke Kruit, which posted again and asked the team a second
+  // time); only a failure does.
+  if (source.returnThreadId && intent !== "result" && !options?.forceUnread) {
     await markBotOutcomeReturned(deps.prisma, run.id);
     return true;
   }
@@ -727,25 +724,11 @@ async function openDelegation(prisma: PrismaClient, threadId: string) {
     // A request whose turn has not started yet is not the work that just finished.
     sourceRuns: { none: { status: "queued" as const } },
   };
-  const select = { id: true, seq: true, blocks: true, createdAt: true } as const;
-  const [delegated, started] = await Promise.all([
-    prisma.message.findFirst({
-      where: { ...where, blocks: { array_contains: [{ kind: "bot_message_received" }] } },
-      orderBy: { seq: "desc" },
-      select,
-    }),
-    prisma.message.findFirst({
-      where: { ...where, clientNonce: { startsWith: ROLE_START_NONCE } },
-      orderBy: { seq: "desc" },
-      select: { ...select, clientNonce: true, sourceRuns: { select: { botId: true }, take: 1 } },
-    }),
-  ]);
-  // Long-search-finishes 11-15: a role opened from Kruit's chat with "找完告诉我" finished in the
-  // role's chat and never came back, although Kruit had said it would tell the recruiter.
-  if (started && (!delegated || started.seq > delegated.seq)) {
-    const root = await roleStartReturn(prisma, threadId, started);
-    if (root) return { delegated: started, root };
-  }
+  const delegated = await prisma.message.findFirst({
+    where: { ...where, blocks: { array_contains: [{ kind: "bot_message_received" }] } },
+    orderBy: { seq: "desc" },
+    select: { id: true, seq: true, blocks: true, createdAt: true },
+  });
   const root = botMessageContext(
     Array.isArray(delegated?.blocks) ? (delegated.blocks as MessageBlock[]) : [],
   );
@@ -754,45 +737,6 @@ async function openDelegation(prisma: PrismaClient, threadId: string) {
   if (root.intent !== undefined && root.intent !== "request" && root.intent !== "question")
     return null;
   return { delegated, root: { ...root, returnThreadId: root.returnThreadId } };
-}
-
-/** Where a role opened from Kruit's chat returns: the chat holding the recruiter's message. */
-async function roleStartReturn(
-  prisma: PrismaClient,
-  threadId: string,
-  started: { clientNonce: string | null; sourceRuns: Array<{ botId: string }> },
-) {
-  const askedId = started.clientNonce?.slice(ROLE_START_NONCE.length).split(":")[0];
-  const fromBotId = started.sourceRuns[0]?.botId;
-  if (!askedId || !fromBotId) return null;
-  const role = await prisma.thread.findUnique({
-    where: { id: threadId },
-    select: { spaceId: true, userId: true },
-  });
-  const asked = role
-    ? await prisma.message.findFirst({
-        where: {
-          id: askedId,
-          role: "user",
-          thread: {
-            spaceId: role.spaceId,
-            userId: role.userId,
-            groupId: { startsWith: "recruiting-global-" },
-          },
-        },
-        select: { threadId: true },
-      })
-    : null;
-  const bot = asked
-    ? await prisma.bot.findFirst({ where: { id: fromBotId }, select: { name: true } })
-    : null;
-  if (!asked || !bot) return null;
-  return {
-    fromBotId,
-    fromBotName: bot.name,
-    returnThreadId: asked.threadId,
-    intent: "request" as const,
-  };
 }
 
 /**
@@ -836,72 +780,6 @@ export async function reportDelegatedTeamBlocked(
   );
   if (!sent.ok)
     getLogger().warn("delegated team block not reported", { runId: run.id, reason: sent.error });
-}
-
-/**
- * A role team finished work another conversation handed it: its final message goes back there as
- * the result, the way a Claude Code subagent's final message returns to the agent that started it
- * (code.claude.com/docs/en/agent-sdk/subagents: "only its final message returns to the parent";
- * a background one arrives as a completion notification in a later turn). Its steps stay in the
- * role's own conversation. When the recruiter has written in the role's conversation since, they
- * are there and read the result in place.
- */
-export async function returnDelegatedTeamResult(
-  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
-  run: {
-    id: string;
-    spaceId: string;
-    threadId: string;
-    botId: string;
-    userId: string;
-    sourceMessageId?: string | null;
-  },
-  text: string,
-): Promise<void> {
-  if (!text.trim()) return;
-  const thread = await deps.prisma.thread.findFirst({
-    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
-    select: { group: { select: { name: true } } },
-  });
-  if (!thread?.group) return;
-  // The result is the whole team's: a teammate still working (a hand-off inside the role) has the
-  // rest of it.
-  const stillWorking = await deps.prisma.run.count({
-    where: {
-      threadId: run.threadId,
-      id: { not: run.id },
-      status: { in: ["queued", "leased", "running"] },
-    },
-  });
-  if (stillWorking) return;
-  const found = await openDelegation(deps.prisma, run.threadId);
-  if (!found) return;
-  if (
-    await recruiterInRoleChat(deps.prisma, {
-      roleThreadId: run.threadId,
-      returnThreadId: found.root.returnThreadId,
-      since: found.delegated.createdAt,
-    })
-  )
-    return;
-  const sent = await messageBot(
-    deps,
-    run,
-    { id: run.botId, name: thread.group.name },
-    {
-      bot_id: found.root.fromBotId,
-      thread_id: found.root.returnThreadId,
-      sender_label: `${thread.group.name} team`,
-      target_label: found.root.fromBotName,
-      message: clampBotMessage(text),
-      intent: "result",
-      // One result per hand-off: a later run in the role (a reply, a routine) is not its answer.
-      deliveryKey: `delegation-result:${found.delegated.id}`,
-    },
-    { allowTerminalSource: true },
-  );
-  if (!sent.ok)
-    getLogger().warn("delegated team result not returned", { runId: run.id, reason: sent.error });
 }
 
 /**
