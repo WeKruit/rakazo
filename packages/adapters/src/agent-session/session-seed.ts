@@ -10,7 +10,7 @@ import {
   formatCompactedSummary,
   LEGACY_HISTORY_WINDOW_SIZE,
   selectCompactedHistory,
-} from "../history-compaction.js";
+} from "./legacy-history.js";
 import { replayableThinking } from "../pi-runtime.js";
 import { messageToAgentHistoryText } from "../reply-context.js";
 

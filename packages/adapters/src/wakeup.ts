@@ -9,7 +9,6 @@ import { isDatabaseUnreachable } from "@rakazo/db";
 import { getLogger, runCorrelatedJob, unwrapJobPayload, wrapJobPayload } from "@rakazo/logging";
 import { makeWorkerUtils, type Runner, run, type WorkerUtils } from "graphile-worker";
 import type { Pool } from "pg";
-import { recordHistoryCompactAttemptsExhausted } from "./history-compaction.js";
 
 /** Automation runs queue behind a recruiter's turn when every worker slot is busy; graphile runs lower priority numbers first. */
 const BACKGROUND_PRIORITY = 10;
@@ -165,11 +164,9 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
       taskList,
     });
     runner.events.on("job:failed", ({ job, error }) => {
-      recordHistoryCompactAttemptsExhausted(job, error);
       // The queue will not try this job again: one error line the deployment owner can alert on.
       // Runs are not lost with it; the reconciler re-queues any run still waiting.
-      // history.compact already logs its own permanent failure above.
-      if (job.attempts >= job.max_attempts && job.task_identifier !== "history.compact")
+      if (job.attempts >= job.max_attempts)
         getLogger().error("job.exhausted", error, {
           "job.type": job.task_identifier,
           "job.attempts": job.attempts,

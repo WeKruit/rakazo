@@ -19,10 +19,6 @@ const payloadSchemas = {
     leaseId: z.string().min(1),
   }),
   "skill.teaching-expire": z.object({ skillId: z.string().min(1) }),
-  "history.compact": z.object({
-    threadId: z.string().min(1),
-    sourceRunId: z.string().min(1).optional(),
-  }),
   "messaging.deliver": z.object({ runId: z.string().min(1).optional() }),
   "cloud_agent.poll": z.object({ agentId: z.string().min(1) }),
   "recruiting_checkin.start": z.object({ threadId: z.string().min(1) }),
@@ -173,36 +169,12 @@ export function skillTeachingExpireJob(skillId: string, availableAt: Date): Back
   };
 }
 
-export function historyCompactJobKey(threadId: string): string {
-  return `history.compact:${threadId}`;
-}
-
-/**
- * Each attempt runs a summarizer completion that can take up to the summarizer
- * timeout, so the job queue's default attempt count turns one permanently
- * failing thread into hours of paid retries. A few tries ride out transient
- * provider errors without storming.
- */
-export const HISTORY_COMPACT_MAX_ATTEMPTS = 4;
-
 export function messagingDeliverJob(runId?: string, availableAt?: Date): BackgroundJob {
   return {
     name: "messaging.deliver",
     payload: runId ? { runId } : {},
     replaceKey: `messaging.deliver:${runId ?? "drain"}`,
     ...(availableAt ? { availableAt } : {}),
-  };
-}
-
-export function historyCompactJob(threadId: string, sourceRunId?: string): BackgroundJob {
-  return {
-    name: "history.compact",
-    payload: { threadId, ...(sourceRunId ? { sourceRunId } : {}) },
-    replaceKey: historyCompactJobKey(threadId),
-    // A job enqueued while another compacts the same thread would summarize the same messages
-    // again and lose the cursor race; it waits, then finds that batch already done.
-    serialKey: historyCompactJobKey(threadId),
-    maxAttempts: HISTORY_COMPACT_MAX_ATTEMPTS,
   };
 }
 

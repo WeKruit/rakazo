@@ -38,7 +38,6 @@ import type {
   AgentRunRequest,
   AgentRuntime,
   AgentRuntimeEvent,
-  AgentSteeringMessage,
   AgentThinking,
   AgentToolCompletion,
   AgentToolExecutionResult,
@@ -108,7 +107,6 @@ import { sanitizeThought } from "./thought.js";
 import { REPORT_BEFORE_END } from "./turn-report.js";
 
 const running = new Map<string, { controller: AbortController; work: Promise<void> }>();
-export const SLOW_TOOL_BACKGROUND_MS = 10_000;
 interface ToolCallBudget {
   count: number;
   exceeded: boolean;
@@ -246,8 +244,6 @@ export interface PiAgentRuntimeOptions {
   /** Directory where Pi JSONL sessions are written. Omit to disable recording. */
   sessionRoot?: string;
   modelCallObserver?: ModelCallObserver;
-  /** How often a live model stream checks for an interjecting user message. */
-  interjectPollMs?: number;
   /** Sanitized per-call selection telemetry; never includes prompt or credentials. */
   onContextDecision?: (
     decision: RuntimeContextDecision & {
@@ -262,12 +258,10 @@ export class PiAgentRuntime implements AgentRuntime {
   private readonly sessionRecorder?: PiSessionRecorder;
   private readonly modelCallObserver?: ModelCallObserver;
   private readonly onContextDecision?: PiAgentRuntimeOptions["onContextDecision"];
-  private readonly interjectPollMs: number;
 
   constructor(options: PiAgentRuntimeOptions = {}) {
     this.modelCallObserver = options.modelCallObserver;
     this.onContextDecision = options.onContextDecision;
-    this.interjectPollMs = options.interjectPollMs ?? INTERJECT_POLL_MS;
     this.sessionRecorder = options.sessionRoot
       ? new PiJsonlSessionRecorder(options.sessionRoot)
       : undefined;
@@ -377,15 +371,7 @@ export class PiAgentRuntime implements AgentRuntime {
         };
         resumeHost = host;
         const tools = toAgentTools(toolDefs, host);
-        const seenSteeringIds: string[] = [];
-        const initialSteering = request.claimSteering ? await request.claimSteering([]) : [];
-        seenSteeringIds.push(...initialSteering.map((item) => item.id));
-        const history = toHistory(
-          withoutSteeringMessages(request.history, initialSteering),
-          request.prompt,
-          request.sourceMessageId,
-          model,
-        );
+        const history = toHistory(request.history, request.prompt, request.sourceMessageId, model);
         const systemPrompt =
           request.instructions ||
           (toolDefs.some((tool) => tool.name === "computer_observe")
@@ -562,18 +548,9 @@ export class PiAgentRuntime implements AgentRuntime {
           },
           prepareNextTurnWithContext: async () => {
             // Whatever was steered in so far reaches the model in the step that starts now.
-            host.steeredUnseen = 0;
             // Memory, skills or tools changed mid-run: a notice, never a rebuilt prompt prefix.
             const notice = await request.claimContextNotice?.().catch(() => undefined);
             if (notice) agent.steer({ role: "user", content: notice, timestamp: Date.now() });
-            if (!request.claimSteering) return undefined;
-            // A mid-stream claim still in flight already owns its ids; wait so neither
-            // path claims the same row twice.
-            await interjectClaim;
-            const steering = await request.claimSteering([...seenSteeringIds]);
-            if (steering.length === 0) return undefined;
-            seenSteeringIds.push(...steering.map((item) => item.id));
-            for (const item of steering) steerIn(item);
             return undefined;
           },
           initialState: {
@@ -586,49 +563,6 @@ export class PiAgentRuntime implements AgentRuntime {
             messages: history,
           },
         });
-
-        const steerIn = (item: AgentSteeringMessage) => agent.steer(userMessage(item));
-        // Interject: while the model is streaming, a flagged steering message aborts only
-        // that stream (tools in flight are untouched), is steered in, and the same run
-        // continues from the partial assistant message.
-        let modelStreaming = false;
-        let interjected = false;
-        // The reader sees where a reply was cut off by their new message.
-        let cutMidReply = false;
-        let interjectClaim: Promise<void> | undefined;
-        const pollInterject = () => {
-          if (!modelStreaming || interjectClaim || !request.claimSteering || signal.aborted) return;
-          interjectClaim = request
-            .claimSteering([...seenSteeringIds])
-            .then((steering) => {
-              seenSteeringIds.push(...steering.map((item) => item.id));
-              for (const item of steering) steerIn(item);
-              // Unread until a step starts with them: an interjection can land after the step
-              // already called ask_user, so it counts too.
-              host.steeredUnseen = (host.steeredUnseen ?? 0) + steering.length;
-              if (modelStreaming && steering.some((item) => item.interrupt)) {
-                interjected = true;
-                cutMidReply ||= currentMessageStreamed.trim().length > 0;
-                agent.abort();
-              }
-            })
-            .catch(() => undefined)
-            .finally(() => {
-              interjectClaim = undefined;
-            });
-        };
-        const interjectTimer = request.claimSteering
-          ? setInterval(pollInterject, this.interjectPollMs)
-          : undefined;
-        host.claimNewSteering = async () => {
-          if (!request.claimSteering || signal.aborted) return 0;
-          await interjectClaim;
-          const steering = await request.claimSteering([...seenSteeringIds]).catch(() => []);
-          seenSteeringIds.push(...steering.map((item) => item.id));
-          for (const item of steering) steerIn(item);
-          return steering.length;
-        };
-        interjectTimer?.unref?.();
 
         const onAbort = () => {
           agent.abort();
@@ -685,10 +619,8 @@ export class PiAgentRuntime implements AgentRuntime {
             currentTextPart = undefined;
             thinkingText = "";
             thinkingSince = undefined;
-            modelStreaming = true;
           }
           if (event.type === "message_end" && event.message.role === "assistant") {
-            modelStreaming = false;
             if (firstStep) {
               firstStep = false;
               agent.state.thinkingLevel = thinkingLevel;
@@ -761,10 +693,7 @@ export class PiAgentRuntime implements AgentRuntime {
               queue.push({ type: "text", text });
             }
           }
-          if (event.type === "turn_end" && interjected) {
-            // The interrupted turn is neither a final reply nor a silent tool turn; the
-            // continuation below answers the interjection.
-          } else if (event.type === "turn_end") {
+          if (event.type === "turn_end") {
             const messageText =
               event.message.role === "assistant" ? assistantText(event.message) : "";
             const hasToolCalls = messageHasToolCall(event.message);
@@ -844,35 +773,7 @@ export class PiAgentRuntime implements AgentRuntime {
         // placeholder while a run is active, and emitting one here shows two.
         const images = toPiImages(request.currentTurnImages);
         try {
-          // A message that arrived before the first step (for example right after a card
-          // answer) is its own, latest user turn: folded into the prompt as extra context,
-          // the model answered only the prompt and the message counted as answered.
-          if (initialSteering.length)
-            await agent.prompt([
-              userMessage({ text: request.prompt, images: request.currentTurnImages }),
-              ...initialSteering.map(userMessage),
-            ]);
-          else await agent.prompt(request.prompt, images.length ? images : undefined);
-          while (!signal.aborted && !host.pausePending && !host.toolCallBudget.exceeded) {
-            // A message claimed just as the last step ended was steered in after the loop
-            // stopped looking: answer it in this run, or it would count as answered unseen.
-            await interjectClaim;
-            if (!interjected && !agent.hasQueuedMessages?.()) break;
-            if (interjected) keepInterruptedAssistantMessage(agent.state.messages);
-            interjected = false;
-            const gap = cutMidReply
-              ? `${streamed.endsWith("\n") ? "\n" : "\n\n"}${INTERRUPTED_DIVIDER}\n\n`
-              : streamed.trim() && !streamed.endsWith("\n")
-                ? "\n\n"
-                : "";
-            cutMidReply = false;
-            if (gap) {
-              queue.push({ type: "text", text: gap });
-              streamed += gap;
-            }
-            host.steeredUnseen = 0;
-            await agent.continue();
-          }
+          await agent.prompt(request.prompt, images.length ? images : undefined);
           // The provider counts tokens its own way: when it rejects the request as too long,
           // compact what our estimate let through and try once more instead of failing the run.
           const overflowError =
@@ -882,7 +783,6 @@ export class PiAgentRuntime implements AgentRuntime {
             await agent.continue();
           }
         } finally {
-          if (interjectTimer) clearInterval(interjectTimer);
           try {
             await agent.waitForIdle();
           } finally {
@@ -993,19 +893,6 @@ export class PiAgentRuntime implements AgentRuntime {
       if (running.get(request.runId) === active) running.delete(request.runId);
     }
   }
-}
-
-/** One user turn for the model, with its images. */
-function userMessage(item: {
-  text: string;
-  images?: AgentRunRequest["currentTurnImages"];
-}): AgentMessage {
-  const images = toPiImages(item.images);
-  return {
-    role: "user",
-    content: images.length ? [{ type: "text", text: item.text }, ...images] : item.text,
-    timestamp: Date.now(),
-  };
 }
 
 function toPiImages(images: AgentRunRequest["currentTurnImages"]) {
@@ -1640,33 +1527,6 @@ export function messageThinking(message: {
   return blocks.length
     ? { provider: message.provider, model: message.model, api: message.api, blocks }
     : null;
-}
-
-function withoutSteeringMessages(
-  history: AgentRunRequest["history"],
-  steering: AgentSteeringMessage[],
-): AgentRunRequest["history"] {
-  if (steering.length === 0) return history;
-  const result = [...history];
-  let beforeIndex = result.length - 1;
-  for (let steeringIndex = steering.length - 1; steeringIndex >= 0; steeringIndex -= 1) {
-    const steeringMessage = steering[steeringIndex];
-    for (let index = beforeIndex; index >= 0; index -= 1) {
-      const message = result[index];
-      if (
-        message?.role !== "user" ||
-        (message.id
-          ? message.id !== steeringMessage?.messageId
-          : message.content !== (steeringMessage?.historyText ?? steeringMessage?.text))
-      ) {
-        continue;
-      }
-      result.splice(index, 1);
-      beforeIndex = index - 1;
-      break;
-    }
-  }
-  return result;
 }
 
 /**
@@ -2730,8 +2590,6 @@ function messageHasToolCall(message: unknown): boolean {
   );
 }
 
-const INTERJECT_POLL_MS = 2_000;
-
 /** Markdown rule between a reply cut off by a new message and the answer that follows. */
 export const INTERRUPTED_DIVIDER = "---";
 
@@ -2903,10 +2761,6 @@ export interface ToolHost {
   /** Helpers this run started, by handle (shared with nested hosts, used at depth 0 only). */
   subagents: Map<string, SubagentHelper>;
   subagentCount: { value: number };
-  /** Messages steered in while the current model step streamed; the model has not read them yet. */
-  steeredUnseen?: number;
-  /** Claims messages that arrived since the last read, steers them in and returns how many. */
-  claimNewSteering?: () => Promise<number>;
 }
 
 function toolCallBudgetExceededMessage(limit: number) {

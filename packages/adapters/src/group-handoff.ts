@@ -22,7 +22,6 @@ import {
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
-import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
 export const NO_ROLE_HANDOFF =
   "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds.";
@@ -229,15 +228,8 @@ async function postedResult(
   tx: Pick<PrismaClient, "message" | "run">,
   runId: string,
 ): Promise<boolean> {
-  // A held-back reply's retry posts the stage's result under its own run. Staging 11-13: the
-  // retry posted the template, the report said nothing was posted, and Main had it written twice.
-  const retries = await tx.run.findMany({
-    where: { sourceMessage: { clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${runId}:decline` } },
-    select: { id: true },
-    take: 5,
-  });
   const posted = await tx.message.findMany({
-    where: { runId: { in: [runId, ...retries.map((retry) => retry.id)] }, role: "bot" },
+    where: { runId, role: "bot" },
     select: { blocks: true },
     take: 50,
   });
@@ -429,32 +421,6 @@ async function handedStage(
 }
 
 /**
- * A retry of a declined handed-in turn finishes that turn's stage, so it reports as that turn;
- * the declined turn itself sent no report.
- */
-async function retriedStage(prisma: StageDeps["prisma"], turn: WorkerTurn) {
-  if (!turn.sourceMessageId) return turn;
-  const source = await prisma.message.findFirst({
-    where: { id: turn.sourceMessageId, threadId: turn.threadId },
-    select: { clientNonce: true },
-  });
-  const declined = declinedRunId(source?.clientNonce);
-  if (!declined) return turn;
-  const original = await prisma.run.findFirst({
-    where: { id: declined, threadId: turn.threadId, botId: turn.botId, userId: turn.userId },
-    select: {
-      id: true,
-      spaceId: true,
-      threadId: true,
-      botId: true,
-      userId: true,
-      sourceMessageId: true,
-    },
-  });
-  return original ?? turn;
-}
-
-/**
  * A worker's turn ended in a group: a turn woken to collect its search, or a retried turn,
  * delivers the stage's report to the teammate that handed it over.
  */
@@ -466,7 +432,7 @@ export async function reportGroupStageOutcome(
 ): Promise<{ sessionId: string } | undefined> {
   const wake = turn.trigger === "recruiting_research";
   if (!wake && turn.trigger !== "follow_up") return undefined;
-  const stage = wake ? await handedStage(deps.prisma, turn) : await retriedStage(deps.prisma, turn);
+  const stage = wake ? await handedStage(deps.prisma, turn) : turn;
   if (!stage) return undefined;
   return reportGroupHandoffOutcome(deps, stage, groupId, outcome);
 }

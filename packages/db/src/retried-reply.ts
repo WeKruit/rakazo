@@ -1,8 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import type { Prisma } from "./client.js";
 
-/** A turn the server pushed on after it ended: a declined reply, or work it promised and did not do. */
-const CONTINUATION = /^autocontinue:(.+):(?:decline|\d+)$/;
 /** A teammate's turn on work another turn in the same conversation handed it. */
 const HANDOFF = /^group-handoff:(.+)$/;
 /** How far back a turn's chain is followed: a pushed-on turn, its hand-off, and so on. */
@@ -37,8 +35,7 @@ async function earlierTurns(
     const nonce = run?.sourceMessage?.clientNonce ?? "";
     const handedFrom = nonce.match(HANDOFF)?.[1];
     handoffs ??= handedFrom ? followsHandoffs(tx, threadId) : undefined;
-    const parent =
-      nonce.match(CONTINUATION)?.[1] ?? (handedFrom && (await handoffs) ? handedFrom : undefined);
+    const parent = handedFrom && (await handoffs) ? handedFrom : undefined;
     if (!parent || parent === runId || chain.includes(parent)) break;
     chain.push(parent);
     current = parent;
@@ -91,16 +88,10 @@ export async function retriedReplyInTransaction(
         })),
         {
           role: "user",
-          OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
         },
       ],
     },
     select: { id: true },
   });
   return since ? null : earlier.id;
-}
-
-/** A pushed-on turn's own note: its answer, if any, took the place of the reply above it. */
-export function isContinuationNonce(clientNonce: string | null | undefined): boolean {
-  return !!clientNonce && CONTINUATION.test(clientNonce);
 }

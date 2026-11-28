@@ -1,7 +1,6 @@
 export * from "./actor-db.js";
 export * from "./artifact-versions.js";
 export * from "./automation-rate.js";
-export * from "./background-tool.js";
 export * from "./background-work.js";
 export * from "./billing.js";
 export * from "./board.js";
@@ -26,7 +25,6 @@ export * from "./message-embeddings.js";
 export * from "./message-thinking.js";
 export * from "./messages.js";
 export * from "./mirrored-asks.js";
-export { isContinuationNonce } from "./retried-reply.js";
 export * from "./messaging.js";
 export * from "./model-backups.js";
 export * from "./model-credentials.js";

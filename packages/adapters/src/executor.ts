@@ -86,7 +86,6 @@ import {
   callIdFromClientNonce,
   catalogApprovalDetails,
   catalogApprovalRequest,
-  closeEndedAsks,
   connectorKindFromToolName,
   containsSecret,
   EMAIL_SEND_TOOLS,
@@ -103,7 +102,6 @@ import {
   isCallClientNonce,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
-  isOpenAskBlock,
   isRecruitingSpawnKey,
   isSkillFilePath,
   isTerminal,
@@ -161,7 +159,6 @@ import type {
 import {
   admitRecruitingCrmImport,
   admitRecruitingReply,
-  backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
   campaignSendCardHash,
   canvasOf,
@@ -182,12 +179,10 @@ import {
   findSameMailReply,
   findWaitingCampaignSend,
   getRecruitingCrmTarget,
-  hasUnclaimedSteering,
   InvalidSpaceNameError,
   IsolationError,
   isNativeHumanMessage,
   isRetryableTransactionConflict,
-  loadMessageThinking,
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
@@ -225,6 +220,7 @@ import {
   respondAgentConnection,
 } from "./agent-connections.js";
 import { decryptAgentEnvironment, redactShellStreams } from "./agent-environment.js";
+import { LEGACY_HISTORY_WINDOW_SIZE } from "./agent-session/legacy-history.js";
 import { submitRoutineInput } from "./agent-session/routine-input.js";
 import {
   appendToolCompletionAudit,
@@ -415,15 +411,6 @@ import {
   loadGroupContext,
   reportGroupStageOutcome,
 } from "./group-handoff.js";
-import {
-  formatCompactedSummary,
-  formatRecalledMemory,
-  historyWindowSize,
-  LEGACY_HISTORY_WINDOW_SIZE,
-  MAX_RECALLED_MEMORIES,
-  selectCompactedHistory,
-  steppedHistoryWindow,
-} from "./history-compaction.js";
 import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
 import { describeReplyToEmail, type InstantlyReplyDisplay } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
@@ -1668,9 +1655,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
       const runSecrets = [...deps.secrets];
       try {
-        // Keep the persisted background lane for admission/steering, but recover the exact
-        // original source for messaging, attachments, reply rules and delivery after a lease restart.
-        run.trigger = await backgroundToolSourceTrigger(deps.prisma, run);
         const sourceBlocks =
           run.trigger === "messaging" && run.sourceMessageId
             ? ((
@@ -1972,52 +1956,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             addCanonical(turn.answer, "user");
           }
         }
-        // Teammates' messages carry the teammate's name, so a bot can tell who said what.
-        const teammateIds = [
-          ...new Set(
-            messages.flatMap((m) =>
-              m.role === "bot" && m.botId && m.botId !== run.botId ? [m.botId] : [],
-            ),
-          ),
-        ];
-        const teammateNames = new Map(
-          teammateIds.length
-            ? (
-                await deps.prisma.bot.findMany({
-                  where: {
-                    id: { in: teammateIds },
-                    userId: run.userId,
-                    spaceId: run.spaceId,
-                  },
-                  select: { id: true, name: true },
-                })
-              ).map((row) => [row.id, row.name])
-            : [],
-        );
-        // A card left pending by a run that ended is history, not a card still waiting.
-        const cardRunIds = [
-          ...new Set(
-            messages.flatMap((m) =>
-              m.runId && (m.blocks as MessageBlock[]).some(isOpenAskBlock) ? [m.runId] : [],
-            ),
-          ),
-        ];
-        const waitingCardRuns = new Set(
-          cardRunIds.length
-            ? (
-                await deps.prisma.run.findMany({
-                  where: {
-                    id: { in: cardRunIds },
-                    status: { in: [...ACTIVE_RUN_STATUSES] },
-                  },
-                  select: { id: true },
-                })
-              ).map((row) => row.id)
-            : [],
-        );
-        // In a group, mark where this member's unread part starts, so it catches up on what
-        // others said since its own last reply instead of rereading the whole thread.
-        const firstUnseen = thread.groupId ? firstUnseenMessageId(messages, run.botId) : undefined;
         // A routine's own settings: whether it continues the thread's session, and its probe.
         // A failed read runs the routine with the defaults instead of failing the run.
         const routineOptions =
@@ -2031,55 +1969,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 )
                 .catch(() => null)
             : null;
-        const threadContext = threadContextForRun(
-          routineOptions?.sessionMode === "reuse" ? "routine_reuse" : run.trigger,
-          {
-            messages: [...messages].reverse().map((m) => ({
-              id: m.id,
-              createdAt: m.createdAt?.toISOString(),
-              seq: m.seq,
-              role: (m.role === "system"
-                ? "system"
-                : m.role === "bot" && m.botId === run.botId
-                  ? "assistant"
-                  : "user") as "user" | "assistant" | "system",
-              content: `${m.id === firstUnseen ? "[new since your last reply] " : ""}${m.role === "bot" && m.botId !== run.botId ? `[bot ${teammateLabel(m.botId, teammateNames)}] ` : ""}${messageToAgentHistoryText(
-                {
-                  ...m,
-                  blocks: closeEndedAsks(
-                    m.blocks as MessageBlock[],
-                    !m.runId || waitingCardRuns.has(m.runId),
-                  ),
-                },
-              )}`,
-            })),
-            summary: thread.historyCompactionSummary,
-            historyCompactedUpToSeq: thread.historyCompactedUpToSeq,
-          },
-          messagingChannelRun,
-        );
-        const compactedHistory = selectCompactedHistory({
-          messages: threadContext.messages,
-          summary: threadContext.summary,
-          historyCompactedUpToSeq: threadContext.historyCompactedUpToSeq,
-        });
-        // This bot's own recent replies carry the reasoning behind them, for the same model only.
-        const savedThinking = await loadMessageThinking(
-          deps.prisma,
-          compactedHistory.history.flatMap((m) => (m.role === "assistant" && m.id ? [m.id] : [])),
-        ).catch(() => new Map<string, AgentThinking>());
-        let history: AgentRunRequest["history"] = compactedHistory.history.map(
-          ({ id, role, content, createdAt }) => {
-            const thinking = id ? savedThinking.get(id) : undefined;
-            return {
-              id,
-              createdAt,
-              role,
-              content,
-              ...(thinking ? { thinking } : {}),
-            };
-          },
-        );
         const historyMessages = [
           ...messages,
           ...[...canonicalMessages.values()].filter(
@@ -2189,24 +2078,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const turnReport = new TurnReportLedger(
           !quietRun && !allowSilentPeerMessage && !isBackgroundRunTrigger(run.trigger),
         );
-        const recallPromise = ownTime(
-          "recall",
-          threadContext.includeSemanticRecall &&
-            semanticMemory &&
-            memoryScope &&
-            thread.historyCompactedUpToSeq != null
-            ? semanticMemory.recall(
-                {
-                  query: task.prompt,
-                  scope: memoryScope,
-                  botId: bot.id,
-                  historyGeneration: thread.historyCompactionGeneration,
-                  limit: MAX_RECALLED_MEMORIES,
-                },
-                context,
-              )
-            : Promise.resolve(null),
-        );
         const memoryContextPromise = ownTime(
           "memoryContext",
           messagingChannelRun
@@ -2264,11 +2135,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         );
         const discoveryJoinStartedAt = performance.now();
         setupMark("discoveryJoinStart");
-        const [discovered, currentTurnImages, loadedMemoryContext, recalled] = await Promise.all([
+        const [discovered, currentTurnImages, loadedMemoryContext] = await Promise.all([
           discoveredPromise,
           ownTime("turnImages", loadCurrentTurnImages(deps, turnBlocks, context)),
           memoryContextPromise,
-          recallPromise,
         ]);
         setupMarks.discoveryJoinWaitMs = Math.round(performance.now() - discoveryJoinStartedAt);
         setupMark("discoveryJoin");
@@ -2399,33 +2269,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return redactConnectorPayload(result, runSecrets);
         };
         const semanticMemoryEnabled = Boolean(semanticMemory) && !messagingChannelRun;
-        let recalledMemory = "";
-        let recallSucceeded = false;
-        if (recalled) {
-          if (recalled.ok && recalled.value.length > 0) {
-            recallSucceeded = true;
-            recalledMemory = formatRecalledMemory(recalled.value);
-          } else if (!recalled.ok) {
-            getLogger().error("semantic memory recall failed", recalled.error);
-          }
-        }
-        if (!compactedHistory.usedLocalSummary) {
-          const seqById = new Map(compactedHistory.history.map((m) => [m.id, m.seq]));
-          history = steppedHistoryWindow(
-            history,
-            historyWindowSize({
-              semanticMemoryEnabled: semanticMemoryEnabled && !thread.historyCompactionSummary,
-              compacted: thread.historyCompactedUpToSeq != null,
-              recallSucceeded,
-            }),
-            (message) => seqById.get(message.id),
-          );
-        }
-        if (canonicalHistory.length)
-          history = [
-            ...history.filter((message) => !message.id || !canonicalMessages.has(message.id)),
-            ...canonicalHistory,
-          ];
         const failRunBeforeModel = async (message: string) => {
           const failed = await deps.events.finalizeRun({
             spaceId: run.spaceId,
@@ -2821,16 +2664,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             midTurnProgressCount += 1;
           }
         }
-        // Tool calls that land mid-sentence wait here until the narration catches up to a
-        // sentence boundary, so the step chips never render in the middle of a clause.
-        const pendingTools: {
-          name: string;
-          executionId: string;
-          startedAt: string;
-          activity?: string;
-          detail?: string;
-          completion?: Record<string, unknown>;
-        }[] = [];
         let pendingProgress = "";
         let lastProgressAt = 0;
         let hasStreamedText = false;
@@ -8168,6 +8001,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "wait_for_work") {
+            const waitStartedAt = new Date();
             return waitWithCountdown(
               deps.prisma,
               { spaceId: run.spaceId, threadId: run.threadId },
@@ -8180,21 +8014,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   mode: args.mode === "any" ? "any" : "all",
                   timeoutSeconds,
                   signal: context.signal,
-                  // A teammate's or Kruit's new request queues its own turn behind this one.
+                  // A message steered into this operation since the wait began ends the wait,
+                  // so the model reads it at its next step.
                   userMessageWaiting: async () =>
-                    (await hasUnclaimedSteering(deps.prisma, {
-                      threadId: run.threadId,
-                      botId: bot.id,
-                      runId: run.id,
-                    })) ||
                     Boolean(
-                      await deps.prisma.run.findFirst({
+                      await deps.prisma.sessionInput.findFirst({
                         where: {
-                          threadId: run.threadId,
-                          botId: bot.id,
-                          status: "queued",
-                          trigger: "bot_message",
-                          id: { not: run.id },
+                          operationId: run.id,
+                          kind: { in: ["message", "cardAnswer"] },
+                          deliveredAt: { gt: waitStartedAt },
                         },
                         select: { id: true },
                       }),
@@ -8462,7 +8290,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ...(thread.historyCompactedUpToSeq == null
                   ? {}
                   : { historyGeneration: thread.historyCompactionGeneration }),
-                limit: MAX_RECALLED_MEMORIES,
+                limit: 5,
               },
               context,
             );
@@ -9835,7 +9663,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           [task.prompt, probeNote, missingImagesInstruction].filter(Boolean).join("\n\n"),
           agentSkills,
         );
-        const basePrompt = taskPrompt;
         const approvalContinuation = buildApprovalContinuation(
           approvedEffects,
           (request) => redactSecrets(JSON.stringify(request), runSecrets),
@@ -10056,37 +9883,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           "en";
         let replyOutcome: string | undefined;
         let sentReplyBody: string | undefined;
-        const historicalContext: AgentRunRequest["history"] = [];
-        // Parts that change on every turn go after the history, so the history stays a prefix the
-        // provider's prompt cache can reuse from the previous turn.
-        const turnHistory: AgentRunRequest["history"] = [];
-        // ponytail: complete task state preserves private choice values and invoked skills.
-        // It duplicates linear Q/A history; use structured private input state if that budget becomes limiting.
-        if (nativeSources?.currentAnswer)
-          turnHistory.push({
-            role: "user",
-            content: `Platform task state (data):\n${basePrompt}`,
-            requiredForRun: true,
-          });
-        if (compactedHistory.usedLocalSummary && compactedHistory.summary) {
-          historicalContext.push({
-            role: "user",
-            content: redactSecrets(
-              formatCompactedSummary(compactedHistory.summary, thread.historyCompactedUpToSeq!),
-              runSecrets,
-            ),
-            summary: true,
-          });
-        }
-        // Recall follows each new message, so it changes on most turns.
-        if (recalledMemory) {
-          turnHistory.push({
-            role: "user",
-            content: redactSecrets(recalledMemory, runSecrets),
-            summary: true,
-          });
-        }
-
         // A recruiter clicked Send on a saved reply: replay the native approved request now,
         // before any model call. The regular tool path still owns preflight, claim and receipt.
         let sentReplyDirectly = false;

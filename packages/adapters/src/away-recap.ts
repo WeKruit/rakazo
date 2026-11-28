@@ -18,7 +18,6 @@ export async function awayRecapNote(
       role: "user",
       id: { not: input.messageId },
       createdAt: { lt: now },
-      OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
     },
     orderBy: { createdAt: "desc" },
     select: { createdAt: true },

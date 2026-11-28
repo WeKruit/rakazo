@@ -99,7 +99,6 @@ import {
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { getLogger } from "@rakazo/logging";
-import { backgroundToolSourceTrigger } from "./background-tool.js";
 import { STOPPED_TURN } from "./cancel-runs.js";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
@@ -1776,47 +1775,6 @@ function compareHumanMessages(
 }
 
 /**
- * A turn-end auto-continue acts for the recruiter's last message: the system nudge carries no
- * authority of its own, so resolve the newest native human message before it in the thread. The
- * nudge may start the run or reach a run already working as steering; then the message it
- * resolves to must be one this run already acts for.
- */
-async function autoContinuedHumanMessage(
-  tx: Tx,
-  run: { threadId: string; sourceMessageId: string | null },
-  message: SourceMessage,
-  steering: readonly { messageId: string }[] = [],
-): Promise<SourceMessage | null> {
-  const steered =
-    message.id !== run.sourceMessageId && steering.some((item) => item.messageId === message.id);
-  if (
-    (message.id !== run.sourceMessageId && !steered) ||
-    message.threadId !== run.threadId ||
-    !message.clientNonce?.startsWith("autocontinue:")
-  )
-    return null;
-  const previous = await tx.message.findFirst({
-    where: {
-      threadId: run.threadId,
-      seq: { lt: message.seq },
-      role: "user",
-      botId: null,
-      OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
-    },
-    orderBy: { seq: "desc" },
-    include: humanMessageInclude,
-  });
-  if (!previous || !isNativeHumanMessage(previous)) return null;
-  if (
-    steered &&
-    previous.id !== run.sourceMessageId &&
-    !steering.some((item) => item.messageId === previous.id)
-  )
-    return null;
-  return previous;
-}
-
-/**
  * The recruiter's own message behind a decision on people or a round (hold, pass, resume,
  * accepting a calibration round): those are theirs to make, so the run must trace one. Saves of
  * record keeping cite runProvenance instead and are never refused over it.
@@ -1833,26 +1791,18 @@ async function requireCurrentHumanSource(
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage }> {
   if (ancestors.has(run.id)) throw new IsolationError();
   ancestors.add(run.id);
-  // A turn that waited on a slow tool resumes as a background run; it still acts for the message
-  // that started it (staging 11-16: a resumed global turn's handoff could save no feedback).
-  run = {
-    ...run,
-    trigger: await backgroundToolSourceTrigger(tx, { ...run, spaceId: actor.spaceId }).catch(
-      () => run.trigger,
-    ),
-  };
   const {
     source: given,
     steering,
     answers,
   } = await requireRunSource(tx, actor, run, sourceMessageId);
-  const hint = (await autoContinuedHumanMessage(tx, run, given, steering)) ?? given;
+  const hint = given;
   if (hint.id !== run.sourceMessageId && !isNativeHumanMessage(hint)) throw new IsolationError();
   const newest = answers.reduce(
     (current, answer) => (answer.seq > current.seq ? answer : current),
     hint,
   );
-  const latest = (await autoContinuedHumanMessage(tx, run, newest)) ?? newest;
+  const latest = newest;
   if (!isNativeHumanMessage(latest)) {
     const delegator = await requireRoleDelegation(tx, actor, run, latest);
     if (delegator) {

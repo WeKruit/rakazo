@@ -780,7 +780,6 @@ async function recruiterInRoleChat(
     (message) =>
       message.botId === null &&
       !message.externalTranscriptFor &&
-      !message.clientNonce?.startsWith("autocontinue:") &&
       !message.clientNonce?.startsWith(ROLE_START_NONCE) &&
       Array.isArray(message.blocks) &&
       message.blocks.length > 0 &&

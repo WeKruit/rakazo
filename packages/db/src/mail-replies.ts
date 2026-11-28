@@ -345,7 +345,6 @@ export async function findWaitingCampaignSend(
         role: "user",
         botId: null,
         createdAt: { gt: declined.updatedAt },
-        OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
       },
       select: { id: true },
     }))

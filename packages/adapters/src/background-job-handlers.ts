@@ -23,7 +23,6 @@ import { scheduleComputerSleep, sleepComputerIfIdle } from "./computer-idle.js";
 import { performComputerUpdate } from "./computer-update.js";
 import { warmBotDiscovery } from "./discovery-prewarm.js";
 import type { createRunExecutor } from "./executor.js";
-import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
 import { closePollAndWake } from "./poll-close.js";
@@ -209,23 +208,6 @@ export function createBackgroundJobHandlers(deps: {
           artifacts: deps.artifacts,
         },
         payload,
-      );
-    },
-    "history.compact": async (payload) => {
-      // New automatic summaries carry a validated origin; do not revive unattributed legacy work.
-      if (!payload.sourceRunId && deps.executor.contextStrategy !== "current") return;
-      await compactHistory(
-        {
-          prisma: deps.prisma,
-          runtime: deps.runtime,
-          jobs: deps.jobs,
-          memoryProviders: deps.memoryProviders,
-          deploymentModelKey: deps.deploymentModelKey,
-          deploymentModelConfigured: deps.deploymentModelConfigured,
-          ...(deps.executor.resolveModel ? { resolveModel: deps.executor.resolveModel } : {}),
-        },
-        payload.threadId,
-        payload.sourceRunId,
       );
     },
   };

@@ -18,15 +18,12 @@ import {
 } from "@rakazo/contracts";
 import {
   askFormAnswerText,
-  blocksToAgentHistoryText,
   boundDirectApprovalDetails,
   callIdFromClientNonce,
   catalogApprovalDetails,
   isApprovalAskBlock,
-  isConversationalRun,
   isSecretAskBlock,
   isWorkActivity,
-  messagingChannelId,
   RETIRED_APPROVAL_KINDS,
   resolveAskChoice,
   sanitizeJsonValue,
@@ -66,18 +63,6 @@ export const INTERRUPT_ORIGIN = "interrupt";
 export const FOLLOW_UP_ORIGIN = "follow_up";
 /** Run nonce of a background follow-up on a people search that outlived its turn. */
 export const RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX = "recruiting-agent-run-wait:";
-
-/**
- * Whether a run takes a person's new message into its turn. A background follow-up on a people
- * search never does: the message waits for the person's own turn, which the follow-up gives
- * way to.
- */
-function takesMessages(run: { trigger: string | null; clientNonce?: string | null }): boolean {
-  return (
-    isConversationalRun(run.trigger) &&
-    !run.clientNonce?.startsWith(RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX)
-  );
-}
 const PUSH_CATCH_UP_MS = 30_000;
 const POLL_ONLY_CATCH_UP_MS = 400;
 /** Without push, each sidebar wake re-lists the roster, so poll no faster than the old client did. */
@@ -99,7 +84,6 @@ export interface AppendEventInput {
 export interface ThreadEvents {
   answerRunInput(input: AnswerRunInput): Promise<boolean>;
   append(input: AppendEventInput): Promise<ProductEvent>;
-  claimSteering(input: ClaimSteeringInput): Promise<ClaimedSteeringMessage[]>;
   clearThread(input: ClearThreadInput): Promise<ClearThreadResult>;
   finalizeComputerControlRelease(
     input: FinalizeComputerControlReleaseInput,
@@ -147,31 +131,6 @@ export interface FinalizeComputerControlReleaseInput {
 
 export interface FinalizeComputerControlReleaseResult {
   runId: string | null;
-}
-
-export interface ClaimSteeringInput {
-  threadId: string;
-  botId: string;
-  runId: string;
-  leaseOwner: string;
-  leaseFence: number;
-  seenIds: string[];
-}
-
-export interface ClaimedSteeringMessage {
-  id: string;
-  messageId: string;
-  text: string;
-  blocks: MessageBlock[];
-  /** Interject: the sender asked to interrupt the live reply rather than wait for it. */
-  interrupt?: true;
-  /** Written by the server or a teammate (an automatic continuation), not by the person. */
-  internal?: true;
-  /**
-   * Claimed by an earlier attempt of this run (before a pause or a restart): already part of the
-   * work, shown again only because the resumed turn rebuilds its context.
-   */
-  earlier?: true;
 }
 
 /** ISO timestamps of the current attempt, carried on run progress and run.completed. */
@@ -403,7 +362,6 @@ export function createThreadEvents(
     answerRunInput: (input) =>
       answerRunInput(prisma, input, realtime, options.runSecretWriter, options.jobs),
     append: (input) => appendEvent(prisma, input, realtime),
-    claimSteering: (input) => claimSteering(prisma, input),
     clearThread: (input) => clearThread(prisma, input, realtime),
     finalizeComputerControlRelease: (input) =>
       finalizeComputerControlRelease(prisma, input, realtime),
@@ -705,7 +663,6 @@ export async function sendUserMessage(
           // Carries the call id on the live event so a spoken turn groups into the
           // call card immediately, instead of after a refetch reads the nonce.
           callId: callIdFromClientNonce(message.clientNonce),
-          ...(message.clientNonce?.startsWith("autocontinue:") ? { internal: true } : {}),
         },
       });
       return { message, sessionId: submitted?.sessionId ?? null, event };
@@ -753,164 +710,6 @@ async function routineInputReceipt(
     where: { id: admitted.messageId },
     include: { sourceRuns: { orderBy: { createdAt: "asc" as const }, take: 1 } },
   });
-}
-
-/** The steering rows a run takes: the same filter for claiming them and for noticing them. */
-function steeringForRunWhere(
-  run: {
-    trigger: string | null;
-    clientNonce?: string | null;
-    sourceMessage?: { blocks: unknown } | null;
-  },
-  input: { threadId: string; botId: string; runId: string },
-): Prisma.SteeringMessageWhereInput {
-  // A background search follow-up never takes the recruiter's message: it waits for the
-  // recruiter's own turn, which the follow-up gives way to.
-  const takesPending = takesMessages(run);
-  const channelId =
-    run.trigger === "messaging"
-      ? messagingChannelId(run.sourceMessage?.blocks as MessageBlock[] | undefined)
-      : undefined;
-  const directMessage = run.trigger === "messaging" && !channelId;
-  // Pending rows from another chat stay for their own continuation.
-  const pendingWhere = directMessage
-    ? { runId: null, originTrigger: "messaging" }
-    : channelId
-      ? { runId: null }
-      : { runId: null, originTrigger: null };
-  return {
-    botId: input.botId,
-    AND: [{ OR: [{ originTrigger: null }, { originTrigger: { not: FOLLOW_UP_ORIGIN } }] }],
-    // A routine or webhook turn only takes steering addressed to it; pending user messages
-    // wait for the conversational continuation that starts once it finishes.
-    OR: takesPending ? [pendingWhere, { runId: input.runId }] : [{ runId: input.runId }],
-    message: {
-      threadId: input.threadId,
-      // Private follow-ups remain unclaimed for the existing private continuation.
-      ...(channelId
-        ? { blocks: { array_contains: [{ kind: "channel_message", channelId }] } }
-        : directMessage
-          ? { NOT: { blocks: { array_contains: [{ kind: "channel_message" }] } } }
-          : {}),
-    },
-  };
-}
-
-/**
- * Whether a message this run would take is waiting unread. A long tool wait checks it so the
- * user is answered now instead of after the wait.
- */
-export async function hasUnclaimedSteering(
-  prisma: Pick<PrismaClient, "run" | "steeringMessage">,
-  input: { threadId: string; botId: string; runId: string },
-): Promise<boolean> {
-  const run = await prisma.run.findFirst({
-    where: { id: input.runId, threadId: input.threadId, status: "running" },
-    select: { trigger: true, clientNonce: true, sourceMessage: { select: { blocks: true } } },
-  });
-  if (!run || run.trigger === "created") return false;
-  const row = await prisma.steeringMessage.findFirst({
-    where: { ...steeringForRunWhere(run, input), claimedAt: null },
-    select: { id: true },
-  });
-  return Boolean(row);
-}
-
-/** A row the person did not write: a server continuation (system) or a teammate's message. */
-const isInternalMessage = (message: { role?: string | null; botId?: string | null }) =>
-  (message.role !== undefined && message.role !== "user") || Boolean(message.botId);
-
-export async function claimSteering(
-  prisma: PrismaClient,
-  input: ClaimSteeringInput,
-): Promise<ClaimedSteeringMessage[]> {
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
-    const run = await tx.run.findFirst({
-      where: {
-        id: input.runId,
-        threadId: input.threadId,
-        botId: input.botId,
-        status: "running",
-        leaseOwner: input.leaseOwner,
-        leaseFence: input.leaseFence,
-      },
-      select: {
-        id: true,
-        spaceId: true,
-        trigger: true,
-        clientNonce: true,
-        sourceMessage: { select: { blocks: true } },
-      },
-    });
-    if (!run || run.trigger === "created") return [];
-    const steering = await tx.steeringMessage.findMany({
-      where: {
-        ...steeringForRunWhere(run, input),
-        id: input.seenIds.length ? { notIn: input.seenIds } : undefined,
-      },
-      include: { message: { select: { blocks: true, seq: true, role: true, botId: true } } },
-      orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
-    });
-    if (steering.length === 0) return [];
-    await tx.steeringMessage.updateMany({
-      where: { id: { in: steering.map((item) => item.id) }, claimedAt: null },
-      data: { runId: input.runId, claimedAt: new Date() },
-    });
-    // The thread lock serializes this watermark with message writes. Unlike claim
-    // timestamps, it cannot drift from the database clock or tie with a reply.
-    const { nextMessageSeq } = await tx.thread.findUniqueOrThrow({
-      where: { id: input.threadId },
-      select: { nextMessageSeq: true },
-    });
-    await appendEventInTransaction(tx, {
-      threadId: input.threadId,
-      spaceId: run.spaceId,
-      botId: input.botId,
-      runId: input.runId,
-      type: "run.steering.claimed",
-      payload: {
-        steeringIds: steering.map((item) => item.id),
-        // Clients drop these from the visible input queue: they are part of the run now.
-        messageIds: [...new Set(steering.map((item) => item.messageId))],
-        nextMessageSeq,
-      },
-    });
-    return steering.map((item) => ({
-      id: item.id,
-      messageId: item.messageId,
-      text: blocksToAgentHistoryText(item.message.blocks as MessageBlock[]),
-      blocks: item.message.blocks as MessageBlock[],
-      ...(item.originTrigger === INTERRUPT_ORIGIN ? { interrupt: true as const } : {}),
-      ...(item.claimedAt ? { earlier: true as const } : {}),
-      ...(isInternalMessage(item.message) ? { internal: true as const } : {}),
-    }));
-  });
-}
-
-async function findPendingAsk(
-  tx: Prisma.TransactionClient,
-  input: { threadId: string; runId: string },
-) {
-  const messages = await tx.message.findMany({
-    where: {
-      threadId: input.threadId,
-      runId: input.runId,
-      role: "bot",
-    },
-    orderBy: { seq: "desc" },
-    take: 50,
-    select: { id: true, blocks: true },
-  });
-  for (const message of messages) {
-    const parsed = MessageBlockSchema.array().safeParse(message.blocks);
-    if (!parsed.success) continue;
-    const pendingAsk = parsed.data.find(
-      (block) => block.kind === "ask" && block.status !== "answered",
-    );
-    if (pendingAsk?.kind === "ask") return { messageId: message.id, pendingAsk };
-  }
-  return null;
 }
 
 async function commitAnswerRunInput(
@@ -1442,51 +1241,6 @@ export async function answerRunInput(
   await notifyAnsweredCard(realtime, committed);
   if (committed.sessionId) await wakeSessions({ realtime, jobs }, [committed.sessionId]);
   return true;
-}
-
-/**
- * Whether a typed message can answer this paused run's card. An approval, secret or form card
- * cannot: a message written while one waits is queued until the card is resolved instead.
- */
-export async function waitingAskTakesText(
-  tx: Prisma.TransactionClient,
-  input: { threadId: string; runId: string },
-): Promise<boolean> {
-  const found = await findPendingAsk(tx, input);
-  if (!found) return true;
-  // A connect card stays open under the message: typing past it closed it, and each reply then
-  // brought a new card (gate eec6adf0).
-  return !(
-    isApprovalAskBlock(found.pendingAsk) ||
-    isSecretAskBlock(found.pendingAsk) ||
-    found.pendingAsk.connection ||
-    found.pendingAsk.requestedSchema
-  );
-}
-
-/**
- * A form card cannot be answered by typing. A person who writes past it has moved on, so the form
- * closes as cancelled and the run resumes; the caller delivers the message as steering. Approval
- * and secret cards are never closed this way.
- */
-export async function cancelFormAskInTransaction(
-  tx: Prisma.TransactionClient,
-  input: { spaceId: string; threadId: string; runId: string; answeredByUserId: string },
-): Promise<boolean> {
-  const found = await findPendingAsk(tx, input);
-  if (
-    !found?.pendingAsk.requestedSchema ||
-    isApprovalAskBlock(found.pendingAsk) ||
-    isSecretAskBlock(found.pendingAsk)
-  )
-    return false;
-  return Boolean(
-    await commitAnswerRunInput(tx, {
-      ...input,
-      messageId: found.messageId,
-      answer: { action: "cancel" },
-    }),
-  );
 }
 
 export async function pauseRunForInput(
@@ -2052,192 +1806,9 @@ async function finalizeRunOnce(
     // The final message and the terminal event share one sequence reservation and insert.
     const lastEvent = (await appendEventsInTransaction(tx, events)).at(-1)!;
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
-    // An interject only means something to the run it targeted.
-    await tx.steeringMessage.updateMany({
-      where: { runId: input.runId, originTrigger: INTERRUPT_ORIGIN },
-      data: { originTrigger: null },
-    });
-    if (input.outcome === "completed") {
-      await tx.steeringMessage.deleteMany({
-        where: { runId: input.runId, claimedAt: { not: null } },
-      });
-      await tx.steeringMessage.updateMany({
-        where: { runId: input.runId },
-        data: { runId: null },
-      });
-    } else {
-      await discardAnsweredSteering(tx, input);
-      const { sourceMessage } = await tx.run.findUniqueOrThrow({
-        where: { id: input.runId },
-        select: { sourceMessage: { select: { seq: true } } },
-      });
-      // A continuation's source is the newest steering it was created for. Only newer
-      // messages justify another run after failure, even if setup failed before claiming.
-      await tx.steeringMessage.updateMany({
-        where: {
-          runId: input.runId,
-          message: sourceMessage ? { seq: { gt: sourceMessage.seq } } : undefined,
-        },
-        data: { runId: null },
-      });
-    }
-    const continuationRunId = await createPendingSteeringRun(tx, input);
     await tx.bot.update({ where: { id: input.botId }, data: { updatedAt: now } });
-    return { threadId: lastEvent.threadId, seq: lastEvent.seq, continuationRunId };
+    return { threadId: lastEvent.threadId, seq: lastEvent.seq, continuationRunId: null };
   });
-}
-
-export async function discardAnsweredSteering(
-  tx: Prisma.TransactionClient,
-  input: { threadId: string; runId: string },
-) {
-  const lastReply = await tx.message.findFirst({
-    where: {
-      threadId: input.threadId,
-      runId: input.runId,
-      role: "bot",
-      blocks: { array_contains: [{ kind: "text" }] },
-      NOT: ["ask", "computer", "steps", "subagent"].map((kind) => ({
-        blocks: { array_contains: [{ kind }] },
-      })),
-    },
-    orderBy: { seq: "desc" },
-    select: { seq: true },
-  });
-  if (!lastReply) return;
-  const claims = await tx.event.findMany({
-    where: { threadId: input.threadId, runId: input.runId, type: "run.steering.claimed" },
-    select: { payload: true },
-  });
-  const answeredIds = new Set<string>();
-  for (const claim of claims) {
-    const payload = claim.payload as { steeringIds?: unknown; nextMessageSeq?: unknown } | null;
-    if (!payload || !Array.isArray(payload.steeringIds)) continue;
-    for (const id of payload.steeringIds) {
-      if (typeof id !== "string") continue;
-      if (typeof payload.nextMessageSeq === "number" && payload.nextMessageSeq <= lastReply.seq) {
-        answeredIds.add(id);
-      }
-    }
-  }
-  // Old runs without a durable claim watermark are deliberately replayed.
-  if (answeredIds.size === 0) return;
-  await tx.steeringMessage.deleteMany({
-    where: { runId: input.runId, claimedAt: { not: null }, id: { in: [...answeredIds] } },
-  });
-}
-
-/** Queue one follow-up when this bot still has unclaimed steering and no live run. */
-export async function createPendingSteeringRun(
-  tx: Prisma.TransactionClient,
-  input: { spaceId: string; threadId: string; botId: string },
-): Promise<string | null> {
-  const active = await tx.run.findFirst({
-    where: {
-      threadId: input.threadId,
-      botId: input.botId,
-      trigger: { not: "tool_background" },
-      status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
-    },
-    select: { id: true, status: true },
-  });
-  const waiting = active?.status === "waiting_input" || active?.status === "waiting_takeover";
-  if (active && !waiting) return null;
-  const pending = await tx.steeringMessage.findMany({
-    where: {
-      botId: input.botId,
-      runId: null,
-      message: { threadId: input.threadId },
-    },
-    include: { message: { select: { id: true, blocks: true, seq: true } } },
-    orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
-  });
-  if (pending.length === 0) return null;
-  // A teammate's report doesn't wait on a card nobody answers, as a teammate's message doesn't
-  // (fr 11-21: a checked round sat 60–90 s, or until the recruiter gave up, behind a role chat's
-  // open "what next?" card while the recruiter talked in Kruit's chat).
-  if (
-    waiting &&
-    (!pending.every((item) =>
-      (item.message.blocks as MessageBlock[] | null)?.some((block) => block.kind === "handoff"),
-    ) ||
-      (await tx.run.findFirst({
-        where: {
-          threadId: input.threadId,
-          botId: input.botId,
-          trigger: { not: "tool_background" },
-          status: { in: ["queued", "leased", "running"] },
-        },
-        select: { id: true },
-      })))
-  )
-    return null;
-  // One origin per continuation so a group channel and a direct chat are not answered together.
-  const origin = steeringOrigin(pending[0]!);
-  const batch = pending.filter((item) => steeringOrigin(item) === origin);
-  const source = batch.at(-1)!;
-  const modelPin = continuationModelPin(batch);
-  const task = await tx.task.create({
-    data: {
-      spaceId: input.spaceId,
-      botId: input.botId,
-      threadId: input.threadId,
-      userId: batch[0]!.userId,
-      prompt: "Respond to the user's steering context.",
-      status: "queued",
-    },
-  });
-  const run = await tx.run.create({
-    data: {
-      spaceId: input.spaceId,
-      botId: input.botId,
-      threadId: input.threadId,
-      taskId: task.id,
-      userId: batch[0]!.userId,
-      status: "queued",
-      trigger: origin === "app" ? "follow_up" : "messaging",
-      sourceMessageId: source.message.id,
-      ...(modelPin ?? {}),
-    },
-  });
-  await tx.steeringMessage.updateMany({
-    where: { id: { in: batch.map((item) => item.id) }, runId: null },
-    data: { runId: run.id, claimedAt: null, ...(origin === "app" ? { originTrigger: null } : {}) },
-  });
-  return run.id;
-}
-
-function continuationModelPin(
-  batch: ReadonlyArray<{
-    modelProvider?: string | null;
-    modelId?: string | null;
-    thinkingLevel?: string | null;
-  }>,
-) {
-  const first = batch[0];
-  if (!first?.modelProvider || !first.modelId) return null;
-  const agreed = batch.every(
-    (item) =>
-      item.modelProvider === first.modelProvider &&
-      item.modelId === first.modelId &&
-      (item.thinkingLevel ?? null) === (first.thinkingLevel ?? null),
-  );
-  if (!agreed) return null;
-  return {
-    modelProvider: first.modelProvider,
-    modelId: first.modelId,
-    thinkingLevel: first.thinkingLevel ?? null,
-    modelPinned: true,
-  };
-}
-
-function steeringOrigin(item: {
-  originTrigger: string | null;
-  message: { blocks: unknown };
-}): string {
-  if (item.originTrigger !== "messaging") return "app";
-  const channelId = messagingChannelId(item.message.blocks as MessageBlock[] | undefined);
-  return channelId ? `channel:${channelId}` : "dm";
 }
 
 export async function appendEventInTransaction(

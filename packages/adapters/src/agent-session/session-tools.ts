@@ -29,12 +29,10 @@ import {
   RECORD_TOOLS,
   withinDeadline,
 } from "../deadline.js";
-import { isCatalogWrapperTool } from "../lazy-tool-catalog.js";
 import { selectMemoryTools } from "../memory-tools.js";
 import { filterImageReturningComputerTools } from "../model-vision.js";
 import type { ToolHost } from "../pi-runtime.js";
 import {
-  ASK_SUPERSEDED_BY_MESSAGE,
   beginToolCall,
   boundAgentToolResult,
   endToolCall,
@@ -43,7 +41,6 @@ import {
   normalizeAgentToolNames,
   parametersFor,
   prepareRequestSecretArguments,
-  SLOW_TOOL_BACKGROUND_MS,
   serializeToolResult,
   subagentResultsBeforePause,
   toolOutputStore,
@@ -400,7 +397,7 @@ export async function assembleRunTools(input: RunToolsInput) {
   const exposedConnectorTools = discovered.filter(
     (tool) =>
       !builtinAgentTools.some((builtin) => builtin.name === tool.name) &&
-      !(hideCatalog && isCatalogWrapperTool(tool.name)),
+      !(hideCatalog && /_(search_tools|load_tool|execute_tool)$/.test(tool.name)),
   );
   const connectorTools = new Map(exposedConnectorTools.map((tool) => [tool.name, tool] as const));
   // The intro turn confirms how a bot read its own role before anyone hands it
@@ -665,20 +662,6 @@ function toAgentTool(
       let result: unknown;
       let failure: unknown;
       host.dispatchedToolCalls.add(toolCallId);
-      let promotion: Promise<void> | undefined;
-      // Human interaction tools pause explicitly; only executing work moves to the background.
-      const promotionTimer =
-        host.request.onSlowTool && !CARD_TOOL_NAMES.has(tool.name)
-          ? setTimeout(() => {
-              promotion = host.request.onSlowTool!({
-                name: tool.name,
-                executionId,
-                durationMs: Date.now() - startedAt,
-              }).catch((error) => {
-                getLogger().error("slow tool promotion failed", error);
-              });
-            }, SLOW_TOOL_BACKGROUND_MS)
-          : undefined;
       try {
         result = await (async () => {
           if (tool.name === "request_takeover") {
@@ -702,36 +685,8 @@ function toAgentTool(
                 "ask_user requires two to four unique, non-empty options or a valid requestedSchema. Add two to four short options (the card already offers a custom answer) and ask again; never ask in plain text instead.",
               );
             const { question } = parsed.data;
-            const known = await host.request.beforeAsk?.(question);
-            if (known) {
-              // Each bounce costs the person another model step before the card; say which check.
-              getLogger().info("ask.not_shown", {
-                runId: host.request.runId,
-                reason: typeof known === "string" ? "already_answered" : known.instead.slice(0, 80),
-              });
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text:
-                      typeof known === "string"
-                        ? `Not asked: the recruiter already replied after this question: ${known}`
-                        : known.instead,
-                  },
-                ],
-                details: args,
-              };
-            }
             const helped = await subagentResultsBeforePause(host);
             if (helped) return helped;
-            // A message the user sent while this question was being written may already answer
-            // it; read it before pausing, so the user is never left waiting behind the card.
-            const arrived = (host.steeredUnseen ?? 0) + ((await host.claimNewSteering?.()) ?? 0);
-            if (arrived)
-              return {
-                content: [{ type: "text", text: ASK_SUPERSEDED_BY_MESSAGE }],
-                details: args,
-              };
             const options = "options" in parsed.data ? parsed.data.options : undefined;
             const requestedSchema =
               "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
@@ -850,8 +805,6 @@ function toAgentTool(
             details: { error: "no executor" },
           };
         })();
-        clearTimeout(promotionTimer);
-        await promotion;
         if (VERBATIM_TOOL_RESULTS.has(tool.name))
           return spillRequiredResult(
             result as AgentToolResult<unknown>,
@@ -869,7 +822,6 @@ function toAgentTool(
         if (conflict) throw new Error(conflict, { cause: error });
         throw error;
       } finally {
-        clearTimeout(promotionTimer);
         endToolCall(host);
         const completion: AgentToolCompletion = {
           name: tool.name,

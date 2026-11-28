@@ -574,15 +574,6 @@ export interface AgentRunRequest {
     route?: ConnectorRoute,
     observer?: AgentToolExecutionObserver,
   ) => Promise<unknown>;
-  /** Move a slow executing tool's native run out of the person's conversation lane. */
-  onSlowTool?: (tool: { name: string; executionId: string; durationMs: number }) => Promise<void>;
-  /**
-   * Awaited before a question card pauses the run, so work the run started finishes first.
-   * Returns the user's earlier answer when the conversation already answered this question;
-   * the run then continues with it instead of asking again. `{ instead }` returns that text to
-   * the model in place of the card, for a question the run may not ask yet.
-   */
-  beforeAsk?: (question: string) => Promise<string | { instead: string } | undefined>;
   /** The arguments of a tool call parsed so far while the model is still writing them. */
   onToolCallDelta?: (call: { id: string; name: string; args: Record<string, unknown> }) => void;
   /** Called after a tool returns; implementations must not persist raw result contents. */
@@ -597,7 +588,6 @@ export interface AgentRunRequest {
     text: string;
   }) => Promise<{ artifactId: string; length: number } | undefined>;
   /** Atomically claim durable user steering at the runtime's next safe turn boundary. */
-  claimSteering?: (seenIds: string[]) => Promise<AgentSteeringMessage[]>;
   /**
    * One short notice of memory, skills or tools changed since the run started, claimed at the
    * next turn boundary. The run's instructions stay as they were, keeping the cached prefix.
@@ -788,7 +778,6 @@ export interface BackgroundJobPayloads {
   "computer.update": { updateId: string };
   "computer.control-expire": { computerId: string; leaseId: string };
   "skill.teaching-expire": { skillId: string };
-  "history.compact": { threadId: string; sourceRunId?: string };
   "messaging.deliver": { runId?: string };
   /** Reconcile durable remote-agent intent; scope is loaded from the database. */
   "cloud_agent.poll": { agentId: string };

@@ -20,7 +20,6 @@ function recruiterBlocks(message: {
   blocks: unknown;
 }): MessageBlock[] | undefined {
   if (message.role !== "user" || message.botId !== null) return undefined;
-  if (message.clientNonce?.startsWith("autocontinue:")) return undefined;
   const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
   if (!blocks.length || !blocks.every((b) => ["text", "file", "image"].includes(b.kind)))
     return undefined;
