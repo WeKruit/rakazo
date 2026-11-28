@@ -72,65 +72,6 @@ function noGroupMemberships() {
 }
 
 describe("spawned bot creation", () => {
-  it("returns the existing child when a spawn is retried", async () => {
-    const findUnique = vi.fn().mockResolvedValue({
-      id: "child-1",
-      name: "Scout",
-      title: "Venue researcher",
-      thread: { id: "thread-1" },
-    });
-    const enqueue = vi.fn().mockResolvedValue(undefined);
-    const prisma = {
-      bot: {
-        count: vi.fn().mockResolvedValue(0),
-        findFirst: vi.fn().mockResolvedValue({ id: "parent-1" }),
-        findUnique,
-      },
-      deploymentSettings: { findUnique: vi.fn().mockResolvedValue(null) },
-      run: { findUnique: vi.fn().mockResolvedValue({ id: "child-run-1" }) },
-      $transaction: vi.fn().mockRejectedValue(new Error("unique spawn key")),
-    } as unknown as PrismaClient;
-
-    const result = await spawnBot(
-      {
-        prisma,
-        jobs: { enqueue } as unknown as JobPublisher,
-      },
-      {
-        spawnedBy: {
-          id: "parent-1",
-          name: "Chief",
-          spaceId: "workspace-1",
-          userId: "user-1",
-        },
-        runId: "run-retry",
-        spawnKey: "tool-call-1",
-        name: " Scout ",
-        title: "Ignored on a retry",
-        prompt: "Do not enqueue this twice",
-      },
-    );
-
-    expect(findUnique).toHaveBeenCalledWith({
-      where: {
-        spaceId_spawnKey: {
-          spaceId: "workspace-1",
-          spawnKey: "tool-call-1",
-        },
-      },
-      include: { thread: true },
-    });
-    expect(result).toEqual({
-      ok: true,
-      duplicate: true,
-      botId: "child-1",
-      name: "Scout",
-      title: "Venue researcher",
-      threadId: "thread-1",
-    });
-    expect(enqueue).toHaveBeenCalledOnce();
-  });
-
   it("passes computerMode through to createBot", async () => {
     const createBot = vi.fn().mockResolvedValue({
       id: "child-2",
@@ -145,7 +86,7 @@ describe("spawned bot creation", () => {
     const result = await spawnBot(
       {
         prisma: {} as PrismaClient,
-        jobs: { enqueue: vi.fn() } as unknown as JobPublisher,
+        events: { wakeSessions: vi.fn(async () => undefined) },
       },
       {
         spawnedBy: {

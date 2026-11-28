@@ -30,7 +30,9 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
         data: { id: `${id}-space`, organizationId: `${id}-org`, name: "Space" },
       });
       const runFor = async (userId: string) => {
-        await prisma.user.create({ data: { id: userId, name: "Owner", email: `${userId}@x.test` } });
+        await prisma.user.create({
+          data: { id: userId, name: "Owner", email: `${userId}@x.test` },
+        });
         const bot = await prisma.bot.create({
           data: { spaceId: `${id}-space`, userId, name: "Sourcer", color: "blue" },
         });

@@ -58,7 +58,10 @@ describe("roleRequestMessage", () => {
 
   it("keeps the brief alone when no recruiter message started this turn", () => {
     expect(
-      roleRequestMessage({ recruiterWords: "", brief: "Goal: use Ana's profile from the other role" }),
+      roleRequestMessage({
+        recruiterWords: "",
+        brief: "Goal: use Ana's profile from the other role",
+      }),
     ).toBe("Goal: use Ana's profile from the other role");
   });
 });
@@ -70,7 +73,13 @@ describe("delegatedRequestMessage", () => {
     expect(
       delegatedRequestMessage(
         words,
-        [{ candidateKey: "linkedin:ada", name: "Ada Chen", linkedinUrl: "https://linkedin.com/in/ada" }],
+        [
+          {
+            candidateKey: "linkedin:ada",
+            name: "Ada Chen",
+            linkedinUrl: "https://linkedin.com/in/ada",
+          },
+        ],
         1,
       ),
     ).toBe(

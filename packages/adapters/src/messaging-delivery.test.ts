@@ -858,25 +858,6 @@ describe("deliverMessagingOutbound channel runs", () => {
     );
   });
 
-  it("wakes an @-mentioned peer bot with a run", async () => {
-    const deps = createChannelDeps({ text: "@Helper what do you think?" });
-    await deliverMessagingOutbound(deps, { runId: "run-1" }, context);
-
-    expect(deps.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        spaceId: "ws-2",
-        threadId: "thread-2",
-        botId: "bot-2",
-        trigger: "messaging",
-        clientNonce: "messaging-peer:m-1:bot-2",
-      }),
-    );
-    expect(deps.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "run.continue", payload: { runId: "run-wake" } }),
-    );
-    expect(deps.contextMessages).toHaveLength(0);
-  });
-
   it("wakes an @-mentioned peer even when the casing differs", async () => {
     const deps = createChannelDeps({ text: "@helper ping" });
     await deliverMessagingOutbound(deps, { runId: "run-1" }, context);

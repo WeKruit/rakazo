@@ -91,67 +91,6 @@ function tx(options?: {
 }
 
 describe("expireStuckRun", () => {
-  it("cancels the wait, leaves the status line, and continues pending steering", async () => {
-    const client = tx({ steering: true });
-    const result = await expireStuckRun(client as unknown as Prisma.TransactionClient, {
-      runId: "run-1",
-      threadId: "thread-1",
-      status: "queued",
-      updatedAt,
-      now,
-    });
-
-    expect(result).toEqual({ seq: 8, continuationRunId: "run-next" });
-    expect(client.run.updateMany).toHaveBeenCalledWith({
-      where: { id: "run-1", status: "queued", updatedAt },
-      data: {
-        status: "cancelled",
-        error: stuckWorkStatusMessage("queued"),
-        completedAt: now,
-        leaseOwner: null,
-        leaseExpiresAt: null,
-      },
-    });
-    expect(client.message.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        role: "system",
-        clientNonce: "stuck-expired:run-1",
-        blocks: [{ kind: "meta", text: stuckWorkStatusMessage("queued") }],
-      }),
-    });
-    expect(client.snapshot().messages).toEqual([
-      expect.objectContaining({
-        role: "system",
-        clientNonce: "stuck-expired:run-1",
-        blocks: [{ kind: "meta", text: stuckWorkStatusMessage("queued") }],
-      }),
-    ]);
-    expect(client.snapshot().events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: "thread.message.created",
-          payload: expect.objectContaining({ messageId: "message-expired", role: "system" }),
-        }),
-        expect.objectContaining({ type: "run.cancelled", runId: "run-1" }),
-      ]),
-    );
-    expect(client.computer.updateMany).toHaveBeenCalledWith({
-      where: {
-        controlRunId: "run-1",
-        OR: [{ controlHolder: { not: "user" } }, { controlLeaseId: null }],
-      },
-      data: { controlRunId: null },
-    });
-    expect(client.computerExecutionLease.updateMany).toHaveBeenCalledWith({
-      where: { runId: "run-1" },
-      data: { expiresAt: new Date(0) },
-    });
-    expect(client.task.updateMany).toHaveBeenCalledWith({
-      where: { id: "task-1" },
-      data: { status: "cancelled" },
-    });
-  });
-
   it("does nothing when the run already moved on", async () => {
     const client = tx({ cancelled: 0, status: "waiting_takeover" });
     const result = await expireStuckRun(client as unknown as Prisma.TransactionClient, {

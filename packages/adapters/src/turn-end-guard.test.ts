@@ -1,9 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
-import {
-  recruitingRoundListText,
-  roundPassage,
-} from "./turn-end-guard.js";
+import { recruitingRoundListText, roundPassage } from "./turn-end-guard.js";
 
 describe("recruitingRoundListText", () => {
   it("lists the ten with each search's own reason for the person", async () => {
@@ -266,4 +263,3 @@ describe("roundPassage", () => {
     expect(cut.length).toBeLessThanOrEqual(221);
   });
 });
-

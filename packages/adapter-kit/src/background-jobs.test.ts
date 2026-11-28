@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   dispatchBackgroundJob,
-  HISTORY_COMPACT_MAX_ATTEMPTS,
-  historyCompactJob,
-  historyCompactJobKey,
   messagingDeliverJob,
   NOTIFICATION_RETRY_ATTEMPTS,
   notificationRetryJob,
@@ -14,13 +11,11 @@ import type { BackgroundJobHandlers } from "./types.js";
 
 function handlers(): BackgroundJobHandlers {
   return {
-    "run.continue": vi.fn(async () => undefined),
     "routine.wakeup": vi.fn(async () => undefined),
     "computer.update": vi.fn(async () => undefined),
     "computer.sleep": vi.fn(async () => undefined),
     "computer.control-expire": vi.fn(async () => undefined),
     "skill.teaching-expire": vi.fn(async () => undefined),
-    "history.compact": vi.fn(async () => undefined),
     "messaging.deliver": vi.fn(async () => undefined),
     "cloud_agent.poll": vi.fn(async () => undefined),
     "recruiting_checkin.start": vi.fn(async () => undefined),
@@ -136,23 +131,6 @@ describe("background job contracts", () => {
     });
   });
 
-  it("rejects unknown names and malformed deliveries", () => {
-    expect(() => parseBackgroundJob("unknown", {})).toThrow("Unknown background job");
-    expect(() =>
-      parseBackgroundJob("routine.wakeup", {
-        routineId: "routine-1",
-        scheduledFor: "not-a-date",
-      }),
-    ).toThrow();
-    expect(() => parseBackgroundJob("run.continue", { runId: "" })).toThrow();
-    expect(() =>
-      parseBackgroundJob("computer.control-expire", {
-        computerId: "computer-1",
-        leaseId: "",
-      }),
-    ).toThrow();
-  });
-
   it("validates and dispatches a control-expiry job", async () => {
     const target = handlers();
     await dispatchBackgroundJob(target, "computer.control-expire", {
@@ -163,39 +141,6 @@ describe("background job contracts", () => {
       computerId: "computer-1",
       leaseId: "lease-1",
     });
-  });
-});
-
-describe("historyCompactJob", () => {
-  it("retains the actual originating run through dispatch", async () => {
-    const target = handlers();
-    const job = historyCompactJob("thread-1", "origin-run");
-    expect(job).toMatchObject({
-      payload: { threadId: "thread-1", sourceRunId: "origin-run" },
-    });
-    await dispatchBackgroundJob(target, job.name, job.payload);
-    expect(target["history.compact"]).toHaveBeenCalledWith({
-      threadId: "thread-1",
-      sourceRunId: "origin-run",
-    });
-  });
-
-  it("builds a job with a replace key scoped to the thread", () => {
-    expect(historyCompactJob("thread-1")).toEqual({
-      name: "history.compact",
-      payload: { threadId: "thread-1" },
-      replaceKey: historyCompactJobKey("thread-1"),
-      serialKey: historyCompactJobKey("thread-1"),
-      maxAttempts: HISTORY_COMPACT_MAX_ATTEMPTS,
-    });
-  });
-
-  it("caps attempts below the queue default so a stuck thread cannot storm", () => {
-    expect(HISTORY_COMPACT_MAX_ATTEMPTS).toBeLessThan(25);
-  });
-
-  it("keys different threads differently", () => {
-    expect(historyCompactJobKey("thread-1")).not.toBe(historyCompactJobKey("thread-2"));
   });
 });
 

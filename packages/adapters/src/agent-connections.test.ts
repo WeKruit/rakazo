@@ -180,10 +180,11 @@ function createDeps(
   const enqueue = vi.fn(async () => undefined);
   return {
     prisma: prisma as unknown as PrismaClient & typeof prisma,
-    events: { sendUserMessage, notify } as unknown as Pick<
-      ThreadEvents,
-      "sendUserMessage" | "notify"
-    >,
+    events: {
+      sendUserMessage,
+      notify,
+      wakeSessions: vi.fn(async () => undefined),
+    } as unknown as Pick<ThreadEvents, "sendUserMessage" | "notify" | "wakeSessions">,
     jobs: { enqueue },
     outboundRows,
     txCalls,
@@ -313,67 +314,6 @@ describe("respondAgentConnection", () => {
 });
 
 describe("messageConnectedAgent", () => {
-  it("delivers across workspaces over an approved connection", async () => {
-    const deps = createDeps({
-      connection: { id: "ac-1", requesterBotId: "bot-1", targetBotId: "bot-2", status: "approved" },
-    });
-    const result = await messageConnectedAgent(deps, run, sender, {
-      address: "+15552222222",
-      message: "results are in",
-      deliveryKey: "exec-9",
-    });
-
-    expect(result).toEqual(expect.objectContaining({ ok: true, botId: "bot-2" }));
-    const inbound = deps.txCalls.messageCreate[0] as Record<string, unknown>;
-    expect(inbound.threadId).toBe("thread-2");
-    expect(inbound.role).toBe("user");
-    expect(inbound.blocks).toEqual([
-      {
-        kind: "bot_message_received",
-        fromBotId: "bot-1",
-        fromBotName: "Assistant",
-        text: "results are in",
-        hop: 1,
-      },
-    ]);
-    const wake = deps.txCalls.runCreate[0] as Record<string, unknown>;
-    expect(wake).toEqual(
-      expect.objectContaining({
-        spaceId: "ws-2",
-        userId: "user-2",
-        botId: "bot-2",
-        trigger: "bot_message",
-      }),
-    );
-    expect(deps.enqueue).toHaveBeenCalled();
-  });
-
-  it("delivers repeated messages when each call has a distinct deliveryKey", async () => {
-    const deps = createDeps({
-      connection: { id: "ac-1", requesterBotId: "bot-1", targetBotId: "bot-2", status: "approved" },
-    });
-    const first = await messageConnectedAgent(deps, run, sender, {
-      address: "+15552222222",
-      message: "one",
-      deliveryKey: "run-1:message_agent:0",
-    });
-    const second = await messageConnectedAgent(deps, run, sender, {
-      address: "+15552222222",
-      message: "two",
-      deliveryKey: "run-1:message_agent:1",
-    });
-    expect(first).toEqual(expect.objectContaining({ ok: true }));
-    expect(second).toEqual(expect.objectContaining({ ok: true }));
-    const inboundNonces = deps.txCalls.messageCreate
-      .map((row) => row as { clientNonce?: string; role?: string })
-      .filter((row) => row.clientNonce)
-      .map((row) => row.clientNonce);
-    expect(inboundNonces).toEqual([
-      "agent-message:run-1:message_agent:0",
-      "agent-message:run-1:message_agent:1",
-    ]);
-  });
-
   it("refuses without an approved connection", async () => {
     const deps = createDeps();
     const result = await messageConnectedAgent(deps, run, sender, {

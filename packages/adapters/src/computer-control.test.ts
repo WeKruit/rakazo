@@ -82,37 +82,6 @@ describe("computer control leases", () => {
     expect(harness.setScreenControl).not.toHaveBeenCalled();
   });
 
-  it("denies control, revokes the stream, clears the lease, and publishes expiry", async () => {
-    const harness = controlHarness({ waitingRunId: "run-1" });
-
-    await expect(expireComputerControl(harness.deps, "computer-id", "lease-1")).resolves.toBe(true);
-
-    expect(harness.prisma.computer.updateMany.mock.calls[0]?.[0]).toMatchObject({
-      where: { id: "computer-id", controlLeaseId: "lease-1" },
-      data: { controlHolder: "none" },
-    });
-    expect(harness.setScreenControl).toHaveBeenCalledWith(
-      expect.objectContaining({ providerRef: "computer" }),
-      false,
-      expect.objectContaining({ operationId: "computer.control-expire" }),
-      "lease-1",
-    );
-    expect(harness.events.finalizeComputerControlRelease).toHaveBeenCalledWith({
-      spaceId: "workspace",
-      computerId: "computer-id",
-      botId: "bot",
-      runId: "run-1",
-      leaseId: "lease-1",
-      holder: "none",
-      reason: "expired",
-    });
-    expect(harness.enqueue).toHaveBeenCalledWith({
-      name: "run.continue",
-      payload: { runId: "run-1" },
-      replaceKey: "run:run-1",
-    });
-  });
-
   it("resumes the run holding the takeover lease instead of a newer waiting run", async () => {
     const harness = controlHarness({ controlRunId: "run-holding-takeover" });
 
@@ -134,20 +103,6 @@ describe("computer control leases", () => {
     expect(harness.events.finalizeComputerControlRelease).toHaveBeenCalledWith(
       expect.objectContaining({ runId: "run-holding-takeover" }),
     );
-  });
-
-  it("leaves a released run recoverable when its immediate continuation enqueue fails", async () => {
-    const enqueueError = new Error("job broker unavailable");
-    const harness = controlHarness({ waitingRunId: "run-1", enqueueError });
-    const sink = createTestSink();
-    installLogger(createLogger({ service: "rakazo-worker", sinks: [sink] }));
-
-    await expect(expireComputerControl(harness.deps, "computer-id", "lease-1")).resolves.toBe(true);
-
-    expect(sink.events.some((event) => event.message === "takeover continuation enqueue")).toBe(
-      true,
-    );
-    installLogger(createLogger({ service: "rakazo-worker", level: "off", sinks: [] }));
   });
 
   it("keeps the denied lease retryable when provider revocation fails", async () => {

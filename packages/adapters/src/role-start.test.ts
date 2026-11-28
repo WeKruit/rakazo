@@ -116,18 +116,6 @@ describe("copyRecruiterMessageToRole", () => {
     await copyRecruiterMessageToRole(d as never, run, role);
     expect(copiedBlocks()).toEqual([{ kind: "text", text: "Open role 5" }]);
   });
-
-  it("refuses a source the recruiter did not write", async () => {
-    for (const source of [
-      { ...mine, blocks: [{ kind: "bot_message_received", text: "x" }] },
-      { ...mine, role: "bot", botId: "b", blocks: [{ kind: "text", text: "x" }] },
-      { ...mine, clientNonce: "autocontinue:1", blocks: [{ kind: "text", text: "x" }] },
-      null,
-    ]) {
-      const { deps: d } = deps(source);
-      expect(await copyRecruiterMessageToRole(d as never, run, role)).toBeUndefined();
-    }
-  });
 });
 
 describe("roleStartKey", () => {

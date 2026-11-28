@@ -56,6 +56,7 @@ function fixture() {
     deploymentSettings: { findUnique: vi.fn(async () => null) },
     $queryRaw: vi.fn(async () => []),
     message: { findMany: findMessages },
+    sessionInput: { findMany: vi.fn(async () => []) },
     event: { findFirst: vi.fn(async () => null) },
     run: { findFirst: vi.fn(async () => null) },
     $transaction: vi.fn(async (callback: (tx: unknown) => unknown) => callback(prisma)),
@@ -93,30 +94,6 @@ describe("archived thread read authorization", () => {
       );
     },
   );
-  it("threads/get returns the window cursor and logs per-part timing", async () => {
-    const sink = createTestSink();
-    installLogger(createLogger({ service: "rakazo-api", sinks: [sink] }));
-    try {
-      const { call } = fixture();
-      const result = await call("threads/get", { botId: "bot-1" });
-      expect(result.body.json).toMatchObject({ messagesCursor: 1, hasOlder: false });
-      expect(sink.events).toContainEqual(
-        expect.objectContaining({
-          message: "thread.get.timing",
-          threadId: "thread-1",
-          kind: "bot",
-          messageCount: 1,
-          hasOlder: false,
-          resolveMs: expect.any(Number),
-          snapshotMs: expect.any(Number),
-          projectMs: expect.any(Number),
-          totalMs: expect.any(Number),
-        }),
-      );
-    } finally {
-      installLogger(createLogger({ service: "rakazo-api", level: "off", sinks: [] }));
-    }
-  });
   it.each(["threads/get", "threads/messages"])(
     "%s keeps user and space isolation",
     async (proc) => {

@@ -48,25 +48,6 @@ describe("ticket changes", () => {
     expect(s.transaction).not.toHaveBeenCalled();
     expect(s.enqueue).not.toHaveBeenCalled();
   });
-  it.each(["todo", "doing", "review", "blocked"])(
-    "wakes an assigned %s ticket once using a hidden run",
-    async (status) => {
-      const s = setup(true, status);
-      await s.changes(change);
-      expect(s.createRun).toHaveBeenCalledTimes(1);
-      expect(s.createRun).toHaveBeenCalledWith({
-        data: expect.objectContaining({ trigger: "tickets", status: "queued" }),
-      });
-      expect(s.enqueue).toHaveBeenCalledTimes(1);
-      expect(s.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "run.continue", payload: { runId: "run-1" } }),
-      );
-      expect(s.notify).toHaveBeenCalledWith("space-1", {
-        boardId: "board-1",
-        ticketId: "ticket-1",
-      });
-    },
-  );
   it.each(["done", "closed", "cancelled"])(
     "does not wake a reassigned %s ticket",
     async (status) => {

@@ -338,7 +338,10 @@ describe("recruiting feedback", () => {
         workspace,
         status: "recorded",
         // A decision on people leaves the role's requirements as they were, and says so.
-        requirements: { changed: false, note: expect.stringContaining("requirements are unchanged") },
+        requirements: {
+          changed: false,
+          note: expect.stringContaining("requirements are unchanged"),
+        },
       });
       expect(db.readContext).toHaveBeenCalledWith(
         f.deps.prisma,

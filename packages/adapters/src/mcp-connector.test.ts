@@ -61,7 +61,8 @@ describe("scope refusals", () => {
   // 11-12: "Check the current assigned connection and requested scope" read as a missing
   // permission, and a one-off email ended as "the current permission does not support it".
   it("keeps the server's reason and says it is about the path, never a permission", () => {
-    const reason = "Not created: in a role conversation the role's campaign comes only from ensure_role_campaign";
+    const reason =
+      "Not created: in a role conversation the role's campaign comes only from ensure_role_campaign";
     const text = scopeRefusal(new IsolationError(reason));
     expect(text.startsWith(`${reason}. `)).toBe(true);
     expect(text).toContain("not a permission the recruiter lacks");

@@ -519,7 +519,9 @@ describe("buildApprovalAskBlock", () => {
             name: "Ada Lovelace",
             email: "ada@example.test",
             firstEmail: { subject: "Founding role", body: "<p>Hi Ada</p>" },
-            followUps: [{ after: "3 days after the email before", subject: "", body: "<p>Ada?</p>" }],
+            followUps: [
+              { after: "3 days after the email before", subject: "", body: "<p>Ada?</p>" },
+            ],
           },
         ],
         recipientCount: 1,

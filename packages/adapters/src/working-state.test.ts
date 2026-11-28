@@ -216,7 +216,9 @@ describe("loadWorkingState", () => {
     );
     expect(card).toContain('  Waiting on the recruiter: "Is USC required?"');
     // The latest run decides, not an older failed one.
-    expect(card).toContain("0 people shown to the recruiter (less any they turned down) · team working now");
+    expect(card).toContain(
+      "0 people shown to the recruiter (less any they turned down) · team working now",
+    );
     expect(card).toContain(
       "sent the email (1 min ago), saved people to the role ×2 (latest 2 min ago)",
     );

@@ -20,12 +20,12 @@ import {
   completeExternalEffect,
   createApprovedEffectReplayQueue,
   deniedCardsSince,
+  deniedContinuationNote,
   deniedEarlierThisTurn,
   inputPausedToolResult,
   isApprovalPausedResult,
   isToolPauseResult,
   replaceCompletedExternalEffectResult,
-  deniedContinuationNote,
   resolveDuplicateEffectGate,
   settleUncertainEffect,
 } from "./approval-effect.js";
