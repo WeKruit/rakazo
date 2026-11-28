@@ -895,7 +895,8 @@ export async function returnDelegatedTeamResult(
       target_label: found.root.fromBotName,
       message: clampBotMessage(text),
       intent: "result",
-      deliveryKey: `delegation-result:${run.id}`,
+      // One result per hand-off: a later run in the role (a reply, a routine) is not its answer.
+      deliveryKey: `delegation-result:${found.delegated.id}`,
     },
     { allowTerminalSource: true },
   );

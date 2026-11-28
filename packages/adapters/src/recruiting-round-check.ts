@@ -99,12 +99,6 @@ export async function withoutShownBefore(
   return { keys: fresh, shownBefore: keys.length - fresh.length };
 }
 
-/**
- * Where a request for N people stands, given with every search, list and round result so the
- * agent never keeps a tally of its own. `counted` is the one count a request is measured by and
- * the one told to the recruiter: the people rounds have listed for them, without those they
- * turned down (`turnedDown`, as Results marks them).
- */
 /** P5's one count for a role: the people shown to the recruiter, less those they turned down. */
 export async function shownCount(
   prisma: Parameters<typeof readRecruitingResultsMarks>[0],
@@ -129,6 +123,12 @@ export async function shownCount(
   return { shown, notAFit, counted: shown.size - turnedDown, turnedDown };
 }
 
+/**
+ * Where a request for N people stands, given with every search, list and round result so the
+ * agent never keeps a tally of its own. `counted` is the one count a request is measured by and
+ * the one told to the recruiter: the people rounds have listed for them, without those they
+ * turned down (`turnedDown`, as Results marks them).
+ */
 export async function requestCounts(
   prisma: PrismaClient,
   role: { roleId: string; userId: string; spaceId: string },

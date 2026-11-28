@@ -4275,7 +4275,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Where this page sits, so the recruiter can ask for the next, previous or any page. No
           // total of saved people: the one count is the people shown (P5; long-search on 96dcd1c9
           // showed a stray "1–1 / 40").
-          const range = first !== undefined ? ` · ${first}–${first + shown.length - 1}` : "";
+          const range =
+            first !== undefined
+              ? ` · ${first}–${first + shown.length - 1}`
+              : total !== undefined && total > shown.length
+                ? ` · 1–${shown.length}`
+                : "";
           const text = await recruitingRoundListText(deps.prisma, {
             chinese: turnLanguage === "zh",
             threadId: role.sourceThreadId,
@@ -12791,6 +12796,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         // request before it (gate 493e9f2e: its reply was dropped as handed off).
                         if (freshHumanSteering && !freshHumanSteering.internal) {
                           lastRecruiterText = freshHumanSteering.text;
+                          const steeredScreen = screenLanguage(
+                            freshHumanSteering.blocks.flatMap((block) =>
+                              block.kind === "text" && block.uiLocale ? [block.uiLocale] : [],
+                            )[0],
+                          );
+                          if (steeredScreen) turnLanguage = steeredScreen;
                           handedOff = false;
                           // Nor is a teammate's report quiet once the person writes into it (gate
                           // f25185df: its answers to 「草稿还在吗」 were dropped).
