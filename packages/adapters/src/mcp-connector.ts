@@ -2090,7 +2090,7 @@ export class McpConnector implements ConnectorProvider {
         throw new IsolationError();
       if (!(await ownMailboxSendingAllowed(this.prisma, context)))
         throw new Error(
-          "This account sends through its outreach mailbox, never the recruiter's own email: send with the role's campaign instead.",
+          "This account sends through its outreach mailbox, not the recruiter's own email.",
         );
       const provider = await this.oauth?.providerFor(server, context);
       const token = (await provider?.tokens())?.access_token;
