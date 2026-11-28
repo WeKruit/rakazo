@@ -52,7 +52,7 @@ export class GraphileJobPublisher implements JobPublisher {
       const found = await client.query(
         `select 1 from runs r left join messages m on m.id = r."sourceMessageId"
           where r.id = $1 and r."trigger" = any($2::text[])
-            and not (r."trigger" = 'bot_message' and m.blocks->0 ? 'returnThreadId')`,
+            and not coalesce(r."trigger" = 'bot_message' and m.blocks->0 ? 'returnThreadId', false)`,
         [job.payload.runId, [...AUTOMATION_RUN_TRIGGERS]],
       );
       return (found.rowCount ?? 0) > 0;

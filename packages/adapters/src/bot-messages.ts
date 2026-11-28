@@ -581,13 +581,22 @@ export async function teamProgress(
 
 /**
  * The result of work another conversation delegated to this run, once the role's conversation is
- * idle: "working" while any run there is still active, undefined when a later request with its own
- * run carries the result or nothing was written, else the newest reply since the request.
+ * idle: "working" while any run there is still active (up to the delegation window, Workloop's
+ * deadlock bound), "later" when a later request from the same conversation, with a live turn of its
+ * own, carries the result, else the newest reply since the request.
  */
 async function settledTeamResult(
   prisma: PrismaClient,
   run: { id: string; threadId: string; sourceMessageId?: string | null },
-): Promise<string | "working" | undefined> {
+  returnThreadId: string,
+): Promise<"working" | "later" | { text: string }> {
+  const request = run.sourceMessageId
+    ? await prisma.message.findUnique({
+        where: { id: run.sourceMessageId },
+        select: { seq: true, createdAt: true },
+      })
+    : null;
+  if (!request) return { text: "" };
   const active = await prisma.run.count({
     where: {
       threadId: run.threadId,
@@ -595,21 +604,20 @@ async function settledTeamResult(
       status: { in: [...ACTIVE_RUN_STATUSES] },
     },
   });
-  if (active) return "working";
-  const request = run.sourceMessageId
-    ? await prisma.message.findUnique({ where: { id: run.sourceMessageId }, select: { seq: true } })
-    : null;
-  if (!request) return undefined;
+  if (active && Date.now() - request.createdAt.getTime() < DELEGATION_RETURN_WINDOW_MS)
+    return "working";
   const later = await prisma.message.findFirst({
     where: {
       threadId: run.threadId,
       seq: { gt: request.seq },
-      blocks: { array_contains: [{ kind: "bot_message_received" }] },
-      sourceRuns: { some: { trigger: "bot_message" } },
+      OR: (["request", "question"] as const).map((intent) => ({
+        blocks: { array_contains: [{ kind: "bot_message_received", returnThreadId, intent }] },
+      })),
+      sourceRuns: { some: { trigger: "bot_message", status: { notIn: ["cancelled", "failed"] } } },
     },
     select: { id: true },
   });
-  if (later) return undefined;
+  if (later) return "later";
   const reply = await prisma.message.findFirst({
     where: {
       threadId: run.threadId,
@@ -621,11 +629,12 @@ async function settledTeamResult(
     select: { blocks: true },
   });
   const blocks = Array.isArray(reply?.blocks) ? (reply.blocks as MessageBlock[]) : [];
-  const text = blocks
-    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-    .join("\n\n")
-    .trim();
-  return text || undefined;
+  return {
+    text: blocks
+      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+      .join("\n\n")
+      .trim(),
+  };
 }
 
 /**
@@ -695,13 +704,14 @@ export async function returnBotMessageOutcome(
   // its parent. Progress never goes back (send-at-night 11-16: each one woke Kruit, which posted
   // again and asked the team a second time); a failure goes back at once.
   if (source.returnThreadId && !options?.forceUnread) {
-    const settled = await settledTeamResult(deps.prisma, run);
+    const settled = await settledTeamResult(deps.prisma, run, source.returnThreadId);
     if (settled === "working") return false;
-    if (!settled) {
+    if (settled === "later") {
       await markBotOutcomeReturned(deps.prisma, run.id);
       return true;
     }
-    text = settled;
+    text =
+      settled.text || text.trim() || "The role's conversation finished without a written reply.";
     intent = "result";
   }
   const sent = await deps.prisma.message.findMany({

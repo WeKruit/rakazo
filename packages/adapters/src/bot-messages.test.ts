@@ -288,7 +288,9 @@ describe("messaging another bot", () => {
     // locks the same rows in that order, so the two cannot deadlock.
     expect(harness.tx.$queryRaw).toHaveBeenCalledTimes(1);
     const [lockSql, ...lockedIds] = harness.tx.$queryRaw.mock.calls[0]!;
-    expect(lockSql.join("?")).toContain(`ORDER BY ("groupId" IS NULL OR "groupId" LIKE 'recruiting-global-%'), id`);
+    expect(lockSql.join("?")).toContain(
+      `ORDER BY ("groupId" IS NULL OR "groupId" LIKE 'recruiting-global-%'), id`,
+    );
     expect(lockedIds).toEqual([run.threadId, expect.any(String)]);
     expect(harness.tx.message.create).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -893,7 +895,11 @@ describe("automatic outcome return", () => {
       });
       const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
       const findUnique = prisma.message!.findUnique as (args: unknown) => Promise<object>;
-      prisma.message!.findUnique = vi.fn(async (args) => ({ seq: 4, ...(await findUnique(args)) }));
+      prisma.message!.findUnique = vi.fn(async (args) => ({
+        seq: 4,
+        createdAt: new Date(),
+        ...(await findUnique(args)),
+      }));
       prisma.run!.count = vi.fn().mockResolvedValue(state.active ?? 0);
       prisma.message!.findFirst = vi.fn(async (args: { where: { role?: string } }) =>
         args.where.role === "bot"
@@ -931,6 +937,14 @@ describe("automatic outcome return", () => {
       expect(await ret(working, "Round 1: 10 people.")).toBe(false);
       expect(working.enqueue).not.toHaveBeenCalled();
       expect(working.deps.prisma.run.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("says so when the role finished without a written reply", async () => {
+      const silent = delegated({});
+      expect(await ret(silent, "", "status")).toBe(true);
+      expect(JSON.stringify(silent.tx.message.create.mock.calls)).toContain(
+        "finished without a written reply",
+      );
     });
 
     it("leaves the result to a later request with its own turn", async () => {
